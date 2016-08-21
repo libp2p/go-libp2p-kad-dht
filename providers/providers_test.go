@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	ds "github.com/ipfs/go-datastore"
 	key "github.com/ipfs/go-ipfs/blocks/key"
-	peer "gx/ipfs/QmRBqJF7hb8ZSpRcMwUt8hNhydWcxGEhtk81HKq6oUwKvs/go-libp2p-peer"
-	ds "gx/ipfs/QmTxLSvdhwg68WJimdS6icLPhZi28aTp6b7uihC2Yb47Xk/go-datastore"
+	peer "github.com/ipfs/go-libp2p-peer"
 
-	context "gx/ipfs/QmZy2y8t9zQH2a1b8q2ZSLKp17ATuJoCNxxyMFG5qFExpt/go-net/context"
+	context "golang.org/x/net/context"
 )
 
 func TestProviderManager(t *testing.T) {

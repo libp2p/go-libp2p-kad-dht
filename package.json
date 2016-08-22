@@ -97,5 +97,5 @@
   "language": "go",
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
-  "version": "0.0.0"
+  "version": "1.0.0"
 }

@@ -2,8 +2,7 @@ package dht
 
 import (
 	ma "github.com/jbenet/go-multiaddr"
-
-	inet "github.com/ipfs/go-libp2p/p2p/net"
+	inet "github.com/libp2p/go-libp2p/p2p/net"
 )
 
 // netNotifiee defines methods to be used with the IpfsDHT

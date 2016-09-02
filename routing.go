@@ -7,17 +7,16 @@ import (
 	"sync"
 	"time"
 
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	notif "github.com/ipfs/go-ipfs/notifications"
-	"github.com/ipfs/go-ipfs/routing"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
-	kb "github.com/ipfs/go-ipfs/routing/kbucket"
-	record "github.com/ipfs/go-ipfs/routing/record"
-	pset "github.com/ipfs/go-ipfs/thirdparty/peerset"
-
+	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
+	pset "github.com/ipfs/go-libp2p-peer/peerset"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
-	inet "github.com/ipfs/go-libp2p/p2p/net"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	record "github.com/libp2p/go-libp2p-record"
+	routing "github.com/libp2p/go-libp2p-routing"
+	notif "github.com/libp2p/go-libp2p-routing/notifications"
+	inet "github.com/libp2p/go-libp2p/p2p/net"
 	context "golang.org/x/net/context"
 )
 

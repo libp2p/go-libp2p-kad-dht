@@ -6,18 +6,17 @@ import (
 	"testing"
 	"time"
 
+	ggio "github.com/gogo/protobuf/io"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	routing "github.com/ipfs/go-ipfs/routing"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
-	record "github.com/ipfs/go-ipfs/routing/record"
-
-	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
+	key "github.com/ipfs/go-key"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
-	inet "github.com/ipfs/go-libp2p/p2p/net"
-	mocknet "github.com/ipfs/go-libp2p/p2p/net/mock"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	record "github.com/libp2p/go-libp2p-record"
+	routing "github.com/libp2p/go-libp2p-routing"
+	inet "github.com/libp2p/go-libp2p/p2p/net"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	context "golang.org/x/net/context"
 )
 

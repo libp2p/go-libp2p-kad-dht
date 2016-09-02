@@ -1,13 +1,12 @@
 package dht
 
 import (
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	notif "github.com/ipfs/go-ipfs/notifications"
-	kb "github.com/ipfs/go-ipfs/routing/kbucket"
-	pset "github.com/ipfs/go-ipfs/thirdparty/peerset"
-
+	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
+	pset "github.com/ipfs/go-libp2p-peer/peerset"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	notif "github.com/libp2p/go-libp2p-routing/notifications"
 	context "golang.org/x/net/context"
 )
 

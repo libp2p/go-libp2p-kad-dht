@@ -6,9 +6,8 @@ import (
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
-	key "github.com/ipfs/go-ipfs/blocks/key"
+	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
-
 	context "golang.org/x/net/context"
 )
 

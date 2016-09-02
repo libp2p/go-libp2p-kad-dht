@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
-	lgbl "github.com/ipfs/go-ipfs/thirdparty/loggables"
-
 	proto "github.com/gogo/protobuf/proto"
+	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
+	key "github.com/ipfs/go-key"
+	lgbl "github.com/ipfs/go-libp2p-loggables"
 	peer "github.com/ipfs/go-libp2p-peer"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	context "golang.org/x/net/context"
 )
 

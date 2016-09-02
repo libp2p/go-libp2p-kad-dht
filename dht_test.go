@@ -11,17 +11,16 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	routing "github.com/ipfs/go-ipfs/routing"
-	record "github.com/ipfs/go-ipfs/routing/record"
-	ci "github.com/ipfs/go-ipfs/thirdparty/testutil/ci"
-	travisci "github.com/ipfs/go-ipfs/thirdparty/testutil/ci/travis"
-
 	u "github.com/ipfs/go-ipfs-util"
+	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
-	netutil "github.com/ipfs/go-libp2p/p2p/test/util"
 	ma "github.com/jbenet/go-multiaddr"
+	record "github.com/libp2p/go-libp2p-record"
+	routing "github.com/libp2p/go-libp2p-routing"
+	netutil "github.com/libp2p/go-libp2p/p2p/test/util"
+	ci "github.com/libp2p/go-testutil/ci"
+	travisci "github.com/libp2p/go-testutil/ci/travis"
 	context "golang.org/x/net/context"
 )
 

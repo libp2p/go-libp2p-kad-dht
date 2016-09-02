@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	routing "github.com/ipfs/go-ipfs/routing"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
-	record "github.com/ipfs/go-ipfs/routing/record"
 	ci "github.com/ipfs/go-libp2p-crypto"
 	peer "github.com/ipfs/go-libp2p-peer"
 	ctxfrac "github.com/jbenet/go-context/frac"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	record "github.com/libp2p/go-libp2p-record"
+	routing "github.com/libp2p/go-libp2p-routing"
 	"golang.org/x/net/context"
 )
 

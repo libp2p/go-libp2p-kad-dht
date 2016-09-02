@@ -6,10 +6,10 @@ import (
 	"time"
 
 	ggio "github.com/gogo/protobuf/io"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
 	peer "github.com/ipfs/go-libp2p-peer"
-	inet "github.com/ipfs/go-libp2p/p2p/net"
 	ctxio "github.com/jbenet/go-context/io"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	inet "github.com/libp2p/go-libp2p/p2p/net"
 	context "golang.org/x/net/context"
 )
 

@@ -12,12 +12,13 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	key "github.com/ipfs/go-key"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	routing "github.com/libp2p/go-libp2p-routing"
 	inet "github.com/libp2p/go-libp2p/p2p/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	context "golang.org/x/net/context"
+
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
 
 func TestGetFailures(t *testing.T) {
@@ -117,7 +118,7 @@ func TestGetFailures(t *testing.T) {
 			Record: rec,
 		}
 
-		s, err := hosts[1].NewStream(context.Background(), ProtocolDHT, hosts[0].ID())
+		s, err := hosts[1].NewStream(context.Background(), hosts[0].ID(), ProtocolDHT)
 		if err != nil {
 			t.Fatal(err)
 		}

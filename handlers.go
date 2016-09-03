@@ -13,6 +13,7 @@ import (
 	peer "github.com/ipfs/go-libp2p-peer"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 	context "golang.org/x/net/context"
 )
 
@@ -81,7 +82,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return resp, nil
 }
 
-func (dht *IpfsDHT) checkLocalDatastore(k key.Key) (*pb.Record, error) {
+func (dht *IpfsDHT) checkLocalDatastore(k key.Key) (*recpb.Record, error) {
 	log.Debugf("%s handleGetValue looking into ds", dht.self)
 	dskey := k.DsKey()
 	iVal, err := dht.datastore.Get(dskey)
@@ -104,7 +105,7 @@ func (dht *IpfsDHT) checkLocalDatastore(k key.Key) (*pb.Record, error) {
 		return nil, fmt.Errorf("datastore had non byte-slice value for %v", dskey)
 	}
 
-	rec := new(pb.Record)
+	rec := new(recpb.Record)
 	err = proto.Unmarshal(byts, rec)
 	if err != nil {
 		log.Debug("failed to unmarshal DHT record from datastore")

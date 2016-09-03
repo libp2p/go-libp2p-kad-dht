@@ -22,6 +22,7 @@ import (
 	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 	routing "github.com/libp2p/go-libp2p-routing"
 	host "github.com/libp2p/go-libp2p/p2p/host"
 	protocol "github.com/libp2p/go-libp2p/p2p/protocol"
@@ -102,7 +103,7 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID,
-	key key.Key, rec *pb.Record) error {
+	key key.Key, rec *recpb.Record) error {
 
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, string(key), 0)
 	pmes.Record = rec
@@ -134,7 +135,7 @@ var errInvalidRecord = errors.New("received invalid record")
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
 func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID,
-	key key.Key) (*pb.Record, []pstore.PeerInfo, error) {
+	key key.Key) (*recpb.Record, []pstore.PeerInfo, error) {
 
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
@@ -154,7 +155,7 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID,
 			log.Info("Received invalid record! (discarded)")
 			// return a sentinal to signify an invalid record was received
 			err = errInvalidRecord
-			record = new(pb.Record)
+			record = new(recpb.Record)
 		}
 		return record, peers, err
 	}
@@ -187,7 +188,7 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID,
 }
 
 // getLocal attempts to retrieve the value from the datastore
-func (dht *IpfsDHT) getLocal(key key.Key) (*pb.Record, error) {
+func (dht *IpfsDHT) getLocal(key key.Key) (*recpb.Record, error) {
 
 	log.Debug("getLocal %s", key)
 	v, err := dht.datastore.Get(key.DsKey())
@@ -200,7 +201,7 @@ func (dht *IpfsDHT) getLocal(key key.Key) (*pb.Record, error) {
 	if !ok {
 		return nil, errors.New("value stored in datastore not []byte")
 	}
-	rec := new(pb.Record)
+	rec := new(recpb.Record)
 	err = proto.Unmarshal(byt, rec)
 	if err != nil {
 		return nil, err
@@ -227,7 +228,7 @@ func (dht *IpfsDHT) getOwnPrivateKey() (ci.PrivKey, error) {
 }
 
 // putLocal stores the key value pair in the datastore
-func (dht *IpfsDHT) putLocal(key key.Key, rec *pb.Record) error {
+func (dht *IpfsDHT) putLocal(key key.Key, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
 		return err

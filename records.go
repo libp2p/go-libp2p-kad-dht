@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	routing "github.com/ipfs/go-ipfs/routing"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
-	record "github.com/ipfs/go-ipfs/routing/record"
 	ci "github.com/ipfs/go-libp2p-crypto"
 	peer "github.com/ipfs/go-libp2p-peer"
 	ctxfrac "github.com/jbenet/go-context/frac"
+	record "github.com/libp2p/go-libp2p-record"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
+	routing "github.com/libp2p/go-libp2p-routing"
 	"golang.org/x/net/context"
 )
 
@@ -106,7 +106,7 @@ func (dht *IpfsDHT) getPublicKeyFromNode(ctx context.Context, p peer.ID) (ci.Pub
 
 // verifyRecordLocally attempts to verify a record. if we do not have the public
 // key, we fail. we do not search the dht.
-func (dht *IpfsDHT) verifyRecordLocally(r *pb.Record) error {
+func (dht *IpfsDHT) verifyRecordLocally(r *recpb.Record) error {
 
 	if len(r.Signature) > 0 {
 		// First, validate the signature
@@ -129,7 +129,7 @@ func (dht *IpfsDHT) verifyRecordLocally(r *pb.Record) error {
 // retrieving arbitrary public keys from the DHT as a result of passively
 // receiving records (e.g. through a PUT_VALUE or ADD_PROVIDER) can cause a
 // massive amplification attack on the dht. Use with care.
-func (dht *IpfsDHT) verifyRecordOnline(ctx context.Context, r *pb.Record) error {
+func (dht *IpfsDHT) verifyRecordOnline(ctx context.Context, r *recpb.Record) error {
 
 	if len(r.Signature) > 0 {
 		// get the public key, search for it if necessary.

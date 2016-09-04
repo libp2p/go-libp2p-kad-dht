@@ -6,11 +6,12 @@ import (
 	"time"
 
 	ggio "github.com/gogo/protobuf/io"
-	pb "github.com/ipfs/go-ipfs/routing/dht/pb"
 	peer "github.com/ipfs/go-libp2p-peer"
-	inet "github.com/ipfs/go-libp2p/p2p/net"
 	ctxio "github.com/jbenet/go-context/io"
+	inet "github.com/libp2p/go-libp2p/p2p/net"
 	context "golang.org/x/net/context"
+
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
 
 var dhtReadMessageTimeout = time.Minute
@@ -141,7 +142,7 @@ func (ms *messageSender) prep() error {
 		return nil
 	}
 
-	nstr, err := ms.dht.host.NewStream(ms.dht.ctx, ProtocolDHT, ms.p)
+	nstr, err := ms.dht.host.NewStream(ms.dht.ctx, ms.p, ProtocolDHT)
 	if err != nil {
 		return err
 	}

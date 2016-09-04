@@ -3,19 +3,18 @@ package dht
 import (
 	"sync"
 
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	notif "github.com/ipfs/go-ipfs/notifications"
-	"github.com/ipfs/go-ipfs/routing"
-	pset "github.com/ipfs/go-ipfs/thirdparty/peerset"
-	todoctr "github.com/ipfs/go-ipfs/thirdparty/todocounter"
-
 	u "github.com/ipfs/go-ipfs-util"
+	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
+	pset "github.com/ipfs/go-libp2p-peer/peerset"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
 	queue "github.com/ipfs/go-libp2p-peerstore/queue"
 	logging "github.com/ipfs/go-log"
+	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
+	routing "github.com/libp2p/go-libp2p-routing"
+	notif "github.com/libp2p/go-libp2p-routing/notifications"
 	context "golang.org/x/net/context"
 )
 

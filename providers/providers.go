@@ -9,26 +9,17 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
+	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
 	autobatch "github.com/whyrusleeping/autobatch"
 	base32 "github.com/whyrusleeping/base32"
-
-	key "github.com/ipfs/go-ipfs/blocks/key"
-	flags "github.com/ipfs/go-ipfs/flags"
-
 	context "golang.org/x/net/context"
 )
 
 var batchBufferSize = 256
-
-func init() {
-	if flags.LowMemMode {
-		batchBufferSize = 8
-	}
-}
 
 var log = logging.Logger("providers")
 

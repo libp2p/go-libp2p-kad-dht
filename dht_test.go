@@ -323,7 +323,7 @@ func TestBootstrap(t *testing.T) {
 	stop := make(chan struct{})
 	go func() {
 		for {
-			t.Logf("bootstrapping them so they find each other", nDHTs)
+			t.Logf("bootstrapping them so they find each other %d", nDHTs)
 			ctxT, _ := context.WithTimeout(ctx, 5*time.Second)
 			bootstrap(t, ctxT, dhts)
 
@@ -392,7 +392,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 	}
 	go amplify(signal, allSignals)
 
-	t.Logf("dhts are not connected.", nDHTs)
+	t.Logf("dhts are not connected. %d", nDHTs)
 	for _, dht := range dhts {
 		rtlen := dht.routingTable.Size()
 		if rtlen > 0 {
@@ -404,7 +404,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
 	}
 
-	t.Logf("DHTs are now connected to 1-2 others.", nDHTs)
+	t.Logf("DHTs are now connected to 1-2 others. %d", nDHTs)
 	for _, dht := range dhts {
 		rtlen := dht.routingTable.Size()
 		if rtlen > 2 {
@@ -416,7 +416,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 		printRoutingTables(dhts)
 	}
 
-	t.Logf("bootstrapping them so they find each other", nDHTs)
+	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
 	signal <- time.Now()
 
 	// this is async, and we dont know when it's finished with one cycle, so keep checking
@@ -448,7 +448,7 @@ func TestProvidesMany(t *testing.T) {
 	}
 
 	<-time.After(100 * time.Millisecond)
-	t.Logf("bootstrapping them so they find each other", nDHTs)
+	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
 	ctxT, _ := context.WithTimeout(ctx, 20*time.Second)
 	bootstrap(t, ctxT, dhts)
 

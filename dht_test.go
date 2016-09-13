@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
@@ -823,5 +825,17 @@ func TestConnectCollision(t *testing.T) {
 		dhtB.Close()
 		dhtA.host.Close()
 		dhtB.host.Close()
+	}
+}
+
+func TestBadProtoMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := setupDHT(ctx, t)
+
+	nilrec := new(pb.Message)
+	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
+		t.Fatal("should have errored on nil record")
 	}
 }

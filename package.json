@@ -83,9 +83,9 @@
     },
     {
       "author": "kubuxu",
-      "hash": "QmWQ2SJisXwcCLsUXLwYCKSfyExXjFRW2WbBH5sqCUnwX5",
+      "hash": "QmeiMCBkYHxkDkDfnDadzz4YxY5ruL5Pj499essE4vRsGM",
       "name": "bbloom",
-      "version": "0.0.2"
+      "version": "0.1.0"
     },
     {
       "author": "whyrusleeping",
@@ -125,14 +125,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmUuwQUJmtvC6ReYcu7xaYKEUM3pD46H18dFn3LBhVt2Di",
+      "hash": "QmR61Ut9oN9mEacVUDWpvvhRPYXSxHEAZVbZkiLy9tKmdr",
       "name": "go-libp2p",
-      "version": "3.5.2"
+      "version": "3.5.3"
     }
   ],
   "gxVersion": "0.4.0",
   "language": "go",
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
-  "version": "1.1.0"
+  "version": "1.1.1"
 }
+

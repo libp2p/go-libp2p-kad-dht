@@ -61,6 +61,8 @@ type IpfsDHT struct {
 	ctx  context.Context
 	proc goprocess.Process
 
+	clientOnly bool
+
 	strmap map[peer.ID]*messageSender
 	smlk   sync.Mutex
 }
@@ -82,6 +84,27 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 
 	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
 	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
+
+	dht.Validator["pk"] = record.PublicKeyValidator
+	dht.Selector["pk"] = record.PublicKeySelector
+
+	return dht
+}
+
+// NewDHTClient creates a new DHT object with the given peer as the 'local' host
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht := makeDHT(ctx, h, dstore)
+
+	// register for network notifs.
+	dht.host.Network().Notify((*netNotifiee)(dht))
+
+	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
+		// remove ourselves from network notifs.
+		dht.host.Network().StopNotify((*netNotifiee)(dht))
+		return nil
+	})
+
+	dht.proc.AddChild(dht.providers.Process())
 
 	dht.Validator["pk"] = record.PublicKeyValidator
 	dht.Selector["pk"] = record.PublicKeySelector

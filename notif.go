@@ -3,6 +3,7 @@ package dht
 import (
 	ma "github.com/jbenet/go-multiaddr"
 	inet "github.com/libp2p/go-libp2p/p2p/net"
+	mstream "github.com/whyrusleeping/go-multistream"
 )
 
 // netNotifiee defines methods to be used with the IpfsDHT
@@ -19,7 +20,23 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		return
 	default:
 	}
-	dht.Update(dht.Context(), v.RemotePeer())
+
+	// Note: We *could* just check the peerstore to see if the remote side supports the dht
+	// protocol, but its not clear that that information will make it into the peerstore
+	// by the time this notification is sent. So just to be very careful, we brute force this
+	// and open a new stream
+	s, err := dht.host.NewStream(dht.Context(), v.RemotePeer(), ProtocolDHT, ProtocolDHTOld)
+	switch err {
+	case nil:
+		s.Close()
+		// connected fine? full dht node
+		dht.Update(dht.Context(), v.RemotePeer())
+	case mstream.ErrNotSupported:
+		// Client mode only, don't bother adding them to our routing table
+	default:
+		// real error? thats odd
+		log.Errorf("checking dht client type: %#v", err)
+	}
 }
 
 func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {

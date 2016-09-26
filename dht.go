@@ -61,47 +61,72 @@ type IpfsDHT struct {
 	ctx  context.Context
 	proc goprocess.Process
 
+	clientOnly bool
+
 	strmap map[peer.ID]*messageSender
 	smlk   sync.Mutex
 }
 
 // NewDHT creates a new DHT object with the given peer as the 'local' host
 func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := new(IpfsDHT)
-	dht.datastore = dstore
-	dht.self = h.ID()
-	dht.peerstore = h.Peerstore()
-	dht.host = h
+	dht := makeDHT(ctx, h, dstore)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
 
-	dht.proc = goprocess.WithTeardown(func() error {
+	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*netNotifiee)(dht))
 		return nil
 	})
 
-	dht.strmap = make(map[peer.ID]*messageSender)
-	dht.ctx = ctx
+	dht.proc.AddChild(dht.providers.Process())
 
 	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
 	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
 
-	dht.providers = providers.NewProviderManager(dht.ctx, dht.self, dstore)
-	dht.proc.AddChild(dht.providers.Process())
-	goprocessctx.CloseAfterContext(dht.proc, ctx)
-
-	dht.routingTable = kb.NewRoutingTable(20, kb.ConvertPeerID(dht.self), time.Minute, dht.peerstore)
-	dht.birth = time.Now()
-
-	dht.Validator = make(record.Validator)
 	dht.Validator["pk"] = record.PublicKeyValidator
-
-	dht.Selector = make(record.Selector)
 	dht.Selector["pk"] = record.PublicKeySelector
 
 	return dht
+}
+
+// NewDHTClient creates a new DHT object with the given peer as the 'local' host
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht := makeDHT(ctx, h, dstore)
+
+	// register for network notifs.
+	dht.host.Network().Notify((*netNotifiee)(dht))
+
+	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
+		// remove ourselves from network notifs.
+		dht.host.Network().StopNotify((*netNotifiee)(dht))
+		return nil
+	})
+
+	dht.proc.AddChild(dht.providers.Process())
+
+	dht.Validator["pk"] = record.PublicKeyValidator
+	dht.Selector["pk"] = record.PublicKeySelector
+
+	return dht
+}
+
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	return &IpfsDHT{
+		datastore:    dstore,
+		self:         h.ID(),
+		peerstore:    h.Peerstore(),
+		host:         h,
+		strmap:       make(map[peer.ID]*messageSender),
+		ctx:          ctx,
+		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
+		birth:        time.Now(),
+		routingTable: kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore()),
+
+		Validator: make(record.Validator),
+		Selector:  make(record.Selector),
+	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'

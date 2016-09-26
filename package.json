@@ -65,9 +65,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmdMfSLMDBDYhtc4oF3NYGCZr5dy4wQb6Ji26N4D4mdxa2",
+      "hash": "QmYkwVGkwoPbMVQEbf6LonZg4SsCxGP3H7PBEtdNCNRyxD",
       "name": "go-libp2p-peerstore",
-      "version": "1.2.4"
+      "version": "1.2.5"
     },
     {
       "author": "whyrusleeping",
@@ -107,15 +107,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmTZsN8hysGnbakvK6mS8rwDQ9uwokxmWFBv94pig6zGd1",
+      "hash": "QmVsCNFD32GzZ6Q5XD1TVGPRviNYqDdoNvgq853TU9hhzP",
       "name": "go-libp2p-kbucket",
-      "version": "1.0.2"
+      "version": "1.0.3"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmcoQiBzRaaVv1DZbbXoDWiEtvDN94Ca1DcwnQKK2tP92s",
+      "hash": "QmemZcG8WprPbnVX3AM43GhhSUiA3V6NjcTLAguvWzkdpQ",
       "name": "go-libp2p-routing",
-      "version": "1.0.2"
+      "version": "1.0.3"
     },
     {
       "author": "whyrusleeping",
@@ -125,15 +125,16 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmR61Ut9oN9mEacVUDWpvvhRPYXSxHEAZVbZkiLy9tKmdr",
+      "hash": "QmbiRCGZqhfcSjnm9icGz3oNQQdPLAnLWnKHXixaEWXVCN",
       "name": "go-libp2p",
-      "version": "3.5.3"
+      "version": "3.5.4"
     }
   ],
   "gxVersion": "0.4.0",
   "language": "go",
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
+  "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
   "version": "1.1.1"
 }
 

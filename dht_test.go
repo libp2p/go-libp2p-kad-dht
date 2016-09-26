@@ -37,11 +37,16 @@ func init() {
 	}
 }
 
-func setupDHT(ctx context.Context, t *testing.T) *IpfsDHT {
+func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	h := netutil.GenHostSwarm(t, ctx)
 
 	dss := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, h, dss)
+	var d *IpfsDHT
+	if client {
+		d = NewDHTClient(ctx, h, dss)
+	} else {
+		d = NewDHT(ctx, h, dss)
+	}
 
 	d.Validator["v"] = &record.ValidChecker{
 		Func: func(key.Key, []byte) error {
@@ -61,7 +66,7 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 	sanityPeersMap := make(map[string]struct{})
 
 	for i := 0; i < n; i++ {
-		dhts[i] = setupDHT(ctx, t)
+		dhts[i] = setupDHT(ctx, t, false)
 		peers[i] = dhts[i].self
 		addrs[i] = dhts[i].peerstore.Addrs(dhts[i].self)[0]
 
@@ -80,8 +85,7 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 	return addrs, peers, dhts
 }
 
-func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
-
+func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	idB := b.self
 	addrB := b.peerstore.Addrs(idB)
 	if len(addrB) == 0 {
@@ -93,6 +97,10 @@ func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	if err := a.host.Connect(ctx, pi); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+	connectNoSync(t, ctx, a, b)
 
 	// loop until connection notification has been received.
 	// under high load, this may not happen as immediately as we would like.
@@ -132,8 +140,8 @@ func TestValueGetSet(t *testing.T) {
 
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t)
-	dhtB := setupDHT(ctx, t)
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -780,8 +788,8 @@ func TestConnectCollision(t *testing.T) {
 
 		ctx := context.Background()
 
-		dhtA := setupDHT(ctx, t)
-		dhtB := setupDHT(ctx, t)
+		dhtA := setupDHT(ctx, t, false)
+		dhtB := setupDHT(ctx, t, false)
 
 		addrA := dhtA.peerstore.Addrs(dhtA.self)[0]
 		addrB := dhtB.peerstore.Addrs(dhtB.self)[0]
@@ -832,10 +840,37 @@ func TestBadProtoMessages(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d := setupDHT(ctx, t)
+	d := setupDHT(ctx, t, false)
 
 	nilrec := new(pb.Message)
 	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
 		t.Fatal("should have errored on nil record")
+	}
+}
+
+func TestClientModeConnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := setupDHT(ctx, t, false)
+	b := setupDHT(ctx, t, true)
+
+	connectNoSync(t, ctx, a, b)
+
+	k := key.Key("TestHash")
+	p := peer.ID("TestPeer")
+	a.providers.AddProvider(ctx, k, p)
+
+	provs, err := b.FindProviders(ctx, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(provs) == 0 {
+		t.Fatal("Expected to get a provider back")
+	}
+
+	if provs[0].ID != p {
+		t.Fatal("expected it to be our test peer")
 	}
 }

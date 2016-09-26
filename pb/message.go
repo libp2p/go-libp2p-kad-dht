@@ -5,8 +5,8 @@ import (
 	peer "github.com/ipfs/go-libp2p-peer"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
 	logging "github.com/ipfs/go-log"
-	ma "github.com/jbenet/go-multiaddr"
 	inet "github.com/libp2p/go-libp2p/p2p/net"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 var log = logging.Logger("dht.pb")

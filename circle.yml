@@ -30,5 +30,5 @@ dependencies:
 
 test:
   override:
-    - gx rewrite && go test -v ./... && gx rewrite --undo
+    - gx rewrite && go test -v ./... && gx rewrite --undo:
         pwd: "../.go_workspace/src/$IMPORT_PATH"

@@ -1,10 +1,5 @@
 machine:
   environment:
-    TEST_NO_FUSE: 1
-    TEST_VERBOSE: 1
-    TEST_NO_DOCKER: 1
-    TRAVIS: 1
-    CIRCLE: 1
     IMPORT_PATH: "github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME"
     GOPATH: "$HOME/.go_workspace"
 
@@ -12,6 +7,8 @@ machine:
     - sudo rm -rf /usr/local/go
     - if [ ! -e go1.7.linux-amd64.tar.gz ]; then curl -o go1.7.linux-amd64.tar.gz https://storage.googleapis.com/golang/go1.7.linux-amd64.tar.gz; fi
     - sudo tar -C /usr/local -xzf go1.7.linux-amd64.tar.gz
+    - go get github.com/whyrusleeping/gx
+    - go get github.com/whyrusleeping/gx-go
 
 dependencies:
   pre:

@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"sync"
 
 	u "github.com/ipfs/go-ipfs-util"
@@ -14,7 +15,6 @@ import (
 	ctxproc "github.com/jbenet/goprocess/context"
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
-	context "golang.org/x/net/context"
 )
 
 var maxQueryConcurrency = AlphaValue

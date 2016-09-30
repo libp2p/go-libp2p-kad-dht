@@ -2,6 +2,7 @@ package dht
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
@@ -17,7 +18,6 @@ import (
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 	inet "github.com/libp2p/go-libp2p/p2p/net"
-	context "golang.org/x/net/context"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This

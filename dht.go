@@ -4,6 +4,7 @@ package dht
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -28,7 +29,6 @@ import (
 	host "github.com/libp2p/go-libp2p/p2p/host"
 	protocol "github.com/libp2p/go-libp2p/p2p/protocol"
 	base32 "github.com/whyrusleeping/base32"
-	context "golang.org/x/net/context"
 )
 
 var log = logging.Logger("dht")

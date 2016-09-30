@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -15,7 +16,6 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	base32 "github.com/whyrusleeping/base32"
-	context "golang.org/x/net/context"
 )
 
 // The number of closer peers to send on requests.

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"strings"
@@ -16,7 +17,6 @@ import (
 	goprocessctx "github.com/jbenet/goprocess/context"
 	autobatch "github.com/whyrusleeping/autobatch"
 	base32 "github.com/whyrusleeping/base32"
-	context "golang.org/x/net/context"
 )
 
 var batchBufferSize = 256

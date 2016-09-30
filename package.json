@@ -25,11 +25,6 @@
       "version": "2.0.4"
     },
     {
-      "hash": "QmZy2y8t9zQH2a1b8q2ZSLKp17ATuJoCNxxyMFG5qFExpt",
-      "name": "go-net",
-      "version": "0.0.0"
-    },
-    {
       "hash": "QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP",
       "name": "goprocess",
       "version": "1.0.0"
@@ -89,12 +84,6 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "Qmce4Y4zg3sYr7xKM5UueS67vhNni6EeWgCRnb7MbLJMew",
-      "name": "go-key",
-      "version": "1.0.2"
-    },
-    {
-      "author": "whyrusleeping",
       "hash": "QmYpVUnnedgGrp6cX2pBii5HRQgcSr778FiKVe7o7nF5Z3",
       "name": "go-testutil",
       "version": "1.0.2"
@@ -143,4 +132,3 @@
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
   "version": "1.2.0"
 }
-

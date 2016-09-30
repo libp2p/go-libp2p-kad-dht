@@ -1,13 +1,14 @@
 package dht
 
 import (
+	"context"
+
 	peer "github.com/ipfs/go-libp2p-peer"
 	pset "github.com/ipfs/go-libp2p-peer/peerset"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
 	logging "github.com/ipfs/go-log"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
-	context "golang.org/x/net/context"
 )
 
 // Required in order for proper JSON marshaling

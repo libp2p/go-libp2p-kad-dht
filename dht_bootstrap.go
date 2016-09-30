@@ -3,6 +3,7 @@
 package dht
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"sync"
@@ -13,7 +14,6 @@ import (
 	goprocess "github.com/jbenet/goprocess"
 	periodicproc "github.com/jbenet/goprocess/periodic"
 	routing "github.com/libp2p/go-libp2p-routing"
-	context "golang.org/x/net/context"
 )
 
 // BootstrapConfig specifies parameters used bootstrapping the DHT.

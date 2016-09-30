@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -21,7 +22,6 @@ import (
 	netutil "github.com/libp2p/go-libp2p/p2p/test/util"
 	ci "github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
-	context "golang.org/x/net/context"
 )
 
 var testCaseValues = map[string][]byte{}

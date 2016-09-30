@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
+	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	key "github.com/ipfs/go-key"
+	u "github.com/ipfs/go-ipfs-util"
 	peer "github.com/ipfs/go-libp2p-peer"
 	context "golang.org/x/net/context"
 )
@@ -15,7 +16,7 @@ func TestProviderManager(t *testing.T) {
 	ctx := context.Background()
 	mid := peer.ID("testing")
 	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
-	a := key.Key("test")
+	a := cid.NewCidV0(u.Hash([]byte("test")))
 	p.AddProvider(ctx, a, peer.ID("testingprovider"))
 	resp := p.GetProviders(ctx, a)
 	if len(resp) != 1 {
@@ -35,15 +36,15 @@ func TestProvidersDatastore(t *testing.T) {
 	defer p.proc.Close()
 
 	friend := peer.ID("friend")
-	var keys []key.Key
+	var cids []*cid.Cid
 	for i := 0; i < 100; i++ {
-		k := key.Key(fmt.Sprint(i))
-		keys = append(keys, k)
-		p.AddProvider(ctx, k, friend)
+		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
+		cids = append(cids, c)
+		p.AddProvider(ctx, c, friend)
 	}
 
-	for _, k := range keys {
-		resp := p.GetProviders(ctx, k)
+	for _, c := range cids {
+		resp := p.GetProviders(ctx, c)
 		if len(resp) != 1 {
 			t.Fatal("Could not retrieve provider.")
 		}
@@ -56,7 +57,7 @@ func TestProvidersDatastore(t *testing.T) {
 func TestProvidersSerialization(t *testing.T) {
 	dstore := ds.NewMapDatastore()
 
-	k := key.Key("my key!")
+	k := cid.NewCidV0(u.Hash(([]byte("my key!"))))
 	p1 := peer.ID("peer one")
 	p2 := peer.ID("peer two")
 	pt1 := time.Now()
@@ -111,16 +112,16 @@ func TestProvidesExpire(t *testing.T) {
 	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
 
 	peers := []peer.ID{"a", "b"}
-	var keys []key.Key
+	var cids []*cid.Cid
 	for i := 0; i < 10; i++ {
-		k := key.Key(i)
-		keys = append(keys, k)
-		p.AddProvider(ctx, k, peers[0])
-		p.AddProvider(ctx, k, peers[1])
+		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
+		cids = append(cids, c)
+		p.AddProvider(ctx, c, peers[0])
+		p.AddProvider(ctx, c, peers[1])
 	}
 
 	for i := 0; i < 10; i++ {
-		out := p.GetProviders(ctx, keys[i])
+		out := p.GetProviders(ctx, cids[i])
 		if len(out) != 2 {
 			t.Fatal("expected providers to still be there")
 		}
@@ -128,9 +129,9 @@ func TestProvidesExpire(t *testing.T) {
 
 	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
-		out := p.GetProviders(ctx, keys[i])
-		if len(out) > 2 {
-			t.Fatal("expected providers to be cleaned up")
+		out := p.GetProviders(ctx, cids[i])
+		if len(out) > 0 {
+			t.Fatal("expected providers to be cleaned up, got: ", out)
 		}
 	}
 

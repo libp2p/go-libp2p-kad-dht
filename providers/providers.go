@@ -94,7 +94,7 @@ func (pm *ProviderManager) providersForKey(k *cid.Cid) ([]peer.ID, error) {
 }
 
 func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
-	cached, ok := pm.providers.Get(k)
+	cached, ok := pm.providers.Get(k.KeyString())
 	if ok {
 		return cached.(*providerSet), nil
 	}
@@ -105,7 +105,7 @@ func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
 	}
 
 	if len(pset.providers) > 0 {
-		pm.providers.Add(k, pset)
+		pm.providers.Add(k.KeyString(), pset)
 	}
 
 	return pset, nil
@@ -161,10 +161,10 @@ func readTimeValue(i interface{}) (time.Time, error) {
 }
 
 func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
-	iprovs, ok := pm.providers.Get(k)
+	iprovs, ok := pm.providers.Get(k.KeyString())
 	if !ok {
 		iprovs = newProviderSet()
-		pm.providers.Add(k, iprovs)
+		pm.providers.Add(k.KeyString(), iprovs)
 	}
 	provs := iprovs.(*providerSet)
 	now := time.Now()
@@ -183,7 +183,7 @@ func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time)
 }
 
 func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
-	pm.providers.Remove(k)
+	pm.providers.Remove(k.KeyString())
 
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
@@ -277,13 +277,13 @@ func (pm *ProviderManager) run() {
 					if time.Now().Sub(t) > ProvideValidity {
 						delete(provs.set, p)
 					} else {
+						log.Error("filtered key: ", t)
 						filtered = append(filtered, p)
 					}
 				}
 
-				if len(filtered) > 0 {
-					provs.providers = filtered
-				} else {
+				provs.providers = filtered
+				if len(filtered) == 0 {
 					err := pm.deleteProvSet(k)
 					if err != nil {
 						log.Error("error deleting provider set: ", err)

@@ -1,10 +1,10 @@
 package dht_pb
 
 import (
-	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
 	logging "github.com/ipfs/go-log"
+	b58 "github.com/jbenet/go-base58"
 	ma "github.com/jbenet/go-multiaddr"
 	inet "github.com/libp2p/go-libp2p/p2p/net"
 )
@@ -144,7 +144,7 @@ func (m *Message) Loggable() map[string]interface{} {
 	return map[string]interface{}{
 		"message": map[string]string{
 			"type": m.Type.String(),
-			"key":  key.Key(m.GetKey()).B58String(),
+			"key":  b58.Encode([]byte(m.GetKey())),
 		},
 	}
 }

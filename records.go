@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	routing "github.com/libp2p/go-libp2p-routing"
-	"golang.org/x/net/context"
 )
 
 // MaxRecordAge specifies the maximum time that any node will hold onto a record

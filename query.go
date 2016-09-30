@@ -1,10 +1,10 @@
 package dht
 
 import (
+	"context"
 	"sync"
 
 	u "github.com/ipfs/go-ipfs-util"
-	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
 	pset "github.com/ipfs/go-libp2p-peer/peerset"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
@@ -15,14 +15,13 @@ import (
 	ctxproc "github.com/jbenet/goprocess/context"
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
-	context "golang.org/x/net/context"
 )
 
 var maxQueryConcurrency = AlphaValue
 
 type dhtQuery struct {
 	dht         *IpfsDHT
-	key         key.Key   // the key we're querying for
+	key         string    // the key we're querying for
 	qfunc       queryFunc // the function to execute per peer
 	concurrency int       // the concurrency parameter
 }
@@ -36,7 +35,7 @@ type dhtQueryResult struct {
 }
 
 // constructs query
-func (dht *IpfsDHT) newQuery(k key.Key, f queryFunc) *dhtQuery {
+func (dht *IpfsDHT) newQuery(k string, f queryFunc) *dhtQuery {
 	return &dhtQuery{
 		key:         k,
 		dht:         dht,

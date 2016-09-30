@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -8,10 +9,8 @@ import (
 	ggio "github.com/gogo/protobuf/io"
 	peer "github.com/ipfs/go-libp2p-peer"
 	ctxio "github.com/jbenet/go-context/io"
-	inet "github.com/libp2p/go-libp2p/p2p/net"
-	context "golang.org/x/net/context"
-
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	inet "github.com/libp2p/go-libp2p/p2p/net"
 )
 
 var dhtReadMessageTimeout = time.Minute

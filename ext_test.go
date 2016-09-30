@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"io"
 	"math/rand"
 	"testing"
@@ -10,15 +11,12 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
-	key "github.com/ipfs/go-key"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	routing "github.com/libp2p/go-libp2p-routing"
 	inet "github.com/libp2p/go-libp2p/p2p/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
-	context "golang.org/x/net/context"
-
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
 
 func TestGetFailures(t *testing.T) {
@@ -43,8 +41,9 @@ func TestGetFailures(t *testing.T) {
 	})
 
 	// This one should time out
-	ctx1, _ := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	if _, err := d.GetValue(ctx1, key.Key("test")); err != nil {
+	ctx1, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := d.GetValue(ctx1, "test"); err != nil {
 		if merr, ok := err.(u.MultiErr); ok && len(merr) > 0 {
 			err = merr[0]
 		}
@@ -83,8 +82,9 @@ func TestGetFailures(t *testing.T) {
 	// the dht should be exhausting its query and returning not found.
 	// (was 3 seconds before which should be _plenty_ of time, but maybe
 	// travis machines really have a hard time...)
-	ctx2, _ := context.WithTimeout(context.Background(), 20*time.Second)
-	_, err = d.GetValue(ctx2, key.Key("test"))
+	ctx2, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = d.GetValue(ctx2, "test")
 	if err != nil {
 		if merr, ok := err.(u.MultiErr); ok && len(merr) > 0 {
 			err = merr[0]
@@ -108,7 +108,7 @@ func TestGetFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		rec, err := record.MakePutRecord(sk, key.Key(str), []byte("blah"), true)
+		rec, err := record.MakePutRecord(sk, str, []byte("blah"), true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,7 +202,7 @@ func TestNotFound(t *testing.T) {
 	// long timeout to ensure timing is not at play.
 	ctx, cancel := context.WithTimeout(ctx, time.Second*20)
 	defer cancel()
-	v, err := d.GetValue(ctx, key.Key("hello"))
+	v, err := d.GetValue(ctx, "hello")
 	log.Debugf("get value got %v", v)
 	if err != nil {
 		if merr, ok := err.(u.MultiErr); ok && len(merr) > 0 {
@@ -275,7 +275,7 @@ func TestLessThanKResponses(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
 	defer cancel()
-	if _, err := d.GetValue(ctx, key.Key("hello")); err != nil {
+	if _, err := d.GetValue(ctx, "hello"); err != nil {
 		switch err {
 		case routing.ErrNotFound:
 			//Success!

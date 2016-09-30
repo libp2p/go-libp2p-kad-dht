@@ -9,23 +9,25 @@ import (
 	"sync"
 	"time"
 
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
+	routing "github.com/libp2p/go-libp2p-routing"
+
 	proto "github.com/gogo/protobuf/proto"
+	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	key "github.com/ipfs/go-key"
 	ci "github.com/ipfs/go-libp2p-crypto"
 	peer "github.com/ipfs/go-libp2p-peer"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	routing "github.com/libp2p/go-libp2p-routing"
 	host "github.com/libp2p/go-libp2p/p2p/host"
 	protocol "github.com/libp2p/go-libp2p/p2p/protocol"
+	base32 "github.com/whyrusleeping/base32"
 	context "golang.org/x/net/context"
 )
 
@@ -131,9 +133,9 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID,
-	key key.Key, rec *recpb.Record) error {
+	key string, rec *recpb.Record) error {
 
-	pmes := pb.NewMessage(pb.Message_PUT_VALUE, string(key), 0)
+	pmes := pb.NewMessage(pb.Message_PUT_VALUE, key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
@@ -162,8 +164,7 @@ var errInvalidRecord = errors.New("received invalid record")
 // key. It returns either the value or a list of closer peers.
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID,
-	key key.Key) (*recpb.Record, []pstore.PeerInfo, error) {
+func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []pstore.PeerInfo, error) {
 
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
@@ -198,11 +199,15 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID,
 }
 
 // getValueSingle simply performs the get value RPC with the given parameters
-func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID,
-	key key.Key) (*pb.Message, error) {
-	defer log.EventBegin(ctx, "getValueSingle", p, &key).Done()
+func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (*pb.Message, error) {
+	meta := logging.LoggableMap{
+		"key":  key,
+		"peer": p,
+	}
 
-	pmes := pb.NewMessage(pb.Message_GET_VALUE, string(key), 0)
+	defer log.EventBegin(ctx, "getValueSingle", meta).Done()
+
+	pmes := pb.NewMessage(pb.Message_GET_VALUE, key, 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
@@ -216,14 +221,14 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID,
 }
 
 // getLocal attempts to retrieve the value from the datastore
-func (dht *IpfsDHT) getLocal(key key.Key) (*recpb.Record, error) {
+func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
+	log.Debugf("getLocal %s", key)
 
-	log.Debug("getLocal %s", key)
-	v, err := dht.datastore.Get(key.DsKey())
+	v, err := dht.datastore.Get(mkDsKey(key))
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("found in db")
+	log.Debugf("found %s in local datastore")
 
 	byt, ok := v.([]byte)
 	if !ok {
@@ -256,13 +261,13 @@ func (dht *IpfsDHT) getOwnPrivateKey() (ci.PrivKey, error) {
 }
 
 // putLocal stores the key value pair in the datastore
-func (dht *IpfsDHT) putLocal(key key.Key, rec *recpb.Record) error {
+func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
 		return err
 	}
 
-	return dht.datastore.Put(key.DsKey(), data)
+	return dht.datastore.Put(mkDsKey(key), data)
 }
 
 // Update signals the routingTable to Update its last-seen status
@@ -298,10 +303,10 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key key.Key) (*pb.Message, error) {
-	defer log.EventBegin(ctx, "findProvidersSingle", p, &key).Done()
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key *cid.Cid) (*pb.Message, error) {
+	defer log.EventBegin(ctx, "findProvidersSingle", p, key).Done()
 
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, string(key), 0)
+	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.KeyString(), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
@@ -316,8 +321,7 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key key.
 
 // nearestPeersToQuery returns the routing tables closest peers.
 func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
-	key := key.Key(pmes.GetKey())
-	closer := dht.routingTable.NearestPeers(kb.ConvertKey(key), count)
+	closer := dht.routingTable.NearestPeers(kb.ConvertKey(pmes.GetKey()), count)
 	return closer
 }
 
@@ -365,4 +369,8 @@ func (dht *IpfsDHT) Process() goprocess.Process {
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
+}
+
+func mkDsKey(s string) ds.Key {
+	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }

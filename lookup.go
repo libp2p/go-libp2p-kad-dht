@@ -1,10 +1,10 @@
 package dht
 
 import (
-	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
 	pset "github.com/ipfs/go-libp2p-peer/peerset"
 	pstore "github.com/ipfs/go-libp2p-peerstore"
+	logging "github.com/ipfs/go-log"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 	context "golang.org/x/net/context"
@@ -20,10 +20,16 @@ func pointerizePeerInfos(pis []pstore.PeerInfo) []*pstore.PeerInfo {
 	return out
 }
 
+func loggableKey(k string) logging.LoggableMap {
+	return logging.LoggableMap{
+		"key": k,
+	}
+}
+
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
-func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key key.Key) (<-chan peer.ID, error) {
-	e := log.EventBegin(ctx, "getClosestPeers", &key)
+func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
+	e := log.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), KValue)
 	if len(tablepeers) == 0 {
 		return nil, kb.ErrLookupFailure
@@ -92,7 +98,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key key.Key) (<-chan pe
 	return out, nil
 }
 
-func (dht *IpfsDHT) closerPeersSingle(ctx context.Context, key key.Key, p peer.ID) ([]peer.ID, error) {
+func (dht *IpfsDHT) closerPeersSingle(ctx context.Context, key string, p peer.ID) ([]peer.ID, error) {
 	pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
 	if err != nil {
 		return nil, err

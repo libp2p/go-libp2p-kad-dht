@@ -7,9 +7,9 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
-	key "github.com/ipfs/go-key"
 	peer "github.com/ipfs/go-libp2p-peer"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
@@ -48,12 +48,12 @@ type providerSet struct {
 }
 
 type addProv struct {
-	k   key.Key
+	k   *cid.Cid
 	val peer.ID
 }
 
 type getProv struct {
-	k    key.Key
+	k    *cid.Cid
 	resp chan []peer.ID
 }
 
@@ -77,15 +77,15 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 const providersKeyPrefix = "/providers/"
 
-func mkProvKey(k key.Key) ds.Key {
-	return ds.NewKey(providersKeyPrefix + base32.RawStdEncoding.EncodeToString([]byte(k)))
+func mkProvKey(k *cid.Cid) ds.Key {
+	return ds.NewKey(providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes()))
 }
 
 func (pm *ProviderManager) Process() goprocess.Process {
 	return pm.proc
 }
 
-func (pm *ProviderManager) providersForKey(k key.Key) ([]peer.ID, error) {
+func (pm *ProviderManager) providersForKey(k *cid.Cid) ([]peer.ID, error) {
 	pset, err := pm.getProvSet(k)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func (pm *ProviderManager) providersForKey(k key.Key) ([]peer.ID, error) {
 	return pset.providers, nil
 }
 
-func (pm *ProviderManager) getProvSet(k key.Key) (*providerSet, error) {
+func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
 	cached, ok := pm.providers.Get(k)
 	if ok {
 		return cached.(*providerSet), nil
@@ -111,7 +111,7 @@ func (pm *ProviderManager) getProvSet(k key.Key) (*providerSet, error) {
 	return pset, nil
 }
 
-func loadProvSet(dstore ds.Datastore, k key.Key) (*providerSet, error) {
+func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k).String()})
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func readTimeValue(i interface{}) (time.Time, error) {
 	return time.Unix(0, nsec), nil
 }
 
-func (pm *ProviderManager) addProv(k key.Key, p peer.ID) error {
+func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
 	iprovs, ok := pm.providers.Get(k)
 	if !ok {
 		iprovs = newProviderSet()
@@ -173,7 +173,7 @@ func (pm *ProviderManager) addProv(k key.Key, p peer.ID) error {
 	return writeProviderEntry(pm.dstore, k, p, now)
 }
 
-func writeProviderEntry(dstore ds.Datastore, k key.Key, p peer.ID, t time.Time) error {
+func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time) error {
 	dsk := mkProvKey(k).ChildString(base32.RawStdEncoding.EncodeToString([]byte(p)))
 
 	buf := make([]byte, 16)
@@ -182,7 +182,7 @@ func writeProviderEntry(dstore ds.Datastore, k key.Key, p peer.ID, t time.Time) 
 	return dstore.Put(dsk, buf[:n])
 }
 
-func (pm *ProviderManager) deleteProvSet(k key.Key) error {
+func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	pm.providers.Remove(k)
 
 	res, err := pm.dstore.Query(dsq.Query{
@@ -204,7 +204,7 @@ func (pm *ProviderManager) deleteProvSet(k key.Key) error {
 	return nil
 }
 
-func (pm *ProviderManager) getAllProvKeys() ([]key.Key, error) {
+func (pm *ProviderManager) getAllProvKeys() ([]*cid.Cid, error) {
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
 		Prefix:   providersKeyPrefix,
@@ -219,8 +219,7 @@ func (pm *ProviderManager) getAllProvKeys() ([]key.Key, error) {
 		return nil, err
 	}
 
-	out := make([]key.Key, 0, len(entries))
-	seen := make(map[key.Key]struct{})
+	seen := cid.NewSet()
 	for _, e := range entries {
 		parts := strings.Split(e.Key, "/")
 		if len(parts) != 4 {
@@ -233,14 +232,16 @@ func (pm *ProviderManager) getAllProvKeys() ([]key.Key, error) {
 			continue
 		}
 
-		k := key.Key(decoded)
-		if _, ok := seen[k]; !ok {
-			out = append(out, key.Key(decoded))
-			seen[k] = struct{}{}
+		c, err := cid.Cast(decoded)
+		if err != nil {
+			log.Warning("error casting key to cid from datastore key")
+			continue
 		}
+
+		seen.Add(c)
 	}
 
-	return out, nil
+	return seen.Keys(), nil
 }
 
 func (pm *ProviderManager) run() {
@@ -295,7 +296,7 @@ func (pm *ProviderManager) run() {
 	}
 }
 
-func (pm *ProviderManager) AddProvider(ctx context.Context, k key.Key, val peer.ID) {
+func (pm *ProviderManager) AddProvider(ctx context.Context, k *cid.Cid, val peer.ID) {
 	prov := &addProv{
 		k:   k,
 		val: val,
@@ -306,7 +307,7 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k key.Key, val peer.
 	}
 }
 
-func (pm *ProviderManager) GetProviders(ctx context.Context, k key.Key) []peer.ID {
+func (pm *ProviderManager) GetProviders(ctx context.Context, k *cid.Cid) []peer.ID {
 	gp := &getProv{
 		k:    k,
 		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking

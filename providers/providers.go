@@ -277,7 +277,6 @@ func (pm *ProviderManager) run() {
 					if time.Now().Sub(t) > ProvideValidity {
 						delete(provs.set, p)
 					} else {
-						log.Error("filtered key: ", t)
 						filtered = append(filtered, p)
 					}
 				}

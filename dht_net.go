@@ -7,10 +7,10 @@ import (
 	"time"
 
 	ggio "github.com/gogo/protobuf/io"
-	peer "github.com/ipfs/go-libp2p-peer"
 	ctxio "github.com/jbenet/go-context/io"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	inet "github.com/libp2p/go-libp2p/p2p/net"
+	inet "github.com/libp2p/go-libp2p-net"
+	peer "github.com/libp2p/go-libp2p-peer"
 )
 
 var dhtReadMessageTimeout = time.Minute

@@ -10,10 +10,10 @@ import (
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
-	lgbl "github.com/ipfs/go-libp2p-loggables"
-	peer "github.com/ipfs/go-libp2p-peer"
-	pstore "github.com/ipfs/go-libp2p-peerstore"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	lgbl "github.com/libp2p/go-libp2p-loggables"
+	peer "github.com/libp2p/go-libp2p-peer"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	base32 "github.com/whyrusleeping/base32"
 )

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -8,8 +9,7 @@ import (
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
-	peer "github.com/ipfs/go-libp2p-peer"
-	context "golang.org/x/net/context"
+	peer "github.com/libp2p/go-libp2p-peer"
 )
 
 func TestProviderManager(t *testing.T) {

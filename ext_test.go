@@ -11,11 +11,11 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
-	pstore "github.com/ipfs/go-libp2p-peerstore"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	inet "github.com/libp2p/go-libp2p-net"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
 	routing "github.com/libp2p/go-libp2p-routing"
-	inet "github.com/libp2p/go-libp2p/p2p/net"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 

@@ -9,15 +9,15 @@ import (
 	"time"
 
 	cid "github.com/ipfs/go-cid"
-	peer "github.com/ipfs/go-libp2p-peer"
-	pset "github.com/ipfs/go-libp2p-peer/peerset"
-	pstore "github.com/ipfs/go-libp2p-peerstore"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	inet "github.com/libp2p/go-libp2p-net"
+	peer "github.com/libp2p/go-libp2p-peer"
+	pset "github.com/libp2p/go-libp2p-peer/peerset"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
-	inet "github.com/libp2p/go-libp2p/p2p/net"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This

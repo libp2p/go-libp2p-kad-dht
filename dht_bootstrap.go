@@ -10,9 +10,9 @@ import (
 	"time"
 
 	u "github.com/ipfs/go-ipfs-util"
-	peer "github.com/ipfs/go-libp2p-peer"
 	goprocess "github.com/jbenet/goprocess"
 	periodicproc "github.com/jbenet/goprocess/periodic"
+	peer "github.com/libp2p/go-libp2p-peer"
 	routing "github.com/libp2p/go-libp2p-routing"
 )
 

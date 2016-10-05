@@ -15,13 +15,13 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
-	peer "github.com/ipfs/go-libp2p-peer"
-	pstore "github.com/ipfs/go-libp2p-peerstore"
-	ma "github.com/jbenet/go-multiaddr"
+	peer "github.com/libp2p/go-libp2p-peer"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
 	netutil "github.com/libp2p/go-libp2p/p2p/test/util"
 	ci "github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 var testCaseValues = map[string][]byte{}

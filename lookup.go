@@ -3,11 +3,11 @@ package dht
 import (
 	"context"
 
-	peer "github.com/ipfs/go-libp2p-peer"
-	pset "github.com/ipfs/go-libp2p-peer/peerset"
-	pstore "github.com/ipfs/go-libp2p-peerstore"
 	logging "github.com/ipfs/go-log"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	peer "github.com/libp2p/go-libp2p-peer"
+	pset "github.com/libp2p/go-libp2p-peer/peerset"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 

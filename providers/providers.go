@@ -11,10 +11,10 @@ import (
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
-	peer "github.com/ipfs/go-libp2p-peer"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
+	peer "github.com/libp2p/go-libp2p-peer"
 	autobatch "github.com/whyrusleeping/autobatch"
 	base32 "github.com/whyrusleeping/base32"
 )

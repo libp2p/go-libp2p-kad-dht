@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	ci "github.com/ipfs/go-libp2p-crypto"
-	peer "github.com/ipfs/go-libp2p-peer"
 	ctxfrac "github.com/jbenet/go-context/frac"
+	ci "github.com/libp2p/go-libp2p-crypto"
+	peer "github.com/libp2p/go-libp2p-peer"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	routing "github.com/libp2p/go-libp2p-routing"

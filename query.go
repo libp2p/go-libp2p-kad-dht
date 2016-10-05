@@ -5,14 +5,14 @@ import (
 	"sync"
 
 	u "github.com/ipfs/go-ipfs-util"
-	peer "github.com/ipfs/go-libp2p-peer"
-	pset "github.com/ipfs/go-libp2p-peer/peerset"
-	pstore "github.com/ipfs/go-libp2p-peerstore"
-	queue "github.com/ipfs/go-libp2p-peerstore/queue"
 	logging "github.com/ipfs/go-log"
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
+	peer "github.com/libp2p/go-libp2p-peer"
+	pset "github.com/libp2p/go-libp2p-peer/peerset"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
+	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )

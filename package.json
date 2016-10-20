@@ -102,9 +102,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmNUgVQTYnXQVrGT2rajZYsuKV8GYdiL91cdZSQDKNPNgE",
+      "hash": "Qmenmzkj1Vrp29A69FotWMMq4PyuFzxU6Y7DKhRbpoH9RR",
       "name": "go-libp2p-routing",
-      "version": "2.1.2"
+      "version": "2.2.0"
     },
     {
       "author": "whyrusleeping",
@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmXUuRadqDq5BuFWzVU6VuKaSjTcNm1gNCtLvvP1TJCW4z",
+      "hash": "QmbTGYCo96Z9hiG37D9zeErFo5GjrEPcqdh7PJX1HTM73E",
       "name": "go-cid",
-      "version": "0.6.0"
+      "version": "0.7.0"
     },
     {
       "author": "whyrusleeping",
@@ -142,6 +142,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "2.2.0"
+  "version": "2.3.0"
 }
 

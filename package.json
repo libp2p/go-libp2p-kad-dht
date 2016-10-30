@@ -132,9 +132,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmcRa2qn6iCmap9bjp8jAwkvYAq13AUfxdY3rrYiaJbLum",
+      "hash": "QmQ7iWUfqrLEoJwsoNdrZu4625bKyhZCi4Sh6MfjywEfbG",
       "name": "go-libp2p",
-      "version": "4.0.1"
+      "version": "4.0.2"
     }
   ],
   "gxVersion": "0.4.0",

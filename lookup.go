@@ -66,7 +66,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 		var filtered []pstore.PeerInfo
 		for _, clp := range closer {
-			if kb.Closer(clp, dht.self, key) && peerset.TryAdd(clp) {
+			if peerset.TryAdd(clp) {
 				select {
 				case out <- clp:
 				case <-ctx.Done():

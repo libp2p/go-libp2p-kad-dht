@@ -824,3 +824,36 @@ func TestClientModeConnect(t *testing.T) {
 		t.Fatal("expected it to be our test peer")
 	}
 }
+
+func TestFindClosestPeers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nDHTs := 30
+	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	defer func() {
+		for i := 0; i < nDHTs; i++ {
+			dhts[i].Close()
+			defer dhts[i].host.Close()
+		}
+	}()
+
+	t.Logf("connecting %d dhts in a ring", nDHTs)
+	for i := 0; i < nDHTs; i++ {
+		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
+	}
+
+	peers, err := dhts[1].GetClosestPeers(ctx, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out []peer.ID
+	for p := range peers {
+		out = append(out, p)
+	}
+
+	if len(out) != KValue {
+		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
+	}
+}

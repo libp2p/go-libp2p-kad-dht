@@ -126,15 +126,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmdML3R42PRSwnt46jSuEts9bHSqLctVYEjJqMR3UYV8ki",
+      "hash": "QmWf338UyG5DKyemvoFiomDPtkVNHLsw3GAt9XXHX5ZtsM",
       "name": "go-libp2p-host",
-      "version": "1.1.0"
+      "version": "1.1.1"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQ7iWUfqrLEoJwsoNdrZu4625bKyhZCi4Sh6MfjywEfbG",
+      "hash": "QmVN76ekoYakYa8WVDwhkUsnjt2MYuFpQs1uuU57T5KMD8",
       "name": "go-libp2p",
-      "version": "4.0.2"
+      "version": "4.0.3"
     }
   ],
   "gxVersion": "0.4.0",

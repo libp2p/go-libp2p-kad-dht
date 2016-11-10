@@ -160,7 +160,11 @@ func readTimeValue(i interface{}) (time.Time, error) {
 func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
 	iprovs, ok := pm.providers.Get(k.KeyString())
 	if !ok {
-		iprovs = newProviderSet()
+		stored, err := loadProvSet(pm.dstore, k)
+		if err != nil {
+			return err
+		}
+		iprovs = stored
 		pm.providers.Add(k.KeyString(), iprovs)
 	}
 	provs := iprovs.(*providerSet)

@@ -190,6 +190,9 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 		KeysOnly: true,
 		Prefix:   mkProvKey(k),
 	})
+	if err != nil {
+		return err
+	}
 
 	entries, err := res.Rest()
 	if err != nil {

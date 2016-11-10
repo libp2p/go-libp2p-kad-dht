@@ -292,6 +292,7 @@ func (pm *ProviderManager) run() {
 				}
 			}
 		case <-pm.proc.Closing():
+			tick.Stop()
 			return
 		}
 	}

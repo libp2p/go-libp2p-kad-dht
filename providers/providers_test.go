@@ -148,3 +148,54 @@ func TestProvidesExpire(t *testing.T) {
 		t.Fatal("expected everything to be cleaned out of the datastore")
 	}
 }
+
+/* This can be used for profiling. Keeping it commented out for now to avoid incurring extra CI time
+func TestLargeProvidersSet(t *testing.T) {
+	old := lruCacheSize
+	lruCacheSize = 10
+	defer func() { lruCacheSize = old }()
+
+	dirn, err := ioutil.TempDir("", "provtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := &lds.Options{
+		NoSync:      true,
+		Compression: 1,
+	}
+	lds, err := lds.NewDatastore(dirn, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = lds
+
+	defer func() {
+		os.RemoveAll(dirn)
+	}()
+
+	ctx := context.Background()
+	var peers []peer.ID
+	for i := 0; i < 3000; i++ {
+		peers = append(peers, peer.ID(fmt.Sprint(i)))
+	}
+
+	mid := peer.ID("myself")
+	p := NewProviderManager(ctx, mid, lds)
+	defer p.proc.Close()
+
+	var cids []*cid.Cid
+	for i := 0; i < 1000; i++ {
+		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
+		cids = append(cids, c)
+		for _, pid := range peers {
+			p.AddProvider(ctx, c, pid)
+		}
+	}
+
+	for _, c := range cids {
+		_ = p.GetProviders(ctx, c)
+	}
+
+}
+*/

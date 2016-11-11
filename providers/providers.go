@@ -77,8 +77,8 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 const providersKeyPrefix = "/providers/"
 
-func mkProvKey(k *cid.Cid) ds.Key {
-	return ds.NewKey(providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes()))
+func mkProvKey(k *cid.Cid) string {
+	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
 }
 
 func (pm *ProviderManager) Process() goprocess.Process {
@@ -112,13 +112,14 @@ func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
 }
 
 func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
-	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k).String()})
+	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
 	if err != nil {
 		return nil, err
 	}
 
 	out := newProviderSet()
 	for e := range res.Next() {
+
 		if e.Error != nil {
 			log.Error("got an error: ", e.Error)
 			continue
@@ -174,12 +175,12 @@ func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
 }
 
 func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time) error {
-	dsk := mkProvKey(k).ChildString(base32.RawStdEncoding.EncodeToString([]byte(p)))
+	dsk := mkProvKey(k) + "/" + base32.RawStdEncoding.EncodeToString([]byte(p))
 
 	buf := make([]byte, 16)
 	n := binary.PutVarint(buf, t.UnixNano())
 
-	return dstore.Put(dsk, buf[:n])
+	return dstore.Put(ds.RawKey(dsk), buf[:n])
 }
 
 func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
@@ -187,7 +188,7 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
-		Prefix:   mkProvKey(k).String(),
+		Prefix:   mkProvKey(k),
 	})
 
 	entries, err := res.Rest()
@@ -196,7 +197,7 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	}
 
 	for _, e := range entries {
-		err := pm.dstore.Delete(ds.NewKey(e.Key))
+		err := pm.dstore.Delete(ds.RawKey(e.Key))
 		if err != nil {
 			log.Error("deleting provider set: ", err)
 		}

@@ -176,7 +176,7 @@ func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time)
 	buf := make([]byte, 16)
 	n := binary.PutVarint(buf, t.UnixNano())
 
-	return dstore.Put(ds.RawKey(dsk), buf[:n])
+	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
 func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
@@ -193,7 +193,7 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	}
 
 	for _, e := range entries {
-		err := pm.dstore.Delete(ds.RawKey(e.Key))
+		err := pm.dstore.Delete(ds.NewKey(e.Key))
 		if err != nil {
 			log.Error("deleting provider set: ", err)
 		}

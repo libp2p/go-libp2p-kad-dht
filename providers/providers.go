@@ -77,8 +77,8 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 const providersKeyPrefix = "/providers/"
 
-func mkProvKey(k *cid.Cid) ds.Key {
-	return ds.NewKey(providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes()))
+func mkProvKey(k *cid.Cid) string {
+	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
 }
 
 func (pm *ProviderManager) Process() goprocess.Process {
@@ -112,7 +112,7 @@ func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
 }
 
 func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
-	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k).String()})
+	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
 	if err != nil {
 		return nil, err
 	}
@@ -123,13 +123,10 @@ func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 			log.Error("got an error: ", e.Error)
 			continue
 		}
-		parts := strings.Split(e.Key, "/")
-		if len(parts) != 4 {
-			log.Warning("incorrectly formatted key: ", e.Key)
-			continue
-		}
 
-		decstr, err := base32.RawStdEncoding.DecodeString(parts[len(parts)-1])
+		lix := strings.LastIndex(e.Key, "/")
+
+		decstr, err := base32.RawStdEncoding.DecodeString(e.Key[lix+1:])
 		if err != nil {
 			log.Error("base32 decoding error: ", err)
 			continue
@@ -174,12 +171,12 @@ func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
 }
 
 func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time) error {
-	dsk := mkProvKey(k).ChildString(base32.RawStdEncoding.EncodeToString([]byte(p)))
+	dsk := mkProvKey(k) + "/" + base32.RawStdEncoding.EncodeToString([]byte(p))
 
 	buf := make([]byte, 16)
 	n := binary.PutVarint(buf, t.UnixNano())
 
-	return dstore.Put(dsk, buf[:n])
+	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
 func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
@@ -187,7 +184,7 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
-		Prefix:   mkProvKey(k).String(),
+		Prefix:   mkProvKey(k),
 	})
 
 	entries, err := res.Rest()
@@ -204,44 +201,40 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	return nil
 }
 
-func (pm *ProviderManager) getAllProvKeys() ([]*cid.Cid, error) {
+func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: true,
+		KeysOnly: false,
 		Prefix:   providersKeyPrefix,
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := res.Rest()
-	if err != nil {
-		return nil, err
+	iter := func() (*cid.Cid, bool) {
+		for e := range res.Next() {
+			parts := strings.Split(e.Key, "/")
+			if len(parts) != 4 {
+				log.Warningf("incorrectly formatted provider entry in datastore: %s", e.Key)
+				continue
+			}
+			decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
+			if err != nil {
+				log.Warning("error decoding base32 provider key: %s: %s", parts[2], err)
+				continue
+			}
+
+			c, err := cid.Cast(decoded)
+			if err != nil {
+				log.Warning("error casting key to cid from datastore key: %s", err)
+				continue
+			}
+
+			return c, true
+		}
+		return nil, false
 	}
 
-	seen := cid.NewSet()
-	for _, e := range entries {
-		parts := strings.Split(e.Key, "/")
-		if len(parts) != 4 {
-			log.Warning("incorrectly formatted provider entry in datastore")
-			continue
-		}
-		decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
-		if err != nil {
-			log.Warning("error decoding base32 provider key")
-			continue
-		}
-
-		c, err := cid.Cast(decoded)
-		if err != nil {
-			log.Warning("error casting key to cid from datastore key")
-			continue
-		}
-
-		seen.Add(c)
-	}
-
-	return seen.Keys(), nil
+	return iter, nil
 }
 
 func (pm *ProviderManager) run() {
@@ -261,12 +254,17 @@ func (pm *ProviderManager) run() {
 
 			gp.resp <- provs
 		case <-tick.C:
-			keys, err := pm.getAllProvKeys()
+			keys, err := pm.getProvKeys()
 			if err != nil {
 				log.Error("Error loading provider keys: ", err)
 				continue
 			}
-			for _, k := range keys {
+			for {
+				k, ok := keys()
+				if !ok {
+					break
+				}
+
 				provs, err := pm.getProvSet(k)
 				if err != nil {
 					log.Error("error loading known provset: ", err)

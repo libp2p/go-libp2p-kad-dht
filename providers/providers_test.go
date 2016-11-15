@@ -3,11 +3,14 @@ package providers
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	lds "github.com/ipfs/go-ds-leveldb"
 	u "github.com/ipfs/go-ipfs-util"
 	peer "github.com/libp2p/go-libp2p-peer"
 )
@@ -149,7 +152,7 @@ func TestProvidesExpire(t *testing.T) {
 	}
 }
 
-/* This can be used for profiling. Keeping it commented out for now to avoid incurring extra CI time
+///* This can be used for profiling. Keeping it commented out for now to avoid incurring extra CI time
 func TestLargeProvidersSet(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 10
@@ -198,4 +201,3 @@ func TestLargeProvidersSet(t *testing.T) {
 	}
 
 }
-*/

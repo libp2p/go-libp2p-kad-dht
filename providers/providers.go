@@ -118,19 +118,20 @@ func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 	}
 
 	out := newProviderSet()
-	for e := range res.Next() {
-
+	//for e := range res.Next() {
+	for {
+		e, ok := res.NextSync()
+		if !ok {
+			break
+		}
 		if e.Error != nil {
 			log.Error("got an error: ", e.Error)
 			continue
 		}
-		parts := strings.Split(e.Key, "/")
-		if len(parts) != 4 {
-			log.Warning("incorrectly formatted key: ", e.Key)
-			continue
-		}
 
-		decstr, err := base32.RawStdEncoding.DecodeString(parts[len(parts)-1])
+		lix := strings.LastIndex(e.Key, "/")
+
+		decstr, err := base32.RawStdEncoding.DecodeString(e.Key[lix+1:])
 		if err != nil {
 			log.Error("base32 decoding error: ", err)
 			continue

@@ -10,7 +10,7 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	lds "github.com/ipfs/go-ds-leveldb"
+	//lds "github.com/ipfs/go-ds-leveldb"
 	u "github.com/ipfs/go-ipfs-util"
 	peer "github.com/libp2p/go-libp2p-peer"
 )
@@ -142,17 +142,21 @@ func TestProvidesExpire(t *testing.T) {
 		t.Fatal("providers map not cleaned up")
 	}
 
-	allprovs, err := p.getAllProvKeys()
+	proviter, err := p.getProvKeys()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(allprovs) != 0 {
+	_, ok := proviter()
+	if ok {
 		t.Fatal("expected everything to be cleaned out of the datastore")
 	}
 }
 
-///* This can be used for profiling. Keeping it commented out for now to avoid incurring extra CI time
+var _ = ioutil.NopCloser
+var _ = os.DevNull
+
+/* This can be used for profiling. Keeping it commented out for now to avoid incurring extra CI time
 func TestLargeProvidersSet(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 10
@@ -201,3 +205,4 @@ func TestLargeProvidersSet(t *testing.T) {
 	}
 
 }
+//*/

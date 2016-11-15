@@ -206,44 +206,40 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	return nil
 }
 
-func (pm *ProviderManager) getAllProvKeys() ([]*cid.Cid, error) {
+func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: true,
+		KeysOnly: false,
 		Prefix:   providersKeyPrefix,
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := res.Rest()
-	if err != nil {
-		return nil, err
+	iter := func() (*cid.Cid, bool) {
+		for e := range res.Next() {
+			parts := strings.Split(e.Key, "/")
+			if len(parts) != 4 {
+				log.Warning("incorrectly formatted provider entry in datastore")
+				continue
+			}
+			decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
+			if err != nil {
+				log.Warning("error decoding base32 provider key")
+				continue
+			}
+
+			c, err := cid.Cast(decoded)
+			if err != nil {
+				log.Warning("error casting key to cid from datastore key")
+				continue
+			}
+
+			return c, true
+		}
+		return nil, false
 	}
 
-	seen := cid.NewSet()
-	for _, e := range entries {
-		parts := strings.Split(e.Key, "/")
-		if len(parts) != 4 {
-			log.Warning("incorrectly formatted provider entry in datastore")
-			continue
-		}
-		decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
-		if err != nil {
-			log.Warning("error decoding base32 provider key")
-			continue
-		}
-
-		c, err := cid.Cast(decoded)
-		if err != nil {
-			log.Warning("error casting key to cid from datastore key")
-			continue
-		}
-
-		seen.Add(c)
-	}
-
-	return seen.Keys(), nil
+	return iter, nil
 }
 
 func (pm *ProviderManager) run() {
@@ -263,12 +259,17 @@ func (pm *ProviderManager) run() {
 
 			gp.resp <- provs
 		case <-tick.C:
-			keys, err := pm.getAllProvKeys()
+			keys, err := pm.getProvKeys()
 			if err != nil {
 				log.Error("Error loading provider keys: ", err)
 				continue
 			}
-			for _, k := range keys {
+			for {
+				k, ok := keys()
+				if !ok {
+					break
+				}
+
 				provs, err := pm.getProvSet(k)
 				if err != nil {
 					log.Error("error loading known provset: ", err)

@@ -118,12 +118,7 @@ func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 	}
 
 	out := newProviderSet()
-	//for e := range res.Next() {
-	for {
-		e, ok := res.NextSync()
-		if !ok {
-			break
-		}
+	for e := range res.Next() {
 		if e.Error != nil {
 			log.Error("got an error: ", e.Error)
 			continue

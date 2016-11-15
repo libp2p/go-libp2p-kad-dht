@@ -214,18 +214,18 @@ func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 		for e := range res.Next() {
 			parts := strings.Split(e.Key, "/")
 			if len(parts) != 4 {
-				log.Warning("incorrectly formatted provider entry in datastore")
+				log.Warningf("incorrectly formatted provider entry in datastore: %s", e.Key)
 				continue
 			}
 			decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
 			if err != nil {
-				log.Warning("error decoding base32 provider key")
+				log.Warning("error decoding base32 provider key: %s: %s", parts[2], err)
 				continue
 			}
 
 			c, err := cid.Cast(decoded)
 			if err != nil {
-				log.Warning("error casting key to cid from datastore key")
+				log.Warning("error casting key to cid from datastore key: %s", err)
 				continue
 			}
 

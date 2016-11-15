@@ -61,8 +61,6 @@ type IpfsDHT struct {
 	ctx  context.Context
 	proc goprocess.Process
 
-	clientOnly bool
-
 	strmap map[peer.ID]*messageSender
 	smlk   sync.Mutex
 }

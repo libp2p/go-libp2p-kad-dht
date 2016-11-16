@@ -53,7 +53,6 @@ type IpfsDHT struct {
 	providers    *providers.ProviderManager
 
 	birth    time.Time  // When this peer started up
-	diaglock sync.Mutex // lock to make diagnostics work better
 
 	Validator record.Validator // record validator funcs
 	Selector  record.Selector  // record selection funcs

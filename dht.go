@@ -73,7 +73,7 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 
 	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
 	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
-	
+
 	return dht
 }
 

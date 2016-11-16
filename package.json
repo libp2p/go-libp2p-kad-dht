@@ -102,9 +102,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQKEgGgYCDyk8VNY6A65FpuE4YwbspvjXHco1rdb75PVc",
+      "hash": "QmUrCwTDvJgmBbJVHu1HGEyqDaod3dR6sEkZkpxZk4u47c",
       "name": "go-libp2p-routing",
-      "version": "2.2.2"
+      "version": "2.2.3"
     },
     {
       "author": "whyrusleeping",
@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmXfiyr2RWEXpVDdaYnD2HNiBk6UBddsvEP4RPfXb6nGqY",
+      "hash": "QmcEcrBAMrwMyhSjXt4yfyPpzgSuV8HLHavnfmiKCSRqZU",
       "name": "go-cid",
-      "version": "0.7.3"
+      "version": "0.7.5"
     },
     {
       "author": "whyrusleeping",

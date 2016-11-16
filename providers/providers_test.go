@@ -206,3 +206,26 @@ func TestLargeProvidersSet(t *testing.T) {
 
 }
 //*/
+
+func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
+	old := lruCacheSize
+	lruCacheSize = 1
+	defer func() { lruCacheSize = old }()
+	ctx := context.Background()
+
+	p1, p2 := peer.ID("a"), peer.ID("b")
+	c1 := cid.NewCidV1(cid.CBOR, u.Hash([]byte("1")))
+	c2 := cid.NewCidV1(cid.CBOR, u.Hash([]byte("2")))
+	pm := NewProviderManager(ctx, p1, ds.NewMapDatastore())
+
+	pm.AddProvider(ctx, c1, p1)
+	// make the cached provider for c1 go to datastore
+	pm.AddProvider(ctx, c2, p1)
+	// now just offloaded record should be brought back and joined with p2
+	pm.AddProvider(ctx, c1, p2)
+
+	c1Provs := pm.GetProviders(ctx, c1)
+	if len(c1Provs) != 2 {
+		t.Fatalf("expected c1 to be provided by 2 peers, is by %d", len(c1Provs))
+	}
+}

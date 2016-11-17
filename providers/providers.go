@@ -120,7 +120,7 @@ func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 	out := newProviderSet()
 	for e := range res.Next() {
 		if e.Error != nil {
-			log.Error("got an error: ", e.Error)
+			log.Error("got an error:", e.Error)
 			continue
 		}
 
@@ -128,7 +128,7 @@ func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 
 		decstr, err := base32.RawStdEncoding.DecodeString(e.Key[lix+1:])
 		if err != nil {
-			log.Error("base32 decoding error: ", err)
+			log.Error("base32 decoding error:", err)
 			continue
 		}
 
@@ -136,7 +136,7 @@ func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
 
 		t, err := readTimeValue(e.Value)
 		if err != nil {
-			log.Warning("parsing providers record from disk: ", err)
+			log.Warning("parsing providers record from disk:", err)
 			continue
 		}
 
@@ -202,13 +202,13 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	for _, e := range entries {
 		err := pm.dstore.Delete(ds.NewKey(e.Key))
 		if err != nil {
-			log.Error("deleting provider set: ", err)
+			log.Error("deleting provider set:", err)
 		}
 	}
 	return nil
 }
 
-func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
+func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool, error), error) {
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: false,
 		Prefix:   providersKeyPrefix,
@@ -217,8 +217,11 @@ func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 		return nil, err
 	}
 
-	iter := func() (*cid.Cid, bool) {
+	iter := func() (*cid.Cid, bool, error) {
 		for e := range res.Next() {
+			if e.Error != nil {
+				return nil, false, e.Error
+			}
 			parts := strings.Split(e.Key, "/")
 			if len(parts) != 4 {
 				log.Warningf("incorrectly formatted provider entry in datastore: %s", e.Key)
@@ -226,19 +229,19 @@ func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 			}
 			decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
 			if err != nil {
-				log.Warning("error decoding base32 provider key: %s: %s", parts[2], err)
+				log.Warningf("error decoding base32 provider key: %s: %s", parts[2], err)
 				continue
 			}
 
 			c, err := cid.Cast(decoded)
 			if err != nil {
-				log.Warning("error casting key to cid from datastore key: %s", err)
+				log.Warningf("error casting key to cid from datastore key: %s", err)
 				continue
 			}
 
-			return c, true
+			return c, true, nil
 		}
-		return nil, false
+		return nil, false, nil
 	}
 
 	return iter, nil
@@ -251,30 +254,34 @@ func (pm *ProviderManager) run() {
 		case np := <-pm.newprovs:
 			err := pm.addProv(np.k, np.val)
 			if err != nil {
-				log.Error("error adding new providers: ", err)
+				log.Error("error adding new providers:", err)
 			}
 		case gp := <-pm.getprovs:
 			provs, err := pm.providersForKey(gp.k)
 			if err != nil && err != ds.ErrNotFound {
-				log.Error("error reading providers: ", err)
+				log.Error("error reading providers:", err)
 			}
 
 			gp.resp <- provs
 		case <-tick.C:
 			keys, err := pm.getProvKeys()
 			if err != nil {
-				log.Error("Error loading provider keys: ", err)
+				log.Error("Error loading provider keys:", err)
 				continue
 			}
 			for {
-				k, ok := keys()
+				k, ok, err := keys()
+				if err != nil {
+					log.Error("error enumerating provider keys:", err)
+					break
+				}
 				if !ok {
 					break
 				}
 
 				provs, err := pm.getProvSet(k)
 				if err != nil {
-					log.Error("error loading known provset: ", err)
+					log.Error("error loading known provset:", err)
 					continue
 				}
 				var filtered []peer.ID
@@ -290,7 +297,7 @@ func (pm *ProviderManager) run() {
 				if len(filtered) == 0 {
 					err := pm.deleteProvSet(k)
 					if err != nil {
-						log.Error("error deleting provider set: ", err)
+						log.Error("error deleting provider set:", err)
 					}
 				}
 			}

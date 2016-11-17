@@ -52,7 +52,7 @@ type IpfsDHT struct {
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
 	providers    *providers.ProviderManager
 
-	birth    time.Time  // When this peer started up
+	birth time.Time // When this peer started up
 
 	Validator record.Validator // record validator funcs
 	Selector  record.Selector  // record selection funcs

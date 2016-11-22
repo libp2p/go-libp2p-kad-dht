@@ -10,9 +10,11 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	//lds "github.com/ipfs/go-ds-leveldb"
 	u "github.com/ipfs/go-ipfs-util"
 	peer "github.com/libp2p/go-libp2p-peer"
+	//
+	// used by TestLargeProvidersSet: do not remove
+	// lds "github.com/ipfs/go-ds-leveldb"
 )
 
 func TestProviderManager(t *testing.T) {
@@ -200,12 +202,16 @@ func TestLargeProvidersSet(t *testing.T) {
 		}
 	}
 
-	for _, c := range cids {
-		_ = p.GetProviders(ctx, c)
+	for i := 0; i < 5; i++ {
+		start := time.Now()
+		for _, c := range cids {
+			_ = p.GetProviders(ctx, c)
+		}
+		elapsed := time.Since(start)
+		fmt.Printf("query %f ms\n", elapsed.Seconds()*1000)
 	}
-
 }
-//*/
+*/
 
 func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	old := lruCacheSize

@@ -48,9 +48,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU",
+      "hash": "QmfBmdzssuoW5qFS3EdhoV66H33LAqwg2a4gNBX6HUhHpp",
       "name": "go-datastore",
-      "version": "1.0.0"
+      "version": "1.2.0"
     },
     {
       "author": "hashicorp",
@@ -84,9 +84,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmaEcA713Y54EtSsj7ZYfwXmsTfxrJ4oywr1iFt1d6LKY5",
+      "hash": "QmTzvFTuwhmBMP6eCsfFXKZBPd1GvvqXqFtNLJZ36C4igi",
       "name": "go-testutil",
-      "version": "1.1.0"
+      "version": "1.2.0"
     },
     {
       "author": "whyrusleeping",
@@ -96,15 +96,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmUKePKcUEXwdvJENZJ6z8mJjPaxLsDZ3V9CZjPPtyawPm",
+      "hash": "QmeLoG6nzP2eCJLvQFL1akR79F8yh7gwTmXELqi3vWzWTd",
       "name": "go-libp2p-kbucket",
-      "version": "2.1.0"
+      "version": "2.2.0"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmUrCwTDvJgmBbJVHu1HGEyqDaod3dR6sEkZkpxZk4u47c",
+      "hash": "Qmb8eVQNW2ig7NsBdGwZwbuZLsJFgK4bkRhArnoTyhrmx2",
       "name": "go-libp2p-routing",
-      "version": "2.2.3"
+      "version": "2.3.0"
     },
     {
       "author": "whyrusleeping",
@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmcEcrBAMrwMyhSjXt4yfyPpzgSuV8HLHavnfmiKCSRqZU",
+      "hash": "QmWeAhEo9Zj7UZWQYY2kua4ZXwd3e6iVG1b5YGCL6fYVP1",
       "name": "go-cid",
-      "version": "0.7.5"
+      "version": "0.8.0"
     },
     {
       "author": "whyrusleeping",
@@ -132,9 +132,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmZyBJGpRnbQ7oUstoGNZbhXC4HJuFUCgpp8pmsVTUwdS3",
+      "hash": "Qmayo1f6ygtTkbT5BTPYGhYvWL2LuYGi1VaHyCmrJzC79N",
       "name": "go-libp2p",
-      "version": "4.2.0"
+      "version": "4.3.0"
     }
   ],
   "gxVersion": "0.4.0",
@@ -142,6 +142,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "2.4.6"
+  "version": "2.5.0"
 }
 

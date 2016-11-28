@@ -214,8 +214,8 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	ctx := context.Background()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
-	c1 := cid.NewCidV1(cid.CBOR, u.Hash([]byte("1")))
-	c2 := cid.NewCidV1(cid.CBOR, u.Hash([]byte("2")))
+	c1 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("1")))
+	c2 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("2")))
 	pm := NewProviderManager(ctx, p1, ds.NewMapDatastore())
 
 	pm.AddProvider(ctx, c1, p1)

@@ -73,9 +73,23 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 // These parameters are configurable.
 //
 // BootstrapWithConfig returns a process, so the user can stop it.
-func (dht *IpfsDHT) BootstrapWithConfig(config BootstrapConfig) (goprocess.Process, error) {
-	sig := time.Tick(config.Period)
-	return dht.BootstrapOnSignal(config, sig)
+func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process, error) {
+	if cfg.Queries <= 0 {
+		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
+	}
+
+	proc := periodicproc.Tick(cfg.Period, func(worker goprocess.Process) {
+		// it would be useful to be able to send out signals of when we bootstrap, too...
+		// maybe this is a good case for whole module event pub/sub?
+
+		ctx := dht.Context()
+		if err := dht.runBootstrap(ctx, cfg); err != nil {
+			log.Warning(err)
+			// A bootstrapping error is important to notice but not fatal.
+		}
+	})
+
+	return proc, nil
 }
 
 // SignalBootstrap ensures the dht routing table remains healthy as peers come and go.

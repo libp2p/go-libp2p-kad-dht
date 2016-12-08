@@ -78,16 +78,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
 
-	proc := periodicproc.Tick(cfg.Period, func(worker goprocess.Process) {
-		// it would be useful to be able to send out signals of when we bootstrap, too...
-		// maybe this is a good case for whole module event pub/sub?
-
-		ctx := dht.Context()
-		if err := dht.runBootstrap(ctx, cfg); err != nil {
-			log.Warning(err)
-			// A bootstrapping error is important to notice but not fatal.
-		}
-	})
+	proc := periodicproc.Tick(cfg.Period, dht.bootstrapWorker(cfg))
 
 	return proc, nil
 }
@@ -107,7 +98,13 @@ func (dht *IpfsDHT) BootstrapOnSignal(cfg BootstrapConfig, signal <-chan time.Ti
 		return nil, fmt.Errorf("invalid signal: %v", signal)
 	}
 
-	proc := periodicproc.Ticker(signal, func(worker goprocess.Process) {
+	proc := periodicproc.Ticker(signal, dht.bootstrapWorker(cfg))
+
+	return proc, nil
+}
+
+func (dht *IpfsDHT) bootstrapWorker(cfg BootstrapConfig) func(worker goprocess.Process) {
+	return func(worker goprocess.Process) {
 		// it would be useful to be able to send out signals of when we bootstrap, too...
 		// maybe this is a good case for whole module event pub/sub?
 
@@ -116,9 +113,7 @@ func (dht *IpfsDHT) BootstrapOnSignal(cfg BootstrapConfig, signal <-chan time.Ti
 			log.Warning(err)
 			// A bootstrapping error is important to notice but not fatal.
 		}
-	})
-
-	return proc, nil
+	}
 }
 
 // runBootstrap builds up list of peers by requesting random peer IDs

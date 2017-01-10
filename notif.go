@@ -3,7 +3,7 @@ package dht
 import (
 	inet "github.com/libp2p/go-libp2p-net"
 	ma "github.com/multiformats/go-multiaddr"
-	mstream "github.com/whyrusleeping/go-multistream"
+	mstream "github.com/multiformats/go-multistream"
 )
 
 // netNotifiee defines methods to be used with the IpfsDHT

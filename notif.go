@@ -1,6 +1,8 @@
 package dht
 
 import (
+	"io"
+
 	inet "github.com/libp2p/go-libp2p-net"
 	ma "github.com/multiformats/go-multiaddr"
 	mstream "github.com/multiformats/go-multistream"
@@ -33,9 +35,12 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		dht.Update(dht.Context(), v.RemotePeer())
 	case mstream.ErrNotSupported:
 		// Client mode only, don't bother adding them to our routing table
+	case io.EOF:
+		// This is kindof an error, but it happens someone often so make it a warning
+		log.Warningf("checking dht client type: %s", err)
 	default:
 		// real error? thats odd
-		log.Errorf("checking dht client type: %#v", err)
+		log.Errorf("checking dht client type: %s", err)
 	}
 }
 

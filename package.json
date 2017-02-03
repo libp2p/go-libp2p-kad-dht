@@ -20,7 +20,7 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQ1FYwmfL2jSvLKeXd6i47cSS23bWVMGqGxeh9nv8xwry",
+      "hash": "QmbKtZxyDqUJp7Ad8tGr5nrLqoi9nfgqFxcNbmLJbfaHPe",
       "name": "go-libp2p-peer",
       "version": "2.1.0"
     },
@@ -60,7 +60,7 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmU8iiXVwobZ366qAezD62VDxxnUe9Ss7K2skzYs7vy73B",
+      "hash": "QmekwEJM81TqzKzupMvK68hVNfBNvBengWkpc8nAw2bjBf",
       "name": "go-libp2p-peerstore",
       "version": "1.4.0"
     },
@@ -84,7 +84,7 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmZbH1LKqum7EVW7GnT6znzSSAnySwnA6kYdJ6WsNfqhXV",
+      "hash": "QmbN6CcaGuVSWwhYq5nDQs98hWHgu5PTBgVjnGV28YeGRk",
       "name": "go-testutil",
       "version": "1.1.1"
     },
@@ -96,13 +96,13 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQLTLKAEhw5BqrnYNH3yjHb3GcrXLecYiLvZA2uHNHmvz",
+      "hash": "Qmeo4KuuR61Po7RBx8BPovRmVVttYDPMqcPNif328ssQUa",
       "name": "go-libp2p-kbucket",
       "version": "2.1.2"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmWwv3oWeKjUG8QefL3387ZZQwAEtMeChuwrYW8AmtHR3m",
+      "hash": "QmTPjH2YuGuTbwizXZpyiCjrX82wmNPo1WjFfK2nwVdjPK",
       "name": "go-libp2p-routing",
       "version": "2.2.7"
     },
@@ -120,19 +120,19 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmayjCepfH9eZJE3E6uPafmx22tdrsNva5CstRB86kVh9a",
+      "hash": "Qma1v2AjS7d2ceYgye4wUVBFFSdB6UPp7jgL8kNtxvFzWu",
       "name": "go-libp2p-loggables",
       "version": "1.1.1"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmdnLcmr1uhqonu4yxtnoDnkoqeVZXWN1kead4dktobk51",
+      "hash": "QmXNqhBy5SVc7pFnzDkoGicvFYyXw9X9oCR6X99c45hTZC",
       "name": "go-libp2p-host",
       "version": "1.3.7"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmTdFbYjY9j9S2zT7DCDnQewxFWvEjXyYMb4rH1wS4kFmg",
+      "hash": "QmQCSAjRYbP2fxNEmETbNwqp2vBZokKyi3gv5353eigh6g",
       "name": "go-libp2p",
       "version": "4.3.5"
     }
@@ -142,6 +142,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "2.4.15"
+  "version": "2.4.16"
 }
 

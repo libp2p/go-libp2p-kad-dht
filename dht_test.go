@@ -15,6 +15,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	netutil "github.com/libp2p/go-libp2p-netutil"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -823,6 +824,80 @@ func TestClientModeConnect(t *testing.T) {
 
 	if provs[0].ID != p {
 		t.Fatal("expected it to be our test peer")
+	}
+}
+
+func TestFindPeerQuery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nDHTs := 121
+	_, allpeers, dhts := setupDHTS(ctx, nDHTs, t)
+	defer func() {
+		for i := 0; i < nDHTs; i++ {
+			dhts[i].Close()
+			defer dhts[i].host.Close()
+		}
+	}()
+
+	guy := dhts[0]
+	others := dhts[1:]
+	for i := 0; i < 20; i++ {
+		for j := 0; j < 10; j++ {
+			connect(t, ctx, others[i], others[20+(i*4)+j])
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		connect(t, ctx, guy, others[i])
+	}
+
+	val := "foobar"
+	rtval := kb.ConvertKey(val)
+
+	rtablePeers := guy.routingTable.NearestPeers(rtval, KValue)
+	if len(rtablePeers) != 20 {
+		t.Fatalf("expected 20 peers back from routing table, got %d", len(rtablePeers))
+	}
+
+	netpeers := guy.host.Network().Peers()
+	if len(netpeers) != 20 {
+		t.Fatalf("expected 20 peers to be connected, got %d", len(netpeers))
+	}
+
+	rtableset := make(map[peer.ID]bool)
+	for _, p := range rtablePeers {
+		rtableset[p] = true
+	}
+
+	out, err := guy.GetClosestPeers(ctx, val)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var notfromrtable int
+	var count int
+	var outpeers []peer.ID
+	for p := range out {
+		count++
+		if !rtableset[p] {
+			notfromrtable++
+		}
+		outpeers = append(outpeers, p)
+	}
+
+	if notfromrtable == 0 {
+		t.Fatal("got entirely peers from our routing table")
+	}
+
+	fmt.Println("counts: ", count, notfromrtable)
+	actualclosest := kb.SortClosestPeers(allpeers[1:], rtval)
+	exp := actualclosest[:20]
+	got := kb.SortClosestPeers(outpeers, rtval)
+	for i, v := range exp {
+		if v != got[i] {
+			t.Fatal("mismatch in expected closest peers:", exp, got)
+		}
 	}
 }
 

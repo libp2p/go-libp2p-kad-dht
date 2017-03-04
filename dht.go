@@ -312,19 +312,18 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 	// no node? nil
 	if closer == nil {
+		log.Warning("no closer peers to send:", p)
 		return nil
-	}
-
-	// == to self? thats bad
-	for _, p := range closer {
-		if p == dht.self {
-			log.Debug("attempted to return self! this shouldn't happen...")
-			return nil
-		}
 	}
 
 	var filtered []peer.ID
 	for _, clp := range closer {
+
+		// == to self? thats bad
+		if p == dht.self {
+			log.Warning("attempted to return self! this shouldn't happen...")
+			return nil
+		}
 		// Dont send a peer back themselves
 		if p == clp {
 			continue

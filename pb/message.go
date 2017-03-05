@@ -53,8 +53,8 @@ func peerInfoToPBPeer(p pstore.PeerInfo) *Message_Peer {
 }
 
 // PBPeerToPeer turns a *Message_Peer into its pstore.PeerInfo counterpart
-func PBPeerToPeerInfo(pbp *Message_Peer) pstore.PeerInfo {
-	return pstore.PeerInfo{
+func PBPeerToPeerInfo(pbp *Message_Peer) *pstore.PeerInfo {
+	return &pstore.PeerInfo{
 		ID:    peer.ID(pbp.GetId()),
 		Addrs: pbp.Addresses(),
 	}
@@ -93,8 +93,8 @@ func PeerRoutingInfosToPBPeers(peers []PeerRoutingInfo) []*Message_Peer {
 
 // PBPeersToPeerInfos converts given []*Message_Peer into []pstore.PeerInfo
 // Invalid addresses will be silently omitted.
-func PBPeersToPeerInfos(pbps []*Message_Peer) []pstore.PeerInfo {
-	peers := make([]pstore.PeerInfo, 0, len(pbps))
+func PBPeersToPeerInfos(pbps []*Message_Peer) []*pstore.PeerInfo {
+	peers := make([]*pstore.PeerInfo, 0, len(pbps))
 	for _, pbp := range pbps {
 		peers = append(peers, PBPeerToPeerInfo(pbp))
 	}

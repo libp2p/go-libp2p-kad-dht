@@ -6,7 +6,6 @@ import (
 	logging "github.com/ipfs/go-log"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
-	pset "github.com/libp2p/go-libp2p-peer/peerset"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
@@ -17,6 +16,14 @@ func pointerizePeerInfos(pis []pstore.PeerInfo) []*pstore.PeerInfo {
 	for i, p := range pis {
 		np := p
 		out[i] = &np
+	}
+	return out
+}
+
+func toPeerInfos(ps []peer.ID) []*pstore.PeerInfo {
+	out := make([]*pstore.PeerInfo, len(ps))
+	for i, p := range ps {
+		out[i] = &pstore.PeerInfo{ID: p}
 	}
 	return out
 }
@@ -37,16 +44,6 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	}
 
 	out := make(chan peer.ID, KValue)
-	peerset := pset.NewLimited(KValue)
-
-	for _, p := range tablepeers {
-		select {
-		case out <- p:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		peerset.Add(p)
-	}
 
 	// since the query doesnt actually pass our context down
 	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
@@ -64,35 +61,36 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			return nil, err
 		}
 
-		var filtered []pstore.PeerInfo
-		for _, clp := range closer {
-			if peerset.TryAdd(clp) {
-				select {
-				case out <- clp:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-				filtered = append(filtered, dht.peerstore.PeerInfo(clp))
-			}
-		}
+		peerinfos := toPeerInfos(closer)
 
 		// For DHT query command
 		notif.PublishQueryEvent(parent, &notif.QueryEvent{
 			Type:      notif.PeerResponse,
 			ID:        p,
-			Responses: pointerizePeerInfos(filtered),
+			Responses: peerinfos, // todo: remove need for this pointerize thing
 		})
 
-		return &dhtQueryResult{closerPeers: filtered}, nil
+		return &dhtQueryResult{closerPeers: peerinfos}, nil
 	})
 
 	go func() {
 		defer close(out)
 		defer e.Done()
 		// run it!
-		_, err := query.Run(ctx, tablepeers)
+		res, err := query.Run(ctx, tablepeers)
 		if err != nil {
 			log.Debugf("closestPeers query run error: %s", err)
+		}
+
+		if res != nil && res.finalSet != nil {
+			sorted := kb.SortClosestPeers(res.finalSet.Peers(), kb.ConvertKey(key))
+			if len(sorted) > KValue {
+				sorted = sorted[:KValue]
+			}
+
+			for _, p := range sorted {
+				out <- p
+			}
 		}
 	}()
 

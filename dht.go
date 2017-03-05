@@ -145,7 +145,7 @@ var errInvalidRecord = errors.New("received invalid record")
 // key. It returns either the value or a list of closer peers.
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []pstore.PeerInfo, error) {
+func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*pstore.PeerInfo, error) {
 
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
@@ -320,12 +320,12 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 	for _, clp := range closer {
 
 		// == to self? thats bad
-		if p == dht.self {
+		if clp == dht.self {
 			log.Warning("attempted to return self! this shouldn't happen...")
 			return nil
 		}
 		// Dont send a peer back themselves
-		if p == clp {
+		if clp == p {
 			continue
 		}
 

@@ -27,11 +27,13 @@ type dhtQuery struct {
 }
 
 type dhtQueryResult struct {
-	value         []byte            // GetValue
-	peer          pstore.PeerInfo   // FindPeer
-	providerPeers []pstore.PeerInfo // GetProviders
-	closerPeers   []pstore.PeerInfo // *
+	value         []byte             // GetValue
+	peer          *pstore.PeerInfo   // FindPeer
+	providerPeers []pstore.PeerInfo  // GetProviders
+	closerPeers   []*pstore.PeerInfo // *
 	success       bool
+
+	finalSet *pset.PeerSet
 }
 
 // constructs query
@@ -155,7 +157,9 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 		return r.result, nil
 	}
 
-	return nil, err
+	return &dhtQueryResult{
+		finalSet: r.peersSeen,
+	}, err
 }
 
 func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {

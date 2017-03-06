@@ -4,12 +4,16 @@ os:
 
 language: go
 
+env:
+    - IPFS_REUSEPORT=false
+
 go:
     - 1.7
 
 install: true
 
 script:
+  - ulimit -n 2048
   - make deps
   - go vet
   - go test ./...

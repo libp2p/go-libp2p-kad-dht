@@ -144,23 +144,20 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 
 func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) ([]routing.RecvdVal, error) {
 	var resChan chan *routing.RecvdVal = make(chan *routing.RecvdVal, 0)
-	var errChan chan error = make(chan error, 0)
-	go dht.getValuesAsyncRoutine(ctx, key, nvals, resChan, errChan)
+	go dht.getValuesAsyncRoutine(ctx, key, nvals, resChan, nil)
 
 	var vals []routing.RecvdVal
 loop:
 	for {
 		select {
-		case err := <-errChan:
-			if err == nil {
-				break loop
-			}
-			return nil, err
 		case res := <-resChan:
 			if res == nil {
 				break loop
+			} else if res.Error != nil {
+				return nil, res.Error
+			} else {
+				vals = append(vals, *res)
 			}
-			vals = append(vals, *res)
 		}
 	}
 
@@ -187,8 +184,10 @@ func (dht *IpfsDHT) getValuesAsyncRoutine(ctx context.Context, key string, nvals
 	var valslock sync.Mutex
 	var sentRes int
 
-	defer close(errChan)
 	defer close(resChan)
+	if errChan != nil {
+		defer close(errChan)
+	}
 
 	// If we have it local, dont bother doing an RPC!
 	lrec, err := dht.getLocal(key)
@@ -206,7 +205,10 @@ func (dht *IpfsDHT) getValuesAsyncRoutine(ctx context.Context, key string, nvals
 			return
 		}
 	} else if nvals == 0 {
-		errChan <- err
+		if errChan != nil {
+			errChan <- err
+		}
+		resChan <- &routing.RecvdVal{Error: err}
 		return
 	}
 
@@ -215,7 +217,10 @@ func (dht *IpfsDHT) getValuesAsyncRoutine(ctx context.Context, key string, nvals
 	log.Debugf("peers in rt: %d %s", len(rtp), rtp)
 	if len(rtp) == 0 {
 		log.Warning("No peers from routing table!")
-		errChan <- kb.ErrLookupFailure
+		if errChan != nil {
+			errChan <- err
+		}
+		resChan <- &routing.RecvdVal{Error: kb.ErrLookupFailure}
 		return
 	}
 
@@ -275,7 +280,10 @@ func (dht *IpfsDHT) getValuesAsyncRoutine(ctx context.Context, key string, nvals
 	_, err = query.Run(ctx, rtp)
 	if sentRes == 0 {
 		if err != nil {
-			errChan <- err
+			if errChan != nil {
+				errChan <- err
+			}
+			resChan <- &routing.RecvdVal{Error: err}
 		}
 	}
 

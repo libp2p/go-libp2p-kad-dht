@@ -259,6 +259,7 @@ func (dht *IpfsDHT) getValuesAsyncRoutine(ctx context.Context, key string, nvals
 			}
 			resChan <- &rv
 			valslock.Lock()
+			sentRes += 1
 
 			// If weve collected enough records, we're done
 			if sentRes >= nvals || nvals >= 0 {

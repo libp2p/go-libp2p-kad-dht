@@ -349,6 +349,9 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key *cid.Cid,
 
 		// Add unique providers from request, up to 'count'
 		for _, prov := range provs {
+			if prov.ID != dht.self {
+				dht.peerstore.AddAddrs(prov.ID, prov.Addrs, pstore.TempAddrTTL)
+			}
 			log.Debugf("got provider: %s", prov)
 			if ps.TryAdd(prov.ID) {
 				log.Debugf("using provider: %s", prov)

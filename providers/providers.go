@@ -24,7 +24,7 @@ var batchBufferSize = 256
 var log = logging.Logger("providers")
 
 var lruCacheSize = 256
-var ProvideValidity = time.Hour * 24
+var ProviderValidity = time.Hour * 24
 var defaultCleanupInterval = time.Hour
 
 type ProviderManager struct {
@@ -283,7 +283,7 @@ func (pm *ProviderManager) run() {
 				}
 				var filtered []peer.ID
 				for p, t := range provs.set {
-					if time.Now().Sub(t) > ProvideValidity {
+					if time.Now().Sub(t) > ProviderValidity {
 						delete(provs.set, p)
 					} else {
 						filtered = append(filtered, p)

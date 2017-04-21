@@ -103,12 +103,12 @@ func TestProvidersSerialization(t *testing.T) {
 }
 
 func TestProvidesExpire(t *testing.T) {
-	pval := ProvideValidity
+	pval := ProviderValidity
 	cleanup := defaultCleanupInterval
-	ProvideValidity = time.Second / 2
+	ProviderValidity = time.Second / 2
 	defaultCleanupInterval = time.Second / 2
 	defer func() {
-		ProvideValidity = pval
+		ProviderValidity = pval
 		defaultCleanupInterval = cleanup
 	}()
 

@@ -102,9 +102,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmafuecpeZp3k3sHJ5mUARHd4795revuadECQMkmHB8LfW",
+      "hash": "QmXiH3yLocPhjkAmL8R29fKRcEKoVXKCaVDbAS9tdTrVEd",
       "name": "go-libp2p-routing",
-      "version": "2.2.12"
+      "version": "2.2.13"
     },
     {
       "author": "whyrusleeping",

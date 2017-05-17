@@ -9,6 +9,7 @@ import (
 	"time"
 
 	cid "github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	inet "github.com/libp2p/go-libp2p-net"
@@ -240,11 +241,14 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) ([]rou
 // This is what DSHTs (Coral and MainlineDHT) do to store large values in a DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid) error {
-	defer log.EventBegin(ctx, "provide", key).Done()
+func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) error {
+	defer log.EventBegin(ctx, "provide", key, logging.LoggableMap{"broadcast": brdcst}).Done()
 
 	// add self locally
 	dht.providers.AddProvider(ctx, key, dht.self)
+	if !brdcst {
+		return nil
+	}
 
 	peers, err := dht.GetClosestPeers(ctx, key.KeyString())
 	if err != nil {

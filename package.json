@@ -48,9 +48,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmSiN66ybp5udnQnvhb6euiWiiQWdGvwMhAWa95cC1DTCV",
+      "hash": "QmVSase1JP7cq9QkPT46oNwdp9pT6kBkG3oqS14y3QcZjG",
       "name": "go-datastore",
-      "version": "1.2.1"
+      "version": "1.2.2"
     },
     {
       "author": "hashicorp",
@@ -72,9 +72,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmaaG4PpRdtvdsH7j7J84jBVo3oYRUsNHdg2qtJ4EwdrqK",
+      "hash": "Qmbi2cDAzNb9ofcdmXqhejBzuQwxCKV8xZu3gnWzJDFPQn",
       "name": "autobatch",
-      "version": "0.2.5"
+      "version": "0.2.6"
     },
     {
       "author": "kubuxu",
@@ -102,9 +102,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmaNDbaV1wvPRLxTYepVsXrppXNjQ1NbrnG7ibAgKeyaXD",
+      "hash": "QmP1wMAqk6aZYRZirbaAwmrNeqFRgQrwBt3orUtvSa1UYD",
       "name": "go-libp2p-routing",
-      "version": "2.2.15"
+      "version": "2.2.16"
     },
     {
       "author": "whyrusleeping",
@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmNw61A6sJoXMeP37mJRtQZdNhj5e3FdjoTN3v4FyE96Gk",
+      "hash": "Qma4RJSuh7mMeJQYCqMbKzekn6EwBo7HEs5AQYjVRMQATB",
       "name": "go-cid",
-      "version": "0.7.15"
+      "version": "0.7.16"
     },
     {
       "author": "whyrusleeping",
@@ -142,6 +142,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "2.5.3"
+  "version": "2.5.4"
 }
 

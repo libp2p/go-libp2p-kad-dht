@@ -68,6 +68,10 @@ type IpfsDHT struct {
 func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 	dht := NewDHTClient(ctx, h, dstore)
 
+	cmgr := h.ConnManager()
+	dht.routingTable.PeerAdded = func(p peer.ID) { cmgr.TagPeer(p, "rtable", 5) }
+	dht.routingTable.PeerRemoved = func(p peer.ID) { cmgr.UntagPeer(p, "rtable") }
+
 	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
 	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
 

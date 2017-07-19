@@ -135,6 +135,48 @@
       "hash": "QmapADMpK4e5kFGBxC2aHreaDqKP9vmMng5f91MA14Ces9",
       "name": "go-libp2p",
       "version": "4.4.1"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmahYsGWry85Y7WUe2SX5G4JkH2zifEQAUtJVLZ24aC9DF",
+      "name": "go-libp2p-net",
+      "version": "1.6.12"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmSU6eubNdhXjFBJBSksTp8kv8YRub8mGAPv8tVJHmL2EU",
+      "name": "go-ipfs-util",
+      "version": "1.2.5"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmT8rehPR3F6bmwL6zjUN8XpiDBFFpMP2myPdC6ApsWfJf",
+      "name": "go-base58",
+      "version": "0.0.0"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmTnsezaB1wWNRHeHnYrm8K4d5i9wtyj3GsqjC3Rt5b5v5",
+      "name": "go-multistream",
+      "version": "0.3.6"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmViDDJGzv2TKrheoxckReECc72iRgaYsobG2HYUGWuPVF",
+      "name": "go-libp2p-netutil",
+      "version": "0.2.17"
+    },
+    {
+      "author": "multiformats",
+      "hash": "QmXY77cVe7rVRQXZZQRioukUM7aRW3BTcAgJe12MCtb3Ji",
+      "name": "go-multiaddr",
+      "version": "1.2.4"
+    },
+    {
+      "author": "whyrusleeping",
+      "hash": "QmZNkThpqfVXs9GNbexPrfBbXSLNYeKrE7jwFM2oqHbyqN",
+      "name": "go-libp2p-protocol",
+      "version": "1.0.0"
     }
   ],
   "gxVersion": "0.4.0",

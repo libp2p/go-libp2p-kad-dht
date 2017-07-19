@@ -444,7 +444,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pstore.PeerInfo, 
 		closer := pmes.GetCloserPeers()
 		clpeerInfos := pb.PBPeersToPeerInfos(closer)
 
-		// see it we got the peer here
+		// see if we got the peer here
 		for _, npi := range clpeerInfos {
 			if npi.ID == id {
 				return &dhtQueryResult{
@@ -456,6 +456,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pstore.PeerInfo, 
 
 		notif.PublishQueryEvent(parent, &notif.QueryEvent{
 			Type:      notif.PeerResponse,
+			ID:        p,
 			Responses: clpeerInfos,
 		})
 

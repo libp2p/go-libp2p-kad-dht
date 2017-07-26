@@ -45,40 +45,43 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		cancel:   cancel,
 	}
 
-	go func() {
+	// Note: We *could* just check the peerstore to see if the remote side supports the dht
+	// protocol, but its not clear that that information will make it into the peerstore
+	// by the time this notification is sent. So just to be very careful, we brute force this
+	// and open a new stream
+	go nn.testConnection(ctx, v)
 
-		// Note: We *could* just check the peerstore to see if the remote side supports the dht
-		// protocol, but its not clear that that information will make it into the peerstore
-		// by the time this notification is sent. So just to be very careful, we brute force this
-		// and open a new stream
+}
 
-		for {
-			s, err := dht.host.NewStream(ctx, v.RemotePeer(), ProtocolDHT, ProtocolDHTOld)
+func (nn *netNotifiee) testConnection(ctx context.Context, v inet.Conn) {
+	dht := nn.DHT()
+	for {
+		s, err := dht.host.NewStream(ctx, v.RemotePeer(), ProtocolDHT, ProtocolDHTOld)
 
-			switch err {
-			case nil:
-				s.Close()
-				dht.plk.Lock()
-				defer dht.plk.Unlock()
+		switch err {
+		case nil:
+			s.Close()
+			dht.plk.Lock()
 
-				// Check if canceled under the lock.
-				if ctx.Err() == nil {
-					dht.Update(dht.Context(), v.RemotePeer())
-				}
-			case io.EOF:
-				if ctx.Err() == nil {
-					// Connection died but we may still have *an* open connection (context not canceled) so try again.
-					continue
-				}
-			case mstream.ErrNotSupported:
-				// Client mode only, don't bother adding them to our routing table
-			default:
-				// real error? thats odd
-				log.Errorf("checking dht client type: %s", err)
+			// Check if canceled under the lock.
+			if ctx.Err() == nil {
+				dht.Update(dht.Context(), v.RemotePeer())
 			}
-			return
+
+			dht.plk.Unlock()
+		case io.EOF:
+			if ctx.Err() == nil {
+				// Connection died but we may still have *an* open connection (context not canceled) so try again.
+				continue
+			}
+		case mstream.ErrNotSupported:
+			// Client mode only, don't bother adding them to our routing table
+		default:
+			// real error? thats odd
+			log.Errorf("checking dht client type: %s", err)
 		}
-	}()
+		return
+	}
 }
 
 func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {

@@ -55,24 +55,21 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		for {
 			s, err := dht.host.NewStream(ctx, v.RemotePeer(), ProtocolDHT, ProtocolDHTOld)
 
-			// Canceled.
-			if ctx.Err() != nil {
-				return
-			}
-
 			switch err {
 			case nil:
 				s.Close()
 				dht.plk.Lock()
 				defer dht.plk.Unlock()
 
-				// Check if canceled again under the lock.
+				// Check if canceled under the lock.
 				if ctx.Err() == nil {
 					dht.Update(dht.Context(), v.RemotePeer())
 				}
 			case io.EOF:
-				// Connection died but we may still have *an* open connection so try again.
-				continue
+				if ctx.Err() == nil {
+					// Connection died but we may still have *an* open connection (context not canceled) so try again.
+					continue
+				}
 			case mstream.ErrNotSupported:
 				// Client mode only, don't bother adding them to our routing table
 			default:

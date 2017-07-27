@@ -30,7 +30,10 @@ func toPeerInfos(ps []peer.ID) []*pstore.PeerInfo {
 }
 
 func loggableKey(k string) logging.LoggableMap {
-	if cid, err := cid.Cast([]byte(k)); err == nil {
+	cid, err := cid.Cast([]byte(k))
+	if err != nil {
+		log.Errorf("loggableKey could not cast key: %v", err)
+	} else {
 		k = cid.String()
 	}
 	return logging.LoggableMap{

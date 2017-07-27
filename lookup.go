@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 
+	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
@@ -29,6 +30,9 @@ func toPeerInfos(ps []peer.ID) []*pstore.PeerInfo {
 }
 
 func loggableKey(k string) logging.LoggableMap {
+	if cid, err := cid.Cast([]byte(k)); err == nil {
+		k = cid.String()
+	}
 	return logging.LoggableMap{
 		"key": k,
 	}

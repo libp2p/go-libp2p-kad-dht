@@ -34,7 +34,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 
 	conn, ok := nn.peers[v.RemotePeer()]
 	if ok {
-		conn.refcount += 1
+		conn.refcount++
 		return
 	}
 

@@ -77,12 +77,6 @@
       "version": "0.2.6"
     },
     {
-      "author": "kubuxu",
-      "hash": "QmeiMCBkYHxkDkDfnDadzz4YxY5ruL5Pj499essE4vRsGM",
-      "name": "bbloom",
-      "version": "0.1.0"
-    },
-    {
       "author": "whyrusleeping",
       "hash": "QmSXpwmggGd8fe7e9abqRuST7SqaZjrz3Cg5avMJbdmKGe",
       "name": "go-testutil",
@@ -184,6 +178,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "2.5.6"
+  "version": "2.5.7"
 }
 

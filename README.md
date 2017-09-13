@@ -24,7 +24,7 @@ go get github.com/libp2p/go-libp2p-kad-dht
 
 ## Usage
 
-TODO
+Go to https://godoc.org/github.com/libp2p/go-libp2p-kad-dht.
 
 ## Contribute
 

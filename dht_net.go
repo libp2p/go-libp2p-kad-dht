@@ -217,7 +217,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 
 	mes := new(pb.Message)
 	if err := ms.ctxReadMsg(ctx, mes); err != nil {
-		ms.s.Close()
+		ms.s.Reset()
 		ms.s = nil
 		return nil, err
 	}

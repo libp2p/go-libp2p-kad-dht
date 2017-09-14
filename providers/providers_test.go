@@ -97,8 +97,8 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal("failed to load set correctly")
 	}
 
-	if pt2 != lt2 {
-		t.Fatal("time wasnt serialized correctly")
+	if !pt2.Equal(lt2) {
+		t.Fatalf("time wasnt serialized correctly, %v != %v", pt1, lt1)
 	}
 }
 

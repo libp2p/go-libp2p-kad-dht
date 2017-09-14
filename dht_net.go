@@ -35,6 +35,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		// receive msg
 		pmes := new(pb.Message)
 		if err := r.ReadMsg(pmes); err != nil {
+			s.Reset()
 			log.Debugf("Error unmarshaling data: %s", err)
 			return
 		}
@@ -45,6 +46,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		// get handler for this msg type.
 		handler := dht.handlerForMsgType(pmes.GetType())
 		if handler == nil {
+			s.Reset()
 			log.Debug("got back nil handler from handlerForMsgType")
 			return
 		}
@@ -52,6 +54,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		// dispatch handler.
 		rpmes, err := handler(ctx, mPeer, pmes)
 		if err != nil {
+			s.Reset()
 			log.Debugf("handle message error: %s", err)
 			return
 		}
@@ -64,6 +67,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 
 		// send out response msg
 		if err := w.WriteMsg(rpmes); err != nil {
+			s.Reset()
 			log.Debugf("send response error: %s", err)
 			return
 		}
@@ -161,73 +165,88 @@ const streamReuseTries = 3
 func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) error {
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
-	if err := ms.prep(); err != nil {
-		return err
-	}
-
-	if err := ms.writeMessage(pmes); err != nil {
-		return err
-	}
-
-	if ms.singleMes > streamReuseTries {
-		ms.s.Close()
-		ms.s = nil
-	}
-
-	return nil
-}
-
-func (ms *messageSender) writeMessage(pmes *pb.Message) error {
-	err := ms.w.WriteMsg(pmes)
-	if err != nil {
-		// If the other side isnt expecting us to be reusing streams, we're gonna
-		// end up erroring here. To make sure things work seamlessly, lets retry once
-		// before continuing
-
-		log.Infof("error writing message: ", err)
-		ms.s.Close()
-		ms.s = nil
+	retry := false
+	for {
 		if err := ms.prep(); err != nil {
 			return err
 		}
 
 		if err := ms.w.WriteMsg(pmes); err != nil {
-			return err
+			ms.s.Reset()
+			ms.s = nil
+
+			if retry {
+				log.Info("error writing message, bailing: ", err)
+				return err
+			} else {
+				log.Info("error writing message, trying again: ", err)
+				retry = true
+				continue
+			}
 		}
 
-		// keep track of this happening. If it happens a few times, its
-		// likely we can assume the otherside will never support stream reuse
-		ms.singleMes++
+		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+
+		if ms.singleMes > streamReuseTries {
+			ms.s.Close()
+			ms.s = nil
+		} else if retry {
+			ms.singleMes++
+		}
+
+		return nil
 	}
-	return nil
 }
 
 func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
-	if err := ms.prep(); err != nil {
-		return nil, err
+	retry := false
+	for {
+		if err := ms.prep(); err != nil {
+			return nil, err
+		}
+
+		if err := ms.w.WriteMsg(pmes); err != nil {
+			ms.s.Reset()
+			ms.s = nil
+
+			if retry {
+				log.Info("error writing message, bailing: ", err)
+				return nil, err
+			} else {
+				log.Info("error writing message, trying again: ", err)
+				retry = true
+				continue
+			}
+		}
+
+		mes := new(pb.Message)
+		if err := ms.ctxReadMsg(ctx, mes); err != nil {
+			ms.s.Reset()
+			ms.s = nil
+
+			if retry {
+				log.Info("error reading message, bailing: ", err)
+				return nil, err
+			} else {
+				log.Info("error reading message, trying again: ", err)
+				retry = true
+				continue
+			}
+		}
+
+		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+
+		if ms.singleMes > streamReuseTries {
+			ms.s.Close()
+			ms.s = nil
+		} else if retry {
+			ms.singleMes++
+		}
+
+		return mes, nil
 	}
-
-	if err := ms.writeMessage(pmes); err != nil {
-		return nil, err
-	}
-
-	log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
-
-	mes := new(pb.Message)
-	if err := ms.ctxReadMsg(ctx, mes); err != nil {
-		ms.s.Close()
-		ms.s = nil
-		return nil, err
-	}
-
-	if ms.singleMes > streamReuseTries {
-		ms.s.Close()
-		ms.s = nil
-	}
-
-	return mes, nil
 }
 
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {

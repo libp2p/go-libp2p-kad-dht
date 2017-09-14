@@ -192,7 +192,6 @@ func TestNotFound(t *testing.T) {
 				if err := pbw.WriteMsg(resp); err != nil {
 					panic(err)
 				}
-
 			default:
 				panic("Shouldnt recieve this.")
 			}
@@ -287,4 +286,69 @@ func TestLessThanKResponses(t *testing.T) {
 		}
 	}
 	t.Fatal("Expected to recieve an error.")
+}
+
+// Test multiple queries against a node that closes its stream after every query.
+func TestMultipleQueries(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	ctx := context.Background()
+	mn, err := mocknet.FullMeshConnected(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := mn.Hosts()
+	tsds := dssync.MutexWrap(ds.NewMapDatastore())
+	d := NewDHT(ctx, hosts[0], tsds)
+
+	d.Update(ctx, hosts[1].ID())
+
+	// It would be nice to be able to just get a value and succeed but then
+	// we'd need to deal with selectors and validators...
+	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+		defer s.Close()
+
+		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+		pbw := ggio.NewDelimitedWriter(s)
+
+		pmes := new(pb.Message)
+		if err := pbr.ReadMsg(pmes); err != nil {
+			panic(err)
+		}
+
+		switch pmes.GetType() {
+		case pb.Message_GET_VALUE:
+			pi := hosts[1].Peerstore().PeerInfo(hosts[0].ID())
+			resp := &pb.Message{
+				Type:        pmes.Type,
+				CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []pstore.PeerInfo{pi}),
+			}
+
+			if err := pbw.WriteMsg(resp); err != nil {
+				panic(err)
+			}
+		default:
+			panic("Shouldnt recieve this.")
+		}
+	})
+
+	// long timeout to ensure timing is not at play.
+	ctx, cancel := context.WithTimeout(ctx, time.Second*20)
+	defer cancel()
+	for i := 0; i < 10; i++ {
+		if _, err := d.GetValue(ctx, "hello"); err != nil {
+			switch err {
+			case routing.ErrNotFound:
+				//Success!
+				continue
+			case u.ErrTimeout:
+				t.Fatal("Should not have gotten timeout!")
+			default:
+				t.Fatalf("Got unexpected error: %s", err)
+			}
+		}
+		t.Fatal("Expected to recieve an error.")
+	}
 }

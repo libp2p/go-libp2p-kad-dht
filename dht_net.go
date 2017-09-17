@@ -297,7 +297,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 }
 
 func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
-	// XXX log total request time
+	defer log.EventBegin(ctx, "dhtSendRequest", ms.dht.self, ms.p, pmes).Done()
 	retry := false
 	for {
 		ms.lk.Lock()
@@ -326,27 +326,45 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			}
 		}
 
-		// XXX log
+		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		resch := make(chan requestResult, 1)
 		select {
 		case ms.rch <- resch:
 		default:
-			// XXX Implement me -- pipeline stall
+			// pipeline stall, log it and time it
+			evt := log.EventBegin(ctx, "dhtSendRequestStall", ms.dht.self, ms.p, pmes)
+			select {
+			case ms.rch <- resch:
+				evt.Done()
+			case <-ctx.Done():
+				evt.Done()
+				return nil, ctx.Err()
+			case <-ms.dht.ctx.Done():
+				evt.Done()
+				return nil, ms.dht.ctx.Err()
+			}
 		}
 
 		rcount := ms.rcount
 
 		ms.lk.Unlock()
 
+		t := time.NewTimer(dhtReadMessageTimeout)
+		defer t.Stop()
+
 		var res requestResult
 		select {
 		case res = <-resch:
 
+		case <-t.C:
+			return nil, ErrReadTimeout
+
 		case <-ctx.Done():
 			return nil, ctx.Err()
 
-			// XXX read timeout
+		case <-ms.dht.ctx.Done():
+			return nil, ms.dht.ctx.Err()
 		}
 
 		if res.err != nil {
@@ -363,8 +381,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				continue
 			}
 		}
-
-		// XXX log
 
 		ms.lk.Lock()
 		if ms.singleMes > streamReuseTries {
@@ -405,9 +421,23 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 
 	mes := new(pb.Message)
 
-	// XXX context, timeout
-	if err := r.ReadMsg(mes); err != nil {
-		return nil, err
+	errc := make(chan error, 1)
+	go func() {
+		errc <- r.ReadMsg(mes)
+	}()
+
+	t := time.NewTimer(dhtReadMessageTimeout)
+	defer t.Stop()
+
+	select {
+	case err := <-errc:
+		if err != nil {
+			return nil, err
+		}
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-t.C:
+		return nil, ErrReadTimeout
 	}
 
 	return mes, nil
@@ -435,5 +465,24 @@ func (ms *messageSender) resetSoft(rcount int) {
 }
 
 func messageReceiver(ctx context.Context, rch chan chan requestResult, r ggio.ReadCloser) {
-	// XXX Implement me
+	for {
+		var next chan requestResult
+		var ok bool
+		select {
+		case next, ok = <-rch:
+			if !ok {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+
+		mes := new(pb.Message)
+		err := r.ReadMsg(mes)
+		if err != nil {
+			next <- requestResult{err: err}
+		} else {
+			next <- requestResult{mes: mes}
+		}
+	}
 }

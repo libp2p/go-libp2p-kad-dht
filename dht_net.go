@@ -339,9 +339,11 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				evt.Done()
 			case <-ctx.Done():
 				evt.Done()
+				ms.lk.Unlock()
 				return nil, ctx.Err()
 			case <-ms.dht.ctx.Done():
 				evt.Done()
+				ms.lk.Unlock()
 				return nil, ms.dht.ctx.Err()
 			}
 		}

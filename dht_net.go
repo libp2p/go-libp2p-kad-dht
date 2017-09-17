@@ -150,16 +150,24 @@ func (dht *IpfsDHT) messageSenderForPeer(p peer.ID) (*messageSender, error) {
 }
 
 type messageSender struct {
-	s   inet.Stream
-	r   ggio.ReadCloser
-	w   ggio.WriteCloser
-	lk  sync.Mutex
-	p   peer.ID
-	dht *IpfsDHT
+	s      inet.Stream
+	w      ggio.WriteCloser
+	rch    chan chan requestResult
+	rcount int
+	lk     sync.Mutex
+	p      peer.ID
+	dht    *IpfsDHT
 
 	invalid   bool
 	singleMes int
 }
+
+type requestResult struct {
+	mes *pb.Message
+	err error
+}
+
+const requestResultBuffer = 16
 
 // invalidate is called before this messageSender is removed from the strmap.
 // It prevents the messageSender from being reused/reinitialized and then
@@ -195,7 +203,11 @@ func (ms *messageSender) prep() error {
 		return err
 	}
 
-	ms.r = ggio.NewDelimitedReader(nstr, inet.MessageSizeMax)
+	r := ggio.NewDelimitedReader(nstr, inet.MessageSizeMax)
+	rch := make(chan chan requestResult, requestResultBuffer)
+	go messageReceiver(ms.dht.ctx, rch, r)
+
+	ms.rch = rch
 	ms.w = ggio.NewDelimitedWriter(nstr)
 	ms.s = nstr
 
@@ -212,13 +224,17 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	defer ms.lk.Unlock()
 	retry := false
 	for {
+		if ms.singleMes > streamReuseTries {
+			// TODO do this without holding the lock
+			return ms.sendMessageSingle(ctx, pmes)
+		}
+
 		if err := ms.prep(); err != nil {
 			return err
 		}
 
 		if err := ms.w.WriteMsg(pmes); err != nil {
-			ms.s.Reset()
-			ms.s = nil
+			ms.resetHard()
 
 			if retry {
 				log.Info("error writing message, bailing: ", err)
@@ -233,8 +249,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			ms.s.Close()
-			ms.s = nil
+			ms.resetHard()
 		} else if retry {
 			ms.singleMes++
 		}
@@ -244,17 +259,24 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 }
 
 func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
-	ms.lk.Lock()
-	defer ms.lk.Unlock()
+	// XXX log total request time
 	retry := false
 	for {
+		ms.lk.Lock()
+
+		if ms.singleMes > streamReuseTries {
+			ms.lk.Unlock()
+			return ms.sendRequestSingle(ctx, pmes)
+		}
+
 		if err := ms.prep(); err != nil {
+			ms.lk.Unlock()
 			return nil, err
 		}
 
 		if err := ms.w.WriteMsg(pmes); err != nil {
-			ms.s.Reset()
-			ms.s = nil
+			ms.resetHard()
+			ms.lk.Unlock()
 
 			if retry {
 				log.Info("error writing message, bailing: ", err)
@@ -266,49 +288,114 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			}
 		}
 
-		mes := new(pb.Message)
-		if err := ms.ctxReadMsg(ctx, mes); err != nil {
-			ms.s.Reset()
-			ms.s = nil
+		// XXX log
+
+		resch := make(chan requestResult, 1)
+		select {
+		case ms.rch <- resch:
+		default:
+			// XXX Implement me -- pipeline stall
+		}
+
+		rcount := ms.rcount
+
+		ms.lk.Unlock()
+
+		var res requestResult
+		select {
+		case res = <-resch:
+
+		case <-ctx.Done():
+			return nil, ctx.Err()
+
+			// XXX read timeout
+		}
+
+		if res.err != nil {
+			ms.lk.Lock()
+			ms.resetSoft(rcount)
+			ms.lk.Unlock()
 
 			if retry {
-				log.Info("error reading message, bailing: ", err)
-				return nil, err
+				log.Info("error reading message, bailing: ", res.err)
+				return nil, res.err
 			} else {
-				log.Info("error reading message, trying again: ", err)
+				log.Info("error reading message, trying again: ", res.err)
 				retry = true
 				continue
 			}
 		}
 
-		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		// XXX log
 
+		ms.lk.Lock()
 		if ms.singleMes > streamReuseTries {
-			ms.s.Close()
-			ms.s = nil
+			ms.resetSoft(rcount)
 		} else if retry {
 			ms.singleMes++
 		}
+		ms.lk.Unlock()
 
-		return mes, nil
+		return res.mes, nil
 	}
 }
 
-func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
-	errc := make(chan error, 1)
-	go func(r ggio.ReadCloser) {
-		errc <- r.ReadMsg(mes)
-	}(ms.r)
-
-	t := time.NewTimer(dhtReadMessageTimeout)
-	defer t.Stop()
-
-	select {
-	case err := <-errc:
+func (ms *messageSender) sendMessageSingle(ctx context.Context, pmes *pb.Message) error {
+	s, err := ms.dht.host.NewStream(ctx, ms.p, ProtocolDHT, ProtocolDHTOld)
+	if err != nil {
 		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return ErrReadTimeout
 	}
+	defer s.Close()
+
+	w := ggio.NewDelimitedWriter(s)
+	return w.WriteMsg(pmes)
+}
+
+func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
+	s, err := ms.dht.host.NewStream(ctx, ms.p, ProtocolDHT, ProtocolDHTOld)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+
+	r := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+	w := ggio.NewDelimitedWriter(s)
+
+	if err := w.WriteMsg(pmes); err != nil {
+		return nil, err
+	}
+
+	mes := new(pb.Message)
+
+	// XXX context, timeout
+	if err := r.ReadMsg(mes); err != nil {
+		return nil, err
+	}
+
+	return mes, nil
+}
+
+// Resets the stream unconditionally; increments the reset count.
+// Mutex must be locked.
+func (ms *messageSender) resetHard() {
+	close(ms.rch)
+	ms.s.Reset()
+	ms.s = nil
+	ms.rcount++
+}
+
+// Resets the stream only if the reset count matches the argument
+// Allows multiple read failures in batched concurrent requests with
+// only a single reset between them.
+// Mutex must be locked.
+func (ms *messageSender) resetSoft(rcount int) {
+	if rcount != ms.rcount {
+		return
+	}
+
+	ms.resetHard()
+}
+
+func messageReceiver(ctx context.Context, rch chan chan requestResult, r ggio.ReadCloser) {
+	// XXX Implement me
 }

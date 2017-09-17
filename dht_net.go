@@ -344,13 +344,15 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			}
 		}
 
-		ms.lk.Lock()
-		if ms.singleMes > streamReuseTries {
-			ms.resetSoft(rcount)
-		} else if retry {
-			ms.singleMes++
+		if retry {
+			ms.lk.Lock()
+			if ms.singleMes > streamReuseTries {
+				ms.resetSoft(rcount)
+			} else {
+				ms.singleMes++
+			}
+			ms.lk.Unlock()
 		}
-		ms.lk.Unlock()
 
 		return res.mes, nil
 	}

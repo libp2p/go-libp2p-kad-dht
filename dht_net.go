@@ -167,7 +167,7 @@ type requestResult struct {
 	err error
 }
 
-const requestResultBuffer = 16
+const requestResultBuffer = 64
 
 // invalidate is called before this messageSender is removed from the strmap.
 // It prevents the messageSender from being reused/reinitialized and then

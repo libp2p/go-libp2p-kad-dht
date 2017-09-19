@@ -92,21 +92,40 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 	default:
 	}
 
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
+	p := v.RemotePeer()
 
-	conn, ok := nn.peers[v.RemotePeer()]
+	func() {
+		dht.plk.Lock()
+		defer dht.plk.Unlock()
+
+		conn, ok := nn.peers[p]
+		if !ok {
+			// Unmatched disconnects are fine. It just means that we were
+			// already connected when we registered the listener.
+			return
+		}
+		conn.refcount -= 1
+		if conn.refcount == 0 {
+			delete(nn.peers, p)
+			conn.cancel()
+			dht.routingTable.Remove(p)
+		}
+	}()
+
+	dht.smlk.Lock()
+	defer dht.smlk.Unlock()
+	ms, ok := dht.strmap[p]
 	if !ok {
-		// Unmatched disconnects are fine. It just means that we were
-		// already connected when we registered the listener.
 		return
 	}
-	conn.refcount -= 1
-	if conn.refcount == 0 {
-		delete(nn.peers, v.RemotePeer())
-		conn.cancel()
-		dht.routingTable.Remove(v.RemotePeer())
-	}
+	delete(dht.strmap, p)
+
+	// Do this asynchronously as ms.lk can block for a while.
+	go func() {
+		ms.lk.Lock()
+		defer ms.lk.Unlock()
+		ms.invalidate()
+	}()
 }
 
 func (nn *netNotifiee) OpenedStream(n inet.Network, v inet.Stream) {}

@@ -161,7 +161,9 @@ type messageSender struct {
 	singleMes int
 }
 
-// invalidate is called after this messageSender is removed form the strmap.
+// invalidate is called before this messageSender is removed from the strmap.
+// It prevents the messageSender from being reused/reinitialized and then
+// forgotten (leaving the stream open).
 func (ms *messageSender) invalidate() {
 	ms.invalid = true
 	if ms.s != nil {

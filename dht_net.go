@@ -175,8 +175,7 @@ const requestResultBuffer = 64
 func (ms *messageSender) invalidate() {
 	ms.invalid = true
 	if ms.s != nil {
-		ms.s.Reset()
-		ms.s = nil
+		ms.resetHard()
 	}
 }
 
@@ -194,6 +193,7 @@ func (ms *messageSender) prep() error {
 	if ms.invalid {
 		return fmt.Errorf("message sender has been invalidated")
 	}
+
 	if ms.s != nil {
 		return nil
 	}

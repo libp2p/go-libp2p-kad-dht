@@ -400,7 +400,13 @@ func (ms *messageSender) sendMessageSingle(ctx context.Context, pmes *pb.Message
 	defer s.Close()
 
 	w := ggio.NewDelimitedWriter(s)
-	return w.WriteMsg(pmes)
+
+	err = w.WriteMsg(pmes)
+	if err != nil {
+		s.Reset()
+	}
+
+	return err
 }
 
 func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
@@ -414,6 +420,7 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 	w := ggio.NewDelimitedWriter(s)
 
 	if err := w.WriteMsg(pmes); err != nil {
+		s.Reset()
 		return nil, err
 	}
 

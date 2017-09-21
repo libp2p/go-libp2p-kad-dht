@@ -350,18 +350,15 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 
 		ms.lk.Unlock()
 
-		t := time.NewTimer(dhtReadMessageTimeout)
-		defer t.Stop()
+		rctx, cancel := context.WithTimeout(ctx, dhtReadMessageTimeout)
+		defer cancel()
 
 		var res requestResult
 		select {
 		case res = <-resch:
 
-		case <-t.C:
-			return nil, ErrReadTimeout
-
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-rctx.Done():
+			return nil, rctx.Err()
 
 		case <-ms.dht.ctx.Done():
 			return nil, ms.dht.ctx.Err()
@@ -427,18 +424,16 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 		errc <- r.ReadMsg(mes)
 	}()
 
-	t := time.NewTimer(dhtReadMessageTimeout)
-	defer t.Stop()
+	rctx, cancel := context.WithTimeout(ctx, dhtReadMessageTimeout)
+	defer cancel()
 
 	select {
 	case err := <-errc:
 		if err != nil {
 			return nil, err
 		}
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-t.C:
-		return nil, ErrReadTimeout
+	case <-rctx.Done():
+		return nil, rctx.Err()
 	}
 
 	return mes, nil

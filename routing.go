@@ -19,6 +19,7 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
+	"github.com/libp2p/go-libp2p-kad-dht/util"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This
@@ -88,7 +89,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	vals, err := dht.GetValues(ctx, key, 16)
+	vals, err := dht.GetValues(ctx, key, util.QuerySize)
 	if err != nil {
 		return nil, err
 	}

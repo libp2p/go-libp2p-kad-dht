@@ -17,6 +17,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	autobatch "github.com/whyrusleeping/autobatch"
 	base32 "github.com/whyrusleeping/base32"
+	"github.com/libp2p/go-libp2p-kad-dht/util"
 )
 
 var batchBufferSize = 256
@@ -283,7 +284,7 @@ func (pm *ProviderManager) run() {
 				}
 				var filtered []peer.ID
 				for p, t := range provs.set {
-					if time.Now().Sub(t) > ProvideValidity {
+					if (time.Now().Sub(t) > ProvideValidity && !util.IsPointer(p)) || (time.Now().Sub(t) > util.PointerValidity && util.IsPointer(p)) {
 						delete(provs.set, p)
 					} else {
 						filtered = append(filtered, p)

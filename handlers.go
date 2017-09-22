@@ -16,6 +16,7 @@ import (
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	base32 "github.com/whyrusleeping/base32"
+	"github.com/libp2p/go-libp2p-kad-dht/util"
 )
 
 // The number of closer peers to send on requests.
@@ -125,7 +126,7 @@ func (dht *IpfsDHT) checkLocalDatastore(k string) (*recpb.Record, error) {
 		recordIsBad = true
 	}
 
-	if time.Now().Sub(recvtime) > MaxRecordAge {
+	if time.Now().Sub(recvtime) > util.MaxRecordAge {
 		log.Debug("old record found, tossing.")
 		recordIsBad = true
 	}
@@ -276,24 +277,19 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
 	for _, pi := range pinfos {
-		if pi.ID != p {
-			// we should ignore this provider reccord! not from originator.
-			// (we chould sign them and check signature later...)
-			log.Debugf("handleAddProvider received provider %s from %s. Ignore.", pi.ID, p)
-			continue
-		}
-
 		if len(pi.Addrs) < 1 {
 			log.Debugf("%s got no valid addresses for provider %s. Ignore.", dht.self, p)
 			continue
 		}
 
 		log.Infof("received provider %s for %s (addrs: %s)", p, c, pi.Addrs)
-		if pi.ID != dht.self { // dont add own addrs.
+		if pi.ID != dht.self && !util.IsPointer(pi.ID) { // dont add own addrs.
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, pstore.ProviderAddrTTL)
+		} else if util.IsPointer(pi.ID) {
+			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, util.PointerAddrTTL)
 		}
-		dht.providers.AddProvider(ctx, c, p)
+		dht.providers.AddProvider(ctx, c, pi.ID)
 	}
 
 	return nil, nil

@@ -3,7 +3,6 @@ package dht
 import (
 	"context"
 	"fmt"
-	"time"
 
 	ctxfrac "github.com/jbenet/go-context/frac"
 	ci "github.com/libp2p/go-libp2p-crypto"

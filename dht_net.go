@@ -469,23 +469,22 @@ func (ms *messageSender) resetSoft(rcount int) {
 
 func messageReceiver(ctx context.Context, rch chan chan requestResult, r ggio.ReadCloser) {
 	for {
-		var next chan requestResult
-		var ok bool
 		select {
-		case next, ok = <-rch:
+		case next, ok := <-rch:
 			if !ok {
 				return
 			}
+
+			mes := new(pb.Message)
+			err := r.ReadMsg(mes)
+			if err != nil {
+				next <- requestResult{err: err}
+			} else {
+				next <- requestResult{mes: mes}
+			}
+
 		case <-ctx.Done():
 			return
-		}
-
-		mes := new(pb.Message)
-		err := r.ReadMsg(mes)
-		if err != nil {
-			next <- requestResult{err: err}
-		} else {
-			next <- requestResult{mes: mes}
 		}
 	}
 }

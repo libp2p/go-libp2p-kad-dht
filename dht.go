@@ -99,6 +99,16 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
+
+	cmgr := h.ConnManager()
+	rt.PeerAdded = func(p peer.ID) {
+		cmgr.TagPeer(p, "kbucket", 5)
+	}
+	rt.PeerRemoved = func(p peer.ID) {
+		cmgr.UntagPeer(p, "kbucket")
+	}
+
 	return &IpfsDHT{
 		datastore:    dstore,
 		self:         h.ID(),
@@ -108,7 +118,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		ctx:          ctx,
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
-		routingTable: kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore()),
+		routingTable: rt,
 		peers:        make(map[peer.ID]*peerTracker),
 
 		Validator: make(record.Validator),

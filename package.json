@@ -126,9 +126,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "Qmbgce14YTWE2qhE49JVvTBPaHTyz3FaFmqQPyuZAz6C28",
+      "hash": "QmefgzMbKZYsmHFkLqxgaTBG9ypeEjrdWRD5WXH4j1cWDL",
       "name": "go-libp2p",
-      "version": "5.0.4"
+      "version": "5.0.5"
     },
     {
       "author": "whyrusleeping",
@@ -156,9 +156,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmdzuGp4a9pahgXuBeReHdYGUzdVX3FUCwfmWVo5mQfkTi",
+      "hash": "QmQGX417WoxKxDJeHqouMEmmH4G1RCENNSzkZYHrXy3Xb3",
       "name": "go-libp2p-netutil",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     {
       "author": "multiformats",
@@ -178,6 +178,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "3.0.5"
+  "version": "3.0.6"
 }
 

@@ -74,6 +74,8 @@ func (nn *netNotifiee) testConnection(ctx context.Context, v inet.Conn) {
 				// Connection died but we may still have *an* open connection (context not canceled) so try again.
 				continue
 			}
+		case context.Canceled:
+			// Context canceled while connecting.
 		case mstream.ErrNotSupported:
 			// Client mode only, don't bother adding them to our routing table
 		default:

@@ -272,6 +272,10 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 	dht.routingTable.Update(p)
 }
 
+func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
+	return dht.routingTable
+}
+
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
 func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
 	p := dht.routingTable.Find(id)

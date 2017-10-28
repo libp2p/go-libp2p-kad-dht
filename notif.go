@@ -80,7 +80,7 @@ func (nn *netNotifiee) testConnection(ctx context.Context, v inet.Conn) {
 			// Client mode only, don't bother adding them to our routing table
 		default:
 			// real error? thats odd
-			log.Errorf("checking dht client type: %s", err)
+			log.Warningf("checking dht client type: %s", err)
 		}
 		return
 	}

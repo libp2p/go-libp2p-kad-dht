@@ -48,9 +48,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmVSase1JP7cq9QkPT46oNwdp9pT6kBkG3oqS14y3QcZjG",
+      "hash": "QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5",
       "name": "go-datastore",
-      "version": "1.2.2"
+      "version": "1.4.0"
     },
     {
       "author": "hashicorp",
@@ -72,9 +72,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "Qmbi2cDAzNb9ofcdmXqhejBzuQwxCKV8xZu3gnWzJDFPQn",
+      "hash": "QmXVJax39Hpq2KHYsJZobhVSyKNNwWp3pXLjmdoqYheDHA",
       "name": "autobatch",
-      "version": "0.2.6"
+      "version": "0.2.7"
     },
     {
       "author": "whyrusleeping",
@@ -178,6 +178,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "3.0.7"
+  "version": "3.0.8"
 }
 

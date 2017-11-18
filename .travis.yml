@@ -9,9 +9,7 @@ env:
 go:
     - 1.9.x
 
-install: true
-
-before_install:
+install:
   - make deps
 
 script:

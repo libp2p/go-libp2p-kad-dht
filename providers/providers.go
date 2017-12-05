@@ -270,6 +270,7 @@ func (pm *ProviderManager) run() {
 				log.Error("Error loading provider keys: ", err)
 				continue
 			}
+			now := time.Now()
 			for {
 				k, ok := keys()
 				if !ok {
@@ -281,20 +282,22 @@ func (pm *ProviderManager) run() {
 					log.Error("error loading known provset: ", err)
 					continue
 				}
-				var filtered []peer.ID
 				for p, t := range provs.set {
-					if time.Now().Sub(t) > ProvideValidity {
+					if now.Sub(t) > ProvideValidity {
 						delete(provs.set, p)
-					} else {
-						filtered = append(filtered, p)
 					}
 				}
-
-				provs.providers = filtered
-				if len(filtered) == 0 {
+				// have we run out of providers?
+				if len(provs.set) == 0 {
+					provs.providers = nil
 					err := pm.deleteProvSet(k)
 					if err != nil {
 						log.Error("error deleting provider set: ", err)
+					}
+				} else if len(provs.providers) != len(provs.set) {
+					provs.providers = make([]peer.ID, 0, len(provs.set))
+					for p := range provs.set {
+						provs.providers = append(provs.providers, p)
 					}
 				}
 			}

@@ -330,7 +330,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 		return nil
 	}
 
-	var filtered []peer.ID
+	filtered := make([]peer.ID, 0, len(closer))
 	for _, clp := range closer {
 
 		// == to self? thats bad

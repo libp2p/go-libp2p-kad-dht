@@ -197,8 +197,9 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 		return resp, nil
 	}
 
-	var withAddresses []pstore.PeerInfo
 	closestinfos := pstore.PeerInfos(dht.peerstore, closest)
+	// possibly an over-allocation but this array is temporary anyways.
+	withAddresses := make([]pstore.PeerInfo, 0, len(closestinfos))
 	for _, pi := range closestinfos {
 		if len(pi.Addrs) > 0 {
 			withAddresses = append(withAddresses, pi)

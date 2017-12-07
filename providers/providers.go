@@ -294,7 +294,8 @@ func (pm *ProviderManager) run() {
 					if err != nil {
 						log.Error("error deleting provider set: ", err)
 					}
-				} else if len(provs.providers) != len(provs.set) {
+				} else if len(provs.set) < len(provs.providers) {
+					// We must have modified the providers set, recompute.
 					provs.providers = make([]peer.ID, 0, len(provs.set))
 					for p := range provs.set {
 						provs.providers = append(provs.providers, p)

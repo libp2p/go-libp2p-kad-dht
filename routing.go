@@ -33,7 +33,15 @@ var asyncQueryBuffer = 10
 
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
-func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte) error {
+func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte) (err error) {
+	eip := log.EventBegin(ctx, "PutValue")
+	defer func() {
+		eip.Append(loggableKey(key))
+		if err != nil {
+			eip.SetError(err)
+		}
+		eip.Done()
+	}()
 	log.Debugf("PutValue %s", key)
 	sk, err := dht.getOwnPrivateKey()
 	if err != nil {
@@ -84,7 +92,15 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte) erro
 }
 
 // GetValue searches for the value corresponding to given Key.
-func (dht *IpfsDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
+func (dht *IpfsDHT) GetValue(ctx context.Context, key string) (_ []byte, err error) {
+	eip := log.EventBegin(ctx, "GetValue")
+	defer func() {
+		eip.Append(loggableKey(key))
+		if err != nil {
+			eip.SetError(err)
+		}
+		eip.Done()
+	}()
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
@@ -143,7 +159,15 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 	return best, nil
 }
 
-func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) ([]routing.RecvdVal, error) {
+func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []routing.RecvdVal, err error) {
+	eip := log.EventBegin(ctx, "GetValues")
+	defer func() {
+		eip.Append(loggableKey(key))
+		if err != nil {
+			eip.SetError(err)
+		}
+		eip.Done()
+	}()
 	vals := make([]routing.RecvdVal, 0, nvals)
 	var valslock sync.Mutex
 
@@ -234,15 +258,20 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) ([]rou
 	}
 
 	return vals, nil
-
 }
 
 // Value provider layer of indirection.
 // This is what DSHTs (Coral and MainlineDHT) do to store large values in a DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) error {
-	defer log.EventBegin(ctx, "provide", key, logging.LoggableMap{"broadcast": brdcst}).Done()
+func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) (err error) {
+	eip := log.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
+	defer func() {
+		if err != nil {
+			eip.SetError(err)
+		}
+		eip.Done()
+	}()
 
 	// add self locally
 	dht.providers.AddProvider(ctx, key, dht.self)
@@ -407,8 +436,14 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key *cid.Cid,
 }
 
 // FindPeer searches for a peer with given ID.
-func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pstore.PeerInfo, error) {
-	defer log.EventBegin(ctx, "FindPeer", id).Done()
+func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo, err error) {
+	eip := log.EventBegin(ctx, "FindPeer", id)
+	defer func() {
+		if err != nil {
+			eip.SetError(err)
+		}
+		eip.Done()
+	}()
 
 	// Check if were already connected to them
 	if pi := dht.FindLocal(id); pi.ID != "" {

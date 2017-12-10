@@ -93,7 +93,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	var recs [][]byte
+	recs := make([][]byte, 0, len(vals))
 	for _, v := range vals {
 		if v.Val != nil {
 			recs = append(recs, v.Val)
@@ -144,7 +144,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) ([]routing.RecvdVal, error) {
-	var vals []routing.RecvdVal
+	vals := make([]routing.RecvdVal, 0, nvals)
 	var valslock sync.Mutex
 
 	// If we have it local, dont bother doing an RPC!

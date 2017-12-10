@@ -110,8 +110,9 @@ func (dht *IpfsDHT) closerPeersSingle(ctx context.Context, key string, p peer.ID
 		return nil, err
 	}
 
-	var out []peer.ID
-	for _, pbp := range pmes.GetCloserPeers() {
+	closer := pmes.GetCloserPeers()
+	out := make([]peer.ID, 0, len(closer))
+	for _, pbp := range closer {
 		pid := peer.ID(pbp.GetId())
 		if pid != dht.self { // dont add self
 			dht.peerstore.AddAddrs(pid, pbp.Addresses(), pstore.TempAddrTTL)

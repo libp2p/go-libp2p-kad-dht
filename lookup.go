@@ -2,6 +2,8 @@ package dht
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
@@ -29,13 +31,39 @@ func toPeerInfos(ps []peer.ID) []*pstore.PeerInfo {
 	return out
 }
 
-func loggableKey(k string) logging.LoggableMap {
-	cid, err := cid.Cast([]byte(k))
-	if err != nil {
-		log.Errorf("loggableKey could not cast key: %x %v", k, err)
-	} else {
-		k = cid.String()
+func tryFormatLoggableKey(k string) (string, error) {
+	if len(k) == 0 {
+		return "", fmt.Errorf("loggableKey is empty")
 	}
+	var proto, cstr string
+	if k[0] == '/' {
+		// it's a path (probably)
+		protoEnd := strings.IndexByte(k[1:], '/')
+		if protoEnd < 0 {
+			return k, fmt.Errorf("loggableKey starts with '/' but is not a path: %x", k)
+		}
+		proto = k[1 : protoEnd+1]
+		cstr = k[protoEnd+2:]
+	} else {
+		proto = "provider"
+		cstr = k
+	}
+
+	c, err := cid.Cast([]byte(cstr))
+	if err != nil {
+		return "", fmt.Errorf("loggableKey could not cast key to a CID: %x %v", k, err)
+	}
+	return fmt.Sprintf("/%s/%s", proto, c.String()), nil
+}
+
+func loggableKey(k string) logging.LoggableMap {
+	newKey, err := tryFormatLoggableKey(k)
+	if err != nil {
+		log.Error(err)
+	} else {
+		k = newKey
+	}
+
 	return logging.LoggableMap{
 		"key": k,
 	}

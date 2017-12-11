@@ -200,7 +200,8 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 		"peer": p,
 	}
 
-	defer log.EventBegin(ctx, "getValueSingle", meta).Done()
+	eip := log.EventBegin(ctx, "getValueSingle", meta)
+	defer eip.Done()
 
 	pmes := pb.NewMessage(pb.Message_GET_VALUE, key, 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -211,6 +212,7 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 		log.Warningf("read timeout: %s %s", p.Pretty(), key)
 		fallthrough
 	default:
+		eip.SetError(err)
 		return nil, err
 	}
 }
@@ -283,7 +285,8 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
 func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	defer log.EventBegin(ctx, "findPeerSingle", p, id).Done()
+	eip := log.EventBegin(ctx, "findPeerSingle", p, id)
+	defer eip.Done()
 
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, string(id), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -294,12 +297,14 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 		log.Warningf("read timeout: %s %s", p.Pretty(), id)
 		fallthrough
 	default:
+		eip.SetError(err)
 		return nil, err
 	}
 }
 
 func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key *cid.Cid) (*pb.Message, error) {
-	defer log.EventBegin(ctx, "findProvidersSingle", p, key).Done()
+	eip := log.EventBegin(ctx, "findProvidersSingle", p, key)
+	defer eip.Done()
 
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.KeyString(), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -310,6 +315,7 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key *cid
 		log.Warningf("read timeout: %s %s", p.Pretty(), key)
 		fallthrough
 	default:
+		eip.SetError(err)
 		return nil, err
 	}
 }

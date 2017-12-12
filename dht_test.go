@@ -30,11 +30,8 @@ var testCaseValues = map[string][]byte{}
 var testCaseCids []*cid.Cid
 
 func init() {
-	testCaseValues["hello"] = []byte("world")
 	for i := 0; i < 100; i++ {
-		k := fmt.Sprintf("%d -- key", i)
 		v := fmt.Sprintf("%d -- value", i)
-		testCaseValues[k] = []byte(v)
 
 		mhv := u.Hash([]byte(v))
 		testCaseCids = append(testCaseCids, cid.NewCidV0(mhv))

@@ -2,10 +2,10 @@ package dht_pb
 
 import (
 	logging "github.com/ipfs/go-log"
-	b58 "github.com/jbenet/go-base58"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
+	b58 "github.com/mr-tron/base58/base58"
 	ma "github.com/multiformats/go-multiaddr"
 )
 

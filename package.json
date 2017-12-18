@@ -144,12 +144,6 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmT8rehPR3F6bmwL6zjUN8XpiDBFFpMP2myPdC6ApsWfJf",
-      "name": "go-base58",
-      "version": "0.0.0"
-    },
-    {
-      "author": "whyrusleeping",
       "hash": "QmTnsezaB1wWNRHeHnYrm8K4d5i9wtyj3GsqjC3Rt5b5v5",
       "name": "go-multistream",
       "version": "0.3.6"
@@ -171,6 +165,12 @@
       "hash": "QmZNkThpqfVXs9GNbexPrfBbXSLNYeKrE7jwFM2oqHbyqN",
       "name": "go-libp2p-protocol",
       "version": "1.0.0"
+    },
+    {
+      "author": "mr-tron",
+      "hash": "QmWFAMPqsEyUX7gDUsRVmMWz59FxSpJ1b2v6bJ1yYzo7jY",
+      "name": "go-base58-fast",
+      "version": "0.1.1"
     }
   ],
   "gxVersion": "0.4.0",

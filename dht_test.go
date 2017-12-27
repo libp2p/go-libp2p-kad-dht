@@ -1004,3 +1004,62 @@ func TestFindClosestPeers(t *testing.T) {
 		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
 	}
 }
+
+func testConcurrentRequests(t *testing.T, reqs int) {
+	ctx := context.Background()
+
+	_, peers, dhts := setupDHTS(ctx, 10, t)
+	defer func() {
+		for i := 0; i < 10; i++ {
+			dhts[i].Close()
+			dhts[i].host.Close()
+		}
+	}()
+
+	connect(t, ctx, dhts[0], dhts[1])
+	for i := 2; i < 10; i++ {
+		connect(t, ctx, dhts[1], dhts[i])
+	}
+
+	ctxT, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	wg := &sync.WaitGroup{}
+	j := 2
+	for i := 0; i < reqs; i++ {
+		wg.Add(1)
+
+		go func(j int) {
+			defer wg.Done()
+
+			p, err := dhts[0].FindPeer(ctxT, peers[j])
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if p.ID == "" {
+				t.Fatal("Failed to find peer.")
+			}
+
+			if p.ID != peers[j] {
+				t.Fatal("Didnt find expected peer.")
+			}
+
+		}(j)
+
+		j++
+		if j == 10 {
+			j = 2
+		}
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrentRequests(t *testing.T) {
+	testConcurrentRequests(t, requestResultBuffer/2)
+}
+
+func TestConcurrentRequestsOverload(t *testing.T) {
+	testConcurrentRequests(t, 2*requestResultBuffer)
+}

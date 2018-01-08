@@ -250,6 +250,16 @@ func (ms *messageSender) prep() error {
 	return nil
 }
 
+// Resets the stream and shuts down the goroutine pump
+// Mutex must be locked.
+func (ms *messageSender) reset() {
+	if ms.s != nil {
+		close(ms.rch)
+		ms.s.Reset()
+		ms.s = nil
+	}
+}
+
 // streamReuseTries is the number of times we will try to reuse a stream to a
 // given peer before giving up and reverting to the old one-message-per-stream
 // behaviour.
@@ -436,16 +446,6 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 	}
 
 	return mes, nil
-}
-
-// Resets the stream and shuts down the goroutine pump
-// Mutex must be locked.
-func (ms *messageSender) reset() {
-	if ms.s != nil {
-		close(ms.rch)
-		ms.s.Reset()
-		ms.s = nil
-	}
 }
 
 func (ms *messageSender) messageReceiver(rch chan chan requestResult, r ggio.ReadCloser) {

@@ -471,25 +471,32 @@ func (ms *messageSender) messageReceiver(rch chan chan requestResult, rctl chan 
 loop:
 	for {
 		select {
-		case next, ok := <-rch:
-			if !ok {
-				return
-			}
-
-			mes := new(pb.Message)
-			err := r.ReadMsg(mes)
-			if err != nil {
-				next <- requestResult{err: err}
-				break loop
-			} else {
-				next <- requestResult{mes: mes}
-			}
-
 		case <-rctl:
+			// poll for reset due to timeouts first, there might be requests queued
 			break loop
 
-		case <-ms.dht.ctx.Done():
-			return
+		default:
+			select {
+			case next, ok := <-rch:
+				if !ok {
+					return
+				}
+
+				mes := new(pb.Message)
+				err := r.ReadMsg(mes)
+				if err != nil {
+					next <- requestResult{err: err}
+					break loop
+				} else {
+					next <- requestResult{mes: mes}
+				}
+
+			case <-rctl:
+				break loop
+
+			case <-ms.dht.ctx.Done():
+				return
+			}
 		}
 	}
 

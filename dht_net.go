@@ -3,6 +3,7 @@ package dht
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -188,13 +189,12 @@ func (dht *IpfsDHT) messageSenderForPeer(p peer.ID) (*messageSender, error) {
 }
 
 type messageSender struct {
-	s      inet.Stream
-	w      ggio.WriteCloser
-	rch    chan chan requestResult
-	rcount int
-	lk     sync.Mutex
-	p      peer.ID
-	dht    *IpfsDHT
+	s   inet.Stream
+	w   ggio.WriteCloser
+	rch chan chan requestResult
+	lk  sync.Mutex
+	p   peer.ID
+	dht *IpfsDHT
 
 	invalid   bool
 	singleMes int
@@ -212,9 +212,7 @@ const requestResultBuffer = 64
 // forgotten (leaving the stream open).
 func (ms *messageSender) invalidate() {
 	ms.invalid = true
-	if ms.s != nil {
-		ms.resetHard()
-	}
+	ms.reset()
 }
 
 func (ms *messageSender) prepOrInvalidate() error {
@@ -243,7 +241,7 @@ func (ms *messageSender) prep() error {
 
 	r := ggio.NewDelimitedReader(nstr, inet.MessageSizeMax)
 	rch := make(chan chan requestResult, requestResultBuffer)
-	go messageReceiver(ms.dht.ctx, rch, r)
+	go ms.messageReceiver(rch, r)
 
 	ms.rch = rch
 	ms.w = ggio.NewDelimitedWriter(nstr)
@@ -273,7 +271,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		}
 
 		if err := ms.w.WriteMsg(pmes); err != nil {
-			ms.resetHard()
+			ms.reset()
 
 			if retry {
 				log.Info("error writing message, bailing: ", err)
@@ -288,7 +286,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		if retry {
 			ms.singleMes++
 			if ms.singleMes > streamReuseTries {
-				ms.resetHard()
+				ms.reset()
 			}
 		}
 
@@ -313,7 +311,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		}
 
 		if err := ms.w.WriteMsg(pmes); err != nil {
-			ms.resetHard()
+			ms.reset()
 			ms.lk.Unlock()
 
 			if retry {
@@ -346,8 +344,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			}
 		}
 
-		rcount := ms.rcount
-
 		ms.lk.Unlock()
 
 		rctx, cancel := context.WithTimeout(ctx, dhtReadMessageTimeout)
@@ -365,10 +361,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		}
 
 		if res.err != nil {
-			ms.lk.Lock()
-			ms.resetSoft(rcount)
-			ms.lk.Unlock()
-
 			if retry {
 				log.Info("error reading message, bailing: ", res.err)
 				return nil, res.err
@@ -383,7 +375,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.lk.Lock()
 			ms.singleMes++
 			if ms.singleMes > streamReuseTries {
-				ms.resetSoft(rcount)
+				ms.reset()
 			}
 			ms.lk.Unlock()
 		}
@@ -446,28 +438,18 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 	return mes, nil
 }
 
-// Resets the stream unconditionally; increments the reset count.
+// Resets the stream and shuts down the goroutine pump
 // Mutex must be locked.
-func (ms *messageSender) resetHard() {
-	close(ms.rch)
-	ms.s.Reset()
-	ms.s = nil
-	ms.rcount++
-}
-
-// Resets the stream only if the reset count matches the argument
-// Allows multiple read failures in batched concurrent requests with
-// only a single reset between them.
-// Mutex must be locked.
-func (ms *messageSender) resetSoft(rcount int) {
-	if rcount != ms.rcount {
-		return
+func (ms *messageSender) reset() {
+	if ms.s != nil {
+		close(ms.rch)
+		ms.s.Reset()
+		ms.s = nil
 	}
-
-	ms.resetHard()
 }
 
-func messageReceiver(ctx context.Context, rch chan chan requestResult, r ggio.ReadCloser) {
+func (ms *messageSender) messageReceiver(rch chan chan requestResult, r ggio.ReadCloser) {
+loop:
 	for {
 		select {
 		case next, ok := <-rch:
@@ -479,11 +461,35 @@ func messageReceiver(ctx context.Context, rch chan chan requestResult, r ggio.Re
 			err := r.ReadMsg(mes)
 			if err != nil {
 				next <- requestResult{err: err}
+				break loop
 			} else {
 				next <- requestResult{mes: mes}
 			}
 
-		case <-ctx.Done():
+		case <-ms.dht.ctx.Done():
+			return
+		}
+	}
+
+	// reset once; needs to happen in a goroutine to avoid deadlock
+	// in case of pipeline stalls
+	go func() {
+		ms.lk.Lock()
+		ms.reset()
+		ms.lk.Unlock()
+	}()
+
+	// drain the pipeline
+	err := errors.New("Stream has been abandoned due to earlier errors")
+	for {
+		select {
+		case next, ok := <-rch:
+			if !ok {
+				return
+			}
+			next <- requestResult{err: err}
+
+		case <-ms.dht.ctx.Done():
 			return
 		}
 	}

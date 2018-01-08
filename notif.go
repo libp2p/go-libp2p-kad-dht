@@ -80,14 +80,14 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 
 	p := v.RemotePeer()
 
-	func() {
-		dht.plk.Lock()
-		defer dht.plk.Unlock()
+	dht.plk.Lock()
+	defer dht.plk.Unlock()
+	if dht.host.Network().Connectedness(p) == inet.Connected {
+		// We're still connected.
+		return
+	}
 
-		if dht.host.Network().Connectedness(p) != inet.Connected {
-			dht.routingTable.Remove(p)
-		}
-	}()
+	dht.routingTable.Remove(p)
 
 	dht.smlk.Lock()
 	defer dht.smlk.Unlock()

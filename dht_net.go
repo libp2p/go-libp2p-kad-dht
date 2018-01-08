@@ -228,7 +228,7 @@ func (ms *messageSender) reset() {
 const streamReuseTries = 3
 
 func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) error {
-	defer log.EventBegin(ctx, "dhtSendMessage", ms.dht.self, ms.p, pmes).Done()
+	defer log.EventBegin(ctx, "SendMessage", ms.dht.self, ms.p, pmes).Done()
 	ms.lk.Lock()
 	retry := false
 	for {
@@ -269,7 +269,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 }
 
 func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
-	defer log.EventBegin(ctx, "dhtSendRequest", ms.dht.self, ms.p, pmes).Done()
+	defer log.EventBegin(ctx, "SendRequest", ms.dht.self, ms.p, pmes).Done()
 	retry := false
 	for {
 		ms.lk.Lock()
@@ -303,7 +303,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		case ms.rch <- resch:
 		default:
 			// pipeline stall, log it and time it
-			evt := log.EventBegin(ctx, "dhtSendRequestStall", ms.dht.self, ms.p, pmes)
+			evt := log.EventBegin(ctx, "SendRequestStall", ms.dht.self, ms.p, pmes)
 			select {
 			case ms.rch <- resch:
 				evt.Done()

@@ -151,12 +151,13 @@ func (dht *IpfsDHT) messageSenderForPeer(p peer.ID) (*messageSender, error) {
 }
 
 type messageSender struct {
-	s   inet.Stream
-	w   ggio.WriteCloser
-	rch chan chan requestResult
-	lk  sync.Mutex
-	p   peer.ID
-	dht *IpfsDHT
+	s    inet.Stream
+	w    ggio.WriteCloser
+	rch  chan chan requestResult
+	rctl chan struct{}
+	lk   sync.Mutex
+	p    peer.ID
+	dht  *IpfsDHT
 
 	invalid   bool
 	singleMes int
@@ -203,9 +204,11 @@ func (ms *messageSender) prep() error {
 
 	r := ggio.NewDelimitedReader(nstr, inet.MessageSizeMax)
 	rch := make(chan chan requestResult, requestResultBuffer)
-	go ms.messageReceiver(rch, r)
+	rctl := make(chan struct{}, 1)
+	go ms.messageReceiver(rch, rctl, r)
 
 	ms.rch = rch
+	ms.rctl = rctl
 	ms.w = ggio.NewDelimitedWriter(nstr)
 	ms.s = nstr
 
@@ -318,6 +321,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			}
 		}
 
+		rctl := ms.rctl
+
 		ms.lk.Unlock()
 
 		rctx, cancel := context.WithTimeout(ctx, dhtReadMessageTimeout)
@@ -328,6 +333,18 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		case res = <-resch:
 
 		case <-rctx.Done():
+			// A read timeout will cause the entire pipeline to time out.
+			// So signal for a stream reset to avoid clogging subsequent requests.
+			select {
+			case <-ctx.Done():
+				// not a read timeout
+			default:
+				select {
+				case rctl <- struct{}{}:
+				default:
+				}
+			}
+
 			return nil, rctx.Err()
 
 		case <-ms.dht.ctx.Done():
@@ -412,7 +429,7 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 	return mes, nil
 }
 
-func (ms *messageSender) messageReceiver(rch chan chan requestResult, r ggio.ReadCloser) {
+func (ms *messageSender) messageReceiver(rch chan chan requestResult, rctl chan struct{}, r ggio.ReadCloser) {
 loop:
 	for {
 		select {
@@ -429,6 +446,9 @@ loop:
 			} else {
 				next <- requestResult{mes: mes}
 			}
+
+		case <-rctl:
+			break loop
 
 		case <-ms.dht.ctx.Done():
 			return

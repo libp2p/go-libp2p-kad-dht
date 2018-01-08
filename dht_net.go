@@ -230,15 +230,15 @@ const streamReuseTries = 3
 func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) error {
 	defer log.EventBegin(ctx, "dhtSendMessage", ms.dht.self, ms.p, pmes).Done()
 	ms.lk.Lock()
-	defer ms.lk.Unlock()
 	retry := false
 	for {
 		if ms.singleMes > streamReuseTries {
-			// TODO do this without holding the lock
+			ms.lk.Unlock()
 			return ms.sendMessageSingle(ctx, pmes)
 		}
 
 		if err := ms.prep(); err != nil {
+			ms.lk.Unlock()
 			return err
 		}
 
@@ -247,6 +247,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 
 			if retry {
 				log.Info("error writing message, bailing: ", err)
+				ms.lk.Unlock()
 				return err
 			} else {
 				log.Info("error writing message, trying again: ", err)
@@ -262,6 +263,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			}
 		}
 
+		ms.lk.Unlock()
 		return nil
 	}
 }

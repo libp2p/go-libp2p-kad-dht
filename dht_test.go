@@ -20,6 +20,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ci "github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
@@ -50,7 +51,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	}
 
 	d.Validator["v"] = &record.ValidChecker{
-		Func: func(string, []byte) error {
+		Func: func(*recpb.Record) error {
 			return nil
 		},
 		Sign: false,
@@ -150,7 +151,7 @@ func TestValueGetSet(t *testing.T) {
 	defer dhtB.host.Close()
 
 	vf := &record.ValidChecker{
-		Func: func(string, []byte) error { return nil },
+		Func: func(*recpb.Record) error { return nil },
 		Sign: false,
 	}
 	nulsel := func(_ string, bs [][]byte) (int, error) { return 0, nil }

@@ -152,6 +152,18 @@ func (dht *IpfsDHT) checkLocalDatastore(k string) (*recpb.Record, error) {
 	return rec, nil
 }
 
+// Cleans the record (to avoid storing arbitrary data).
+func cleanRecord(rec *recpb.Record) {
+	rec.XXX_unrecognized = nil
+	rec.TimeReceived = nil
+
+	// Only include the author if there's a signature (otherwise, it's
+	// unvalidated and could be anything).
+	if len(rec.Signature) == 0 {
+		rec.Author = nil
+	}
+}
+
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	eip := log.EventBegin(ctx, "handlePutValue", p)
@@ -169,6 +181,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		log.Infof("Got nil record from: %s", p.Pretty())
 		return nil, errors.New("nil record")
 	}
+	cleanRecord(rec)
 
 	if err = dht.verifyRecordLocally(rec); err != nil {
 		log.Warningf("Bad dht record in PUT from: %s. %s", peer.ID(pmes.GetRecord().GetAuthor()), err)

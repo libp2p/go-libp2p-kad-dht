@@ -84,9 +84,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmWGtsyPYEoiqTtWLpeUA2jpW4YSZgarKDD2zivYAFz7sR",
+      "hash": "QmajyQvG3Her6XmwoTHSVUyuEAc9v6AEj2GW3dx4Wyxd5K",
       "name": "go-libp2p-record",
-      "version": "2.1.6"
+      "version": "3.0.0"
     },
     {
       "author": "whyrusleeping",

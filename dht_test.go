@@ -50,7 +50,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	}
 
 	d.Validator["v"] = &record.ValidChecker{
-		Func: func(string, []byte) error {
+		Func: func(*record.ValidationRecord) error {
 			return nil
 		},
 		Sign: false,
@@ -150,7 +150,7 @@ func TestValueGetSet(t *testing.T) {
 	defer dhtB.host.Close()
 
 	vf := &record.ValidChecker{
-		Func: func(string, []byte) error { return nil },
+		Func: func(*record.ValidationRecord) error { return nil },
 		Sign: false,
 	}
 	nulsel := func(_ string, bs [][]byte) (int, error) { return 0, nil }

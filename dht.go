@@ -63,8 +63,7 @@ type IpfsDHT struct {
 	strmap map[peer.ID]*messageSender
 	smlk   sync.Mutex
 
-	plk   sync.Mutex
-	peers map[peer.ID]*peerTracker
+	plk sync.Mutex
 }
 
 // NewDHT creates a new DHT object with the given peer as the 'local' host
@@ -119,7 +118,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
-		peers:        make(map[peer.ID]*peerTracker),
 
 		Validator: make(record.Validator),
 		Selector:  make(record.Selector),

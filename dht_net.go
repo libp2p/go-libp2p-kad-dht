@@ -45,11 +45,13 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 
 		var err error
 		var handleMessageSpan opentrace.Span
-		if ts := pmes.GetTraceState(); ts != nil {
+		var oldCtx = ctx
+		if ts := pmes.GetTraceState(); len(ts) > 0 {
 			//Extract the tracerState, start a span, add to ctx, return span and ctx
 			ctx, handleMessageSpan, err = logging.ExtractToContext(ctx, "handleNewMessage", ts)
 			if err != nil {
 				log.Warningf("Error extracting SpanContext: %s", err)
+				ctx = oldCtx
 			}
 		}
 
@@ -246,7 +248,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	//inject conver span context to bytes
 	bsc, err := logging.InjectToBytes(span.Context())
 	if err != nil {
-		panic(err)
+		log.Errorf("SendMessage - Error on Inject: %s\n,", err)
 	}
 	//add the bytest context to the message
 	pmes.TraceState = bsc
@@ -294,7 +296,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 	//inject conver span context to bytes
 	bsc, err := logging.InjectToBytes(span.Context())
 	if err != nil {
-		panic(err)
+		log.Errorf("SendRequest - Error on Inject: %s\n,", err)
 	}
 	//add the bytest context to the message
 	pmes.TraceState = bsc

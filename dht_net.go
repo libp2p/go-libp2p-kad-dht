@@ -11,6 +11,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
+
+	logging "github.com/ipfs/go-log"
+	opentrace "gx/ipfs/QmWLWmRVSiagqP15jczsGME1qpob6HDbtbHAY2he9W5iUo/opentracing-go"
 )
 
 var dhtReadMessageTimeout = time.Minute
@@ -40,6 +43,16 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 			return
 		}
 
+		var err error
+		var handleMessageSpan opentrace.Span
+		if ts := pmes.GetTraceState(); ts != nil {
+			//Extract the tracerState, start a span, add to ctx, return span and ctx
+			ctx, handleMessageSpan, err = logging.ExtractToContext(ctx, "handleNewMessage", ts)
+			if err != nil {
+				log.Warningf("Error extracting SpanContext: %s", err)
+			}
+		}
+
 		// update the peer (on valid msgs only)
 		dht.updateFromMessage(ctx, mPeer, pmes)
 
@@ -48,6 +61,9 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		if handler == nil {
 			s.Reset()
 			log.Debug("got back nil handler from handlerForMsgType")
+			if handleMessageSpan != nil {
+				handleMessageSpan.Finish()
+			}
 			return
 		}
 
@@ -56,12 +72,18 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		if err != nil {
 			s.Reset()
 			log.Debugf("handle message error: %s", err)
+			if handleMessageSpan != nil {
+				handleMessageSpan.Finish()
+			}
 			return
 		}
 
 		// if nil response, return it before serializing
 		if rpmes == nil {
 			log.Debug("got back nil response from request")
+			if handleMessageSpan != nil {
+				handleMessageSpan.Finish()
+			}
 			continue
 		}
 
@@ -69,7 +91,13 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		if err := w.WriteMsg(rpmes); err != nil {
 			s.Reset()
 			log.Debugf("send response error: %s", err)
+			if handleMessageSpan != nil {
+				handleMessageSpan.Finish()
+			}
 			return
+		}
+		if handleMessageSpan != nil {
+			handleMessageSpan.Finish()
 		}
 	}
 }
@@ -211,6 +239,18 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
+
+	//Start a span for the request
+	span, ctx := opentrace.StartSpanFromContext(ctx, "SendMessage")
+	defer span.Finish()
+	//inject conver span context to bytes
+	bsc, err := logging.InjectToBytes(span.Context())
+	if err != nil {
+		panic(err)
+	}
+	//add the bytest context to the message
+	pmes.TraceState = bsc
+
 	for {
 		if err := ms.prep(); err != nil {
 			return err
@@ -247,6 +287,18 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
+
+	//Start a span for the request
+	span, ctx := opentrace.StartSpanFromContext(ctx, "SendRequest")
+	defer span.Finish()
+	//inject conver span context to bytes
+	bsc, err := logging.InjectToBytes(span.Context())
+	if err != nil {
+		panic(err)
+	}
+	//add the bytest context to the message
+	pmes.TraceState = bsc
+
 	for {
 		if err := ms.prep(); err != nil {
 			return nil, err

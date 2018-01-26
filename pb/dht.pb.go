@@ -129,6 +129,7 @@ type Message struct {
 	// Used to return Providers
 	// GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
 	ProviderPeers    []*Message_Peer `protobuf:"bytes,9,rep,name=providerPeers" json:"providerPeers,omitempty"`
+	TraceState       []byte          `protobuf:"bytes,11,opt,name=traceState" json:"traceState,omitempty"`
 	XXX_unrecognized []byte          `json:"-"`
 }
 
@@ -174,6 +175,13 @@ func (m *Message) GetCloserPeers() []*Message_Peer {
 func (m *Message) GetProviderPeers() []*Message_Peer {
 	if m != nil {
 		return m.ProviderPeers
+	}
+	return nil
+}
+
+func (m *Message) GetTraceState() []byte {
+	if m != nil {
+		return m.TraceState
 	}
 	return nil
 }

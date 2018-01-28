@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmaDoQyTYCS3DrPLBLXMixXfuCstBVVR81J3UY1vMxghpT",
+      "hash": "QmQ3c5AP6yjqD3E4get5atkvfaUU4rubWquoL2e8ycjUSu",
       "name": "go-libp2p-loggables",
-      "version": "1.1.11"
+      "version": "1.1.12"
     },
     {
       "author": "whyrusleeping",
@@ -126,9 +126,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmNRN4eZGmY89CRC4T5PC4xDYRx6GkDKEfRnvrT65fVeio",
+      "hash": "QmPd5qhppUqewTQMfStvNNCFtcxiWGsnE6Vs3va6788gsX",
       "name": "go-libp2p",
-      "version": "5.0.11"
+      "version": "5.0.12"
     },
     {
       "author": "whyrusleeping",
@@ -150,9 +150,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmV1axkk86DDkYwS269AvPy9eV5h7mUyHveJkSVHPjrQtY",
+      "hash": "QmWUugnJBbcuin8qdfiCYKAsNkG8NeDLhzoBqRaqXhAHd4",
       "name": "go-libp2p-netutil",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     {
       "author": "multiformats",
@@ -178,6 +178,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "3.0.14"
+  "version": "3.0.15"
 }
 

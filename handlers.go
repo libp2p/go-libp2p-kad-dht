@@ -119,11 +119,6 @@ func (dht *IpfsDHT) checkLocalDatastore(k string) (*recpb.Record, error) {
 		return nil, err
 	}
 
-	// if its our record, dont bother checking the times on it
-	if peer.ID(rec.GetAuthor()) == dht.self {
-		return rec, nil
-	}
-
 	var recordIsBad bool
 	recvtime, err := u.ParseRFC3339(rec.GetTimeReceived())
 	if err != nil {
@@ -156,12 +151,6 @@ func (dht *IpfsDHT) checkLocalDatastore(k string) (*recpb.Record, error) {
 func cleanRecord(rec *recpb.Record) {
 	rec.XXX_unrecognized = nil
 	rec.TimeReceived = nil
-
-	// Only include the author if there's a signature (otherwise, it's
-	// unvalidated and could be anything).
-	if len(rec.Signature) == 0 {
-		rec.Author = nil
-	}
 }
 
 // Store a value in this peer local storage
@@ -183,8 +172,8 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	}
 	cleanRecord(rec)
 
-	if err = dht.verifyRecordLocally(rec); err != nil {
-		log.Warningf("Bad dht record in PUT from: %s. %s", peer.ID(pmes.GetRecord().GetAuthor()), err)
+	if err = dht.Validator.VerifyRecord(rec); err != nil {
+		log.Warningf("Bad dht record in PUT from: %s. %s", p.Pretty(), err)
 		return nil, err
 	}
 

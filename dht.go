@@ -172,7 +172,7 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 		log.Debug("getValueOrPeers: got value")
 
 		// make sure record is valid.
-		err = dht.verifyRecordOnline(ctx, record)
+		err = dht.Validator.VerifyRecord(record)
 		if err != nil {
 			log.Info("Received invalid record! (discarded)")
 			// return a sentinal to signify an invalid record was received
@@ -235,7 +235,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 		return nil, err
 	}
 
-	err = dht.verifyRecordLocally(rec)
+	err = dht.Validator.VerifyRecord(rec)
 	if err != nil {
 		log.Debugf("local record verify failed: %s (discarded)", err)
 		return nil, err

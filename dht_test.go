@@ -49,12 +49,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 		d = NewDHT(ctx, h, dss)
 	}
 
-	d.Validator["v"] = &record.ValidChecker{
-		Func: func(*record.ValidationRecord) error {
-			return nil
-		},
-		Sign: false,
-	}
+	d.Validator["v"] = func(*record.ValidationRecord) error { return nil }
 	d.Selector["v"] = func(_ string, bs [][]byte) (int, error) { return 0, nil }
 	return d
 }
@@ -149,10 +144,7 @@ func TestValueGetSet(t *testing.T) {
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
 
-	vf := &record.ValidChecker{
-		Func: func(*record.ValidationRecord) error { return nil },
-		Sign: false,
-	}
+	vf := func(*record.ValidationRecord) error { return nil }
 	nulsel := func(_ string, bs [][]byte) (int, error) { return 0, nil }
 
 	dhtA.Validator["v"] = vf

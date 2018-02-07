@@ -8,8 +8,6 @@ import (
 	ctxfrac "github.com/jbenet/go-context/frac"
 	ci "github.com/libp2p/go-libp2p-crypto"
 	peer "github.com/libp2p/go-libp2p-peer"
-	record "github.com/libp2p/go-libp2p-record"
-	recpb "github.com/libp2p/go-libp2p-record/pb"
 	routing "github.com/libp2p/go-libp2p-routing"
 )
 
@@ -108,52 +106,4 @@ func (dht *IpfsDHT) getPublicKeyFromNode(ctx context.Context, p peer.ID) (ci.Pub
 	// ok! it's valid. we got it!
 	log.Debugf("DHT got public key from node itself.")
 	return pk, nil
-}
-
-// verifyRecordLocally attempts to verify a record. if we do not have the public
-// key, we fail. we do not search the dht.
-func (dht *IpfsDHT) verifyRecordLocally(r *recpb.Record) error {
-	if r == nil {
-		log.Error("nil record passed into verifyRecordLocally")
-		return fmt.Errorf("nil record")
-	}
-
-	if len(r.Signature) > 0 {
-		// First, validate the signature
-		p := peer.ID(r.GetAuthor())
-		pk := dht.peerstore.PubKey(p)
-		if pk == nil {
-			return fmt.Errorf("do not have public key for %s", p)
-		}
-
-		if err := record.CheckRecordSig(r, pk); err != nil {
-			return err
-		}
-	}
-
-	return dht.Validator.VerifyRecord(r)
-}
-
-// verifyRecordOnline verifies a record, searching the DHT for the public key
-// if necessary. The reason there is a distinction in the functions is that
-// retrieving arbitrary public keys from the DHT as a result of passively
-// receiving records (e.g. through a PUT_VALUE or ADD_PROVIDER) can cause a
-// massive amplification attack on the dht. Use with care.
-func (dht *IpfsDHT) verifyRecordOnline(ctx context.Context, r *recpb.Record) error {
-
-	if len(r.Signature) > 0 {
-		// get the public key, search for it if necessary.
-		p := peer.ID(r.GetAuthor())
-		pk, err := dht.GetPublicKey(ctx, p)
-		if err != nil {
-			return err
-		}
-
-		err = record.CheckRecordSig(r, pk)
-		if err != nil {
-			return err
-		}
-	}
-
-	return dht.Validator.VerifyRecord(r)
 }

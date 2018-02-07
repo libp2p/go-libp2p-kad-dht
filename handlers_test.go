@@ -12,8 +12,6 @@ func TestCleanRecordSigned(t *testing.T) {
 	actual := new(recpb.Record)
 	actual.TimeReceived = proto.String("time")
 	actual.XXX_unrecognized = []byte("extra data")
-	actual.Signature = []byte("signature")
-	actual.Author = proto.String("author")
 	actual.Value = []byte("value")
 	actual.Key = proto.String("key")
 
@@ -24,8 +22,6 @@ func TestCleanRecordSigned(t *testing.T) {
 	}
 
 	expected := new(recpb.Record)
-	expected.Signature = []byte("signature")
-	expected.Author = proto.String("author")
 	expected.Value = []byte("value")
 	expected.Key = proto.String("key")
 	expectedBytes, err := proto.Marshal(expected)

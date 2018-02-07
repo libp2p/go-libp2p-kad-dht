@@ -43,22 +43,8 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte) (err
 		eip.Done()
 	}()
 	log.Debugf("PutValue %s", key)
-	sk, err := dht.getOwnPrivateKey()
-	if err != nil {
-		return err
-	}
 
-	sign, err := dht.Validator.IsSigned(key)
-	if err != nil {
-		return err
-	}
-
-	rec, err := record.MakePutRecord(sk, key, value, sign)
-	if err != nil {
-		log.Debug("creation of record failed!")
-		return err
-	}
-
+	rec := record.MakePutRecord(key, value)
 	err = dht.putLocal(key, rec)
 	if err != nil {
 		return err
@@ -128,13 +114,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) (_ []byte, err err
 		return nil, routing.ErrNotFound
 	}
 
-	fixupRec, err := record.MakePutRecord(dht.peerstore.PrivKey(dht.self), key, best, true)
-	if err != nil {
-		// probably shouldnt actually 'error' here as we have found a value we like,
-		// but this call failing probably isnt something we want to ignore
-		return nil, err
-	}
-
+	fixupRec := record.MakePutRecord(key, best)
 	for _, v := range vals {
 		// if someone sent us a different 'less-valid' record, lets correct them
 		if !bytes.Equal(v.Val, best) {

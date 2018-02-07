@@ -103,15 +103,7 @@ func TestGetFailures(t *testing.T) {
 		typ := pb.Message_GET_VALUE
 		str := "hello"
 
-		sk, err := d.getOwnPrivateKey()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		rec, err := record.MakePutRecord(sk, str, []byte("blah"), true)
-		if err != nil {
-			t.Fatal(err)
-		}
+		rec := record.MakePutRecord(str, []byte("blah"))
 		req := pb.Message{
 			Type:   &typ,
 			Key:    &str,

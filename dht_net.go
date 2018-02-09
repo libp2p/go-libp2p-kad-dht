@@ -468,6 +468,7 @@ func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message
 			return nil, err
 		}
 	case <-rctx.Done():
+		s.Reset()
 		return nil, rctx.Err()
 	}
 

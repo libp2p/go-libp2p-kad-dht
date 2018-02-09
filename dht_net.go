@@ -225,6 +225,12 @@ func (ms *messageSender) reset() {
 	}
 }
 
+func (ms *messageSender) resetStream(s inet.Stream) {
+	if ms.s == s {
+		ms.reset()
+	}
+}
+
 // streamReuseTries is the number of times we will try to reuse a stream to a
 // given peer before giving up and reverting to the old one-message-per-stream
 // behaviour.
@@ -322,6 +328,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		}
 
 		rctl := ms.rctl
+		s := ms.s
 
 		ms.lk.Unlock()
 
@@ -366,7 +373,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.lk.Lock()
 			ms.singleMes++
 			if ms.singleMes > streamReuseTries {
-				ms.reset()
+				ms.resetStream(s)
 			}
 			ms.lk.Unlock()
 		}
@@ -464,11 +471,11 @@ loop:
 
 	// reset once; needs to happen in a goroutine to avoid deadlock
 	// in case of pipeline stalls
-	go func() {
+	go func(s inet.Stream) {
 		ms.lk.Lock()
-		ms.reset()
+		ms.resetStream(s)
 		ms.lk.Unlock()
-	}()
+	}(ms.s)
 
 	// drain the pipeline
 	err := errors.New("Stream has been abandoned due to earlier errors")

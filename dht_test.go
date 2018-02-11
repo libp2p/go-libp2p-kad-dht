@@ -154,7 +154,7 @@ func TestValueGetSet(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	log.Error("adding value on: ", dhtA.self)
+	log.Debug("adding value on: ", dhtA.self)
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	err := dhtA.PutValue(ctxT, "/v/hello", []byte("world"))
@@ -174,7 +174,7 @@ func TestValueGetSet(t *testing.T) {
 		}
 	*/
 
-	log.Error("requesting value on dht: ", dhtB.self)
+	log.Debug("requesting value on dht: ", dhtB.self)
 	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
 	valb, err := dhtB.GetValue(ctxT, "/v/hello")

@@ -2,7 +2,11 @@ package dht
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
+
+	tu "github.com/libp2p/go-testutil"
 )
 
 func TestNotifieeMultipleConn(t *testing.T) {
@@ -40,13 +44,16 @@ func TestNotifieeMultipleConn(t *testing.T) {
 		conn.Close()
 	}
 
-	if checkRoutingTable(d1, d2) {
-		t.Fatal("routes")
-	}
+	tu.WaitFor(ctx, func() error {
+		if checkRoutingTable(d1, d2) {
+			return fmt.Errorf("should not have routes")
+		}
+		return nil
+	})
 }
 
 func TestNotifieeFuzz(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 
 	d1 := setupDHT(ctx, t, false)
@@ -58,9 +65,12 @@ func TestNotifieeFuzz(t *testing.T) {
 			conn.Close()
 		}
 	}
-	if checkRoutingTable(d1, d2) {
-		t.Fatal("should not have routes")
-	}
+	tu.WaitFor(ctx, func() error {
+		if checkRoutingTable(d1, d2) {
+			return fmt.Errorf("should not have routes")
+		}
+		return nil
+	})
 	connect(t, ctx, d1, d2)
 }
 

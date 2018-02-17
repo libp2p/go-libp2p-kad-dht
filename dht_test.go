@@ -113,6 +113,8 @@ func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	log.Debugf("Bootstrapping DHTs...")
 
 	// tried async. sequential fares much better. compare:
@@ -129,7 +131,6 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 		dht := dhts[(start+i)%len(dhts)]
 		dht.runBootstrap(ctx, cfg)
 	}
-	cancel()
 }
 
 func TestValueGetSet(t *testing.T) {
@@ -188,8 +189,12 @@ func TestValueGetSet(t *testing.T) {
 }
 
 func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	dht := setupDHT(ctx, t, false)
+	defer dht.Close()
+
 	foo := peer.ID("asdasd")
 	_, err := dht.messageSenderForPeer(foo)
 	if err == nil {
@@ -197,15 +202,18 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 	}
 
 	dht.smlk.Lock()
-	defer dht.smlk.Unlock()
-	if len(dht.strmap) > 0 {
+	mscnt := len(dht.strmap)
+	dht.smlk.Unlock()
+
+	if mscnt > 0 {
 		t.Fatal("should have no message senders in map")
 	}
 }
 
 func TestProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	_, _, dhts := setupDHTS(ctx, 4, t)
 	defer func() {
@@ -254,7 +262,8 @@ func TestProvides(t *testing.T) {
 
 func TestLocalProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	_, _, dhts := setupDHTS(ctx, 4, t)
 	defer func() {
@@ -340,7 +349,8 @@ func TestBootstrap(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	nDHTs := 30
 	_, _, dhts := setupDHTS(ctx, nDHTs, t)
@@ -393,7 +403,8 @@ func TestPeriodicBootstrap(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	nDHTs := 30
 	_, _, dhts := setupDHTS(ctx, nDHTs, t)
@@ -470,7 +481,8 @@ func TestPeriodicBootstrap(t *testing.T) {
 func TestProvidesMany(t *testing.T) {
 	t.Skip("this test doesn't work")
 	// t.Skip("skipping test to debug another")
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	nDHTs := 40
 	_, _, dhts := setupDHTS(ctx, nDHTs, t)
@@ -571,7 +583,8 @@ func TestProvidesAsync(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	_, _, dhts := setupDHTS(ctx, 4, t)
 	defer func() {
@@ -652,7 +665,8 @@ func TestFindPeer(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	_, peers, dhts := setupDHTS(ctx, 4, t)
 	defer func() {
@@ -689,7 +703,8 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	_, peers, dhts := setupDHTS(ctx, 4, t)
 	defer func() {
@@ -777,7 +792,7 @@ func TestConnectCollision(t *testing.T) {
 	for rtime := 0; rtime < runTimes; rtime++ {
 		log.Info("Running Time: ", rtime)
 
-		ctx := context.Background()
+		ctx, cancel := context.WithCancel(context.Background())
 
 		dhtA := setupDHT(ctx, t, false)
 		dhtB := setupDHT(ctx, t, false)
@@ -824,6 +839,7 @@ func TestConnectCollision(t *testing.T) {
 		dhtB.Close()
 		dhtA.host.Close()
 		dhtB.host.Close()
+		cancel()
 	}
 }
 

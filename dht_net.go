@@ -22,7 +22,7 @@ func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 }
 
 func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
-	defer s.Close()
+	defer inet.FullClose(s)
 
 	ctx := dht.Context()
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
@@ -233,7 +233,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			ms.s.Close()
+			go inet.FullClose(ms.s)
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++
@@ -284,7 +284,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			ms.s.Close()
+			go inet.FullClose(ms.s)
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++

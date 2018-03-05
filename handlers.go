@@ -172,9 +172,31 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	}
 	cleanRecord(rec)
 
+	// Make sure the record is valid (not expired, valid signature etc)
 	if err = dht.Validator.VerifyRecord(rec); err != nil {
 		log.Warningf("Bad dht record in PUT from: %s. %s", p.Pretty(), err)
 		return nil, err
+	}
+
+	// Make sure the new record is "better" than the record we have locally.
+	// This prevents a record with for example a lower sequence number from
+	// overwriting a record with a higher sequence number.
+	existing, err := dht.getRecordFromDatastore(dskey)
+	if err != nil {
+		return nil, err
+	}
+
+	if existing != nil {
+		recs := [][]byte{rec.GetValue(), existing.GetValue()}
+		i, err := dht.Selector.BestRecord(pmes.GetKey(), recs)
+		if err != nil {
+			log.Warningf("Bad dht record in PUT from %s: %s", p.Pretty(), err)
+			return nil, err
+		}
+		if i != 0 {
+			log.Infof("DHT record in PUT from %s is older than existing record. Ignoring", p.Pretty())
+			return nil, errors.New("old record")
+		}
 	}
 
 	// record the time we receive every record
@@ -188,6 +210,42 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	err = dht.datastore.Put(dskey, data)
 	log.Debugf("%s handlePutValue %v", dht.self, dskey)
 	return pmes, err
+}
+
+func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
+	reci, err := dht.datastore.Get(dskey)
+	if err == ds.ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		log.Warningf("Got error retrieving record with key %s from datastore: %s", dskey, err)
+		return nil, err
+	}
+
+	byt, ok := reci.([]byte)
+	if !ok {
+		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
+		log.Warningf("Value stored in datastore with key %s is not []byte", dskey)
+		return nil, nil
+	}
+
+	rec := new(recpb.Record)
+	err = proto.Unmarshal(byt, rec)
+	if err != nil {
+		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
+		log.Warningf("Bad record data stored in datastore with key %s: could not unmarshal record", dskey)
+		return nil, nil
+	}
+
+	err = dht.Validator.VerifyRecord(rec)
+	if err != nil {
+		// Invalid record in datastore, probably expired but don't return an error,
+		// we'll just overwrite it
+		log.Debugf("Local record verify failed: %s (discarded)", err)
+		return nil, nil
+	}
+
+	return rec, nil
 }
 
 func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {

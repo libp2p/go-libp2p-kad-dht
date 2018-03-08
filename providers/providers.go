@@ -214,7 +214,7 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 
 func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: false,
+		KeysOnly: true,
 		Prefix:   providersKeyPrefix,
 	})
 	if err != nil {

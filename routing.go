@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	proto "github.com/gogo/protobuf/proto"
 	cid "github.com/ipfs/go-cid"
+	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -45,6 +47,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte) (err
 	log.Debugf("PutValue %s", key)
 
 	rec := record.MakePutRecord(key, value)
+	rec.TimeReceived = proto.String(u.FormatRFC3339(time.Now()))
 	err = dht.putLocal(key, rec)
 	if err != nil {
 		return err
@@ -100,6 +103,9 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string) (_ []byte, err err
 		if v.Val != nil {
 			recs = append(recs, v.Val)
 		}
+	}
+	if len(recs) == 0 {
+		return nil, routing.ErrNotFound
 	}
 
 	i, err := dht.Selector.BestRecord(key, recs)

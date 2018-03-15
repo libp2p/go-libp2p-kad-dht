@@ -1,7 +1,9 @@
 package dht
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -20,6 +22,7 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
+	routing "github.com/libp2p/go-libp2p-routing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ci "github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
@@ -186,6 +189,79 @@ func TestValueGetSet(t *testing.T) {
 	if string(valb) != "world" {
 		t.Fatalf("Expected 'world' got '%s'", string(valb))
 	}
+}
+
+func TestValueSetInvalid(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+
+	defer dhtA.Close()
+	defer dhtB.Close()
+	defer dhtA.host.Close()
+	defer dhtB.host.Close()
+
+	vf := func(r *record.ValidationRecord) error {
+		if bytes.Compare(r.Value, []byte("expired")) == 0 {
+			return errors.New("expired")
+		}
+		return nil
+	}
+	nulsel := func(k string, bs [][]byte) (int, error) {
+		index := -1
+		for i, b := range bs {
+			if bytes.Compare(b, []byte("newer")) == 0 {
+				index = i
+			} else if bytes.Compare(b, []byte("valid")) == 0 {
+				if index == -1 {
+					index = i
+				}
+			}
+		}
+		if index == -1 {
+			return -1, errors.New("no rec found")
+		}
+		return index, nil
+	}
+
+	dhtA.Validator["v"] = vf
+	dhtB.Validator["v"] = vf
+	dhtA.Selector["v"] = nulsel
+	dhtB.Selector["v"] = nulsel
+
+	connect(t, ctx, dhtA, dhtB)
+
+	testSetGet := func(val string, exp string, experr error) {
+		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		err := dhtA.PutValue(ctxT, "/v/hello", []byte(val))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
+		defer cancel()
+		valb, err := dhtB.GetValue(ctxT, "/v/hello")
+		if err != experr {
+			t.Fatalf("Set/Get %v: Expected %v error but got %v", val, experr, err)
+		}
+		if err == nil {
+			if string(valb) != exp {
+				t.Fatalf("Expected '%v' got '%s'", exp, string(valb))
+			}
+		}
+	}
+
+	// Expired records should not be returned
+	testSetGet("expired", "", routing.ErrNotFound)
+	// Valid record should be returned
+	testSetGet("valid", "valid", nil)
+	// Newer record should supersede previous record
+	testSetGet("newer", "newer", nil)
+	// Attempt to set older record again should be ignored
+	testSetGet("valid", "newer", nil)
 }
 
 func TestInvalidMessageSenderTracking(t *testing.T) {

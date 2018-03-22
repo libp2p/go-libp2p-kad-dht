@@ -21,7 +21,7 @@ func TestPubkeyExtract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pid, err := peer.IDFromEd25519PublicKey(pk)
+	pid, err := peer.IDFromPublicKey(pk)
 	if err != nil {
 		t.Fatal(err)
 	}

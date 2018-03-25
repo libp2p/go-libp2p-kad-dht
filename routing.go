@@ -157,10 +157,10 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []r
 	vals := make([]routing.RecvdVal, 0, nvals)
 	var valslock sync.Mutex
 
-	// If we have it local, dont bother doing an RPC!
+	// If we have it local, don't bother doing an RPC!
 	lrec, err := dht.getLocal(key)
 	if err == nil {
-		// TODO: this is tricky, we dont always want to trust our own value
+		// TODO: this is tricky, we don't always want to trust our own value
 		// what if the authoritative source updated it?
 		log.Debug("have it locally")
 		vals = append(vals, routing.RecvdVal{
@@ -219,7 +219,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []r
 			valslock.Lock()
 			vals = append(vals, rv)
 
-			// If weve collected enough records, we're done
+			// If we have collected enough records, we're done
 			if len(vals) >= nvals {
 				res.success = true
 			}
@@ -343,7 +343,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key *cid.Cid,
 			}
 		}
 
-		// If we have enough peers locally, dont bother with remote RPC
+		// If we have enough peers locally, don't bother with remote RPC
 		// TODO: is this a DOS vector?
 		if ps.Size() >= count {
 			return

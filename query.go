@@ -1,3 +1,8 @@
+// package query implement a query manager to drive concurrent workers
+// to query the DHT. A query is setup with a target key, a queryFunc tasked
+// to communicate with a peer, and a set of initial peers. As the query
+// progress, queryFunc can return closer peers that will be used to navigate
+// closer to the target key in the DHT until an answer is reached.
 package dht
 
 import (
@@ -224,7 +229,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	// make sure we do this when we exit
 	defer func() {
-		// signal we're done proccessing peer p
+		// signal we're done processing peer p
 		r.peersRemaining.Decrement(1)
 		r.rateLimit <- struct{}{}
 	}()
@@ -283,7 +288,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	} else if len(res.closerPeers) > 0 {
 		log.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(res.closerPeers))
 		for _, next := range res.closerPeers {
-			if next.ID == r.query.dht.self { // dont add self.
+			if next.ID == r.query.dht.self { // don't add self.
 				log.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 				continue
 			}

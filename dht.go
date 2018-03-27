@@ -283,7 +283,11 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
 func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	eip := log.EventBegin(ctx, "findPeerSingle", p, id)
+	eip := log.EventBegin(ctx, "findPeerSingle",
+		logging.LoggableMap{
+			"peer":   p,
+			"target": id,
+		})
 	defer eip.Done()
 
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, string(id), 0)

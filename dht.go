@@ -1,5 +1,5 @@
 // Package dht implements a distributed hash table that satisfies the ipfs routing
-// interface. This DHT is modeled after kademlia with Coral and S/Kademlia modifications.
+// interface. This DHT is modeled after kademlia with S/Kademlia modifications.
 package dht
 
 import (
@@ -40,7 +40,7 @@ var ProtocolDHTOld protocol.ID = "/ipfs/dht"
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
-// IpfsDHT is an implementation of Kademlia with Coral and S/Kademlia modifications.
+// IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base IpfsRouting module.
 type IpfsDHT struct {
 	host      host.Host        // the network services we need

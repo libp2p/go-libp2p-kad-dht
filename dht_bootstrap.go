@@ -1,5 +1,5 @@
 // Package dht implements a distributed hash table that satisfies the ipfs routing
-// interface. This DHT is modeled after kademlia with Coral and S/Kademlia modifications.
+// interface. This DHT is modeled after Kademlia with S/Kademlia modifications.
 package dht
 
 import (

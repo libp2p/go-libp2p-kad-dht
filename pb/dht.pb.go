@@ -116,6 +116,7 @@ type Message struct {
 	// defines what type of message it is.
 	Type *Message_MessageType `protobuf:"varint,1,opt,name=type,enum=dht.pb.Message_MessageType" json:"type,omitempty"`
 	// defines what coral cluster level this query/response belongs to.
+	// in case we want to implement coral's cluster rings in the future.
 	ClusterLevelRaw *int32 `protobuf:"varint,10,opt,name=clusterLevelRaw" json:"clusterLevelRaw,omitempty"`
 	// Used to specify the key associated with this message.
 	// PUT_VALUE, GET_VALUE, ADD_PROVIDER, GET_PROVIDERS

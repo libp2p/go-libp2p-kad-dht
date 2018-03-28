@@ -246,8 +246,9 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []r
 	return vals, nil
 }
 
-// Value provider layer of indirection.
-// This is what DSHTs (Coral and MainlineDHT) do to store large values in a DHT.
+// Provider abstraction for indirect stores.
+// Some DHTs store values directly, while an indirect store stores pointers to
+// locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) (err error) {

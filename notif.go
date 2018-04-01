@@ -37,7 +37,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		return
 	}
 
-	// Note: Unfortunately, the peerstore may not yet now that this peer is
+	// Note: Unfortunately, the peerstore may not yet know that this peer is
 	// a DHT server. So, if it didn't return a positive response above, test
 	// manually.
 	go nn.testConnection(v)

@@ -355,8 +355,8 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
 	for _, pi := range pinfos {
 		if pi.ID != p {
-			// we should ignore this provider reccord! not from originator.
-			// (we chould sign them and check signature later...)
+			// we should ignore this provider record! not from originator.
+			// (we should sign them and check signature later...)
 			log.Debugf("handleAddProvider received provider %s from %s. Ignore.", pi.ID, p)
 			continue
 		}
@@ -367,7 +367,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		}
 
 		log.Infof("received provider %s for %s (addrs: %s)", p, c, pi.Addrs)
-		if pi.ID != dht.self { // dont add own addrs.
+		if pi.ID != dht.self { // don't add own addrs.
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, pstore.ProviderAddrTTL)
 		}

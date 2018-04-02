@@ -27,7 +27,7 @@ func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, err
 	log.Debugf("getPublicKey for: %s", p)
 
 	// try extracting from identity.
-	pk := p.ExtractPublicKey()
+	pk, _ := p.ExtractPublicKey()
 	if pk != nil {
 		return pk, nil
 	}

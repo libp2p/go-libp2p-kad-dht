@@ -16,25 +16,26 @@ import (
 
 // Check that GetPublicKey() correctly extracts a public key
 func TestPubkeyExtract(t *testing.T) {
+	ctx := context.Background()
+	dht := setupDHT(ctx, t, false)
+	defer dht.Close()
+
 	_, pk, err := ci.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pid, err := peer.IDFromEd25519PublicKey(pk)
+	pid, err := peer.IDFromPublicKey(pk)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// no need to actually construct one
-	d := new(IpfsDHT)
-
-	pk_out, err := d.GetPublicKey(context.Background(), pid)
+	pkOut, err := dht.GetPublicKey(context.Background(), pid)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !pk_out.Equals(pk) {
+	if !pkOut.Equals(pk) {
 		t.Fatal("got incorrect public key out")
 	}
 }

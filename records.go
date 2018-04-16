@@ -26,14 +26,8 @@ type pubkrs struct {
 func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, error) {
 	log.Debugf("getPublicKey for: %s", p)
 
-	// try extracting from identity.
-	pk := p.ExtractPublicKey()
-	if pk != nil {
-		return pk, nil
-	}
-
 	// check locally.
-	pk = dht.peerstore.PubKey(p)
+	pk := dht.peerstore.PubKey(p)
 	if pk != nil {
 		return pk, nil
 	}

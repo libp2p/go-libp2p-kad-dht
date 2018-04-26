@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"io"
 	"math/rand"
 	"testing"
 	"time"
@@ -35,9 +34,8 @@ func TestGetFailures(t *testing.T) {
 	d := NewDHT(ctx, hosts[0], tsds)
 	d.Update(ctx, hosts[1].ID())
 
-	// Reply with failures to every message
 	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
-		s.Close()
+		// hang forever
 	})
 
 	// This one should time out
@@ -48,7 +46,7 @@ func TestGetFailures(t *testing.T) {
 			err = merr[0]
 		}
 
-		if err != io.EOF {
+		if err != context.DeadlineExceeded {
 			t.Fatal("Got different error than we expected", err)
 		}
 	} else {

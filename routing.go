@@ -127,12 +127,15 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 			}
 			switch i {
 			case 0:
+				// current (first) one is better
 				outdatedPeers = append(outdatedPeers, result.from)
 			case 1:
+				// new (second) one is better
 				outdatedPeers = append(outdatedPeers, currentPeers...)
 				currentPeers = append(currentPeers[:0], result.from)
 			default:
-				err := fmt.Errorf("invalid bad selector for key: %s", loggableKey(key))
+				// index out of bounds? probably a bug
+				err := fmt.Errorf("invalid selector for key: %s", loggableKey(key))
 				log.Error(err)
 				return nil, err
 			}

@@ -504,6 +504,7 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 
 	peerchan := make(chan *pstore.PeerInfo, asyncQueryBuffer)
 	peersSeen := make(map[peer.ID]struct{})
+	var peersSeenMx sync.Mutex
 
 	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), AlphaValue)
 	if len(peers) == 0 {
@@ -524,10 +525,13 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 			pi := pb.PBPeerToPeerInfo(pbp)
 
 			// skip peers already seen
+			peersSeenMx.Lock()
 			if _, found := peersSeen[pi.ID]; found {
+				peersSeenMx.Unlock()
 				continue
 			}
 			peersSeen[pi.ID] = struct{}{}
+			peersSeenMx.Unlock()
 
 			// if peer is connected, send it to our client.
 			if pb.Connectedness(*pbp.Connection) == inet.Connected {

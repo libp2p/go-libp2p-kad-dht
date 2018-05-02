@@ -41,7 +41,7 @@ func tryFormatLoggableKey(k string) (string, error) {
 func loggableKey(k string) logging.LoggableMap {
 	newKey, err := tryFormatLoggableKey(k)
 	if err != nil {
-		log.Error(err)
+		log.Debug(err)
 	} else {
 		k = newKey
 	}

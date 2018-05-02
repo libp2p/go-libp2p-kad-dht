@@ -78,17 +78,12 @@ func (dht *IpfsDHT) getPublicKeyFromDHT(ctx context.Context, p peer.ID) (ci.PubK
 	// Only retrieve one value, because the public key is immutable
 	// so there's no need to retrieve multiple versions
 	pkkey := routing.KeyForPublicKey(p)
-	vals, err := dht.GetValues(ctx, pkkey, 1)
+	val, err := dht.GetValue(ctx, pkkey, Quorum(1))
 	if err != nil {
 		return nil, err
 	}
 
-	if len(vals) == 0 || vals[0].Val == nil {
-		log.Debugf("Could not find public key for %v in DHT", p)
-		return nil, routing.ErrNotFound
-	}
-
-	pubk, err := ci.UnmarshalPublicKey(vals[0].Val)
+	pubk, err := ci.UnmarshalPublicKey(val)
 	if err != nil {
 		log.Errorf("Could not unmarshall public key retrieved from DHT for %v", p)
 		return nil, err

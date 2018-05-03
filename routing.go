@@ -125,7 +125,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 		return nil, routing.ErrNotFound
 	}
 
-	i, err := dht.Selector.BestRecord(key, recs)
+	i, err := dht.Validator.Select(key, recs)
 	if err != nil {
 		return nil, err
 	}

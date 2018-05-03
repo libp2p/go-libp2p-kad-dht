@@ -32,7 +32,7 @@ func TestGetFailures(t *testing.T) {
 	hosts := mn.Hosts()
 
 	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d := NewDHT(ctx, hosts[0], tsds, record.NamespacedValidator{})
 	d.Update(ctx, hosts[1].ID())
 
 	// Reply with failures to every message
@@ -149,7 +149,7 @@ func TestNotFound(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d := NewDHT(ctx, hosts[0], tsds, record.NamespacedValidator{})
 
 	for _, p := range hosts {
 		d.Update(ctx, p.ID())
@@ -226,7 +226,7 @@ func TestLessThanKResponses(t *testing.T) {
 	hosts := mn.Hosts()
 
 	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d := NewDHT(ctx, hosts[0], tsds, record.NamespacedValidator{})
 
 	for i := 1; i < 5; i++ {
 		d.Update(ctx, hosts[i].ID())
@@ -293,7 +293,7 @@ func TestMultipleQueries(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d := NewDHT(ctx, hosts[0], tsds, record.NamespacedValidator{})
 
 	d.Update(ctx, hosts[1].ID())
 

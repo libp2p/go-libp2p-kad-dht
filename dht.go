@@ -54,8 +54,7 @@ type IpfsDHT struct {
 
 	birth time.Time // When this peer started up
 
-	Validator record.Validator // record validator funcs
-	Selector  record.Selector  // record selection funcs
+	Validator record.Validator
 
 	ctx  context.Context
 	proc goprocess.Process
@@ -69,8 +68,8 @@ type IpfsDHT struct {
 // NewDHT creates a new DHT object with the given peer as the 'local' host.
 // IpfsDHT's initialized with this function will respond to DHT requests,
 // whereas IpfsDHT's initialized with NewDHTClient will not.
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := NewDHTClient(ctx, h, dstore)
+func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching, validator record.Validator) *IpfsDHT {
+	dht := NewDHTClient(ctx, h, dstore, validator)
 
 	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
 	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
@@ -81,7 +80,8 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // NewDHTClient creates a new DHT object with the given peer as the 'local'
 // host. IpfsDHT clients initialized with this function will not respond to DHT
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
-func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+// NewDHTClient creates a new DHT object with the given peer as the 'local' host
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching, validator record.Validator) *IpfsDHT {
 	dht := makeDHT(ctx, h, dstore)
 
 	// register for network notifs.
@@ -94,9 +94,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	})
 
 	dht.proc.AddChild(dht.providers.Process())
-
-	dht.Validator["pk"] = record.PublicKeyValidator
-	dht.Selector["pk"] = record.PublicKeySelector
+	dht.Validator = validator
 
 	return dht
 }
@@ -122,9 +120,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
-
-		Validator: make(record.Validator),
-		Selector:  make(record.Selector),
 	}
 }
 
@@ -176,7 +171,7 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 		log.Debug("getValueOrPeers: got value")
 
 		// make sure record is valid.
-		err = dht.Validator.VerifyRecord(record)
+		err = dht.Validator.Validate(record.GetKey(), record.GetValue())
 		if err != nil {
 			log.Info("Received invalid record! (discarded)")
 			// return a sentinal to signify an invalid record was received
@@ -239,7 +234,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 		return nil, err
 	}
 
-	err = dht.Validator.VerifyRecord(rec)
+	err = dht.Validator.Validate(rec.GetKey(), rec.GetValue())
 	if err != nil {
 		log.Debugf("local record verify failed: %s (discarded)", err)
 		return nil, err

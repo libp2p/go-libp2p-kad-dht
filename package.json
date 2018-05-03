@@ -72,9 +72,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmZ9V14gpwKsTUG7y5mHZDnHSF4Fa4rKsXNx7jSTEQ4JWs",
+      "hash": "QmTUyK82BVPA6LmSzEJpfEunk9uBaQzWtMsNP917tVj4sT",
       "name": "go-libp2p-record",
-      "version": "4.0.1"
+      "version": "4.1.0"
     },
     {
       "author": "whyrusleeping",
@@ -168,3 +168,4 @@
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
   "version": "4.0.4"
 }
+

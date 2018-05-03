@@ -163,20 +163,25 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		eip.Done()
 	}()
 
-	dskey := convertToDsKey(pmes.GetKey())
-
 	rec := pmes.GetRecord()
 	if rec == nil {
 		log.Infof("Got nil record from: %s", p.Pretty())
 		return nil, errors.New("nil record")
 	}
+
+	if pmes.GetKey() != rec.GetKey() {
+		return nil, errors.New("put key doesn't match record key")
+	}
+
 	cleanRecord(rec)
 
 	// Make sure the record is valid (not expired, valid signature etc)
-	if err = dht.Validator.VerifyRecord(rec); err != nil {
+	if err = dht.Validator.Validate(rec.GetKey(), rec.GetValue()); err != nil {
 		log.Warningf("Bad dht record in PUT from: %s. %s", p.Pretty(), err)
 		return nil, err
 	}
+
+	dskey := convertToDsKey(rec.GetKey())
 
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from
@@ -188,7 +193,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 	if existing != nil {
 		recs := [][]byte{rec.GetValue(), existing.GetValue()}
-		i, err := dht.Selector.BestRecord(pmes.GetKey(), recs)
+		i, err := dht.Validator.Select(rec.GetKey(), recs)
 		if err != nil {
 			log.Warningf("Bad dht record in PUT from %s: %s", p.Pretty(), err)
 			return nil, err
@@ -237,7 +242,7 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 		return nil, nil
 	}
 
-	err = dht.Validator.VerifyRecord(rec)
+	err = dht.Validator.Validate(rec.GetKey(), rec.GetValue())
 	if err != nil {
 		// Invalid record in datastore, probably expired but don't return an error,
 		// we'll just overwrite it

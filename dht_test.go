@@ -41,19 +41,50 @@ func init() {
 	}
 }
 
+type blankValidator struct{}
+
+func (blankValidator) Validate(_ string, _ []byte) error        { return nil }
+func (blankValidator) Select(_ string, _ [][]byte) (int, error) { return 0, nil }
+
+type testValidator struct{}
+
+func (testValidator) Select(_ string, bs [][]byte) (int, error) {
+	index := -1
+	for i, b := range bs {
+		if bytes.Compare(b, []byte("newer")) == 0 {
+			index = i
+		} else if bytes.Compare(b, []byte("valid")) == 0 {
+			if index == -1 {
+				index = i
+			}
+		}
+	}
+	if index == -1 {
+		return -1, errors.New("no rec found")
+	}
+	return index, nil
+}
+func (testValidator) Validate(_ string, b []byte) error {
+	if bytes.Compare(b, []byte("expired")) == 0 {
+		return errors.New("expired")
+	}
+	return nil
+}
+
 func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	h := bhost.New(netutil.GenSwarmNetwork(t, ctx))
 
 	dss := dssync.MutexWrap(ds.NewMapDatastore())
 	var d *IpfsDHT
-	if client {
-		d = NewDHTClient(ctx, h, dss)
-	} else {
-		d = NewDHT(ctx, h, dss)
+	validator := record.NamespacedValidator{
+		"v":  blankValidator{},
+		"pk": record.PublicKeyValidator{},
 	}
-
-	d.Validator["v"] = func(*record.ValidationRecord) error { return nil }
-	d.Selector["v"] = func(_ string, bs [][]byte) (int, error) { return 0, nil }
+	if client {
+		d = NewDHTClient(ctx, h, dss, validator)
+	} else {
+		d = NewDHT(ctx, h, dss, validator)
+	}
 	return d
 }
 
@@ -148,14 +179,6 @@ func TestValueGetSet(t *testing.T) {
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
 
-	vf := func(*record.ValidationRecord) error { return nil }
-	nulsel := func(_ string, bs [][]byte) (int, error) { return 0, nil }
-
-	dhtA.Validator["v"] = vf
-	dhtB.Validator["v"] = vf
-	dhtA.Selector["v"] = nulsel
-	dhtB.Selector["v"] = nulsel
-
 	connect(t, ctx, dhtA, dhtB)
 
 	log.Debug("adding value on: ", dhtA.self)
@@ -203,33 +226,8 @@ func TestValueSetInvalid(t *testing.T) {
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
 
-	vf := func(r *record.ValidationRecord) error {
-		if bytes.Compare(r.Value, []byte("expired")) == 0 {
-			return errors.New("expired")
-		}
-		return nil
-	}
-	nulsel := func(k string, bs [][]byte) (int, error) {
-		index := -1
-		for i, b := range bs {
-			if bytes.Compare(b, []byte("newer")) == 0 {
-				index = i
-			} else if bytes.Compare(b, []byte("valid")) == 0 {
-				if index == -1 {
-					index = i
-				}
-			}
-		}
-		if index == -1 {
-			return -1, errors.New("no rec found")
-		}
-		return index, nil
-	}
-
-	dhtA.Validator["v"] = vf
-	dhtB.Validator["v"] = vf
-	dhtA.Selector["v"] = nulsel
-	dhtB.Selector["v"] = nulsel
+	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
 
 	connect(t, ctx, dhtA, dhtB)
 

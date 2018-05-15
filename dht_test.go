@@ -11,11 +11,10 @@ import (
 	"testing"
 	"time"
 
+	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	cid "github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
-	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	netutil "github.com/libp2p/go-libp2p-netutil"
@@ -72,18 +71,15 @@ func (testValidator) Validate(_ string, b []byte) error {
 }
 
 func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
-	h := bhost.New(netutil.GenSwarmNetwork(t, ctx))
+	d, err := New(
+		ctx,
+		bhost.New(netutil.GenSwarmNetwork(t, ctx)),
+		opts.Client(client),
+		opts.NamespacedValidator("v", blankValidator{}),
+	)
 
-	dss := dssync.MutexWrap(ds.NewMapDatastore())
-	var d *IpfsDHT
-	validator := record.NamespacedValidator{
-		"v":  blankValidator{},
-		"pk": record.PublicKeyValidator{},
-	}
-	if client {
-		d = NewDHTClient(ctx, h, dss, validator)
-	} else {
-		d = NewDHT(ctx, h, dss, validator)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return d
 }

@@ -17,6 +17,8 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	cid "github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
 	delay "github.com/ipfs/go-ipfs-delay"
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-kad-dht/delayed"

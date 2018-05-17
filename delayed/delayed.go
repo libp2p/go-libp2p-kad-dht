@@ -53,7 +53,9 @@ func (dds *delayed) Batch() (ds.Batch, error) {
 	return ds.NewBasicBatch(dds), nil
 }
 
-func (dds *delayed) DiskUsage() (uint64, error) {
-	dds.delay.Wait()
-	return ds.DiskUsage(dds.ds)
-}
+// note: datastore.DiskUsage is not defined in go-datastore 1.4.1
+//
+//func (dds *delayed) DiskUsage() (uint64, error) {
+//	dds.delay.Wait()
+//	return ds.DiskUsage(dds.ds)
+//}

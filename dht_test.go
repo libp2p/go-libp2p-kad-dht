@@ -1409,7 +1409,7 @@ func TestDelayedConcurrentRequests(t *testing.T) {
 
 	// PutValue everything into DHT 0
 	putValueWg := &sync.WaitGroup{}
-	now := time.Now()
+	checkpoint := time.Now()
 	for i := 0; i < reqs; i++ {
 		putValueWg.Add(1)
 
@@ -1428,12 +1428,12 @@ func TestDelayedConcurrentRequests(t *testing.T) {
 	}
 
 	putValueWg.Wait()
-	fmt.Printf("PutValue calls completed in %s\n", time.Since(now))
+	fmt.Printf("PutValue calls completed in %s\n", time.Since(checkpoint))
 
 	// GetValue from each DHT and ensure that the key/values
 	// are correct
 	getValueWg := &sync.WaitGroup{}
-	now = time.Now()
+	checkpoint = time.Now()
 	for i := 0; i < reqs; i++ {
 		getValueWg.Add(1)
 
@@ -1455,7 +1455,7 @@ func TestDelayedConcurrentRequests(t *testing.T) {
 	}
 
 	getValueWg.Wait()
-	fmt.Printf("GetValue calls completed in %s\n", time.Since(now))
+	fmt.Printf("GetValue calls completed in %s\n", time.Since(checkpoint))
 }
 
 func TestGetSetPluggedProtocol(t *testing.T) {

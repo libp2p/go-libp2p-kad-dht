@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -33,6 +34,7 @@ import (
 
 var testCaseValues = map[string][]byte{}
 var testCaseCids []*cid.Cid
+var slowtests = flag.Bool("slowtests", false, "set to true to run the slower tests")
 
 func init() {
 	for i := 0; i < 100; i++ {
@@ -1374,6 +1376,11 @@ func TestConcurrentRequestsOverload(t *testing.T) {
 }
 
 func TestDelayedConcurrentRequests(t *testing.T) {
+	// must pass "-slowtests=true" flag to run
+	if !*slowtests {
+		t.SkipNow()
+	}
+
 	reqs := 30
 	ctx := context.Background()
 

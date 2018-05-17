@@ -16,7 +16,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	cid "github.com/ipfs/go-cid"
+	delay "github.com/ipfs/go-ipfs-delay"
 	u "github.com/ipfs/go-ipfs-util"
+	"github.com/libp2p/go-libp2p-kad-dht/delayed"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -64,6 +66,7 @@ func (testValidator) Select(_ string, bs [][]byte) (int, error) {
 	}
 	return index, nil
 }
+
 func (testValidator) Validate(_ string, b []byte) error {
 	if bytes.Compare(b, []byte("expired")) == 0 {
 		return errors.New("expired")
@@ -71,21 +74,27 @@ func (testValidator) Validate(_ string, b []byte) error {
 	return nil
 }
 
-func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
+func setupDHT(ctx context.Context, t *testing.T, client bool, maxDelay time.Duration) *IpfsDHT {
+	var dss ds.Batching = dssync.MutexWrap(ds.NewMapDatastore())
+	if maxDelay != 0 {
+		dss = delayed.New(dss, delay.VariableUniform(maxDelay/2, maxDelay/2, nil)).(ds.Batching)
+	}
+
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		opts.Datastore(dss),
 		opts.Client(client),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return d
 }
 
-func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer.ID, []*IpfsDHT) {
+func setupDHTS(ctx context.Context, n int, t *testing.T, maxDelay time.Duration) ([]ma.Multiaddr, []peer.ID, []*IpfsDHT) {
 	addrs := make([]ma.Multiaddr, n)
 	dhts := make([]*IpfsDHT, n)
 	peers := make([]peer.ID, n)
@@ -94,7 +103,7 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 	sanityPeersMap := make(map[string]struct{})
 
 	for i := 0; i < n; i++ {
-		dhts[i] = setupDHT(ctx, t, false)
+		dhts[i] = setupDHT(ctx, t, false, maxDelay)
 		peers[i] = dhts[i].self
 		addrs[i] = dhts[i].peerstore.Addrs(dhts[i].self)[0]
 
@@ -456,7 +465,7 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dht := setupDHT(ctx, t, false)
+	dht := setupDHT(ctx, t, false, 0)
 	defer dht.Close()
 
 	foo := peer.ID("asdasd")
@@ -479,7 +488,7 @@ func TestProvides(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTS(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -529,7 +538,7 @@ func TestLocalProvides(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTS(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -617,7 +626,7 @@ func TestBootstrap(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTS(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -671,7 +680,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTS(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -742,7 +751,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 40
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTS(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -843,7 +852,7 @@ func TestProvidesAsync(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTS(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -885,7 +894,7 @@ func TestLayeredGet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTS(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -925,7 +934,7 @@ func TestFindPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, peers, dhts := setupDHTS(ctx, 4, t)
+	_, peers, dhts := setupDHTS(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -963,7 +972,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, peers, dhts := setupDHTS(ctx, 4, t)
+	_, peers, dhts := setupDHTS(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -1051,8 +1060,8 @@ func TestConnectCollision(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		dhtA := setupDHT(ctx, t, false)
-		dhtB := setupDHT(ctx, t, false)
+		dhtA := setupDHT(ctx, t, false, 0)
+		dhtB := setupDHT(ctx, t, false, 0)
 
 		addrA := dhtA.peerstore.Addrs(dhtA.self)[0]
 		addrB := dhtB.peerstore.Addrs(dhtB.self)[0]
@@ -1104,7 +1113,7 @@ func TestBadProtoMessages(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d := setupDHT(ctx, t, false)
+	d := setupDHT(ctx, t, false, 0)
 
 	nilrec := new(pb.Message)
 	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
@@ -1116,8 +1125,8 @@ func TestClientModeConnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a := setupDHT(ctx, t, false)
-	b := setupDHT(ctx, t, true)
+	a := setupDHT(ctx, t, false, 0)
+	b := setupDHT(ctx, t, true, 0)
 
 	connectNoSync(t, ctx, a, b)
 
@@ -1180,7 +1189,7 @@ func TestFindPeerQuery(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 101
-	_, allpeers, dhts := setupDHTS(ctx, nDHTs, t)
+	_, allpeers, dhts := setupDHTS(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -1277,7 +1286,7 @@ func TestFindClosestPeers(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTS(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -1305,10 +1314,10 @@ func TestFindClosestPeers(t *testing.T) {
 	}
 }
 
-func testConcurrentRequests(t *testing.T, reqs int) {
+func testConcurrentRequests(t *testing.T, reqs int, maxDelay time.Duration) {
 	ctx := context.Background()
 
-	_, peers, dhts := setupDHTS(ctx, 10, t)
+	_, peers, dhts := setupDHTS(ctx, 10, t, maxDelay)
 	defer func() {
 		for i := 0; i < 10; i++ {
 			dhts[i].Close()
@@ -1357,11 +1366,83 @@ func testConcurrentRequests(t *testing.T, reqs int) {
 }
 
 func TestConcurrentRequests(t *testing.T) {
-	testConcurrentRequests(t, requestResultBuffer/2)
+	testConcurrentRequests(t, requestResultBuffer/2, 0)
 }
 
 func TestConcurrentRequestsOverload(t *testing.T) {
-	testConcurrentRequests(t, 2*requestResultBuffer)
+	testConcurrentRequests(t, 2*requestResultBuffer, 0)
+}
+
+func TestDelayedConcurrentRequests(t *testing.T) {
+	reqs := 30
+	ctx := context.Background()
+
+	// create reqs-number of DHTs whose datastore operations
+	// are delayed (see delayed.go) by, at maximum, 800ms
+	_, _, dhts := setupDHTS(ctx, reqs, t, 800*time.Millisecond)
+	defer func() {
+		for i := 0; i < reqs; i++ {
+			dhts[i].Close()
+			dhts[i].host.Close()
+		}
+	}()
+
+	// connect 0 with 1, and 1 with everything else
+	connect(t, ctx, dhts[0], dhts[1])
+	for i := 2; i < reqs; i++ {
+		connect(t, ctx, dhts[1], dhts[i])
+	}
+
+	// ensure that our PutValue and GetValue calls complete
+	// within 30 seconds
+	ctxT, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// PutValue everything into DHT 0
+	putValueWg := &sync.WaitGroup{}
+	for i := 0; i < reqs; i++ {
+		putValueWg.Add(1)
+
+		go func(j int) {
+			defer putValueWg.Done()
+
+			cid := cid.NewCidV0(u.Hash([]byte(fmt.Sprintf("test%d", j))))
+			key := fmt.Sprintf("/v/%s", string(cid.Bytes()))
+			val := []byte(key)
+
+			err := dhts[0].PutValue(ctxT, key, val)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}(i)
+	}
+
+	putValueWg.Wait()
+
+	// GetValue from each DHT and ensure that the key/values
+	// are correct
+	getValueWg := &sync.WaitGroup{}
+	for i := 0; i < reqs; i++ {
+		getValueWg.Add(1)
+
+		go func(j int) {
+			defer getValueWg.Done()
+
+			cid := cid.NewCidV0(u.Hash([]byte(fmt.Sprintf("test%d", j))))
+			key := fmt.Sprintf("/v/%s", string(cid.Bytes()))
+
+			val, err := dhts[j].GetValue(ctxT, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if string(val) != key {
+				t.Fatalf("Expected '%s' got '%s'", key, string(val))
+			}
+		}(i)
+	}
+
+	getValueWg.Wait()
 }
 
 func TestGetSetPluggedProtocol(t *testing.T) {

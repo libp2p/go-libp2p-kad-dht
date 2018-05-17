@@ -1,11 +1,17 @@
+// This package was copied from go-datastore 2.2.0, as
+// go-libp2p-kad-dht is stuck using go-datastore 1.4.1 until
+// its autobatch dependency is updated.
+//
+// see: https://github.com/whyrusleeping/autobatch/pull/8
+
 // Package delayed wraps a datastore allowing to artificially
 // delay all operations.
 package delayed
 
 import (
-	delay "gx/ipfs/QmRJVNatYJwTAHgdSM1Xef9QVQ1Ch3XHdmcrykjP5Y4soL/go-ipfs-delay"
-	ds "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore"
-	dsq "gx/ipfs/QmdHG8MAuARdGHxx4rPQASLcvhz24fzjSQq7AJRAQEorq5/go-datastore/query"
+	ds "github.com/ipfs/go-datastore"
+	dsq "github.com/ipfs/go-datastore/query"
+	delay "github.com/ipfs/go-ipfs-delay"
 )
 
 // New returns a new delayed datastore.
@@ -45,4 +51,9 @@ func (dds *delayed) Query(q dsq.Query) (dsq.Results, error) {
 
 func (dds *delayed) Batch() (ds.Batch, error) {
 	return ds.NewBasicBatch(dds), nil
+}
+
+func (dds *delayed) DiskUsage() (uint64, error) {
+	dds.delay.Wait()
+	return ds.DiskUsage(dds.ds)
 }

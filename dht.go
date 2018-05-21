@@ -66,7 +66,9 @@ type IpfsDHT struct {
 	plk sync.Mutex
 }
 
-// NewDHT creates a new DHT object with the given peer as the 'local' host
+// NewDHT creates a new DHT object with the given peer as the 'local' host.
+// IpfsDHT's initialized with this function will respond to DHT requests,
+// whereas IpfsDHT's initialized with NewDHTClient will not.
 func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 	dht := NewDHTClient(ctx, h, dstore)
 
@@ -76,7 +78,9 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 	return dht
 }
 
-// NewDHTClient creates a new DHT object with the given peer as the 'local' host
+// NewDHTClient creates a new DHT object with the given peer as the 'local'
+// host. IpfsDHT clients initialized with this function will not respond to DHT
+// requests. If you need a peer to respond to DHT requests, use NewDHT instead.
 func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 	dht := makeDHT(ctx, h, dstore)
 

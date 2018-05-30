@@ -13,10 +13,10 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	delayed "github.com/ipfs/go-datastore/delayed"
 	dssync "github.com/ipfs/go-datastore/sync"
 	delay "github.com/ipfs/go-ipfs-delay"
 	u "github.com/ipfs/go-ipfs-util"
-	"github.com/libp2p/go-libp2p-kad-dht/delayed"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	netutil "github.com/libp2p/go-libp2p-netutil"
 	peer "github.com/libp2p/go-libp2p-peer"

@@ -1405,7 +1405,7 @@ func TestDelayedConcurrentRequests(t *testing.T) {
 
 	// ensure that our PutValue and GetValue calls complete
 	// within 30 seconds
-	ctxT, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctxT, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
 	// PutValue everything into DHT 0

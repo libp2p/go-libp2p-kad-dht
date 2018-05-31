@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -16,11 +15,11 @@ import (
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	delayed "github.com/ipfs/go-datastore/delayed"
+	"github.com/ipfs/go-datastore/delayed"
 	dssync "github.com/ipfs/go-datastore/sync"
-	delay "github.com/ipfs/go-ipfs-delay"
+	"github.com/ipfs/go-ipfs-delay"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
@@ -29,7 +28,7 @@ import (
 	routing "github.com/libp2p/go-libp2p-routing"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
-	ci "github.com/libp2p/go-testutil/ci"
+	"github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
 	ma "github.com/multiformats/go-multiaddr"
 )
@@ -264,8 +263,8 @@ func TestValueSetInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhtA := setupDHT(ctx, t, false)
-	dhtB := setupDHT(ctx, t, false)
+	dhtA := setupDHT(ctx, t, false, 0)
+	dhtB := setupDHT(ctx, t, false, 0)
 
 	defer dhtA.Close()
 	defer dhtB.Close()

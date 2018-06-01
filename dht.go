@@ -34,9 +34,6 @@ import (
 
 var log = logging.Logger("dht")
 
-var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
-var ProtocolDHTOld protocol.ID = "/ipfs/dht"
-
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
 const NumBootstrapQueries = 5
@@ -64,6 +61,8 @@ type IpfsDHT struct {
 	smlk   sync.Mutex
 
 	plk sync.Mutex
+
+	protocols []protocol.ID // DHT protocols
 }
 
 // New creates a new DHT with the specified host and options.
@@ -72,7 +71,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg.Datastore)
+	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -87,8 +86,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.Validator = cfg.Validator
 
 	if !cfg.Client {
-		h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
-		h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
+		for _, p := range cfg.Protocols {
+			h.SetStreamHandler(p, dht.handleNewStream)
+		}
 	}
 	return dht, nil
 }
@@ -116,7 +116,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -137,6 +137,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
+		protocols:    protocols,
 	}
 }
 
@@ -387,6 +388,15 @@ func (dht *IpfsDHT) Process() goprocess.Process {
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
+}
+
+func (dht *IpfsDHT) protocolStrs() []string {
+	pstrs := make([]string, len(dht.protocols))
+	for _, proto := range dht.protocols {
+		pstrs = append(pstrs, string(proto))
+	}
+
+	return pstrs
 }
 
 func mkDsKey(s string) ds.Key {

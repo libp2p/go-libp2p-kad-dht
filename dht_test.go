@@ -13,6 +13,7 @@ import (
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-protocol"
 
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
@@ -1073,5 +1074,41 @@ func TestFindClosestPeers(t *testing.T) {
 
 	if len(out) != KValue {
 		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
+	}
+}
+
+func TestGetSetPluggedProtocol(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	os := []opts.Option{
+		opts.Protocols([]protocol.ID{"/esh/dht"}),
+		opts.Client(false),
+		opts.NamespacedValidator("v", blankValidator{}),
+	}
+
+	dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connect(t, ctx, dhtA, dhtB)
+
+	if err := dhtA.PutValue(ctx, "/v/cat", []byte("meow")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := dhtB.GetValue(ctx, "/v/cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "meow" {
+		t.Fatalf("Expected 'meow' got '%s'", string(value))
 	}
 }

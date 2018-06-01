@@ -190,7 +190,7 @@ func (ms *messageSender) prep() error {
 		return nil
 	}
 
-	nstr, err := ms.dht.host.NewStream(ms.dht.ctx, ms.p, ProtocolDHT, ProtocolDHTOld)
+	nstr, err := ms.dht.host.NewStream(ms.dht.ctx, ms.p, ms.dht.protocols...)
 	if err != nil {
 		return err
 	}

@@ -5,14 +5,20 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/libp2p/go-libp2p-protocol"
 	record "github.com/libp2p/go-libp2p-record"
 )
+
+var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
+var ProtocolDHTOld protocol.ID = "/ipfs/dht"
+var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
 	Datastore ds.Batching
 	Validator record.Validator
 	Client    bool
+	Protocols []protocol.ID
 }
 
 // Apply applies the given options to this Option
@@ -35,6 +41,7 @@ var Defaults = func(o *Options) error {
 		"pk": record.PublicKeyValidator{},
 	}
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
+	o.Protocols = DefaultProtocols
 	return nil
 }
 
@@ -82,6 +89,16 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
 		}
 		nsval[ns] = v
+		return nil
+	}
+}
+
+// Protocols sets the protocols for the DHT
+//
+// Defaults to dht.DefaultProtocols
+func Protocols(protocols []protocol.ID) Option {
+	return func(o *Options) error {
+		o.Protocols = protocols
 		return nil
 	}
 }

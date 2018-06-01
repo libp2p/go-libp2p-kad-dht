@@ -35,6 +35,7 @@ var log = logging.Logger("dht")
 
 var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
 var ProtocolDHTOld protocol.ID = "/ipfs/dht"
+var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
 
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
@@ -83,7 +84,7 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []pr
 
 // NewDefaultDHT delegates to NewDHT, providing IPFS DHT protocols
 func NewDefaultDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	return NewDHT(ctx, h, dstore, []protocol.ID{ProtocolDHT, ProtocolDHTOld})
+	return NewDHT(ctx, h, dstore, DefaultProtocols)
 }
 
 // NewDHTClient creates a new DHT object with the given peer as the 'local'
@@ -111,7 +112,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching, protocol
 
 // NewDefaultDHTClient delegates to NewDHTClient, providing IPFS DHT protocols
 func NewDefaultDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	return NewDHTClient(ctx, h, dstore, []protocol.ID{ProtocolDHT, ProtocolDHTOld})
+	return NewDHTClient(ctx, h, dstore, DefaultProtocols)
 }
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {

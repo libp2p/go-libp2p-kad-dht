@@ -47,9 +47,9 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	dss := dssync.MutexWrap(ds.NewMapDatastore())
 	var d *IpfsDHT
 	if client {
-		d = NewDHTClient(ctx, h, dss)
+		d = NewDefaultDHTClient(ctx, h, dss)
 	} else {
-		d = NewDHT(ctx, h, dss)
+		d = NewDefaultDHT(ctx, h, dss)
 	}
 
 	d.Validator["v"] = func(*record.ValidationRecord) error { return nil }

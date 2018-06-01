@@ -9,8 +9,6 @@ import (
 // netNotifiee defines methods to be used with the IpfsDHT
 type netNotifiee IpfsDHT
 
-var dhtProtocols = []string{string(ProtocolDHT), string(ProtocolDHTOld)}
-
 func (nn *netNotifiee) DHT() *IpfsDHT {
 	return (*IpfsDHT)(nn)
 }
@@ -24,7 +22,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	}
 
 	p := v.RemotePeer()
-	protos, err := dht.peerstore.SupportsProtocols(p, dhtProtocols...)
+	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
 	if err == nil && len(protos) != 0 {
 		// We lock here for consistency with the lock in testConnection.
 		// This probably isn't necessary because (dis)connect
@@ -57,7 +55,7 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 	}
 	defer s.Close()
 
-	selected, err := mstream.SelectOneOf(dhtProtocols, s)
+	selected, err := mstream.SelectOneOf(dht.protocolStrs(), s)
 	if err != nil {
 		// Doesn't support the protocol
 		return

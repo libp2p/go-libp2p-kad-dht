@@ -392,8 +392,8 @@ func (dht *IpfsDHT) Close() error {
 
 func (dht *IpfsDHT) protocolStrs() []string {
 	pstrs := make([]string, len(dht.protocols))
-	for _, proto := range dht.protocols {
-		pstrs = append(pstrs, string(proto))
+	for idx, proto := range dht.protocols {
+		pstrs[idx] = string(proto)
 	}
 
 	return pstrs

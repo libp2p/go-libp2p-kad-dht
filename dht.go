@@ -64,25 +64,33 @@ type IpfsDHT struct {
 	smlk   sync.Mutex
 
 	plk sync.Mutex
+
+	protocols []protocol.ID // DHT protocols
 }
 
 // NewDHT creates a new DHT object with the given peer as the 'local' host.
-// IpfsDHT's initialized with this function will respond to DHT requests,
-// whereas IpfsDHT's initialized with NewDHTClient will not.
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := NewDHTClient(ctx, h, dstore)
+// IpfsDHTs initialized with this function will respond to DHT requests,
+// whereas IpfsDHTs initialized with NewDHTClient will not.
+func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
+	dht := NewDHTClient(ctx, h, dstore, protocols)
 
-	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
-	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
+	for _, pid := range protocols {
+		h.SetStreamHandler(pid, dht.handleNewStream)
+	}
 
 	return dht
+}
+
+// NewDefaultDHT delegates to NewDHT, providing IPFS DHT protocols
+func NewDefaultDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	return NewDHT(ctx, h, dstore, []protocol.ID{ProtocolDHT, ProtocolDHTOld})
 }
 
 // NewDHTClient creates a new DHT object with the given peer as the 'local'
 // host. IpfsDHT clients initialized with this function will not respond to DHT
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
-func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := makeDHT(ctx, h, dstore)
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
+	dht := makeDHT(ctx, h, dstore, protocols)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -101,7 +109,12 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+// NewDefaultDHTClient delegates to NewDHTClient, providing IPFS DHT protocols
+func NewDefaultDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	return NewDHTClient(ctx, h, dstore, []protocol.ID{ProtocolDHT, ProtocolDHTOld})
+}
+
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -122,6 +135,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
+		protocols:    protocols,
 
 		Validator: make(record.Validator),
 		Selector:  make(record.Selector),
@@ -375,6 +389,15 @@ func (dht *IpfsDHT) Process() goprocess.Process {
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
+}
+
+func (dht *IpfsDHT) protocolStrs() []string {
+	pstrs := make([]string, len(dht.protocols))
+	for _, proto := range dht.protocols {
+		pstrs = append(pstrs, string(proto))
+	}
+
+	return pstrs
 }
 
 func mkDsKey(s string) ds.Key {

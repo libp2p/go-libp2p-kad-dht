@@ -13,7 +13,6 @@ import (
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-protocol"
 
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
@@ -1082,7 +1081,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 	defer cancel()
 
 	os := []opts.Option{
-		opts.Protocols([]protocol.ID{"/esh/dht"}),
+		opts.Protocols("/esh/dht"),
 		opts.Client(false),
 		opts.NamespacedValidator("v", blankValidator{}),
 	}

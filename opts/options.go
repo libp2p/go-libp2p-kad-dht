@@ -96,7 +96,7 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 // Protocols sets the protocols for the DHT
 //
 // Defaults to dht.DefaultProtocols
-func Protocols(protocols []protocol.ID) Option {
+func Protocols(protocols ...protocol.ID) Option {
 	return func(o *Options) error {
 		o.Protocols = protocols
 		return nil

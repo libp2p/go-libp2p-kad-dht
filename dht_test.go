@@ -1077,37 +1077,77 @@ func TestFindClosestPeers(t *testing.T) {
 }
 
 func TestGetSetPluggedProtocol(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Run("PutValue/GetValue - same protocol", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-	os := []opts.Option{
-		opts.Protocols("/esh/dht"),
-		opts.Client(false),
-		opts.NamespacedValidator("v", blankValidator{}),
-	}
+		os := []opts.Option{
+			opts.Protocols("/esh/dht"),
+			opts.Client(false),
+			opts.NamespacedValidator("v", blankValidator{}),
+		}
 
-	dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
-	if err != nil {
-		t.Fatal(err)
-	}
+		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
-	if err != nil {
-		t.Fatal(err)
-	}
+		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	connect(t, ctx, dhtA, dhtB)
+		connect(t, ctx, dhtA, dhtB)
 
-	if err := dhtA.PutValue(ctx, "/v/cat", []byte("meow")); err != nil {
-		t.Fatal(err)
-	}
+		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		if err := dhtA.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
+			t.Fatal(err)
+		}
 
-	value, err := dhtB.GetValue(ctx, "/v/cat")
-	if err != nil {
-		t.Fatal(err)
-	}
+		value, err := dhtB.GetValue(ctxT, "/v/cat")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if string(value) != "meow" {
-		t.Fatalf("Expected 'meow' got '%s'", string(value))
-	}
+		if string(value) != "meow" {
+			t.Fatalf("Expected 'meow' got '%s'", string(value))
+		}
+	})
+
+	t.Run("GetValue fails if DHTs don't use same protocol", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		optsA := []opts.Option{
+			opts.Protocols("/esh/dht"),
+			opts.Client(false),
+			opts.NamespacedValidator("v", blankValidator{}),
+		}
+
+		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), optsA...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		optsB := []opts.Option{
+			opts.Protocols("/lsr/dht"),
+			opts.Client(false),
+			opts.NamespacedValidator("v", blankValidator{}),
+		}
+
+		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), optsB...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		connect(t, ctx, dhtA, dhtB)
+
+		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		if err := dhtA.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = dhtB.GetValue(ctxT, "/v/cat")
+		panic("wat")
+	})
 }

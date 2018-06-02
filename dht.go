@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
-	routing "github.com/libp2p/go-libp2p-routing"
 
 	proto "github.com/gogo/protobuf/proto"
 	cid "github.com/ipfs/go-cid"
@@ -28,6 +28,7 @@ import (
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	routing "github.com/libp2p/go-libp2p-routing"
 	base32 "github.com/whyrusleeping/base32"
 )
 
@@ -54,8 +55,7 @@ type IpfsDHT struct {
 
 	birth time.Time // When this peer started up
 
-	Validator record.Validator // record validator funcs
-	Selector  record.Selector  // record selection funcs
+	Validator record.Validator
 
 	ctx  context.Context
 	proc goprocess.Process
@@ -66,23 +66,13 @@ type IpfsDHT struct {
 	plk sync.Mutex
 }
 
-// NewDHT creates a new DHT object with the given peer as the 'local' host.
-// IpfsDHT's initialized with this function will respond to DHT requests,
-// whereas IpfsDHT's initialized with NewDHTClient will not.
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := NewDHTClient(ctx, h, dstore)
-
-	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
-	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
-
-	return dht
-}
-
-// NewDHTClient creates a new DHT object with the given peer as the 'local'
-// host. IpfsDHT clients initialized with this function will not respond to DHT
-// requests. If you need a peer to respond to DHT requests, use NewDHT instead.
-func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := makeDHT(ctx, h, dstore)
+// New creates a new DHT with the specified host and options.
+func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
+	var cfg opts.Options
+	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
+		return nil, err
+	}
+	dht := makeDHT(ctx, h, cfg.Datastore)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -94,10 +84,35 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	})
 
 	dht.proc.AddChild(dht.providers.Process())
+	dht.Validator = cfg.Validator
 
-	dht.Validator["pk"] = record.PublicKeyValidator
-	dht.Selector["pk"] = record.PublicKeySelector
+	if !cfg.Client {
+		h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
+		h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
+	}
+	return dht, nil
+}
 
+// NewDHT creates a new DHT object with the given peer as the 'local' host.
+// IpfsDHT's initialized with this function will respond to DHT requests,
+// whereas IpfsDHT's initialized with NewDHTClient will not.
+func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(ctx, h, opts.Datastore(dstore))
+	if err != nil {
+		panic(err)
+	}
+	return dht
+}
+
+// NewDHTClient creates a new DHT object with the given peer as the 'local'
+// host. IpfsDHT clients initialized with this function will not respond to DHT
+// requests. If you need a peer to respond to DHT requests, use NewDHT instead.
+// NewDHTClient creates a new DHT object with the given peer as the 'local' host
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(ctx, h, opts.Datastore(dstore), opts.Client(true))
+	if err != nil {
+		panic(err)
+	}
 	return dht
 }
 
@@ -122,9 +137,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
-
-		Validator: make(record.Validator),
-		Selector:  make(record.Selector),
 	}
 }
 
@@ -176,7 +188,7 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 		log.Debug("getValueOrPeers: got value")
 
 		// make sure record is valid.
-		err = dht.Validator.VerifyRecord(record)
+		err = dht.Validator.Validate(record.GetKey(), record.GetValue())
 		if err != nil {
 			log.Info("Received invalid record! (discarded)")
 			// return a sentinal to signify an invalid record was received
@@ -239,7 +251,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 		return nil, err
 	}
 
-	err = dht.Validator.VerifyRecord(rec)
+	err = dht.Validator.Validate(rec.GetKey(), rec.GetValue())
 	if err != nil {
 		log.Debugf("local record verify failed: %s (discarded)", err)
 		return nil, err

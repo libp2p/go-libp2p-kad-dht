@@ -421,7 +421,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 }
 
 func (ms *messageSender) sendMessageSingle(ctx context.Context, pmes *pb.Message) error {
-	s, err := ms.dht.host.NewStream(ctx, ms.p, ProtocolDHT, ProtocolDHTOld)
+	s, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.protocols...)
 	if err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ func (ms *messageSender) sendMessageSingle(ctx context.Context, pmes *pb.Message
 }
 
 func (ms *messageSender) sendRequestSingle(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
-	s, err := ms.dht.host.NewStream(ctx, ms.p, ProtocolDHT, ProtocolDHTOld)
+	s, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.protocols...)
 	if err != nil {
 		return nil, err
 	}

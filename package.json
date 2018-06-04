@@ -108,15 +108,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmfZTdmunzKzAGJrSvXXQbQ5kLLUiEMX5vdwux7iXkdk7D",
+      "hash": "QmaSfSMvc1VPZ8JbMponFs4WHvF9FgEruF56opm5E1RgQA",
       "name": "go-libp2p-host",
-      "version": "2.1.7"
+      "version": "2.1.8"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmWsV6kzPaYGBDVyuUfWBvyQygEc9Qrv9vzo8vZ7X4mdLN",
+      "hash": "Qmbok4DkFi1nFBgM6ZPUM7BMGsUt6iYEdSdStCksQNLEeM",
       "name": "go-libp2p",
-      "version": "5.0.17"
+      "version": "5.0.20"
     },
     {
       "author": "whyrusleeping",
@@ -132,15 +132,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmTnsezaB1wWNRHeHnYrm8K4d5i9wtyj3GsqjC3Rt5b5v5",
+      "hash": "QmbXRda5H2K3MSQyWWxTMtd8DWuguEBUCe6hpxfXVpFUGj",
       "name": "go-multistream",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     {
       "author": "whyrusleeping",
-      "hash": "Qmb6BsZf6Y3kxffXMNTubGPF1w1bkHtpvhfYbmnwP3NQyw",
+      "hash": "Qma2UuHusnaFV24DgeZ5hyrM9uc4UdyVaZbtn2FQsPRhES",
       "name": "go-libp2p-netutil",
-      "version": "0.3.11"
+      "version": "0.3.13"
     },
     {
       "author": "multiformats",
@@ -166,6 +166,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.1.0"
+  "version": "4.1.1"
 }
 

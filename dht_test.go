@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1100,6 +1101,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		connect(t, ctx, dhtA, dhtB)
 
 		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
 		if err := dhtA.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
 			t.Fatal(err)
 		}
@@ -1114,40 +1116,43 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		}
 	})
 
-	t.Run("GetValue fails if DHTs don't use same protocol", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+	t.Run("DHT routing table for peer A won't contain B if A and B don't use same protocol", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		optsA := []opts.Option{
+		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), []opts.Option{
 			opts.Protocols("/esh/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),
-		}
-
-		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), optsA...)
+		}...)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		optsB := []opts.Option{
+		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), []opts.Option{
 			opts.Protocols("/lsr/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),
-		}
-
-		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), optsB...)
+		}...)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		connect(t, ctx, dhtA, dhtB)
+		connectNoSync(t, ctx, dhtA, dhtB)
 
-		ctxT, cancel := context.WithTimeout(ctx, time.Second)
-		if err := dhtA.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
-			t.Fatal(err)
+		// We don't expect connection notifications for A to reach B (or vice-versa), given
+		// that they've been configured with different protocols - but we'll give them a
+		// chance, anyhow.
+		time.Sleep(time.Second * 2)
+
+		err = dhtA.PutValue(ctx, "/v/cat", []byte("meow"))
+		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
+			t.Fatal("should not have been able to find any peers in routing table")
 		}
 
-		_, err = dhtB.GetValue(ctxT, "/v/cat")
-		panic("wat")
+		_, err = dhtB.GetValue(ctx, "/v/cat")
+		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
+			t.Fatal("should not have been able to find any peers in routing table")
+		}
 	})
 }

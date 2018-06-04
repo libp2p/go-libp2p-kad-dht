@@ -36,7 +36,7 @@ func TestGetFailures(t *testing.T) {
 	d.Update(ctx, hosts[1].ID())
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 		s.Close()
 	})
 
@@ -58,7 +58,7 @@ func TestGetFailures(t *testing.T) {
 	t.Log("Timeout test passed.")
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 		defer s.Close()
 
 		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
@@ -110,7 +110,7 @@ func TestGetFailures(t *testing.T) {
 			Record: rec,
 		}
 
-		s, err := hosts[1].NewStream(context.Background(), hosts[0].ID(), ProtocolDHT)
+		s, err := hosts[1].NewStream(context.Background(), hosts[0].ID(), d.protocols[0])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +160,7 @@ func TestNotFound(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+		host.SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 			defer s.Close()
 
 			pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
@@ -239,7 +239,7 @@ func TestLessThanKResponses(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+		host.SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 			defer s.Close()
 
 			pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
@@ -305,7 +305,7 @@ func TestMultipleQueries(t *testing.T) {
 
 	// It would be nice to be able to just get a value and succeed but then
 	// we'd need to deal with selectors and validators...
-	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 		defer s.Close()
 
 		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)

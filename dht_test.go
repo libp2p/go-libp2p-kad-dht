@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1074,4 +1075,84 @@ func TestFindClosestPeers(t *testing.T) {
 	if len(out) != KValue {
 		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
 	}
+}
+
+func TestGetSetPluggedProtocol(t *testing.T) {
+	t.Run("PutValue/GetValue - same protocol", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		os := []opts.Option{
+			opts.Protocols("/esh/dht"),
+			opts.Client(false),
+			opts.NamespacedValidator("v", blankValidator{}),
+		}
+
+		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		connect(t, ctx, dhtA, dhtB)
+
+		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if err := dhtA.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
+			t.Fatal(err)
+		}
+
+		value, err := dhtB.GetValue(ctxT, "/v/cat")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if string(value) != "meow" {
+			t.Fatalf("Expected 'meow' got '%s'", string(value))
+		}
+	})
+
+	t.Run("DHT routing table for peer A won't contain B if A and B don't use same protocol", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), []opts.Option{
+			opts.Protocols("/esh/dht"),
+			opts.Client(false),
+			opts.NamespacedValidator("v", blankValidator{}),
+		}...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), []opts.Option{
+			opts.Protocols("/lsr/dht"),
+			opts.Client(false),
+			opts.NamespacedValidator("v", blankValidator{}),
+		}...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		connectNoSync(t, ctx, dhtA, dhtB)
+
+		// We don't expect connection notifications for A to reach B (or vice-versa), given
+		// that they've been configured with different protocols - but we'll give them a
+		// chance, anyhow.
+		time.Sleep(time.Second * 2)
+
+		err = dhtA.PutValue(ctx, "/v/cat", []byte("meow"))
+		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
+			t.Fatal("should not have been able to find any peers in routing table")
+		}
+
+		_, err = dhtB.GetValue(ctx, "/v/cat")
+		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
+			t.Fatal("should not have been able to find any peers in routing table")
+		}
+	})
 }

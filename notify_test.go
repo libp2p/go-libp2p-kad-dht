@@ -13,8 +13,8 @@ func TestNotifieeMultipleConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d1 := setupDHT(ctx, t, false, 0)
-	d2 := setupDHT(ctx, t, false, 0)
+	d1 := setupDHTWithSwarm(ctx, t, false)
+	d2 := setupDHTWithSwarm(ctx, t, false)
 
 	nn1 := (*netNotifiee)(d1)
 	nn2 := (*netNotifiee)(d2)
@@ -56,8 +56,8 @@ func TestNotifieeFuzz(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 
-	d1 := setupDHT(ctx, t, false, 0)
-	d2 := setupDHT(ctx, t, false, 0)
+	d1 := setupDHTWithSwarm(ctx, t, false)
+	d2 := setupDHTWithSwarm(ctx, t, false)
 
 	for i := 0; i < 100; i++ {
 		connectNoSync(t, ctx, d1, d2)

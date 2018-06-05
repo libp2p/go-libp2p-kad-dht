@@ -16,7 +16,7 @@ import (
 // Check that GetPublicKey() correctly extracts a public key
 func TestPubkeyExtract(t *testing.T) {
 	ctx := context.Background()
-	dht := setupDHT(ctx, t, false, 0)
+	dht := setupDHTWithSwarm(ctx, t, false)
 	defer dht.Close()
 
 	_, pk, err := ci.GenerateEd25519Key(rand.Reader)
@@ -42,7 +42,7 @@ func TestPubkeyExtract(t *testing.T) {
 // Check that GetPublicKey() correctly retrieves a public key from the peerstore
 func TestPubkeyPeerstore(t *testing.T) {
 	ctx := context.Background()
-	dht := setupDHT(ctx, t, false, 0)
+	dht := setupDHTWithSwarm(ctx, t, false)
 
 	r := u.NewSeededRand(15) // generate deterministic keypair
 	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
@@ -73,8 +73,8 @@ func TestPubkeyPeerstore(t *testing.T) {
 func TestPubkeyDirectFromNode(t *testing.T) {
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t, false, 0)
-	dhtB := setupDHT(ctx, t, false, 0)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -103,8 +103,8 @@ func TestPubkeyDirectFromNode(t *testing.T) {
 func TestPubkeyFromDHT(t *testing.T) {
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t, false, 0)
-	dhtB := setupDHT(ctx, t, false, 0)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -150,8 +150,8 @@ func TestPubkeyFromDHT(t *testing.T) {
 func TestPubkeyNotFound(t *testing.T) {
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t, false, 0)
-	dhtB := setupDHT(ctx, t, false, 0)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -182,8 +182,8 @@ func TestPubkeyNotFound(t *testing.T) {
 func TestPubkeyBadKeyFromDHT(t *testing.T) {
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t, false, 0)
-	dhtB := setupDHT(ctx, t, false, 0)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -236,8 +236,8 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t, false, 0)
-	dhtB := setupDHT(ctx, t, false, 0)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -291,8 +291,8 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 func TestPubkeyGoodKeyFromDHTGoodKeyDirect(t *testing.T) {
 	ctx := context.Background()
 
-	dhtA := setupDHT(ctx, t, false, 0)
-	dhtB := setupDHT(ctx, t, false, 0)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()

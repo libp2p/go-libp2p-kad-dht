@@ -14,6 +14,7 @@ import (
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
+	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pset "github.com/libp2p/go-libp2p-peer/peerset"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -236,7 +237,9 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	// make sure we're connected to the peer.
 	// FIXME abstract away into the network layer
-	if conns := r.query.dht.host.Network().ConnsToPeer(p); len(conns) == 0 {
+	// Note: Failure to connect in this block will cause the function to
+	// short circuit.
+	if r.query.dht.host.Network().Connectedness(p) == inet.NotConnected {
 		log.Debug("not connected. dialing.")
 
 		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{

@@ -18,11 +18,11 @@ import (
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	netutil "github.com/libp2p/go-libp2p-netutil"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
 	routing "github.com/libp2p/go-libp2p-routing"
+	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ci "github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
@@ -74,7 +74,7 @@ func (testValidator) Validate(_ string, b []byte) error {
 func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	d, err := New(
 		ctx,
-		bhost.New(netutil.GenSwarmNetwork(t, ctx)),
+		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
 		opts.Client(client),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
@@ -1088,12 +1088,12 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			opts.NamespacedValidator("v", blankValidator{}),
 		}
 
-		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), os...)
+		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1120,7 +1120,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		dhtA, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), []opts.Option{
+		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/esh/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),
@@ -1129,7 +1129,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		dhtB, err := New(ctx, bhost.New(netutil.GenSwarmNetwork(t, ctx)), []opts.Option{
+		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/lsr/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),

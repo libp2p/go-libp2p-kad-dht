@@ -39,7 +39,8 @@ type dhtQueryResult struct {
 	closerPeers   []*pstore.PeerInfo // *
 	success       bool
 
-	finalSet *pset.PeerSet
+	finalSet   *pset.PeerSet
+	queriedSet *pset.PeerSet
 }
 
 // constructs query
@@ -77,6 +78,7 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 type dhtQueryRunner struct {
 	query          *dhtQuery        // query to run
 	peersSeen      *pset.PeerSet    // all peers queried. prevent querying same peer 2x
+	peersQueried   *pset.PeerSet    // peers successfully connected to and queried
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
 
@@ -100,6 +102,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersToQuery:   queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key))),
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      pset.New(),
+		peersQueried:   pset.New(),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		proc:           proc,
 	}
@@ -164,7 +167,8 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	}
 
 	return &dhtQueryResult{
-		finalSet: r.peersSeen,
+		finalSet:   r.peersSeen,
+		queriedSet: r.peersQueried,
 	}, err
 }
 
@@ -273,6 +277,8 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)
+
+	r.peersQueried.Add(p)
 
 	if err != nil {
 		log.Debugf("ERROR worker for: %v %v", p, err)

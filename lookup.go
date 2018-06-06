@@ -98,8 +98,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			log.Debugf("closestPeers query run error: %s", err)
 		}
 
-		if res != nil && res.finalSet != nil {
-			sorted := kb.SortClosestPeers(res.finalSet.Peers(), kb.ConvertKey(key))
+		if res != nil && res.queriedSet != nil {
+			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
 			if len(sorted) > KValue {
 				sorted = sorted[:KValue]
 			}

@@ -148,17 +148,10 @@ func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID,
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
-	switch err {
-	case ErrReadTimeout:
-		log.Warningf("read timeout: %s %s", p.Pretty(), key)
-		fallthrough
-	default:
-		return err
-	case nil:
-		break
-	}
-
 	if err != nil {
+		if err == ErrReadTimeout {
+			log.Warningf("read timeout: %s %s", p.Pretty(), key)
+		}
 		return err
 	}
 

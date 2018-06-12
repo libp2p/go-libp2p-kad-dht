@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"sync"
 	"time"
 
 	u "github.com/ipfs/go-ipfs-util"
@@ -137,9 +136,10 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	}
 
 	// bootstrap sequentially, as results will compound
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
 	runQuery := func(ctx context.Context, id peer.ID) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+
 		p, err := dht.FindPeer(ctx, id)
 		if err == routing.ErrNotFound {
 			// this isn't an error. this is precisely what we expect.
@@ -154,34 +154,18 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 		}
 	}
 
-	sequential := true
-	if sequential {
-		// these should be parallel normally. but can make them sequential for debugging.
-		// note that the core/bootstrap context deadline should be extended too for that.
-		for i := 0; i < cfg.Queries; i++ {
-			id := randomID()
-			log.Debugf("Bootstrapping query (%d/%d) to random ID: %s", i+1, cfg.Queries, id)
-			runQuery(ctx, id)
-		}
-
-	} else {
-		// note on parallelism here: the context is passed in to the queries, so they
-		// **should** exit when it exceeds, making this function exit on ctx cancel.
-		// normally, we should be selecting on ctx.Done() here too, but this gets
-		// complicated to do with WaitGroup, and doesnt wait for the children to exit.
-		var wg sync.WaitGroup
-		for i := 0; i < cfg.Queries; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-
-				id := randomID()
-				log.Debugf("Bootstrapping query (%d/%d) to random ID: %s", i+1, cfg.Queries, id)
-				runQuery(ctx, id)
-			}()
-		}
-		wg.Wait()
+	// these should be parallel normally. but can make them sequential for debugging.
+	// note that the core/bootstrap context deadline should be extended too for that.
+	for i := 0; i < cfg.Queries; i++ {
+		id := randomID()
+		log.Debugf("Bootstrapping query (%d/%d) to random ID: %s", i+1, cfg.Queries, id)
+		runQuery(ctx, id)
 	}
+
+	// Find self to distribute peer info to our neighbors.
+	// Do this after bootstrapping.
+	log.Debugf("Bootstrapping query to self: %s", dht.self)
+	runQuery(ctx, dht.self)
 
 	if len(merr) > 0 {
 		return merr

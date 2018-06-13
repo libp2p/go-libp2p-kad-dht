@@ -223,14 +223,14 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 		return nil, nil
 	}
 	if err != nil {
-		log.Warningf("Got error retrieving record with key %s from datastore: %s", dskey, err)
+		log.Errorf("Got error retrieving record with key %s from datastore: %s", dskey, err)
 		return nil, err
 	}
 
 	byt, ok := reci.([]byte)
 	if !ok {
 		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
-		log.Warningf("Value stored in datastore with key %s is not []byte", dskey)
+		log.Errorf("Value stored in datastore with key %s is not []byte", dskey)
 		return nil, nil
 	}
 
@@ -238,7 +238,7 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 	err = proto.Unmarshal(byt, rec)
 	if err != nil {
 		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
-		log.Warningf("Bad record data stored in datastore with key %s: could not unmarshal record", dskey)
+		log.Errorf("Bad record data stored in datastore with key %s: could not unmarshal record", dskey)
 		return nil, nil
 	}
 

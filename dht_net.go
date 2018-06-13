@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -22,8 +23,6 @@ func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 }
 
 func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
-	defer inet.FullClose(s)
-
 	ctx := dht.Context()
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
@@ -34,7 +33,12 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 	for {
 		// receive msg
 		pmes := new(pb.Message)
-		if err := r.ReadMsg(pmes); err != nil {
+		switch err := r.ReadMsg(pmes); err {
+		case io.EOF:
+			s.Close()
+			return
+		case nil:
+		default:
 			s.Reset()
 			log.Debugf("Error unmarshaling data: %s", err)
 			return

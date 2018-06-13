@@ -224,28 +224,80 @@ func TestValueSetInvalid(t *testing.T) {
 	defer dhtB.host.Close()
 
 	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
-	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
 
 	connect(t, ctx, dhtA, dhtB)
 
-	testSetGet := func(val string, exp string, experr error) {
+	testSetGet := func(val string, failset bool, exp string, experr error) {
+		t.Helper()
+
 		ctxT, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		err := dhtA.PutValue(ctxT, "/v/hello", []byte(val))
-		if err != nil {
-			t.Fatal(err)
+		if failset {
+			if err == nil {
+				t.Error("expected set to fail")
+			}
+		} else {
+			if err != nil {
+				t.Error(err)
+			}
 		}
 
 		ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 		defer cancel()
 		valb, err := dhtB.GetValue(ctxT, "/v/hello")
 		if err != experr {
-			t.Fatalf("Set/Get %v: Expected %v error but got %v", val, experr, err)
+			t.Errorf("Set/Get %v: Expected %v error but got %v", val, experr, err)
+		} else if err == nil && string(valb) != exp {
+			t.Errorf("Expected '%v' got '%s'", exp, string(valb))
 		}
-		if err == nil {
-			if string(valb) != exp {
-				t.Fatalf("Expected '%v' got '%s'", exp, string(valb))
-			}
+	}
+
+	// Expired records should not be set
+	testSetGet("expired", true, "", routing.ErrNotFound)
+	// Valid record should be returned
+	testSetGet("valid", false, "valid", nil)
+	// Newer record should supersede previous record
+	testSetGet("newer", false, "newer", nil)
+	// Attempt to set older record again should be ignored
+	testSetGet("valid", true, "newer", nil)
+}
+
+func TestValueGetInvalid(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+
+	defer dhtA.Close()
+	defer dhtB.Close()
+	defer dhtA.host.Close()
+	defer dhtB.host.Close()
+
+	dhtA.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+
+	connect(t, ctx, dhtA, dhtB)
+
+	testSetGet := func(val string, exp string, experr error) {
+		t.Helper()
+
+		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		err := dhtA.PutValue(ctxT, "/v/hello", []byte(val))
+		if err != nil {
+			t.Error(err)
+		}
+
+		ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
+		defer cancel()
+		valb, err := dhtB.GetValue(ctxT, "/v/hello")
+		if err != experr {
+			t.Errorf("Set/Get %v: Expected %v error but got %v", val, experr, err)
+		} else if err == nil && string(valb) != exp {
+			t.Errorf("Expected '%v' got '%s'", exp, string(valb))
 		}
 	}
 

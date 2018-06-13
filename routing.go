@@ -177,7 +177,11 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 
 	// If we have it local, don't bother doing an RPC!
 	lrec, err := dht.getLocal(key)
-	if err == nil {
+	if err != nil {
+		// something is wrong with the datastore.
+		return nil, err
+	}
+	if lrec != nil {
 		// TODO: this is tricky, we don't always want to trust our own value
 		// what if the authoritative source updated it?
 		log.Debug("have it locally")

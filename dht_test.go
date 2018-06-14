@@ -168,46 +168,74 @@ func TestValueGetSet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhtA := setupDHT(ctx, t, false)
-	dhtB := setupDHT(ctx, t, false)
+	var dhts [5]*IpfsDHT
 
-	defer dhtA.Close()
-	defer dhtB.Close()
-	defer dhtA.host.Close()
-	defer dhtB.host.Close()
+	for i := range dhts {
+		dhts[i] = setupDHT(ctx, t, false)
+		defer dhts[i].Close()
+		defer dhts[i].host.Close()
+	}
 
-	connect(t, ctx, dhtA, dhtB)
+	connect(t, ctx, dhts[0], dhts[1])
 
-	log.Debug("adding value on: ", dhtA.self)
+	t.Log("adding value on: ", dhts[0].self)
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	err := dhtA.PutValue(ctxT, "/v/hello", []byte("world"))
+	err := dhts[0].PutValue(ctxT, "/v/hello", []byte("world"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	/*
-		ctxT, _ = context.WithTimeout(ctx, time.Second*2)
-		val, err := dhtA.GetValue(ctxT, "/v/hello")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if string(val) != "world" {
-			t.Fatalf("Expected 'world' got '%s'", string(val))
-		}
-	*/
-
-	log.Debug("requesting value on dht: ", dhtB.self)
+	t.Log("requesting value on dhts: ", dhts[1].self)
 	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
-	valb, err := dhtB.GetValue(ctxT, "/v/hello")
+
+	val, err := dhts[1].GetValue(ctxT, "/v/hello")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if string(valb) != "world" {
-		t.Fatalf("Expected 'world' got '%s'", string(valb))
+	if string(val) != "world" {
+		t.Fatalf("Expected 'world' got '%s'", string(val))
+	}
+
+	// late connect
+
+	connect(t, ctx, dhts[2], dhts[0])
+	connect(t, ctx, dhts[2], dhts[1])
+
+	t.Log("requesting value (offline) on dhts: ", dhts[2].self)
+	vala, err := dhts[2].GetValue(ctxT, "/v/hello", Quorum(0))
+	if vala != nil {
+		t.Fatalf("offline get should have failed, got %s", string(vala))
+	}
+	if err != routing.ErrNotFound {
+		t.Fatalf("offline get should have failed with ErrNotFound, got: %s", err)
+	}
+
+	t.Log("requesting value (online) on dhts: ", dhts[2].self)
+	val, err = dhts[2].GetValue(ctxT, "/v/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(val) != "world" {
+		t.Fatalf("Expected 'world' got '%s'", string(val))
+	}
+
+	for _, d := range dhts[:3] {
+		connect(t, ctx, dhts[3], d)
+	}
+	connect(t, ctx, dhts[4], dhts[3])
+
+	t.Log("requesting value (requires peer routing) on dhts: ", dhts[4].self)
+	val, err = dhts[4].GetValue(ctxT, "/v/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(val) != "world" {
+		t.Fatalf("Expected 'world' got '%s'", string(val))
 	}
 }
 

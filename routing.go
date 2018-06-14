@@ -47,6 +47,29 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	}()
 	log.Debugf("PutValue %s", key)
 
+	// don't even allow local users to put bad values.
+	if err := dht.Validator.Validate(key, value); err != nil {
+		return err
+	}
+
+	old, err := dht.getLocal(key)
+	if err != nil {
+		// Means something is wrong with the datastore.
+		return err
+	}
+
+	// Check if we have an old value that's not the same as the new one.
+	if old != nil && !bytes.Equal(old.GetValue(), value) {
+		// Check to see if the new one is better.
+		i, err := dht.Validator.Select(key, [][]byte{value, old.GetValue()})
+		if err != nil {
+			return err
+		}
+		if i != 0 {
+			return fmt.Errorf("can't replace a newer value with an older value")
+		}
+	}
+
 	rec := record.MakePutRecord(key, value)
 	rec.TimeReceived = proto.String(u.FormatRFC3339(time.Now()))
 	err = dht.putLocal(key, rec)
@@ -177,7 +200,11 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 
 	// If we have it local, don't bother doing an RPC!
 	lrec, err := dht.getLocal(key)
-	if err == nil {
+	if err != nil {
+		// something is wrong with the datastore.
+		return nil, err
+	}
+	if lrec != nil {
 		// TODO: this is tricky, we don't always want to trust our own value
 		// what if the authoritative source updated it?
 		log.Debug("have it locally")
@@ -190,7 +217,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 			return vals, nil
 		}
 	} else if nvals == 0 {
-		return nil, err
+		return nil, routing.ErrNotFound
 	}
 
 	// get closest peers in the routing table

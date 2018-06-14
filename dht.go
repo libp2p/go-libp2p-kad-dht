@@ -228,29 +228,17 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 // getLocal attempts to retrieve the value from the datastore
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	log.Debugf("getLocal %s", key)
-
-	v, err := dht.datastore.Get(mkDsKey(key))
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("found %s in local datastore")
-
-	byt, ok := v.([]byte)
-	if !ok {
-		return nil, errors.New("value stored in datastore not []byte")
-	}
-	rec := new(recpb.Record)
-	err = proto.Unmarshal(byt, rec)
+	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
 	if err != nil {
 		return nil, err
 	}
 
-	err = dht.Validator.Validate(rec.GetKey(), rec.GetValue())
-	if err != nil {
-		log.Debugf("local record verify failed: %s (discarded)", err)
-		return nil, err
-	}
+	// Double check the key. Can't hurt.
+	if rec != nil && rec.GetKey() != key {
+		log.Errorf("BUG: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
+		return nil, nil
 
+	}
 	return rec, nil
 }
 

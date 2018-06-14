@@ -236,7 +236,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	// Double check the key. Can't hurt.
 	if rec != nil && rec.GetKey() != key {
 		log.Errorf("BUG: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
-		return nil, routing.ErrNotFound
+		return nil, nil
 
 	}
 	return rec, nil

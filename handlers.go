@@ -217,6 +217,8 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return pmes, err
 }
 
+// returns nil, nil when either nothing is found or the value found doesn't properly validate.
+// returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
 func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
 	reci, err := dht.datastore.Get(dskey)
 	if err == ds.ErrNotFound {

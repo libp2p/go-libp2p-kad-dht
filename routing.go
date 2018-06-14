@@ -217,7 +217,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 			return vals, nil
 		}
 	} else if nvals == 0 {
-		return nil, err
+		return nil, routing.ErrNotFound
 	}
 
 	// get closest peers in the routing table

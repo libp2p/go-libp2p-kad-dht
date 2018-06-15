@@ -1137,7 +1137,7 @@ func TestFindPeerQuery(t *testing.T) {
 
 	sort.Sort(peer.IDSlice(allpeers[1:]))
 	sort.Sort(peer.IDSlice(outpeers))
-	fmt.Println("counts: ", count, notfromrtable)
+
 	actualclosest := kb.SortClosestPeers(allpeers[1:], rtval)
 	exp := actualclosest[:20]
 	got := kb.SortClosestPeers(outpeers, rtval)

@@ -113,7 +113,11 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 }
 
 func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
-	dht.Update(ctx, p)
+	// Make sure that this node is actually a DHT server, not just a client.
+	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+	if err == nil && len(protos) > 0 {
+		dht.Update(ctx, p)
+	}
 	return nil
 }
 

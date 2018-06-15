@@ -1025,6 +1025,45 @@ func TestClientModeConnect(t *testing.T) {
 	if provs[0].ID != p {
 		t.Fatal("expected it to be our test peer")
 	}
+	if a.routingTable.Find(b.self) != "" {
+		t.Fatal("DHT clients should not be added to routing tables")
+	}
+	if b.routingTable.Find(a.self) == "" {
+		t.Fatal("DHT server should have been added to the dht client's routing table")
+	}
+}
+
+func TestClientModeFindPeer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := setupDHT(ctx, t, false)
+	b := setupDHT(ctx, t, true)
+	c := setupDHT(ctx, t, true)
+
+	connectNoSync(t, ctx, a, b)
+	connectNoSync(t, ctx, a, c)
+
+	// Can't use `connect` because b and c are only clients.
+	for b.routingTable.Find(a.self) == "" {
+		time.Sleep(time.Millisecond * 5)
+	}
+	for c.routingTable.Find(a.self) == "" {
+		time.Sleep(time.Millisecond * 5)
+	}
+
+	pi, err := c.FindPeer(ctx, b.self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pi.Addrs) == 0 {
+		t.Fatal("should have found addresses for node b")
+	}
+
+	err = c.host.Connect(ctx, pi)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFindPeerQuery(t *testing.T) {

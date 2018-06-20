@@ -284,7 +284,7 @@ func (pm *ProviderManager) run() {
 					continue
 				}
 				for p, t := range provs.set {
-					if (time.Now().Sub(t) > ProvideValidity && !util.IsPointer(p)) || (time.Now().Sub(t) > util.PointerValidity && util.IsPointer(p)) {
+					if (now.Sub(t) > ProvideValidity && !util.IsPointer(p)) || (now.Sub(t) > util.PointerValidity && util.IsPointer(p)) {
 						delete(provs.set, p)
 					}
 				}

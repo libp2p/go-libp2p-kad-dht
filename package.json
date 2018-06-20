@@ -48,9 +48,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmPpegoMqhAEqjncrzArm7KVWAkCm78rqL2DPuNjhPrshg",
+      "hash": "QmXRKBQA4wXP7xWbFiZsR1GP4HV6wMDQ1aWFxZZ4uBcPX9",
       "name": "go-datastore",
-      "version": "1.4.1"
+      "version": "2.4.0"
     },
     {
       "author": "hashicorp",

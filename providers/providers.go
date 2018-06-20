@@ -15,7 +15,7 @@ import (
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
 	peer "github.com/libp2p/go-libp2p-peer"
-	autobatch "github.com/whyrusleeping/autobatch"
+	autobatch "github.com/ipfs/go-datastore/autobatch"
 	base32 "github.com/whyrusleeping/base32"
 	"github.com/libp2p/go-libp2p-kad-dht/util"
 )

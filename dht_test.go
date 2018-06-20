@@ -12,11 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
+	u "github.com/ipfs/go-ipfs-util"
+	"github.com/libp2p/go-libp2p-host"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-
-	cid "github.com/ipfs/go-cid"
-	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -24,7 +26,8 @@ import (
 	routing "github.com/libp2p/go-libp2p-routing"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
-	ci "github.com/libp2p/go-testutil/ci"
+	"github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/libp2p/go-testutil/ci"
 	travisci "github.com/libp2p/go-testutil/ci/travis"
 	ma "github.com/multiformats/go-multiaddr"
 )
@@ -64,6 +67,7 @@ func (testValidator) Select(_ string, bs [][]byte) (int, error) {
 	}
 	return index, nil
 }
+
 func (testValidator) Validate(_ string, b []byte) error {
 	if bytes.Compare(b, []byte("expired")) == 0 {
 		return errors.New("expired")
@@ -71,21 +75,26 @@ func (testValidator) Validate(_ string, b []byte) error {
 	return nil
 }
 
-func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
+func setupDHTWithSwarm(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
+	return setupDHT(ctx, t, client, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)))
+}
+
+func setupDHT(ctx context.Context, t *testing.T, client bool, host host.Host) *IpfsDHT {
 	d, err := New(
 		ctx,
-		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		host,
+		opts.Datastore(dssync.MutexWrap(ds.NewMapDatastore())),
 		opts.Client(client),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return d
 }
 
-func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer.ID, []*IpfsDHT) {
+func setupDHTsWithMocknet(ctx context.Context, n int, t *testing.T, latency time.Duration) ([]ma.Multiaddr, []peer.ID, []*IpfsDHT) {
 	addrs := make([]ma.Multiaddr, n)
 	dhts := make([]*IpfsDHT, n)
 	peers := make([]peer.ID, n)
@@ -93,8 +102,18 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 	sanityAddrsMap := make(map[string]struct{})
 	sanityPeersMap := make(map[string]struct{})
 
+	mn := mocknet.New(ctx)
+	mn.SetLinkDefaults(mocknet.LinkOptions{
+		Latency: latency,
+	})
+
 	for i := 0; i < n; i++ {
-		dhts[i] = setupDHT(ctx, t, false)
+		h, err := mn.GenPeer()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		dhts[i] = setupDHT(ctx, t, false, h)
 		peers[i] = dhts[i].self
 		addrs[i] = dhts[i].peerstore.Addrs(dhts[i].self)[0]
 
@@ -109,6 +128,8 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 			sanityPeersMap[peers[i].String()] = struct{}{}
 		}
 	}
+
+	mn.LinkAll()
 
 	return addrs, peers, dhts
 }
@@ -171,7 +192,7 @@ func TestValueGetSet(t *testing.T) {
 	var dhts [5]*IpfsDHT
 
 	for i := range dhts {
-		dhts[i] = setupDHT(ctx, t, false)
+		dhts[i] = setupDHTWithSwarm(ctx, t, false)
 		defer dhts[i].Close()
 		defer dhts[i].host.Close()
 	}
@@ -243,8 +264,8 @@ func TestValueSetInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhtA := setupDHT(ctx, t, false)
-	dhtB := setupDHT(ctx, t, false)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -296,8 +317,8 @@ func TestValueGetInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhtA := setupDHT(ctx, t, false)
-	dhtB := setupDHT(ctx, t, false)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -339,34 +360,12 @@ func TestValueGetInvalid(t *testing.T) {
 	testSetGet("valid", "newer", nil)
 }
 
-func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dht := setupDHT(ctx, t, false)
-	defer dht.Close()
-
-	foo := peer.ID("asdasd")
-	_, err := dht.messageSenderForPeer(foo)
-	if err == nil {
-		t.Fatal("that shouldnt have succeeded")
-	}
-
-	dht.smlk.Lock()
-	mscnt := len(dht.strmap)
-	dht.smlk.Unlock()
-
-	if mscnt > 0 {
-		t.Fatal("should have no message senders in map")
-	}
-}
-
 func TestProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -416,7 +415,7 @@ func TestLocalProvides(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -504,7 +503,7 @@ func TestBootstrap(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -558,7 +557,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -629,7 +628,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 40
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -730,7 +729,7 @@ func TestProvidesAsync(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -772,7 +771,7 @@ func TestLayeredGet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -812,7 +811,7 @@ func TestFindPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, peers, dhts := setupDHTS(ctx, 4, t)
+	_, peers, dhts := setupDHTsWithMocknet(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -850,7 +849,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, peers, dhts := setupDHTS(ctx, 4, t)
+	_, peers, dhts := setupDHTsWithMocknet(ctx, 4, t, 0)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -938,8 +937,8 @@ func TestConnectCollision(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		dhtA := setupDHT(ctx, t, false)
-		dhtB := setupDHT(ctx, t, false)
+		dhtA := setupDHTWithSwarm(ctx, t, false)
+		dhtB := setupDHTWithSwarm(ctx, t, false)
 
 		addrA := dhtA.peerstore.Addrs(dhtA.self)[0]
 		addrB := dhtB.peerstore.Addrs(dhtB.self)[0]
@@ -991,7 +990,7 @@ func TestBadProtoMessages(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d := setupDHT(ctx, t, false)
+	d := setupDHTWithSwarm(ctx, t, false)
 
 	nilrec := new(pb.Message)
 	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
@@ -1003,8 +1002,8 @@ func TestClientModeConnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a := setupDHT(ctx, t, false)
-	b := setupDHT(ctx, t, true)
+	a := setupDHTWithSwarm(ctx, t, false)
+	b := setupDHTWithSwarm(ctx, t, true)
 
 	connectNoSync(t, ctx, a, b)
 
@@ -1032,7 +1031,7 @@ func TestFindPeerQuery(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 101
-	_, allpeers, dhts := setupDHTS(ctx, nDHTs, t)
+	_, allpeers, dhts := setupDHTsWithMocknet(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -1129,7 +1128,7 @@ func TestFindClosestPeers(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	_, _, dhts := setupDHTsWithMocknet(ctx, nDHTs, t, 0)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -1155,6 +1154,160 @@ func TestFindClosestPeers(t *testing.T) {
 	if len(out) != KValue {
 		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
 	}
+}
+
+func testConcurrentRequests(t *testing.T, reqs int, maxDelay time.Duration) {
+	ctx := context.Background()
+
+	_, peers, dhts := setupDHTsWithMocknet(ctx, 10, t, maxDelay)
+	defer func() {
+		for i := 0; i < 10; i++ {
+			dhts[i].Close()
+			dhts[i].host.Close()
+		}
+	}()
+
+	connect(t, ctx, dhts[0], dhts[1])
+	for i := 2; i < 10; i++ {
+		connect(t, ctx, dhts[1], dhts[i])
+	}
+
+	ctxT, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	wg := &sync.WaitGroup{}
+	j := 2
+	for i := 0; i < reqs; i++ {
+		wg.Add(1)
+
+		go func(j int) {
+			defer wg.Done()
+
+			p, err := dhts[0].FindPeer(ctxT, peers[j])
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if p.ID == "" {
+				t.Fatal("Failed to find peer.")
+			}
+
+			if p.ID != peers[j] {
+				t.Fatal("Didnt find expected peer.")
+			}
+
+		}(j)
+
+		j++
+		if j == 10 {
+			j = 2
+		}
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrentRequests(t *testing.T) {
+	testConcurrentRequests(t, 32, 0)
+}
+
+func TestConcurrentRequestsOverload(t *testing.T) {
+	testConcurrentRequests(t, 128, 0)
+}
+
+func TestDelayedConcurrentRequests(t *testing.T) {
+	if ci.IsRunning() {
+		t.Skip("skip on CI - timing dependent")
+	}
+
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	reqs := 50
+	latency := time.Millisecond * 100
+	ctx := context.Background()
+
+	_, _, dhts := setupDHTsWithMocknet(ctx, reqs, t, latency)
+	defer func() {
+		for i := 0; i < reqs; i++ {
+			dhts[i].Close()
+			dhts[i].host.Close()
+		}
+	}()
+
+	// connect 0 with 1, and 1 with everything else
+	connect(t, ctx, dhts[0], dhts[1])
+	for i := 2; i < reqs; i++ {
+		connect(t, ctx, dhts[1], dhts[i])
+	}
+
+	// ensure that our PutValue and GetValue calls complete
+	// within 15 seconds
+	ctxT, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	// PutValue everything into DHT 0
+	putValueWg := &sync.WaitGroup{}
+	checkpoint := time.Now()
+	for i := 0; i < reqs; i++ {
+		putValueWg.Add(1)
+
+		go func(j int) {
+			defer putValueWg.Done()
+
+			cid := cid.NewCidV0(u.Hash([]byte(fmt.Sprintf("test%d", j))))
+			key := fmt.Sprintf("/v/%s", string(cid.Bytes()))
+			val := []byte(key)
+
+			err := dhts[0].PutValue(ctxT, key, val)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}(i)
+	}
+
+	putValueWg.Wait()
+	elapsed := time.Since(checkpoint)
+
+	if elapsed > 10*time.Second {
+		t.Fatal("took too long")
+	}
+
+	fmt.Printf("PutValue calls completed in %s\n", elapsed)
+
+	// GetValue from each DHT and ensure that the key/values
+	// are correct
+	getValueWg := &sync.WaitGroup{}
+	checkpoint = time.Now()
+	for i := 0; i < reqs; i++ {
+		getValueWg.Add(1)
+
+		go func(j int) {
+			defer getValueWg.Done()
+
+			cid := cid.NewCidV0(u.Hash([]byte(fmt.Sprintf("test%d", j))))
+			key := fmt.Sprintf("/v/%s", string(cid.Bytes()))
+
+			val, err := dhts[j].GetValue(ctxT, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if string(val) != key {
+				t.Fatalf("Expected '%s' got '%s'", key, string(val))
+			}
+		}(i)
+	}
+
+	getValueWg.Wait()
+	elapsed = time.Since(checkpoint)
+
+	if elapsed > 5*time.Second {
+		t.Fatal("took too long")
+	}
+
+	fmt.Printf("GetValue calls completed in %s\n", elapsed)
 }
 
 func TestGetSetPluggedProtocol(t *testing.T) {

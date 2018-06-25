@@ -114,6 +114,8 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 }
 
 func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+	t.Helper()
+
 	idB := b.self
 	addrB := b.peerstore.Addrs(idB)
 	if len(addrB) == 0 {
@@ -127,18 +129,25 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	}
 }
 
-func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
-	connectNoSync(t, ctx, a, b)
+func wait(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+	t.Helper()
 
 	// loop until connection notification has been received.
 	// under high load, this may not happen as immediately as we would like.
 	for a.routingTable.Find(b.self) == "" {
-		time.Sleep(time.Millisecond * 5)
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Millisecond * 5):
+		}
 	}
+}
 
-	for b.routingTable.Find(a.self) == "" {
-		time.Sleep(time.Millisecond * 5)
-	}
+func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+	t.Helper()
+	connectNoSync(t, ctx, a, b)
+	wait(t, ctx, a, b)
+	wait(t, ctx, b, a)
 }
 
 func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
@@ -1034,23 +1043,19 @@ func TestClientModeConnect(t *testing.T) {
 }
 
 func TestClientModeFindPeer(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	a := setupDHT(ctx, t, false)
 	b := setupDHT(ctx, t, true)
 	c := setupDHT(ctx, t, true)
 
-	connectNoSync(t, ctx, a, b)
-	connectNoSync(t, ctx, a, c)
+	connectNoSync(t, ctx, b, a)
+	connectNoSync(t, ctx, c, a)
 
 	// Can't use `connect` because b and c are only clients.
-	for b.routingTable.Find(a.self) == "" {
-		time.Sleep(time.Millisecond * 5)
-	}
-	for c.routingTable.Find(a.self) == "" {
-		time.Sleep(time.Millisecond * 5)
-	}
+	wait(t, ctx, b, a)
+	wait(t, ctx, c, a)
 
 	pi, err := c.FindPeer(ctx, b.self)
 	if err != nil {

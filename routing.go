@@ -176,7 +176,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 				defer cancel()
 				err := dht.putValueToPeer(ctx, v.From, key, fixupRec)
 				if err != nil {
-					log.Error("Error correcting DHT entry: ", err)
+					log.Debug("Error correcting DHT entry: ", err)
 				}
 			}(v)
 		}

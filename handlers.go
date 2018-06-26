@@ -12,6 +12,7 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	lgbl "github.com/libp2p/go-libp2p-loggables"
+	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -266,10 +267,28 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	var closest []peer.ID
 
 	// if looking for self... special case where we send it on CloserPeers.
-	if peer.ID(pmes.GetKey()) == dht.self {
+	targetPid := peer.ID(pmes.GetKey())
+	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
 	} else {
 		closest = dht.betterPeersToQuery(pmes, p, CloserPeerCount)
+
+		// Never tell a peer about itself.
+		if targetPid != p {
+			// If we're connected to the target peer, report their
+			// peer info. This makes FindPeer work even if the
+			// target peer isn't in our routing table.
+			//
+			// Alternatively, we could just check our peerstore.
+			// However, we don't want to return out of date
+			// information. We can change this in the future when we
+			// add a progressive, asynchronous `SearchPeer` function
+			// and improve peer routing in the host.
+			switch dht.host.Network().Connectedness(targetPid) {
+			case inet.Connected, inet.CanConnect:
+				closest = append(closest, targetPid)
+			}
+		}
 	}
 
 	if closest == nil {

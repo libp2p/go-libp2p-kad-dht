@@ -23,6 +23,7 @@ import (
 	ci "github.com/libp2p/go-libp2p-crypto"
 	host "github.com/libp2p/go-libp2p-host"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	protocol "github.com/libp2p/go-libp2p-protocol"
@@ -272,11 +273,12 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
 func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
-	p := dht.routingTable.Find(id)
-	if p != "" {
-		return dht.peerstore.PeerInfo(p)
+	switch dht.host.Network().Connectedness(id) {
+	case inet.Connected, inet.CanConnect:
+		return dht.peerstore.PeerInfo(id)
+	default:
+		return pstore.PeerInfo{}
 	}
-	return pstore.PeerInfo{}
 }
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is

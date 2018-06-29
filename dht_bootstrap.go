@@ -89,7 +89,6 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 				default:
 					// Don't queue ticks, like Tickers
 					log.Warning("Previous bootstrapping attempt not completed within bootstrapping period")
-					continue
 				}
 			case <-dht.Context().Done():
 				return

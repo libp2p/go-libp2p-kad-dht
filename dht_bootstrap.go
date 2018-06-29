@@ -77,7 +77,25 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
 
-	proc := periodicproc.Tick(cfg.Period, dht.bootstrapWorker(cfg))
+	tickch := make(chan struct{}, 1)
+	proc := periodicproc.OnSignal(tickch, dht.bootstrapWorker(cfg))
+	go func() {
+		tickch <- struct{}{}
+		for {
+			select {
+			case <-time.After(cfg.Period):
+				select {
+				case tickch <- struct{}{}:
+				default:
+					// Don't queue ticks, like Tickers
+					log.Warning("Previous bootstrapping attempt not completed within bootstrapping period")
+					continue
+				}
+			case <-dht.Context().Done():
+				return
+			}
+		}
+	}()
 
 	return proc, nil
 }

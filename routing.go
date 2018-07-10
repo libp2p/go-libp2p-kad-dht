@@ -120,8 +120,6 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 		}
 		eip.Done()
 	}()
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
 
 	var cfg ropts.Options
 	if err := cfg.Apply(opts...); err != nil {
@@ -280,15 +278,18 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 		return res, nil
 	})
 
-	// run it!
-	_, err = query.Run(ctx, rtp)
-	if len(vals) == 0 {
-		if err != nil {
-			return nil, err
-		}
-	}
+	reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	_, err = query.Run(reqCtx, rtp)
 
-	return vals, nil
+	// We do have some values but we either ran out of peers to query or
+	// searched for a whole minute.
+	//
+	// We'll just call this a success.
+	if len(vals) > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
+		err = nil
+	}
+	return vals, err
 }
 
 // Provider abstraction for indirect stores.

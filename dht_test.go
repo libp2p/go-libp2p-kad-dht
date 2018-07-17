@@ -332,7 +332,7 @@ func TestValueGetInvalid(t *testing.T) {
 		defer cancel()
 		valb, err := dhtB.GetValue(ctxT, "/v/hello")
 		if err != experr {
-			t.Errorf("Set/Get %v: Expected %v error but got %v", val, experr, err)
+			t.Errorf("Set/Get %v: Expected '%v' error but got '%v'", val, experr, err)
 		} else if err == nil && string(valb) != exp {
 			t.Errorf("Expected '%v' got '%s'", exp, string(valb))
 		}

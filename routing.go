@@ -120,9 +120,45 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 		eip.Done()
 	}()
 
+	responses, errCh := dht.SearchValue(ctx, key, opts...)
+	var best []byte
+
+	loop:
+	for {
+		select {
+		case r, ok := <-responses:
+			if !ok {
+				if errCh == nil {
+					break loop
+				}
+				responses = nil
+				continue
+			}
+			best = r
+
+		case err, ok := <- errCh:
+			if !ok {
+				if responses == nil {
+					break loop
+				}
+				errCh = nil
+				continue
+			}
+			return nil, err
+		}
+	}
+
+	if best == nil {
+		return nil, routing.ErrNotFound
+	}
+	log.Debugf("GetValue %v %v", key, best)
+	return best, nil
+}
+
+func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.Option) (<-chan []byte, <-chan error) {
 	var cfg ropts.Options
 	if err := cfg.Apply(opts...); err != nil {
-		return nil, err
+		return nil, wrapErr(err)
 	}
 
 	responsesNeeded := 0
@@ -130,91 +166,139 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 		responsesNeeded = getQuorum(&cfg)
 	}
 
-	vals, err := dht.GetValues(ctx, key, responsesNeeded)
-	if err != nil {
-		return nil, err
-	}
+	out := make(chan []byte, responsesNeeded)
+	outErr := make(chan error, 1)
+	go func() {
+		defer close(out)
+		defer close(outErr)
 
-	recs := make([][]byte, 0, len(vals))
-	for _, v := range vals {
-		if v.Val != nil {
-			recs = append(recs, v.Val)
-		}
-	}
-	if len(recs) == 0 {
-		return nil, routing.ErrNotFound
-	}
+		valCh, errCh := dht.GetValues(ctx, key, responsesNeeded)
+		vals := make([]RecvdVal, 0, responsesNeeded)
+		best := -1
 
-	i, err := dht.Validator.Select(key, recs)
-	if err != nil {
-		return nil, err
-	}
+		defer func() {
+			if len(vals) <= 1 || best < 0 {
+				return
+			}
+			fixupRec := record.MakePutRecord(key, vals[best].Val)
+			for _, v := range vals {
+				// if someone sent us a different 'less-valid' record, lets correct them
+				if !bytes.Equal(v.Val, vals[best].Val) {
+					go func(v RecvdVal) {
+						if v.From == dht.self {
+							err := dht.putLocal(key, fixupRec)
+							if err != nil {
+								log.Error("Error correcting local dht entry:", err)
+							}
+							return
+						}
+						ctx, cancel := context.WithTimeout(dht.Context(), time.Second*30)
+						defer cancel()
+						err := dht.putValueToPeer(ctx, v.From, fixupRec)
+						if err != nil {
+							log.Debug("Error correcting DHT entry: ", err)
+						}
+					}(v)
+				}
+			}
+		}()
 
-	best := recs[i]
-	log.Debugf("GetValue %v %v", key, best)
-	if best == nil {
-		log.Errorf("GetValue yielded correct record with nil value.")
-		return nil, routing.ErrNotFound
-	}
-
-	fixupRec := record.MakePutRecord(key, best)
-	for _, v := range vals {
-		// if someone sent us a different 'less-valid' record, lets correct them
-		if !bytes.Equal(v.Val, best) {
-			go func(v RecvdVal) {
-				if v.From == dht.self {
-					err := dht.putLocal(key, fixupRec)
-					if err != nil {
-						log.Error("Error correcting local dht entry:", err)
+		for {
+			select {
+			case v, ok := <-valCh:
+				if !ok {
+					if errCh == nil {
+						return
 					}
-					return
+					// failed to find a good record
+					if best < 0 {
+						outErr <- routing.ErrNotFound
+					}
+					valCh = nil
+					continue
 				}
-				ctx, cancel := context.WithTimeout(dht.Context(), time.Second*30)
-				defer cancel()
-				err := dht.putValueToPeer(ctx, v.From, fixupRec)
-				if err != nil {
-					log.Debug("Error correcting DHT entry: ", err)
-				}
-			}(v)
-		}
-	}
 
-	return best, nil
+				vals = append(vals, v)
+
+				if v.Val == nil {
+					continue
+				}
+				// Select best value
+				if best > -1 {
+					i, err := dht.Validator.Select(key, [][]byte{vals[best].Val, v.Val})
+					if err != nil {
+						continue //TODO: Do we want to do something with the error here?
+					}
+					if i != best && !bytes.Equal(v.Val, vals[best].Val) {
+						best = i
+						out <- v.Val
+					}
+				} else {
+					// Output first valid value
+					if err := dht.Validator.Validate(key, v.Val); err == nil {
+						best = len(vals) - 1
+						out <- v.Val
+					}
+				}
+			case err, ok := <-errCh:
+				if !ok {
+					if valCh == nil {
+						return
+					}
+					errCh = nil
+					continue
+				}
+				outErr <- err
+				return
+			case <-ctx.Done():
+				outErr <- ctx.Err()
+				return
+			}
+		}
+	}()
+
+	return out, outErr
 }
 
 // GetValues gets nvals values corresponding to the given key.
-func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
+func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (<-chan RecvdVal, <-chan error) {
 	eip := log.EventBegin(ctx, "GetValues")
-	defer func() {
+
+	vals := make(chan RecvdVal, nvals)
+
+	done := func(err error) (<-chan RecvdVal, <-chan error) {
+		defer close(vals)
+
 		eip.Append(loggableKey(key))
 		if err != nil {
 			eip.SetError(err)
 		}
 		eip.Done()
-	}()
-	vals := make([]RecvdVal, 0, nvals)
-	var valslock sync.Mutex
+		return vals, wrapErr(err)
+	}
 
 	// If we have it local, don't bother doing an RPC!
 	lrec, err := dht.getLocal(key)
 	if err != nil {
 		// something is wrong with the datastore.
-		return nil, err
+		return done(err)
 	}
 	if lrec != nil {
 		// TODO: this is tricky, we don't always want to trust our own value
 		// what if the authoritative source updated it?
 		log.Debug("have it locally")
-		vals = append(vals, RecvdVal{
+		vals <- RecvdVal{
 			Val:  lrec.GetValue(),
 			From: dht.self,
-		})
+		}
 
 		if nvals <= 1 {
-			return vals, nil
+			return done(nil)
 		}
+
+		nvals--
 	} else if nvals == 0 {
-		return nil, routing.ErrNotFound
+		return done(routing.ErrNotFound)
 	}
 
 	// get closest peers in the routing table
@@ -222,8 +306,11 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	log.Debugf("peers in rt: %d %s", len(rtp), rtp)
 	if len(rtp) == 0 {
 		log.Warning("No peers from routing table!")
-		return nil, kb.ErrLookupFailure
+		return done(kb.ErrLookupFailure)
 	}
+
+	var valslock sync.Mutex
+	var got int
 
 	// setup the Query
 	parent := ctx
@@ -259,10 +346,11 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 				From: p,
 			}
 			valslock.Lock()
-			vals = append(vals, rv)
+			vals <- rv
+			got++
 
 			// If we have collected enough records, we're done
-			if len(vals) >= nvals {
+			if nvals == got {
 				res.success = true
 			}
 			valslock.Unlock()
@@ -277,18 +365,28 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 		return res, nil
 	})
 
-	reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	_, err = query.Run(reqCtx, rtp)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
 
-	// We do have some values but we either ran out of peers to query or
-	// searched for a whole minute.
-	//
-	// We'll just call this a success.
-	if len(vals) > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
-		err = nil
-	}
-	return vals, err
+		_, err = query.Run(reqCtx, rtp)
+
+		// We do have some values but we either ran out of peers to query or
+		// searched for a whole minute.
+		//
+		// We'll just call this a success.
+		if got > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
+			err = nil
+		}
+		if err != nil {
+			errCh <- err
+		}
+		done(err)
+	}()
+
+	return vals, errCh
 }
 
 // Provider abstraction for indirect stores.
@@ -609,4 +707,13 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 	}()
 
 	return peerchan, nil
+}
+
+func wrapErr(err error) <-chan error {
+	ch := make(chan error, 1)
+	if err != nil {
+		ch <- err
+	}
+	close(ch)
+	return ch
 }

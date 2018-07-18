@@ -226,6 +226,20 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 }
 
 // GetValues gets nvals values corresponding to the given key.
+func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
+	valCh, err := dht.getValues(ctx, key, nvals)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]RecvdVal, 0, nvals)
+	for val := range valCh {
+		out = append(out, val)
+	}
+
+	return out, nil
+}
+
 func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-chan RecvdVal, error) {
 	eip := log.EventBegin(ctx, "GetValues")
 

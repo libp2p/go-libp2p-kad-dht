@@ -301,6 +301,67 @@ func TestValueSetInvalid(t *testing.T) {
 	testSetGet("valid", true, "newer", nil)
 }
 
+func TestSearchValue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+
+	defer dhtA.Close()
+	defer dhtB.Close()
+	defer dhtA.host.Close()
+	defer dhtB.host.Close()
+
+	connect(t, ctx, dhtA, dhtB)
+
+	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	err := dhtA.PutValue(ctxT, "/v/hello", []byte("valid"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
+	defer cancel()
+	valCh, errCh := dhtA.SearchValue(ctxT, "/v/hello")
+
+	select {
+	case v := <-valCh:
+		if string(v) != "valid" {
+			t.Errorf("expected 'valid', got '%s'", string(v))
+		}
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctxT.Done():
+		t.Fatal(ctxT.Err())
+	}
+
+	err = dhtB.PutValue(ctxT, "/v/hello", []byte("newer"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	select {
+	case v := <-valCh:
+		if string(v) != "newer" {
+			t.Errorf("expected 'newer', got '%s'", string(v))
+		}
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctxT.Done():
+		t.Fatal(ctxT.Err())
+	}
+}
+
 func TestValueGetInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

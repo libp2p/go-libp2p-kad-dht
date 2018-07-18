@@ -1271,12 +1271,12 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		err = dhtA.PutValue(ctx, "/v/cat", []byte("meow"))
 		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
-			t.Fatal("should not have been able to find any peers in routing table")
+			t.Fatalf("put should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 
 		_, err = dhtB.GetValue(ctx, "/v/cat")
 		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
-			t.Fatal("should not have been able to find any peers in routing table")
+			t.Fatalf("get should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 	})
 }

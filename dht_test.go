@@ -328,16 +328,15 @@ func TestSearchValue(t *testing.T) {
 
 	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
-	valCh, errCh := dhtA.SearchValue(ctxT, "/v/hello")
+	valCh, err := dhtA.SearchValue(ctxT, "/v/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case v := <-valCh:
 		if string(v) != "valid" {
 			t.Errorf("expected 'valid', got '%s'", string(v))
-		}
-	case err := <-errCh:
-		if err != nil {
-			t.Fatal(err)
 		}
 	case <-ctxT.Done():
 		t.Fatal(ctxT.Err())
@@ -352,10 +351,6 @@ func TestSearchValue(t *testing.T) {
 	case v := <-valCh:
 		if string(v) != "newer" {
 			t.Errorf("expected 'newer', got '%s'", string(v))
-		}
-	case err := <-errCh:
-		if err != nil {
-			t.Fatal(err)
 		}
 	case <-ctxT.Done():
 		t.Fatal(ctxT.Err())

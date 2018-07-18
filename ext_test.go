@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"io"
 	"math/rand"
 	"testing"
 	"time"
@@ -12,9 +11,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
-	record "github.com/libp2p/go-libp2p-record"
-	routing "github.com/libp2p/go-libp2p-routing"
-	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-routing"
+	"github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
 func TestGetFailures(t *testing.T) {
@@ -48,7 +47,7 @@ func TestGetFailures(t *testing.T) {
 			err = merr[0]
 		}
 
-		if err != io.EOF {
+		if err != routing.ErrNotFound {
 			t.Fatal("Got different error than we expected", err)
 		}
 	} else {

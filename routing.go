@@ -120,6 +120,13 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 		eip.Done()
 	}()
 
+	// apply defaultQuorum if relevant
+	var cfg ropts.Options
+	if err := cfg.Apply(opts...); err != nil {
+		return nil, err
+	}
+	opts = append(opts, Quorum(getQuorum(&cfg, defaultQuorum)))
+
 	responses, err := dht.SearchValue(ctx, key, opts...)
 	if err != nil {
 		return nil, err
@@ -145,7 +152,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 
 	responsesNeeded := 0
 	if !cfg.Offline {
-		responsesNeeded = getQuorum(&cfg)
+		responsesNeeded = getQuorum(&cfg, -1)
 	}
 
 	valCh, err := dht.getValues(ctx, key, responsesNeeded)

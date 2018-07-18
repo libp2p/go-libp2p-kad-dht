@@ -6,6 +6,8 @@ import (
 
 type quorumOptionKey struct{}
 
+const defaultQuorum = 16
+
 // Quorum is a DHT option that tells the DHT how many peers it needs to get
 // values from before returning the best one.
 //
@@ -20,10 +22,10 @@ func Quorum(n int) ropts.Option {
 	}
 }
 
-func getQuorum(opts *ropts.Options) int {
+func getQuorum(opts *ropts.Options, ndefault int) int {
 	responsesNeeded, ok := opts.Other[quorumOptionKey{}].(int)
 	if !ok {
-		responsesNeeded = 16
+		responsesNeeded = ndefault
 	}
 	return responsesNeeded
 }

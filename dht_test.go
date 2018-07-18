@@ -328,7 +328,7 @@ func TestSearchValue(t *testing.T) {
 
 	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
-	valCh, err := dhtA.SearchValue(ctxT, "/v/hello")
+	valCh, err := dhtA.SearchValue(ctxT, "/v/hello", Quorum(-1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestGetValues(t *testing.T) {
 		t.Fatalf("expected to get 2 values, got %d", len(vals))
 	}
 
-	sort.Slice(vals, func(i, j int) bool {return string(vals[i].Val) < string(vals[j].Val)})
+	sort.Slice(vals, func(i, j int) bool { return string(vals[i].Val) < string(vals[j].Val) })
 
 	if string(vals[0].Val) != "valid" {
 		t.Errorf("unexpected vals[0]: %s", string(vals[0].Val))

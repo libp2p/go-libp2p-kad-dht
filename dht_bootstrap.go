@@ -78,24 +78,10 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 	}
 
 	proc := dht.Process().Go(func(p goprocess.Process) {
-		workerch := make(chan (<-chan struct{}))
-		bootstrap := func() {
-			proc := p.Go(dht.bootstrapWorker(cfg))
-			workerch <- proc.Closed()
-		}
-		go bootstrap()
 		for {
 			select {
 			case <-time.After(cfg.Period):
-				ch := <-workerch
-				select {
-				case <-ch:
-					go bootstrap()
-				case <-p.Closing():
-					return
-				default:
-					log.Warning("Previous bootstrapping attempt not completed within bootstrapping period")
-				}
+				<-p.Go(dht.bootstrapWorker(cfg)).Closed()
 			case <-p.Closing():
 				return
 			}

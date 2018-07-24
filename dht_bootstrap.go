@@ -78,6 +78,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 	}
 
 	proc := dht.Process().Go(func(p goprocess.Process) {
+		<-p.Go(dht.bootstrapWorker(cfg)).Closed()
 		for {
 			select {
 			case <-time.After(cfg.Period):

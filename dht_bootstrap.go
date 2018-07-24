@@ -77,7 +77,17 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
 
-	proc := periodicproc.Tick(cfg.Period, dht.bootstrapWorker(cfg))
+	proc := dht.Process().Go(func(p goprocess.Process) {
+		<-p.Go(dht.bootstrapWorker(cfg)).Closed()
+		for {
+			select {
+			case <-time.After(cfg.Period):
+				<-p.Go(dht.bootstrapWorker(cfg)).Closed()
+			case <-p.Closing():
+				return
+			}
+		}
+	})
 
 	return proc, nil
 }

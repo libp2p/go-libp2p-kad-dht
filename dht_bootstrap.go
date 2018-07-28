@@ -22,8 +22,8 @@ import (
 // queries.
 type BootstrapConfig struct {
 	Queries int           // how many queries to run per period
-	Period  time.Duration // how often to run periodi cbootstrap.
-	Timeout time.Duration // how long to wait for a bootstrao query to run
+	Period  time.Duration // how often to run periodic bootstrap.
+	Timeout time.Duration // how long to wait for a bootstrap query to run
 }
 
 var DefaultBootstrapConfig = BootstrapConfig{

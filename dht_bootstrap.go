@@ -33,7 +33,7 @@ var DefaultBootstrapConfig = BootstrapConfig{
 	// of our implementation's robustness, we should lower this down to 8 or 4.
 	Queries: 1,
 
-	// For now, this is set to 1 minute, which is a medium period. We are
+	// For now, this is set to 5 minutes, which is a medium period. We are
 	// We are currently more interested in ensuring we have a properly formed
 	// DHT than making sure our dht minimizes traffic.
 	Period: time.Duration(5 * time.Minute),

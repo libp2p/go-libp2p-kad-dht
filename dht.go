@@ -150,7 +150,7 @@ func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID,
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
 	if err != nil {
-		log.Warningf("putValueToPeer: %s. (peer: %s, key: %s)", err.Error(), p.Pretty(), key)
+		log.Debugf("putValueToPeer: %v. (peer: %s, key: %s)", err, p.Pretty(), key)
 		return err
 	}
 
@@ -231,7 +231,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	log.Debugf("getLocal %s", key)
 	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
 	if err != nil {
-		log.Warningf("getLocal: %v", err.Error())
+		log.Warningf("getLocal: %s", err)
 		return nil, err
 	}
 
@@ -260,7 +260,7 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	log.Debugf("putLocal: %v %v", key, rec)
 	data, err := proto.Marshal(rec)
 	if err != nil {
-		log.Warningf("putLocal: %v", err.Error())
+		log.Warningf("putLocal: %s", err)
 		return err
 	}
 

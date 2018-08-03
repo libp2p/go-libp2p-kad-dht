@@ -36,6 +36,7 @@ func TestGetFailures(t *testing.T) {
 
 	// Reply with failures to every message
 	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+		time.Sleep(400 * time.Millisecond)
 		s.Close()
 	})
 
@@ -47,7 +48,7 @@ func TestGetFailures(t *testing.T) {
 			err = merr[0]
 		}
 
-		if err != routing.ErrNotFound {
+		if err != context.DeadlineExceeded {
 			t.Fatal("Got different error than we expected", err)
 		}
 	} else {

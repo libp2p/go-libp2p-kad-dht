@@ -11,9 +11,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
-	"github.com/libp2p/go-libp2p-record"
-	"github.com/libp2p/go-libp2p-routing"
-	"github.com/libp2p/go-libp2p/p2p/net/mock"
+	record "github.com/libp2p/go-libp2p-record"
+	routing "github.com/libp2p/go-libp2p-routing"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
 func TestGetFailures(t *testing.T) {

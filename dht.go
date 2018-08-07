@@ -150,15 +150,15 @@ func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID,
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
 	if err != nil {
-		if err == ErrReadTimeout {
-			log.Warningf("read timeout: %s %s", p.Pretty(), key)
-		}
+		log.Debugf("putValueToPeer: %v. (peer: %s, key: %s)", err, p.Pretty(), key)
 		return err
 	}
 
 	if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
+		log.Warningf("putValueToPeer: value not put correctly. (%v != %v)", pmes, rpmes)
 		return errors.New("value not put correctly")
 	}
+
 	return nil
 }
 
@@ -218,7 +218,7 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 	case nil:
 		return resp, nil
 	case ErrReadTimeout:
-		log.Warningf("read timeout: %s %s", p.Pretty(), key)
+		log.Warningf("getValueSingle: read timeout %s %s", p.Pretty(), key)
 		fallthrough
 	default:
 		eip.SetError(err)
@@ -231,12 +231,13 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	log.Debugf("getLocal %s", key)
 	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
 	if err != nil {
+		log.Warningf("getLocal: %s", err)
 		return nil, err
 	}
 
 	// Double check the key. Can't hurt.
 	if rec != nil && rec.GetKey() != key {
-		log.Errorf("BUG: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
+		log.Errorf("BUG getLocal: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
 		return nil, nil
 
 	}
@@ -256,8 +257,10 @@ func (dht *IpfsDHT) getOwnPrivateKey() (ci.PrivKey, error) {
 
 // putLocal stores the key value pair in the datastore
 func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
+	log.Debugf("putLocal: %v %v", key, rec)
 	data, err := proto.Marshal(rec)
 	if err != nil {
+		log.Warningf("putLocal: %s", err)
 		return err
 	}
 
@@ -334,7 +337,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 	// no node? nil
 	if closer == nil {
-		log.Warning("no closer peers to send:", p)
+		log.Warning("betterPeersToQuery: no closer peers to send:", p)
 		return nil
 	}
 
@@ -343,7 +346,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 		// == to self? thats bad
 		if clp == dht.self {
-			log.Warning("attempted to return self! this shouldn't happen...")
+			log.Error("BUG betterPeersToQuery: attempted to return self! this shouldn't happen...")
 			return nil
 		}
 		// Dont send a peer back themselves

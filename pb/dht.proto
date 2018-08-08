@@ -8,7 +8,7 @@
 syntax = "proto2";
 package dht.pb;
 
-import "record.proto";
+import "github.com/libp2p/go-libp2p-record/pb/record.proto";
 
 message Message {
 	enum MessageType {
@@ -37,7 +37,7 @@ message Message {
 
 	message Peer {
 		// ID of a given peer.
-		optional string id = 1;
+		optional bytes id = 1;
 
 		// multiaddrs for a given peer
 		repeated bytes addrs = 2;
@@ -55,7 +55,7 @@ message Message {
 
 	// Used to specify the key associated with this message.
 	// PUT_VALUE, GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
-	optional string key = 2;
+	optional bytes key = 2;
 
 	// Used to return a value
 	// PUT_VALUE, GET_VALUE

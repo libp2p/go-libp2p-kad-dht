@@ -183,7 +183,7 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 		log.Debug("getValueOrPeers: got value")
 
 		// make sure record is valid.
-		err = dht.Validator.Validate(record.GetKey(), record.GetValue())
+		err = dht.Validator.Validate(string(record.GetKey()), record.GetValue())
 		if err != nil {
 			log.Info("Received invalid record! (discarded)")
 			// return a sentinal to signify an invalid record was received
@@ -236,10 +236,9 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	}
 
 	// Double check the key. Can't hurt.
-	if rec != nil && rec.GetKey() != key {
-		log.Errorf("BUG getLocal: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
+	if rec != nil && string(rec.GetKey()) != key {
+		log.Errorf("BUG getLocal: found a DHT record that didn't match it's key: %s != %s", string(rec.GetKey()), key)
 		return nil, nil
-
 	}
 	return rec, nil
 }
@@ -327,7 +326,7 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key *cid
 
 // nearestPeersToQuery returns the routing tables closest peers.
 func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
-	closer := dht.routingTable.NearestPeers(kb.ConvertKey(pmes.GetKey()), count)
+	closer := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count)
 	return closer
 }
 

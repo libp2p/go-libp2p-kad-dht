@@ -20,7 +20,7 @@ type PeerRoutingInfo struct {
 func NewMessage(typ Message_MessageType, key string, level int) *Message {
 	m := &Message{
 		Type: &typ,
-		Key:  &key,
+		Key:  []byte(key),
 	}
 	m.SetClusterLevel(level)
 	return m
@@ -33,8 +33,7 @@ func peerRoutingInfoToPBPeer(p PeerRoutingInfo) *Message_Peer {
 	for i, maddr := range p.Addrs {
 		pbp.Addrs[i] = maddr.Bytes() // Bytes, not String. Compressed.
 	}
-	s := string(p.ID)
-	pbp.Id = &s
+	pbp.Id = []byte(p.ID)
 	c := ConnectionType(p.Connectedness)
 	pbp.Connection = &c
 	return pbp
@@ -47,8 +46,7 @@ func peerInfoToPBPeer(p pstore.PeerInfo) *Message_Peer {
 	for i, maddr := range p.Addrs {
 		pbp.Addrs[i] = maddr.Bytes() // Bytes, not String. Compressed.
 	}
-	s := string(p.ID)
-	pbp.Id = &s
+	pbp.Id = []byte(p.ID)
 	return pbp
 }
 
@@ -144,7 +142,7 @@ func (m *Message) Loggable() map[string]interface{} {
 	return map[string]interface{}{
 		"message": map[string]string{
 			"type": m.Type.String(),
-			"key":  b58.Encode([]byte(m.GetKey())),
+			"key":  b58.Encode(m.GetKey()),
 		},
 	}
 }

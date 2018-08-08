@@ -52,13 +52,13 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		}
 		eip.Done()
 	}()
-	log.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
+	log.Debugf("%s handleGetValue for key: %s", dht.self, string(pmes.GetKey()))
 
 	// setup response
-	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
+	resp := pb.NewMessage(pmes.GetType(), string(pmes.GetKey()), pmes.GetClusterLevel())
 
 	// first, is there even a key?
-	k := pmes.GetKey()
+	k := string(pmes.GetKey())
 	if k == "" {
 		return nil, errors.New("handleGetValue but no key was provided")
 		// TODO: send back an error response? could be bad, but the other node's hanging.
@@ -170,19 +170,19 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		return nil, errors.New("nil record")
 	}
 
-	if pmes.GetKey() != rec.GetKey() {
+	if string(pmes.GetKey()) != string(rec.GetKey()) {
 		return nil, errors.New("put key doesn't match record key")
 	}
 
 	cleanRecord(rec)
 
 	// Make sure the record is valid (not expired, valid signature etc)
-	if err = dht.Validator.Validate(rec.GetKey(), rec.GetValue()); err != nil {
+	if err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
 		log.Warningf("Bad dht record in PUT from: %s. %s", p.Pretty(), err)
 		return nil, err
 	}
 
-	dskey := convertToDsKey(rec.GetKey())
+	dskey := convertToDsKey(string(rec.GetKey()))
 
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from
@@ -194,7 +194,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 	if existing != nil {
 		recs := [][]byte{rec.GetValue(), existing.GetValue()}
-		i, err := dht.Validator.Select(rec.GetKey(), recs)
+		i, err := dht.Validator.Select(string(rec.GetKey()), recs)
 		if err != nil {
 			log.Warningf("Bad dht record in PUT from %s: %s", p.Pretty(), err)
 			return nil, err
@@ -245,7 +245,7 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 		return nil, nil
 	}
 
-	err = dht.Validator.Validate(rec.GetKey(), rec.GetValue())
+	err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue())
 	if err != nil {
 		// Invalid record in datastore, probably expired but don't return an error,
 		// we'll just overwrite it
@@ -267,7 +267,7 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	var closest []peer.ID
 
 	// if looking for self... special case where we send it on CloserPeers.
-	targetPid := peer.ID(pmes.GetKey())
+	targetPid := peer.ID(string(pmes.GetKey()))
 	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
 	} else {
@@ -316,8 +316,8 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	eip := log.EventBegin(ctx, "handleGetProviders", lm)
 	defer eip.Done()
 
-	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
-	c, err := cid.Cast([]byte(pmes.GetKey()))
+	resp := pb.NewMessage(pmes.GetType(), string(pmes.GetKey()), pmes.GetClusterLevel())
+	c, err := cid.Cast(pmes.GetKey())
 	if err != nil {
 		eip.SetError(err)
 		return nil, err
@@ -367,7 +367,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 	eip := log.EventBegin(ctx, "handleAddProvider", lm)
 	defer eip.Done()
 
-	c, err := cid.Cast([]byte(pmes.GetKey()))
+	c, err := cid.Cast(pmes.GetKey())
 	if err != nil {
 		eip.SetError(err)
 		return nil, err

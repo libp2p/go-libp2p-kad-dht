@@ -4,7 +4,7 @@ GO = $(PB:.proto=.pb.go)
 all: $(GO)
 
 %.pb.go: %.proto
-		protoc --gogo_out=. --proto_path=../../../../../../:/usr/local/opt/protobuf/include:. $<
+		protoc --proto_path=$(GOPATH)/src:. --gogofast_out=. $<
 
 clean:
 		rm -f *.pb.go

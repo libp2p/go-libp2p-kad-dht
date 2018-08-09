@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	proto "github.com/gogo/protobuf/proto"
 	u "github.com/ipfs/go-ipfs-util"
 	ci "github.com/libp2p/go-libp2p-crypto"
 	peer "github.com/libp2p/go-libp2p-peer"
@@ -218,7 +217,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = proto.String(u.FormatRFC3339(time.Now()))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
 	err = dhtB.putLocal(pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +260,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = proto.String(u.FormatRFC3339(time.Now()))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
 	err = dhtB.putLocal(pkkey, rec)
 	if err != nil {
 		t.Fatal(err)

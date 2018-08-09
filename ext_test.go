@@ -105,8 +105,8 @@ func TestGetFailures(t *testing.T) {
 
 		rec := record.MakePutRecord(str, []byte("blah"))
 		req := pb.Message{
-			Type:   &typ,
-			Key:    &str,
+			Type:   typ,
+			Key:    []byte(str),
 			Record: rec,
 		}
 

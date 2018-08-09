@@ -10,10 +10,9 @@ import (
 
 func TestCleanRecordSigned(t *testing.T) {
 	actual := new(recpb.Record)
-	actual.TimeReceived = proto.String("time")
-	actual.XXX_unrecognized = []byte("extra data")
+	actual.TimeReceived = "time"
 	actual.Value = []byte("value")
-	actual.Key = proto.String("key")
+	actual.Key = []byte("key")
 
 	cleanRecord(actual)
 	actualBytes, err := proto.Marshal(actual)
@@ -23,7 +22,7 @@ func TestCleanRecordSigned(t *testing.T) {
 
 	expected := new(recpb.Record)
 	expected.Value = []byte("value")
-	expected.Key = proto.String("key")
+	expected.Key = []byte("key")
 	expectedBytes, err := proto.Marshal(expected)
 	if err != nil {
 		t.Fatal(err)
@@ -36,9 +35,8 @@ func TestCleanRecordSigned(t *testing.T) {
 
 func TestCleanRecord(t *testing.T) {
 	actual := new(recpb.Record)
-	actual.TimeReceived = proto.String("time")
-	actual.XXX_unrecognized = []byte("extra data")
-	actual.Key = proto.String("key")
+	actual.TimeReceived = "time"
+	actual.Key = []byte("key")
 	actual.Value = []byte("value")
 
 	cleanRecord(actual)
@@ -48,7 +46,7 @@ func TestCleanRecord(t *testing.T) {
 	}
 
 	expected := new(recpb.Record)
-	expected.Key = proto.String("key")
+	expected.Key = []byte("key")
 	expected.Value = []byte("value")
 	expectedBytes, err := proto.Marshal(expected)
 	if err != nil {

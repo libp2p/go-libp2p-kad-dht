@@ -222,29 +222,23 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 				}
 				// Select best value
 				if best != nil {
+					if bytes.Equal(best.Val, v.Val) {
+						continue
+					}
 					sel, err := dht.Validator.Select(key, [][]byte{best.Val, v.Val})
 					if err != nil {
 						log.Warning("Failed to select dht key: ", err)
 						continue
 					}
-					if sel == 1 && !bytes.Equal(v.Val, best.Val) {
-						best = &v
-						select {
-						case out <- v.Val:
-						case <-ctx.Done():
-							return
-						}
+					if sel != 1 {
+						continue
 					}
-				} else {
-					// Output first valid value
-					if err := dht.Validator.Validate(key, v.Val); err == nil {
-						best = &v
-						select {
-						case out <- v.Val:
-						case <-ctx.Done():
-							return
-						}
-					}
+				}
+				best = &v
+				select {
+				case out <- v.Val:
+				case <-ctx.Done():
+					return
 				}
 			case <-ctx.Done():
 				return

@@ -301,6 +301,110 @@ func TestValueSetInvalid(t *testing.T) {
 	testSetGet("valid", true, "newer", nil)
 }
 
+func TestSearchValue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+
+	defer dhtA.Close()
+	defer dhtB.Close()
+	defer dhtA.host.Close()
+	defer dhtB.host.Close()
+
+	connect(t, ctx, dhtA, dhtB)
+
+	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	err := dhtA.PutValue(ctxT, "/v/hello", []byte("valid"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
+	defer cancel()
+	valCh, err := dhtA.SearchValue(ctxT, "/v/hello", Quorum(-1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case v := <-valCh:
+		if string(v) != "valid" {
+			t.Errorf("expected 'valid', got '%s'", string(v))
+		}
+	case <-ctxT.Done():
+		t.Fatal(ctxT.Err())
+	}
+
+	err = dhtB.PutValue(ctxT, "/v/hello", []byte("newer"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	select {
+	case v := <-valCh:
+		if string(v) != "newer" {
+			t.Errorf("expected 'newer', got '%s'", string(v))
+		}
+	case <-ctxT.Done():
+		t.Fatal(ctxT.Err())
+	}
+}
+
+func TestGetValues(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+
+	defer dhtA.Close()
+	defer dhtB.Close()
+	defer dhtA.host.Close()
+	defer dhtB.host.Close()
+
+	connect(t, ctx, dhtA, dhtB)
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	err := dhtB.PutValue(ctxT, "/v/hello", []byte("newer"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = dhtA.PutValue(ctxT, "/v/hello", []byte("valid"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
+	defer cancel()
+	vals, err := dhtA.GetValues(ctxT, "/v/hello", 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(vals) != 2 {
+		t.Fatalf("expected to get 2 values, got %d", len(vals))
+	}
+
+	sort.Slice(vals, func(i, j int) bool { return string(vals[i].Val) < string(vals[j].Val) })
+
+	if string(vals[0].Val) != "valid" {
+		t.Errorf("unexpected vals[0]: %s", string(vals[0].Val))
+	}
+	if string(vals[1].Val) != "valid" {
+		t.Errorf("unexpected vals[1]: %s", string(vals[1].Val))
+	}
+}
+
 func TestValueGetInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -332,7 +436,7 @@ func TestValueGetInvalid(t *testing.T) {
 		defer cancel()
 		valb, err := dhtB.GetValue(ctxT, "/v/hello")
 		if err != experr {
-			t.Errorf("Set/Get %v: Expected %v error but got %v", val, experr, err)
+			t.Errorf("Set/Get %v: Expected '%v' error but got '%v'", val, experr, err)
 		} else if err == nil && string(valb) != exp {
 			t.Errorf("Expected '%v' got '%s'", exp, string(valb))
 		}
@@ -1271,12 +1375,12 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		err = dhtA.PutValue(ctx, "/v/cat", []byte("meow"))
 		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
-			t.Fatal("should not have been able to find any peers in routing table")
+			t.Fatalf("put should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 
 		_, err = dhtB.GetValue(ctx, "/v/cat")
 		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
-			t.Fatal("should not have been able to find any peers in routing table")
+			t.Fatalf("get should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 	})
 }

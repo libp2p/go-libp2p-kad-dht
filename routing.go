@@ -230,9 +230,9 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 					if sel == 1 && !bytes.Equal(v.Val, best.Val) {
 						best = &v
 						select {
-							case out <- v.Val:
-							case <-ctx.Done():
-								return
+						case out <- v.Val:
+						case <-ctx.Done():
+							return
 						}
 					}
 				} else {

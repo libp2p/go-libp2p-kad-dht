@@ -229,13 +229,21 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 					}
 					if sel == 1 && !bytes.Equal(v.Val, best.Val) {
 						best = &v
-						out <- v.Val
+						select {
+							case out <- v.Val:
+							case <-ctx.Done():
+								return
+						}
 					}
 				} else {
 					// Output first valid value
 					if err := dht.Validator.Validate(key, v.Val); err == nil {
 						best = &v
-						out <- v.Val
+						select {
+						case out <- v.Val:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}
 			case <-ctx.Done():

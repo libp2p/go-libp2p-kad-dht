@@ -94,8 +94,8 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 	log.Debugf("%s handleGetValue looking into ds", dht.self)
 	dskey := convertToDsKey(k)
-	iVal, err := dht.datastore.Get(dskey)
-	log.Debugf("%s handleGetValue looking into ds GOT %v", dht.self, iVal)
+	buf, err := dht.datastore.Get(dskey)
+	log.Debugf("%s handleGetValue looking into ds GOT %v", dht.self, buf)
 
 	if err == ds.ErrNotFound {
 		return nil, nil
@@ -109,13 +109,8 @@ func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 	// if we have the value, send it back
 	log.Debugf("%s handleGetValue success!", dht.self)
 
-	byts, ok := iVal.([]byte)
-	if !ok {
-		return nil, fmt.Errorf("datastore had non byte-slice value for %v", dskey)
-	}
-
 	rec := new(recpb.Record)
-	err = proto.Unmarshal(byts, rec)
+	err = proto.Unmarshal(buf, rec)
 	if err != nil {
 		log.Debug("failed to unmarshal DHT record from datastore")
 		return nil, err
@@ -221,7 +216,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 // returns nil, nil when either nothing is found or the value found doesn't properly validate.
 // returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
 func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
-	reci, err := dht.datastore.Get(dskey)
+	buf, err := dht.datastore.Get(dskey)
 	if err == ds.ErrNotFound {
 		return nil, nil
 	}
@@ -229,16 +224,8 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 		log.Errorf("Got error retrieving record with key %s from datastore: %s", dskey, err)
 		return nil, err
 	}
-
-	byt, ok := reci.([]byte)
-	if !ok {
-		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
-		log.Errorf("Value stored in datastore with key %s is not []byte", dskey)
-		return nil, nil
-	}
-
 	rec := new(recpb.Record)
-	err = proto.Unmarshal(byt, rec)
+	err = proto.Unmarshal(buf, rec)
 	if err != nil {
 		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
 		log.Errorf("Bad record data stored in datastore with key %s: could not unmarshal record", dskey)

@@ -42,9 +42,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmeiCcJfDW1GJnWUArudsv5rQsihpi4oyddPhdqo3CfX6i",
+      "hash": "QmVG5gxteQNEMhrS8prJSmU2C9rebtFuTd3SYZ5kE3YZ5k",
       "name": "go-datastore",
-      "version": "2.4.1"
+      "version": "3.0.0"
     },
     {
       "author": "hashicorp",
@@ -166,6 +166,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.3.2"
+  "version": "4.3.3"
 }
 

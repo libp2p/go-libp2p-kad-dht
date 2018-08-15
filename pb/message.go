@@ -110,7 +110,7 @@ func (m *Message_Peer) Addresses() []ma.Multiaddr {
 	for _, addr := range m.Addrs {
 		maddr, err := ma.NewMultiaddrBytes(addr)
 		if err != nil {
-			log.Warningf("error decoding Multiaddr for peer: %s", m.GetId())
+			log.Warningf("error decoding Multiaddr for peer %s: %s", peer.ID(m.GetId()).Pretty(), err)
 			continue
 		}
 

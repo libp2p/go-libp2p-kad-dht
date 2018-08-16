@@ -7,7 +7,7 @@
 [![GoDoc](https://godoc.org/github.com/libp2p/go-libp2p-kad-dht?status.svg)](https://godoc.org/github.com/libp2p/go-libp2p-kad-dht)
 [![Build Status](https://travis-ci.org/libp2p/go-libp2p-kad-dht.svg?branch=master)](https://travis-ci.org/libp2p/go-libp2p-kad-dht)
 
-> A Kademlia DHT implemention on go-libp2p
+> A Kademlia DHT implementation on go-libp2p
 
 ## Table of Contents
 

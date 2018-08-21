@@ -197,7 +197,10 @@ type messageSender struct {
 	p    peer.ID
 	dht  *IpfsDHT
 
-	invalid   bool
+	invalid bool
+	// singleMes tracks the number of times a message or request has failed to
+	// send via this messageSender, triggering a stream reset if its limit is
+	// reached.
 	singleMes int
 }
 

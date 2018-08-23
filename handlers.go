@@ -51,7 +51,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		if err != nil {
 			log.SetErr(ctx, err)
 		}
-	log.Finish(ctx)
+		log.Finish(ctx)
 	}()
 	log.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
 
@@ -157,7 +157,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		if err != nil {
 			log.SetErr(ctx, err)
 		}
-	 log.Finish(ctx)
+		log.Finish(ctx)
 	}()
 
 	rec := pmes.GetRecord()
@@ -308,7 +308,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	c, err := cid.Cast([]byte(pmes.GetKey()))
 	if err != nil {
-	log.SetErr(ctx, err)
+		log.SetErr(ctx, err)
 		return nil, err
 	}
 	log.LogKV(ctx, "key", c)

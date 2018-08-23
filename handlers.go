@@ -12,7 +12,6 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	lgbl "github.com/libp2p/go-libp2p-loggables"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -46,12 +45,13 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 }
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	eip := log.EventBegin(ctx, "handleGetValue", p)
+	ctx = log.Start(ctx, "handleGetValue")
+	log.LogKV("peer", p.Pretty())
 	defer func() {
 		if err != nil {
-			eip.SetError(err)
+			log.SetErr(ctx, err)
 		}
-		eip.Done()
+	log.Finish(ctx)
 	}()
 	log.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
 
@@ -151,12 +151,13 @@ func cleanRecord(rec *recpb.Record) {
 
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	eip := log.EventBegin(ctx, "handlePutValue", p)
+	ctx = log.Start(ctx, "handlePutValue")
+	log.LogKV(ctx, "peer", p.Pretty())
 	defer func() {
 		if err != nil {
-			eip.SetError(err)
+			log.SetErr(ctx, err)
 		}
-		eip.Done()
+	 log.Finish(ctx)
 	}()
 
 	rec := pmes.GetRecord()
@@ -249,7 +250,9 @@ func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (
 }
 
 func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	defer log.EventBegin(ctx, "handleFindPeer", p).Done()
+	ctx = log.Start(ctx, "handleFindPeer")
+	defer log.Finish(ctx)
+	log.LogKV(ctx, "peer", p.Pretty())
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -298,19 +301,17 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 }
 
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	lm := make(lgbl.DeferredMap)
-	lm["peer"] = func() interface{} { return p.Pretty() }
-	eip := log.EventBegin(ctx, "handleGetProviders", lm)
-	defer eip.Done()
+	ctx = log.Start(ctx, "handleGetProviders")
+	defer log.Finish(ctx)
+	log.LogKV(ctx, "peer", p.Pretty())
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	c, err := cid.Cast([]byte(pmes.GetKey()))
 	if err != nil {
-		eip.SetError(err)
+	log.SetErr(ctx, err)
 		return nil, err
 	}
-
-	lm["key"] = func() interface{} { return c.String() }
+	log.LogKV(ctx, "key", c)
 
 	// debug logging niceness.
 	reqDesc := fmt.Sprintf("%s handleGetProviders(%s, %s): ", dht.self, p, c)
@@ -349,18 +350,16 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 }
 
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	lm := make(lgbl.DeferredMap)
-	lm["peer"] = func() interface{} { return p.Pretty() }
-	eip := log.EventBegin(ctx, "handleAddProvider", lm)
-	defer eip.Done()
+	ctx = log.Start(ctx, "handleAddProvider")
+	defer log.Finish(ctx)
+	log.LogKV(ctx, "peer", p.Pretty())
 
 	c, err := cid.Cast([]byte(pmes.GetKey()))
 	if err != nil {
-		eip.SetError(err)
+		log.SetErr(ctx, err)
 		return nil, err
 	}
-
-	lm["key"] = func() interface{} { return c.String() }
+	log.LogKV(ctx, "key", c)
 
 	log.Debugf("%s adding %s as a provider for '%s'\n", dht.self, p, c)
 

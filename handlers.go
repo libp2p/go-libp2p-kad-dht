@@ -46,7 +46,7 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	ctx = log.Start(ctx, "handleGetValue")
-	log.LogKV("peer", p.Pretty())
+	log.LogKV(ctx, "peer", p.Pretty())
 	defer func() {
 		if err != nil {
 			log.SetErr(ctx, err)

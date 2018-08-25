@@ -46,13 +46,8 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	ctx = log.Start(ctx, "handleGetValue")
-	log.LogKV(ctx, "peer", p.Pretty())
-	defer func() {
-		if err != nil {
-			log.SetErr(ctx, err)
-		}
-		log.Finish(ctx)
-	}()
+	log.SetTag(ctx, "peer", p)
+	defer func() { log.FinishWithErr(ctx, err) }()
 	log.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
 
 	// setup response
@@ -152,13 +147,8 @@ func cleanRecord(rec *recpb.Record) {
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	ctx = log.Start(ctx, "handlePutValue")
-	log.LogKV(ctx, "peer", p.Pretty())
-	defer func() {
-		if err != nil {
-			log.SetErr(ctx, err)
-		}
-		log.Finish(ctx)
-	}()
+	log.SetTag(ctx, "peer", p)
+	defer func() { log.FinishWithErr(ctx, err) }()
 
 	rec := pmes.GetRecord()
 	if rec == nil {
@@ -249,10 +239,10 @@ func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (
 	return pmes, nil
 }
 
-func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	ctx = log.Start(ctx, "handleFindPeer")
-	defer log.Finish(ctx)
-	log.LogKV(ctx, "peer", p.Pretty())
+	defer func() { log.FinishWithErr(ctx, _err) }()
+	log.SetTag(ctx, "peer", p)
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -300,18 +290,17 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return resp, nil
 }
 
-func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	ctx = log.Start(ctx, "handleGetProviders")
-	defer log.Finish(ctx)
-	log.LogKV(ctx, "peer", p.Pretty())
+	defer func() { log.FinishWithErr(ctx, _err) }()
+	log.SetTag(ctx, "peer", p)
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	c, err := cid.Cast([]byte(pmes.GetKey()))
 	if err != nil {
-		log.SetErr(ctx, err)
 		return nil, err
 	}
-	log.LogKV(ctx, "key", c)
+	log.SetTag(ctx, "key", c)
 
 	// debug logging niceness.
 	reqDesc := fmt.Sprintf("%s handleGetProviders(%s, %s): ", dht.self, p, c)
@@ -349,17 +338,16 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	return resp, nil
 }
 
-func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	ctx = log.Start(ctx, "handleAddProvider")
-	defer log.Finish(ctx)
-	log.LogKV(ctx, "peer", p.Pretty())
+	defer func() { log.FinishWithErr(ctx, _err) }()
+	log.SetTag(ctx, "peer", p)
 
 	c, err := cid.Cast([]byte(pmes.GetKey()))
 	if err != nil {
-		log.SetErr(ctx, err)
 		return nil, err
 	}
-	log.LogKV(ctx, "key", c)
+	log.SetTag(ctx, "key", c)
 
 	log.Debugf("%s adding %s as a provider for '%s'\n", dht.self, p, c)
 

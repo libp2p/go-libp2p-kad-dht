@@ -142,6 +142,15 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 }
 
+func (dht *IpfsDHT) logSpan(ctx context.Context, event string) context.Context {
+	if ctx == nil {
+		ctx = dht.ctx
+	}
+	ctx = log.Start(ctx, event)
+	log.SetTag(ctx, "identity", dht.host.ID())
+	return ctx
+}
+
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
 
@@ -167,8 +176,7 @@ var errInvalidRecord = errors.New("received invalid record")
 // key. It returns either the value or a list of closer peers.
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*pstore.PeerInfo, error) {
-
+func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (_ *recpb.Record, _ []*pstore.PeerInfo, _err error) {
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
@@ -197,32 +205,20 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 		return nil, peers, nil
 	}
 
-	log.Warning("getValueOrPeers: routing.ErrNotFound")
 	return nil, nil, routing.ErrNotFound
 }
 
 // getValueSingle simply performs the get value RPC with the given parameters
-func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (*pb.Message, error) {
-	meta := logging.LoggableMap{
-		"key":  key,
-		"peer": p,
-	}
-
-	eip := log.EventBegin(ctx, "getValueSingle", meta)
-	defer eip.Done()
+func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (_ *pb.Message, _err error) {
+	ctx = dht.logSpan(ctx, "getValueSingle")
+	defer func() {
+		log.FinishWithErr(ctx, _err)
+	}()
+	log.SetTag(ctx, "peer", p)
+	log.SetTag(ctx, "key", loggableKey(key))
 
 	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
-	resp, err := dht.sendRequest(ctx, p, pmes)
-	switch err {
-	case nil:
-		return resp, nil
-	case ErrReadTimeout:
-		log.Warningf("getValueSingle: read timeout %s %s", p.Pretty(), key)
-		fallthrough
-	default:
-		eip.SetError(err)
-		return nil, err
-	}
+	return dht.sendRequest(ctx, p, pmes)
 }
 
 // getLocal attempts to retrieve the value from the datastore
@@ -284,44 +280,29 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
 }
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
-func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	eip := log.EventBegin(ctx, "findPeerSingle",
-		logging.LoggableMap{
-			"peer":   p,
-			"target": id,
-		})
-	defer eip.Done()
+func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (_ *pb.Message, _err error) {
+	ctx = dht.logSpan(ctx, "findPeerSingle")
+	defer func() {
+		log.FinishWithErr(ctx, _err)
+	}()
+
+	log.SetTag(ctx, "peer", p)
+	log.SetTag(ctx, "target", p)
 
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
-	resp, err := dht.sendRequest(ctx, p, pmes)
-	switch err {
-	case nil:
-		return resp, nil
-	case ErrReadTimeout:
-		log.Warningf("read timeout: %s %s", p.Pretty(), id)
-		fallthrough
-	default:
-		eip.SetError(err)
-		return nil, err
-	}
+	return dht.sendRequest(ctx, p, pmes)
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	eip := log.EventBegin(ctx, "findProvidersSingle", p, key)
-	defer eip.Done()
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (_ *pb.Message, _err error) {
+	ctx = dht.logSpan(ctx, "findProvidersSingle")
+	defer func() {
+		log.FinishWithErr(ctx, _err)
+	}()
+	log.SetTag(ctx, "peer", p)
+	log.SetTag(ctx, "key", p)
 
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
-	resp, err := dht.sendRequest(ctx, p, pmes)
-	switch err {
-	case nil:
-		return resp, nil
-	case ErrReadTimeout:
-		log.Warningf("read timeout: %s %s", p.Pretty(), key)
-		fallthrough
-	default:
-		eip.SetError(err)
-		return nil, err
-	}
+	return dht.sendRequest(ctx, p, pmes)
 }
 
 // nearestPeersToQuery returns the routing tables closest peers.

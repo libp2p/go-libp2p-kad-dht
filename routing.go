@@ -10,7 +10,6 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	inet "github.com/libp2p/go-libp2p-net"
@@ -36,13 +35,10 @@ var asyncQueryBuffer = 10
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...ropts.Option) (err error) {
-	eip := log.EventBegin(ctx, "PutValue")
+	ctx = dht.logSpan(ctx, "PutValue")
+	log.SetTag(ctx, "key", loggableKey(key))
 	defer func() {
-		eip.Append(loggableKey(key))
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
+		log.FinishWithErr(ctx, err)
 	}()
 	log.Debugf("PutValue %s", key)
 
@@ -111,13 +107,10 @@ type RecvdVal struct {
 
 // GetValue searches for the value corresponding to given Key.
 func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Option) (_ []byte, err error) {
-	eip := log.EventBegin(ctx, "GetValue")
+	ctx = dht.logSpan(ctx, "GetValue")
+	log.SetTag(ctx, "key", loggableKey(key))
 	defer func() {
-		eip.Append(loggableKey(key))
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
+		log.FinishWithErr(ctx, err)
 	}()
 
 	// apply defaultQuorum if relevant
@@ -251,14 +244,14 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 
 // GetValues gets nvals values corresponding to the given key.
 func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
-	eip := log.EventBegin(ctx, "GetValues")
-
-	eip.Append(loggableKey(key))
-	defer eip.Done()
+	ctx = dht.logSpan(ctx, "GetValues")
+	log.SetTag(ctx, "key", loggableKey(key))
+	defer func() {
+		log.FinishWithErr(ctx, err)
+	}()
 
 	valCh, err := dht.getValues(ctx, key, nvals)
 	if err != nil {
-		eip.SetError(err)
 		return nil, err
 	}
 
@@ -395,13 +388,13 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
-	eip := log.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
+func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (_err error) {
+	ctx = dht.logSpan(ctx, "Provide")
+	log.SetTag(ctx, "key", key)
+	log.SetTag(ctx, "broadcast", brdcst)
+
 	defer func() {
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
+		log.FinishWithErr(ctx, _err)
 	}()
 
 	// add self locally
@@ -425,7 +418,10 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
-			log.Debugf("putProvider(%s, %s)", key, p)
+			log.LogKV(ctx,
+				"event", "putProvider",
+				"peer", p,
+			)
 			err := dht.sendMessage(ctx, p, mes)
 			if err != nil {
 				log.Debug(err)
@@ -465,14 +461,14 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]pstore.Peer
 // Peers will be returned on the channel as soon as they are found, even before
 // the search query completes.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan pstore.PeerInfo {
-	log.Event(ctx, "findProviders", key)
 	peerOut := make(chan pstore.PeerInfo, count)
 	go dht.findProvidersAsyncRoutine(ctx, key, count, peerOut)
 	return peerOut
 }
 
 func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, count int, peerOut chan pstore.PeerInfo) {
-	defer log.EventBegin(ctx, "findProvidersAsync", key).Done()
+	ctx = dht.logSpan(ctx, "findProvidersAsync")
+	defer log.Finish(ctx)
 	defer close(peerOut)
 
 	ps := pset.NewLimited(count)
@@ -567,13 +563,11 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 }
 
 // FindPeer searches for a peer with given ID.
-func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo, err error) {
-	eip := log.EventBegin(ctx, "FindPeer", id)
+func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo, _err error) {
+	ctx = dht.logSpan(ctx, "FindPeer")
+	log.LogKV(ctx, "target", id)
 	defer func() {
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
+		log.FinishWithErr(ctx, _err)
 	}()
 
 	// Check if were already connected to them
@@ -589,7 +583,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 	// Sanity...
 	for _, p := range peers {
 		if p == id {
-			log.Debug("found target peer in list of closest peers...")
+			log.LogKV(ctx, "event", "peer found in routing table")
 			return dht.peerstore.PeerInfo(p), nil
 		}
 	}
@@ -635,7 +629,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 		return pstore.PeerInfo{}, err
 	}
 
-	log.Debugf("FindPeer %v %v", id, result.success)
+	log.LogKV(ctx, "result", result.success)
 	if result.peer.ID == "" {
 		return pstore.PeerInfo{}, routing.ErrNotFound
 	}

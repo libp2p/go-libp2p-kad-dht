@@ -127,12 +127,12 @@ func (dht *IpfsDHT) bootstrapWorker(cfg BootstrapConfig) func(worker goprocess.P
 
 // runBootstrap builds up list of peers by requesting random peer IDs
 func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
-	bslog := func(msg string) {
-		log.Debugf("DHT %s dhtRunBootstrap %s -- routing table size: %d", dht.self, msg, dht.routingTable.Size())
-	}
-	bslog("start")
-	defer bslog("end")
-	defer log.EventBegin(ctx, "dhtRunBootstrap").Done()
+	ctx = dht.logSpan(ctx, "dhtRunBootstrap")
+	defer log.Finish(ctx)
+	log.LogKV(ctx, "routing table size", dht.routingTable.Size())
+	defer func() {
+		log.LogKV(ctx, "routing table size", dht.routingTable.Size())
+	}()
 
 	var merr u.MultiErr
 
@@ -154,6 +154,7 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 		if err == routing.ErrNotFound {
 			// this isn't an error. this is precisely what we expect.
 		} else if err != nil {
+			log.SetErr(ctx, err)
 			merr = append(merr, err)
 		} else {
 			// woah, actually found a peer with that ID? this shouldn't happen normally
@@ -161,6 +162,7 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 			err := fmt.Errorf("Bootstrap peer error: Actually FOUND peer. (%s, %s)", id, p)
 			log.Warningf("%s", err)
 			merr = append(merr, err)
+			log.SetErr(ctx, err)
 		}
 	}
 

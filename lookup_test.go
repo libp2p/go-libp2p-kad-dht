@@ -12,7 +12,7 @@ func TestLoggableKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	k, err := tryFormatLoggableKey("/proto/" + string(c.Bytes()))
+	k, err := loggableKey("/proto/" + string(c.Bytes())).TryString()
 	if err != nil {
 		t.Errorf("failed to format key 1: %s", err)
 	}
@@ -20,7 +20,7 @@ func TestLoggableKey(t *testing.T) {
 		t.Error("expected path to be preserved as a loggable key")
 	}
 
-	k, err = tryFormatLoggableKey(string(c.Bytes()))
+	k, err = loggableKey(string(c.Bytes())).TryString()
 	if err != nil {
 		t.Errorf("failed to format key 2: %s", err)
 	}
@@ -29,7 +29,7 @@ func TestLoggableKey(t *testing.T) {
 	}
 
 	for _, s := range []string{"bla bla", "/bla", "/bla/asdf", ""} {
-		if _, err := tryFormatLoggableKey(s); err == nil {
+		if _, err := loggableKey(s).TryString(); err == nil {
 			t.Errorf("expected to fail formatting: %s", s)
 		}
 	}

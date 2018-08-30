@@ -6,14 +6,25 @@ import (
 	"strings"
 
 	cid "github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
-func tryFormatLoggableKey(k string) (string, error) {
+type loggableKey string
+
+func (lk loggableKey) String() string {
+	newKey, err := lk.TryString()
+	if err != nil {
+		log.Debug(err)
+		return string(lk)
+	}
+	return newKey
+}
+
+func (lk loggableKey) TryString() (string, error) {
+	k := string(lk)
 	if len(k) == 0 {
 		return "", fmt.Errorf("loggableKey is empty")
 	}
@@ -38,25 +49,15 @@ func tryFormatLoggableKey(k string) (string, error) {
 	return fmt.Sprintf("/%s/%s", proto, c.String()), nil
 }
 
-func loggableKey(k string) logging.LoggableMap {
-	newKey, err := tryFormatLoggableKey(k)
-	if err != nil {
-		log.Debug(err)
-	} else {
-		k = newKey
-	}
-
-	return logging.LoggableMap{
-		"key": k,
-	}
-}
-
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
-	e := log.EventBegin(ctx, "getClosestPeers", loggableKey(key))
+	ctx = dht.logSpan(ctx, "GetClosestPeers")
+	log.SetTag(ctx, "key", loggableKey(key))
+
 	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
 	if len(tablepeers) == 0 {
+		log.FinishWithErr(ctx, kb.ErrLookupFailure)
 		return nil, kb.ErrLookupFailure
 	}
 
@@ -91,10 +92,11 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 	go func() {
 		defer close(out)
-		defer e.Done()
+		defer log.Finish(ctx)
 		// run it!
 		res, err := query.Run(ctx, tablepeers)
 		if err != nil {
+			log.SetErr(ctx, err)
 			log.Debugf("closestPeers query run error: %s", err)
 		}
 

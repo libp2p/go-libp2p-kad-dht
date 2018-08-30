@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	proto "github.com/gogo/protobuf/proto"
@@ -45,10 +44,10 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 }
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	ctx = log.Start(ctx, "handleGetValue")
-	log.SetTag(ctx, "peer", p)
+	ctx = dht.logSpan(ctx, "handleGetValue")
 	defer func() { log.FinishWithErr(ctx, err) }()
-	log.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
+	log.SetTag(ctx, "peer", p)
+	log.SetTag(ctx, "key", loggableKey(pmes.GetKey()))
 
 	// setup response
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
@@ -65,13 +64,22 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		return nil, err
 	}
 	resp.Record = rec
+	if resp.Record != nil {
+		log.LogKV(ctx,
+			"event", "returning value",
+			"value", resp.Record.Value,
+		)
+	}
 
 	// Find closest peer on given cluster to desired key and reply with that info
 	closer := dht.betterPeersToQuery(pmes, p, CloserPeerCount)
 	if len(closer) > 0 {
 		closerinfos := pstore.PeerInfos(dht.peerstore, closer)
 		for _, pi := range closerinfos {
-			log.Debugf("handleGetValue returning closer peer: '%s'", pi.ID)
+			log.LogKV(ctx,
+				"event", "returning closer peer",
+				"peer", pi.ID,
+			)
 			if len(pi.Addrs) < 1 {
 				log.Warningf(`no addresses on peer being sent!
 					[local:%s]
@@ -146,8 +154,8 @@ func cleanRecord(rec *recpb.Record) {
 
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	ctx = log.Start(ctx, "handlePutValue")
-	log.SetTag(ctx, "peer", p)
+	ctx = dht.logSpan(ctx, "handlePutValue")
+	log.LogKV(ctx, "peer", p)
 	defer func() { log.FinishWithErr(ctx, err) }()
 
 	rec := pmes.GetRecord()
@@ -234,15 +242,16 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 	return rec, nil
 }
 
-func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	log.Debugf("%s Responding to ping from %s!\n", dht.self, p)
+func (dht *IpfsDHT) handlePing(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+	ctx = dht.logSpan(ctx, "handlePing")
+	log.SetTag(ctx, "peer", p)
 	return pmes, nil
 }
 
 func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	ctx = log.Start(ctx, "handleFindPeer")
+	ctx = dht.logSpan(ctx, "handleFindPeer")
 	defer func() { log.FinishWithErr(ctx, _err) }()
-	log.SetTag(ctx, "peer", p)
+	log.LogKV(ctx, "peer", p)
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -250,6 +259,7 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	targetPid := peer.ID(pmes.GetKey())
 	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
+		log.LogKV(ctx, "event", "found target peer")
 	} else {
 		closest = dht.betterPeersToQuery(pmes, p, CloserPeerCount)
 
@@ -267,12 +277,13 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 			switch dht.host.Network().Connectedness(targetPid) {
 			case inet.Connected, inet.CanConnect:
 				closest = append(closest, targetPid)
+				log.LogKV(ctx, "event", "found target peer")
 			}
 		}
 	}
 
 	if closest == nil {
-		log.Infof("%s handleFindPeer %s: could not find anything.", dht.self, p)
+		log.LogKV(ctx, "event", "no peers found")
 		return resp, nil
 	}
 
@@ -282,7 +293,10 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	for _, pi := range closestinfos {
 		if len(pi.Addrs) > 0 {
 			withAddresses = append(withAddresses, pi)
-			log.Debugf("handleFindPeer: sending back '%s'", pi.ID)
+			log.LogKV(ctx,
+				"event", "returning closer peer",
+				"peer", pi.ID,
+			)
 		}
 	}
 
@@ -291,9 +305,9 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 }
 
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	ctx = log.Start(ctx, "handleGetProviders")
+	ctx = dht.logSpan(ctx, "handleGetProviders")
 	defer func() { log.FinishWithErr(ctx, _err) }()
-	log.SetTag(ctx, "peer", p)
+	log.LogKV(ctx, "peer", p)
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	c, err := cid.Cast([]byte(pmes.GetKey()))
@@ -302,15 +316,10 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	}
 	log.SetTag(ctx, "key", c)
 
-	// debug logging niceness.
-	reqDesc := fmt.Sprintf("%s handleGetProviders(%s, %s): ", dht.self, p, c)
-	log.Debugf("%s begin", reqDesc)
-	defer log.Debugf("%s end", reqDesc)
-
 	// check if we have this value, to add ourselves as provider.
 	has, err := dht.datastore.Has(convertToDsKey(c.Bytes()))
 	if err != nil && err != ds.ErrNotFound {
-		log.Debugf("unexpected datastore error: %v\n", err)
+		log.Errorf("unexpected datastore error: %v\n", err)
 		has = false
 	}
 
@@ -318,13 +327,18 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	providers := dht.providers.GetProviders(ctx, c)
 	if has {
 		providers = append(providers, dht.self)
-		log.Debugf("%s have the value. added self as provider", reqDesc)
+		log.LogKV(ctx,
+			"event", "adding self as a provider",
+		)
 	}
 
 	if providers != nil && len(providers) > 0 {
 		infos := pstore.PeerInfos(dht.peerstore, providers)
 		resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
-		log.Debugf("%s have %d providers: %s", reqDesc, len(providers), infos)
+		log.LogKV(ctx,
+			"event", "adding providers",
+			"providers", infos,
+		)
 	}
 
 	// Also send closer peers.
@@ -332,14 +346,17 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	if closer != nil {
 		infos := pstore.PeerInfos(dht.peerstore, closer)
 		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
-		log.Debugf("%s have %d closer peers: %s", reqDesc, len(closer), infos)
+		log.LogKV(ctx,
+			"event", "reporting closer peers",
+			"peers", infos,
+		)
 	}
 
 	return resp, nil
 }
 
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	ctx = log.Start(ctx, "handleAddProvider")
+	ctx = dht.logSpan(ctx, "handleAddProvider")
 	defer func() { log.FinishWithErr(ctx, _err) }()
 	log.SetTag(ctx, "peer", p)
 
@@ -349,24 +366,31 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 	}
 	log.SetTag(ctx, "key", c)
 
-	log.Debugf("%s adding %s as a provider for '%s'\n", dht.self, p, c)
-
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
 	for _, pi := range pinfos {
 		if pi.ID != p {
 			// we should ignore this provider record! not from originator.
 			// (we should sign them and check signature later...)
-			log.Debugf("handleAddProvider received provider %s from %s. Ignore.", pi.ID, p)
+			log.LogKV(ctx,
+				"event", "ignoring provider record with the wrong peer ID",
+				"peer", pi.ID,
+			)
 			continue
 		}
 
 		if len(pi.Addrs) < 1 {
-			log.Debugf("%s got no valid addresses for provider %s. Ignore.", dht.self, p)
+			log.LogKV(ctx,
+				"event", "ignoring provider record with no peer addresses",
+			)
 			continue
 		}
 
-		log.Infof("received provider %s for %s (addrs: %s)", p, c, pi.Addrs)
+		log.LogKV(ctx,
+			"event", "accepting provider record",
+			"addresses", pi.Addrs,
+		)
+
 		if pi.ID != dht.self { // don't add own addrs.
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, pstore.ProviderAddrTTL)

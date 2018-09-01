@@ -47,7 +47,7 @@ var DefaultBootstrapConfig = BootstrapConfig{
 // These parameters are configurable.
 //
 // As opposed to BootstrapWithConfig, Bootstrap satisfies the routing interface
-func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
+func (dht *DHT) Bootstrap(ctx context.Context) error {
 	proc, err := dht.BootstrapWithConfig(DefaultBootstrapConfig)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 // These parameters are configurable.
 //
 // BootstrapWithConfig returns a process, so the user can stop it.
-func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process, error) {
+func (dht *DHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process, error) {
 	if cfg.Queries <= 0 {
 		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
@@ -98,7 +98,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 // These parameters are configurable.
 //
 // SignalBootstrap returns a process, so the user can stop it.
-func (dht *IpfsDHT) BootstrapOnSignal(cfg BootstrapConfig, signal <-chan time.Time) (goprocess.Process, error) {
+func (dht *DHT) BootstrapOnSignal(cfg BootstrapConfig, signal <-chan time.Time) (goprocess.Process, error) {
 	if cfg.Queries <= 0 {
 		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
@@ -112,7 +112,7 @@ func (dht *IpfsDHT) BootstrapOnSignal(cfg BootstrapConfig, signal <-chan time.Ti
 	return proc, nil
 }
 
-func (dht *IpfsDHT) bootstrapWorker(cfg BootstrapConfig) func(worker goprocess.Process) {
+func (dht *DHT) bootstrapWorker(cfg BootstrapConfig) func(worker goprocess.Process) {
 	return func(worker goprocess.Process) {
 		// it would be useful to be able to send out signals of when we bootstrap, too...
 		// maybe this is a good case for whole module event pub/sub?
@@ -126,7 +126,7 @@ func (dht *IpfsDHT) bootstrapWorker(cfg BootstrapConfig) func(worker goprocess.P
 }
 
 // runBootstrap builds up list of peers by requesting random peer IDs
-func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
+func (dht *DHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
 	bslog := func(msg string) {
 		log.Debugf("DHT %s dhtRunBootstrap %s -- routing table size: %d", dht.self, msg, dht.routingTable.Size())
 	}

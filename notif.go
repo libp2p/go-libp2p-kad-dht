@@ -6,11 +6,11 @@ import (
 	mstream "github.com/multiformats/go-multistream"
 )
 
-// netNotifiee defines methods to be used with the IpfsDHT
-type netNotifiee IpfsDHT
+// netNotifiee defines methods to be used with the DHT
+type netNotifiee DHT
 
-func (nn *netNotifiee) DHT() *IpfsDHT {
-	return (*IpfsDHT)(nn)
+func (nn *netNotifiee) DHT() *DHT {
+	return (*DHT)(nn)
 }
 
 func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {

@@ -44,11 +44,11 @@ func (w *bufferedDelimitedWriter) Flush() error {
 }
 
 // handleNewStream implements the inet.StreamHandler
-func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
+func (dht *DHT) handleNewStream(s inet.Stream) {
 	go dht.handleNewMessage(s)
 }
 
-func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
+func (dht *DHT) handleNewMessage(s inet.Stream) {
 	ctx := dht.Context()
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
@@ -110,7 +110,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *DHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 
 	ms, err := dht.messageSenderForPeer(p)
 	if err != nil {
@@ -133,7 +133,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 }
 
 // sendMessage sends out a message
-func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+func (dht *DHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ms, err := dht.messageSenderForPeer(p)
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	return nil
 }
 
-func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
+func (dht *DHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
 	// Make sure that this node is actually a DHT server, not just a client.
 	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
 	if err == nil && len(protos) > 0 {
@@ -155,7 +155,7 @@ func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Me
 	return nil
 }
 
-func (dht *IpfsDHT) messageSenderForPeer(p peer.ID) (*messageSender, error) {
+func (dht *DHT) messageSenderForPeer(p peer.ID) (*messageSender, error) {
 	dht.smlk.Lock()
 	ms, ok := dht.strmap[p]
 	if ok {
@@ -193,7 +193,7 @@ type messageSender struct {
 	w   bufferedWriteCloser
 	lk  sync.Mutex
 	p   peer.ID
-	dht *IpfsDHT
+	dht *DHT
 
 	invalid   bool
 	singleMes int

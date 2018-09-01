@@ -29,13 +29,13 @@ import (
 // results will wait for the channel to drain.
 var asyncQueryBuffer = 10
 
-// This file implements the Routing interface for the IpfsDHT struct.
+// This file implements the Routing interface for the DHT struct.
 
 // Basic Put/Get
 
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
-func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...ropts.Option) (err error) {
+func (dht *DHT) PutValue(ctx context.Context, key string, value []byte, opts ...ropts.Option) (err error) {
 	eip := log.EventBegin(ctx, "PutValue")
 	defer func() {
 		eip.Append(loggableKey(key))
@@ -110,7 +110,7 @@ type RecvdVal struct {
 }
 
 // GetValue searches for the value corresponding to given Key.
-func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Option) (_ []byte, err error) {
+func (dht *DHT) GetValue(ctx context.Context, key string, opts ...ropts.Option) (_ []byte, err error) {
 	eip := log.EventBegin(ctx, "GetValue")
 	defer func() {
 		eip.Append(loggableKey(key))
@@ -148,7 +148,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...ropts.Opti
 	return best, nil
 }
 
-func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.Option) (<-chan []byte, error) {
+func (dht *DHT) SearchValue(ctx context.Context, key string, opts ...ropts.Option) (<-chan []byte, error) {
 	var cfg ropts.Options
 	if err := cfg.Apply(opts...); err != nil {
 		return nil, err
@@ -250,7 +250,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...ropts.O
 }
 
 // GetValues gets nvals values corresponding to the given key.
-func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
+func (dht *DHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
 	eip := log.EventBegin(ctx, "GetValues")
 
 	eip.Append(loggableKey(key))
@@ -270,7 +270,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	return out, ctx.Err()
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-chan RecvdVal, error) {
+func (dht *DHT) getValues(ctx context.Context, key string, nvals int) (<-chan RecvdVal, error) {
 	vals := make(chan RecvdVal, 1)
 
 	done := func(err error) (<-chan RecvdVal, error) {
@@ -395,7 +395,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) (err error) {
+func (dht *DHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) (err error) {
 	eip := log.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
 	defer func() {
 		if err != nil {
@@ -435,7 +435,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key *cid.Cid, brdcst bool) (err
 	wg.Wait()
 	return nil
 }
-func (dht *IpfsDHT) makeProvRecord(skey *cid.Cid) (*pb.Message, error) {
+func (dht *DHT) makeProvRecord(skey *cid.Cid) (*pb.Message, error) {
 	pi := pstore.PeerInfo{
 		ID:    dht.self,
 		Addrs: dht.host.Addrs(),
@@ -453,7 +453,7 @@ func (dht *IpfsDHT) makeProvRecord(skey *cid.Cid) (*pb.Message, error) {
 }
 
 // FindProviders searches until the context expires.
-func (dht *IpfsDHT) FindProviders(ctx context.Context, c *cid.Cid) ([]pstore.PeerInfo, error) {
+func (dht *DHT) FindProviders(ctx context.Context, c *cid.Cid) ([]pstore.PeerInfo, error) {
 	var providers []pstore.PeerInfo
 	for p := range dht.FindProvidersAsync(ctx, c, KValue) {
 		providers = append(providers, p)
@@ -464,14 +464,14 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c *cid.Cid) ([]pstore.Pee
 // FindProvidersAsync is the same thing as FindProviders, but returns a channel.
 // Peers will be returned on the channel as soon as they are found, even before
 // the search query completes.
-func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key *cid.Cid, count int) <-chan pstore.PeerInfo {
+func (dht *DHT) FindProvidersAsync(ctx context.Context, key *cid.Cid, count int) <-chan pstore.PeerInfo {
 	log.Event(ctx, "findProviders", key)
 	peerOut := make(chan pstore.PeerInfo, count)
 	go dht.findProvidersAsyncRoutine(ctx, key, count, peerOut)
 	return peerOut
 }
 
-func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key *cid.Cid, count int, peerOut chan pstore.PeerInfo) {
+func (dht *DHT) findProvidersAsyncRoutine(ctx context.Context, key *cid.Cid, count int, peerOut chan pstore.PeerInfo) {
 	defer log.EventBegin(ctx, "findProvidersAsync", key).Done()
 	defer close(peerOut)
 
@@ -567,7 +567,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key *cid.Cid,
 }
 
 // FindPeer searches for a peer with given ID.
-func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo, err error) {
+func (dht *DHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo, err error) {
 	eip := log.EventBegin(ctx, "FindPeer", id)
 	defer func() {
 		if err != nil {
@@ -644,7 +644,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 }
 
 // FindPeersConnectedToPeer searches for peers directly connected to a given peer.
-func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<-chan *pstore.PeerInfo, error) {
+func (dht *DHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<-chan *pstore.PeerInfo, error) {
 
 	peerchan := make(chan *pstore.PeerInfo, asyncQueryBuffer)
 	peersSeen := make(map[peer.ID]struct{})

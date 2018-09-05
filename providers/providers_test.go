@@ -45,7 +45,7 @@ func TestProvidersDatastore(t *testing.T) {
 	defer p.proc.Close()
 
 	friend := peer.ID("friend")
-	var cids []*cid.Cid
+	var cids []cid.Cid
 	for i := 0; i < 100; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)
@@ -123,7 +123,7 @@ func TestProvidesExpire(t *testing.T) {
 	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
 
 	peers := []peer.ID{"a", "b"}
-	var cids []*cid.Cid
+	var cids []cid.Cid
 	for i := 0; i < 10; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)
@@ -199,7 +199,7 @@ func TestLargeProvidersSet(t *testing.T) {
 	p := NewProviderManager(ctx, mid, lds)
 	defer p.proc.Close()
 
-	var cids []*cid.Cid
+	var cids []cid.Cid
 	for i := 0; i < 1000; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)

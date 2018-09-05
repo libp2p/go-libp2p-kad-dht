@@ -30,7 +30,7 @@ import (
 )
 
 var testCaseValues = map[string][]byte{}
-var testCaseCids []*cid.Cid
+var testCaseCids []cid.Cid
 
 func init() {
 	for i := 0; i < 100; i++ {
@@ -794,7 +794,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	getProvider := func(dht *IpfsDHT, k *cid.Cid) {
+	getProvider := func(dht *IpfsDHT, k cid.Cid) {
 		defer wg.Done()
 
 		expected := providers[k.KeyString()]

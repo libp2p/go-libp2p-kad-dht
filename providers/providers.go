@@ -48,12 +48,12 @@ type providerSet struct {
 }
 
 type addProv struct {
-	k   *cid.Cid
+	k   cid.Cid
 	val peer.ID
 }
 
 type getProv struct {
-	k    *cid.Cid
+	k    cid.Cid
 	resp chan []peer.ID
 }
 
@@ -77,7 +77,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 const providersKeyPrefix = "/providers/"
 
-func mkProvKey(k *cid.Cid) string {
+func mkProvKey(k cid.Cid) string {
 	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
 }
 
@@ -85,7 +85,7 @@ func (pm *ProviderManager) Process() goprocess.Process {
 	return pm.proc
 }
 
-func (pm *ProviderManager) providersForKey(k *cid.Cid) ([]peer.ID, error) {
+func (pm *ProviderManager) providersForKey(k cid.Cid) ([]peer.ID, error) {
 	pset, err := pm.getProvSet(k)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func (pm *ProviderManager) providersForKey(k *cid.Cid) ([]peer.ID, error) {
 	return pset.providers, nil
 }
 
-func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
+func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
 	cached, ok := pm.providers.Get(k.KeyString())
 	if ok {
 		return cached.(*providerSet), nil
@@ -111,7 +111,7 @@ func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
 	return pset, nil
 }
 
-func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
+func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func readTimeValue(i interface{}) (time.Time, error) {
 	return time.Unix(0, nsec), nil
 }
 
-func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
+func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
 	iprovs, ok := pm.providers.Get(k.KeyString())
 	if !ok {
 		stored, err := loadProvSet(pm.dstore, k)
@@ -178,7 +178,7 @@ func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
 	return writeProviderEntry(pm.dstore, k, p, now)
 }
 
-func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time) error {
+func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) error {
 	dsk := mkProvKey(k) + "/" + base32.RawStdEncoding.EncodeToString([]byte(p))
 
 	buf := make([]byte, 16)
@@ -187,7 +187,7 @@ func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time)
 	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
-func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
+func (pm *ProviderManager) deleteProvSet(k cid.Cid) error {
 	pm.providers.Remove(k.KeyString())
 
 	res, err := pm.dstore.Query(dsq.Query{
@@ -212,7 +212,7 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	return nil
 }
 
-func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
+func (pm *ProviderManager) getProvKeys() (func() (cid.Cid, bool), error) {
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
 		Prefix:   providersKeyPrefix,
@@ -221,7 +221,7 @@ func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 		return nil, err
 	}
 
-	iter := func() (*cid.Cid, bool) {
+	iter := func() (cid.Cid, bool) {
 		for e := range res.Next() {
 			parts := strings.Split(e.Key, "/")
 			if len(parts) != 4 {
@@ -242,7 +242,7 @@ func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 
 			return c, true
 		}
-		return nil, false
+		return cid.Cid{}, false
 	}
 
 	return iter, nil
@@ -309,7 +309,7 @@ func (pm *ProviderManager) run() {
 	}
 }
 
-func (pm *ProviderManager) AddProvider(ctx context.Context, k *cid.Cid, val peer.ID) {
+func (pm *ProviderManager) AddProvider(ctx context.Context, k cid.Cid, val peer.ID) {
 	prov := &addProv{
 		k:   k,
 		val: val,
@@ -320,7 +320,7 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k *cid.Cid, val peer
 	}
 }
 
-func (pm *ProviderManager) GetProviders(ctx context.Context, k *cid.Cid) []peer.ID {
+func (pm *ProviderManager) GetProviders(ctx context.Context, k cid.Cid) []peer.ID {
 	gp := &getProv{
 		k:    k,
 		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking

@@ -158,17 +158,7 @@
       "author": "whyrusleeping",
       "hash": "Qmcc5CPuKyfDZNmqXNkk6j23CyZqZGypUv952NLHYGbeni",
       "name": "go-libp2p-swarm",
-<<<<<<< HEAD
       "version": "3.0.10"
-    },
-    {
-      "author": "hsanjuan",
-      "hash": "QmRJVNatYJwTAHgdSM1Xef9QVQ1Ch3XHdmcrykjP5Y4soL",
-      "name": "go-ipfs-delay",
-      "version": "0.0.1"
-=======
-      "version": "3.0.2"
->>>>>>> remove unused gx deps
     }
   ],
   "gxVersion": "0.4.0",

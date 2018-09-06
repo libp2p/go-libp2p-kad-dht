@@ -383,8 +383,8 @@ func TestGetValues(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhtA := setupDHT(ctx, t, false)
-	dhtB := setupDHT(ctx, t, false)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -431,8 +431,8 @@ func TestValueGetInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhtA := setupDHT(ctx, t, false)
-	dhtB := setupDHT(ctx, t, false)
+	dhtA := setupDHTWithSwarm(ctx, t, false)
+	dhtB := setupDHTWithSwarm(ctx, t, false)
 
 	defer dhtA.Close()
 	defer dhtB.Close()
@@ -1172,9 +1172,9 @@ func TestClientModeFindPeer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	a := setupDHT(ctx, t, false)
-	b := setupDHT(ctx, t, true)
-	c := setupDHT(ctx, t, true)
+	a := setupDHTWithSwarm(ctx, t, false)
+	b := setupDHTWithSwarm(ctx, t, true)
+	c := setupDHTWithSwarm(ctx, t, true)
 
 	connectNoSync(t, ctx, b, a)
 	connectNoSync(t, ctx, c, a)

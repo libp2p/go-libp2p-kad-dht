@@ -13,6 +13,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
+	b58 "github.com/mr-tron/base58/base58"
 )
 
 var dhtReadMessageTimeout = time.Minute
@@ -70,6 +71,9 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 			return
 		}
 
+		// log the received message
+		log.Event(ctx, "handleNewMessage", mPeer, pmes)
+
 		// update the peer (on valid msgs only)
 		dht.updateFromMessage(ctx, mPeer, pmes)
 
@@ -108,12 +112,23 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 	}
 }
 
+func tagWithMessage(ctx context.Context, name string, msg *pb.Message) {
+	log.SetTag(ctx, name+".key", b58.Encode([]byte(msg.GetKey())))
+	log.SetTag(ctx, name+".type", msg.GetType().String())
+}
+
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+	ctx = log.Start(ctx, "sendRequest")
+	defer log.Finish(ctx)
+	log.SetTag(ctx, "peer.address", p.Pretty())
+	log.SetTag(ctx, "self.address", dht.self.Pretty())
+	tagWithMessage(ctx, "request", pmes)
 
 	ms, err := dht.messageSenderForPeer(p)
 	if err != nil {
+		log.SetErr(ctx, err)
 		return nil, err
 	}
 
@@ -121,28 +136,36 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
+		log.SetErr(ctx, err)
 		return nil, err
 	}
+	tagWithMessage(ctx, "response", rpmes)
 
 	// update the peer (on valid msgs only)
 	dht.updateFromMessage(ctx, p, rpmes)
 
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	log.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
 	return rpmes, nil
 }
 
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+	ctx = log.Start(ctx, "sendMessage")
+	defer log.Finish(ctx)
+	log.SetTag(ctx, "peer.address", p.Pretty())
+	log.SetTag(ctx, "self.address", dht.self.Pretty())
+	tagWithMessage(ctx, "request", pmes)
+
 	ms, err := dht.messageSenderForPeer(p)
 	if err != nil {
+		log.SetErr(ctx, err)
 		return err
 	}
 
 	if err := ms.SendMessage(ctx, pmes); err != nil {
+		log.SetErr(ctx, err)
 		return err
 	}
-	log.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
 	return nil
 }
 
@@ -267,8 +290,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 				continue
 			}
 		}
-
-		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		log.LogKV(ctx, "event", "sent", "message", "dht message sent")
 
 		if ms.singleMes > streamReuseTries {
 			go inet.FullClose(ms.s)
@@ -303,6 +325,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				continue
 			}
 		}
+		log.LogKV(ctx, "event", "sent", "message", "dht request sent")
 
 		mes := new(pb.Message)
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
@@ -318,8 +341,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				continue
 			}
 		}
-
-		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		log.LogKV(ctx, "event", "received", "message", "dht request response received")
 
 		if ms.singleMes > streamReuseTries {
 			go inet.FullClose(ms.s)

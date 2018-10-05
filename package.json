@@ -42,9 +42,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmbQshXLNcCPRUGZv4sBGxnZNAHREA6MKeomkwihNXPZWP",
+      "hash": "QmaRb5yNXKonhbkpNxNawoydk4N6es6b4fPj19sjEKsh5D",
       "name": "go-datastore",
-      "version": "3.3.0"
+      "version": "3.4.0"
     },
     {
       "author": "hashicorp",
@@ -54,9 +54,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmSJ36wcYQyEViJUWUEhJU81tw1KdakTKqLLHbvYbA9zDv",
+      "hash": "QmXEyLwySuDMXejWBu8XwdkX2WuGKk8x9jFwz8js7j72UX",
       "name": "go-libp2p-peerstore",
-      "version": "2.0.2"
+      "version": "2.0.3"
     },
     {
       "author": "whyrusleeping",
@@ -78,15 +78,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmWKgrs6cyhTNUaTmAKs86K1FpYmkQLYVj83GqUvmuT3TY",
+      "hash": "Qmb4AZNKg9yQVKkQqejEcg86AaT6EqGemGV8mBjkfJBeGf",
       "name": "go-libp2p-kbucket",
-      "version": "2.2.9"
+      "version": "2.2.10"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQRfifvvbJ8xTKj4KX1VvGWK26hnPiy8eQvW1hmjc82nD",
+      "hash": "QmVQPj6rHdqz6dDQrjcdP36zDYLaoB7xwqRg39kx2PqqKU",
       "name": "go-libp2p-routing",
-      "version": "2.6.3"
+      "version": "2.6.4"
     },
     {
       "author": "whyrusleeping",
@@ -108,21 +108,21 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmX9pw5dSUZ2FozbppcSDJiS7eEh1RFwJNwrbmyLoUMS9x",
+      "hash": "QmQKod7iLxQK6X3aFYvhDDnFdXo3QjxKeL2F7UrPtdKQR2",
       "name": "go-libp2p-host",
-      "version": "3.0.11"
+      "version": "3.0.12"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmNmj2AeM46ZQqHARnWidb5qqHoZJFeYWzmG65jviJDRQY",
+      "hash": "QmWeqvGxDHjtjvRaHNLj1bDkeToAWJsq9HVCvqGEDZjiaG",
       "name": "go-libp2p",
-      "version": "6.0.15"
+      "version": "6.0.16"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQdLcvoy3JuSqhV6iwQ9T6Cv7hWLAdzob4jUZRPqFL67Z",
+      "hash": "QmWUPYHpNv4YahaBYXovuEJttgfqcNcN9Gg4arhQYcRoqa",
       "name": "go-libp2p-net",
-      "version": "3.0.11"
+      "version": "3.0.12"
     },
     {
       "author": "whyrusleeping",
@@ -156,9 +156,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmcALnLPFXgLLaZkXzGv99yt8xPfiWqFTumiXpWBJbU9cY",
+      "hash": "QmYssXVP4anzJGaq7VD1SJSxsr6AjbYD6gGjWoWYL5H3PR",
       "name": "go-libp2p-swarm",
-      "version": "3.0.15"
+      "version": "3.0.16"
     }
   ],
   "gxVersion": "0.4.0",
@@ -166,6 +166,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.4.4"
+  "version": "4.4.5"
 }
 

@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmWeqvGxDHjtjvRaHNLj1bDkeToAWJsq9HVCvqGEDZjiaG",
+      "hash": "QmU9Cf9q5TBCAC3kg74Fqr6K7DQTwa41C44YypYqB2GfR8",
       "name": "go-libp2p",
-      "version": "6.0.16"
+      "version": "6.0.17"
     },
     {
       "author": "whyrusleeping",
@@ -156,9 +156,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmYssXVP4anzJGaq7VD1SJSxsr6AjbYD6gGjWoWYL5H3PR",
+      "hash": "Qmb55o5PuhvqwjdVLvc4VV3ouLziYc6TfwM9LC6GwBQokn",
       "name": "go-libp2p-swarm",
-      "version": "3.0.16"
+      "version": "3.0.17"
     }
   ],
   "gxVersion": "0.4.0",
@@ -166,6 +166,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.4.5"
+  "version": "4.4.6"
 }
 

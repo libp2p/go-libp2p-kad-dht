@@ -54,9 +54,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmXEyLwySuDMXejWBu8XwdkX2WuGKk8x9jFwz8js7j72UX",
+      "hash": "QmWtCpWB39Rzc2xTB75MKorsxNpo3TyecTEN24CJ3KVohE",
       "name": "go-libp2p-peerstore",
-      "version": "2.0.3"
+      "version": "2.0.4"
     },
     {
       "author": "whyrusleeping",
@@ -78,15 +78,15 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "Qmb4AZNKg9yQVKkQqejEcg86AaT6EqGemGV8mBjkfJBeGf",
+      "hash": "QmbVM9Av9Rtcgey7doFXjviabc2hbWCox6YyGLuPe4YNTn",
       "name": "go-libp2p-kbucket",
-      "version": "2.2.10"
+      "version": "2.2.11"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmVQPj6rHdqz6dDQrjcdP36zDYLaoB7xwqRg39kx2PqqKU",
+      "hash": "QmPmFeQ5oY5G6M7aBWggi5phxEPXwsQntE1DFcUzETULdp",
       "name": "go-libp2p-routing",
-      "version": "2.6.4"
+      "version": "2.6.5"
     },
     {
       "author": "whyrusleeping",
@@ -108,21 +108,21 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmQKod7iLxQK6X3aFYvhDDnFdXo3QjxKeL2F7UrPtdKQR2",
+      "hash": "Qmf5yHzmWAyHSJRPAmZzfk3Yd7icydBLi7eec5741aov7v",
       "name": "go-libp2p-host",
-      "version": "3.0.12"
+      "version": "3.0.13"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmU9Cf9q5TBCAC3kg74Fqr6K7DQTwa41C44YypYqB2GfR8",
+      "hash": "QmcmNfbQznhk66ipFiaRHmZU8DVpvDKFfHrRo9q5wsHzZP",
       "name": "go-libp2p",
-      "version": "6.0.17"
+      "version": "6.0.18"
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmWUPYHpNv4YahaBYXovuEJttgfqcNcN9Gg4arhQYcRoqa",
+      "hash": "QmSTaEYUgDe1r581hxyd2u9582Hgp3KX4wGwYbRqz2u9Qh",
       "name": "go-libp2p-net",
-      "version": "3.0.12"
+      "version": "3.0.13"
     },
     {
       "author": "whyrusleeping",
@@ -156,9 +156,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "Qmb55o5PuhvqwjdVLvc4VV3ouLziYc6TfwM9LC6GwBQokn",
+      "hash": "QmR2Yj7Eod2U77DqUHRwNSbV2mtqeRHmVdCfsLkXZwJVLy",
       "name": "go-libp2p-swarm",
-      "version": "3.0.17"
+      "version": "3.0.18"
     }
   ],
   "gxVersion": "0.4.0",
@@ -166,6 +166,6 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.4.6"
+  "version": "4.4.7"
 }
 

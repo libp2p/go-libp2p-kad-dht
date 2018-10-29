@@ -15,7 +15,6 @@ import (
 	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
 
 	proto "github.com/gogo/protobuf/proto"
-	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
@@ -30,6 +29,7 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	routing "github.com/libp2p/go-libp2p-routing"
+	mh "github.com/multiformats/go-multihash"
 	base32 "github.com/whyrusleeping/base32"
 )
 
@@ -306,11 +306,12 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	eip := log.EventBegin(ctx, "findProvidersSingle", p, key)
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key mh.Multihash) (*pb.Message, error) {
+	// FIXME: mh not Loggable
+	eip := log.EventBegin(ctx, "findProvidersSingle", p/*, key*/)
 	defer eip.Done()
 
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
+	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:

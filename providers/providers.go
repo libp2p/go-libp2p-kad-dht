@@ -16,6 +16,7 @@ import (
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
 	peer "github.com/libp2p/go-libp2p-peer"
+	mh "github.com/multiformats/go-multihash"
 	base32 "github.com/whyrusleeping/base32"
 )
 
@@ -48,12 +49,12 @@ type providerSet struct {
 }
 
 type addProv struct {
-	k   cid.Cid
+	k   mh.Multihash
 	val peer.ID
 }
 
 type getProv struct {
-	k    cid.Cid
+	k    mh.Multihash
 	resp chan []peer.ID
 }
 
@@ -77,15 +78,15 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 const providersKeyPrefix = "/providers/"
 
-func mkProvKey(k cid.Cid) string {
-	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
+func mkProvKey(k mh.Multihash) string {
+	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k)
 }
 
 func (pm *ProviderManager) Process() goprocess.Process {
 	return pm.proc
 }
 
-func (pm *ProviderManager) providersForKey(k cid.Cid) ([]peer.ID, error) {
+func (pm *ProviderManager) providersForKey(k mh.Multihash) ([]peer.ID, error) {
 	pset, err := pm.getProvSet(k)
 	if err != nil {
 		return nil, err
@@ -93,8 +94,8 @@ func (pm *ProviderManager) providersForKey(k cid.Cid) ([]peer.ID, error) {
 	return pset.providers, nil
 }
 
-func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
-	cached, ok := pm.providers.Get(k.KeyString())
+func (pm *ProviderManager) getProvSet(k mh.Multihash) (*providerSet, error) {
+	cached, ok := pm.providers.Get(string(k))
 	if ok {
 		return cached.(*providerSet), nil
 	}
@@ -105,13 +106,13 @@ func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
 	}
 
 	if len(pset.providers) > 0 {
-		pm.providers.Add(k.KeyString(), pset)
+		pm.providers.Add(string(k), pset)
 	}
 
 	return pset, nil
 }
 
-func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
+func loadProvSet(dstore ds.Datastore, k mh.Multihash) (*providerSet, error) {
 	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
 	if err != nil {
 		return nil, err
@@ -161,15 +162,15 @@ func readTimeValue(i interface{}) (time.Time, error) {
 	return time.Unix(0, nsec), nil
 }
 
-func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
-	iprovs, ok := pm.providers.Get(k.KeyString())
+func (pm *ProviderManager) addProv(k mh.Multihash, p peer.ID) error {
+	iprovs, ok := pm.providers.Get(string(k))
 	if !ok {
 		stored, err := loadProvSet(pm.dstore, k)
 		if err != nil {
 			return err
 		}
 		iprovs = stored
-		pm.providers.Add(k.KeyString(), iprovs)
+		pm.providers.Add(string(k), iprovs)
 	}
 	provs := iprovs.(*providerSet)
 	now := time.Now()
@@ -178,7 +179,7 @@ func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
 	return writeProviderEntry(pm.dstore, k, p, now)
 }
 
-func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) error {
+func writeProviderEntry(dstore ds.Datastore, k mh.Multihash, p peer.ID, t time.Time) error {
 	dsk := mkProvKey(k) + "/" + base32.RawStdEncoding.EncodeToString([]byte(p))
 
 	buf := make([]byte, 16)
@@ -187,8 +188,8 @@ func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) 
 	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
-func (pm *ProviderManager) deleteProvSet(k cid.Cid) error {
-	pm.providers.Remove(k.KeyString())
+func (pm *ProviderManager) deleteProvSet(k mh.Multihash) error {
+	pm.providers.Remove(string(k))
 
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
@@ -212,7 +213,7 @@ func (pm *ProviderManager) deleteProvSet(k cid.Cid) error {
 	return nil
 }
 
-func (pm *ProviderManager) getProvKeys() (func() (cid.Cid, bool), error) {
+func (pm *ProviderManager) getProvKeys() (func() (mh.Multihash, bool), error) {
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
 		Prefix:   providersKeyPrefix,
@@ -221,7 +222,7 @@ func (pm *ProviderManager) getProvKeys() (func() (cid.Cid, bool), error) {
 		return nil, err
 	}
 
-	iter := func() (cid.Cid, bool) {
+	iter := func() (mh.Multihash, bool) {
 		for e := range res.Next() {
 			parts := strings.Split(e.Key, "/")
 			if len(parts) != 4 {
@@ -234,15 +235,20 @@ func (pm *ProviderManager) getProvKeys() (func() (cid.Cid, bool), error) {
 				continue
 			}
 
+			// NOTE: A raw Multihash is a CidV0 so this will always
+			//       succeed regardless of if we get a multihash from a
+			//       newer node or a full CID from an older node
+			// FIXME: Is this the best way to handle it?
 			c, err := cid.Cast(decoded)
 			if err != nil {
 				log.Warning("error casting key to cid from datastore key: %s", err)
 				continue
 			}
+			h := c.Hash()
 
-			return c, true
+			return h, true
 		}
-		return cid.Cid{}, false
+		return mh.Multihash{}, false
 	}
 
 	return iter, nil
@@ -309,7 +315,7 @@ func (pm *ProviderManager) run() {
 	}
 }
 
-func (pm *ProviderManager) AddProvider(ctx context.Context, k cid.Cid, val peer.ID) {
+func (pm *ProviderManager) AddProvider(ctx context.Context, k mh.Multihash, val peer.ID) {
 	prov := &addProv{
 		k:   k,
 		val: val,
@@ -320,7 +326,7 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k cid.Cid, val peer.
 	}
 }
 
-func (pm *ProviderManager) GetProviders(ctx context.Context, k cid.Cid) []peer.ID {
+func (pm *ProviderManager) GetProviders(ctx context.Context, k mh.Multihash) []peer.ID {
 	gp := &getProv{
 		k:    k,
 		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking

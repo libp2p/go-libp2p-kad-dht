@@ -65,28 +65,30 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	// since the query doesnt actually pass our context down
 	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
 	parent := ctx
-	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		// For DHT query command
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type: notif.SendingQuery,
-			ID:   p,
-		})
+	query := dht.newQuery(key, func(pathIndex int, numPaths int) QueryFunc {
+		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+			// For DHT query command
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type: notif.SendingQuery,
+				ID:   p,
+			})
 
-		pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
-		if err != nil {
-			log.Debugf("error getting closer peers: %s", err)
-			return nil, err
+			pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
+			if err != nil {
+				log.Debugf("error getting closer peers: %s", err)
+				return nil, err
+			}
+			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+
+			// For DHT query command
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type:      notif.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
+
+			return &dhtQueryResult{closerPeers: peers}, nil
 		}
-		peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
-
-		// For DHT query command
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type:      notif.PeerResponse,
-			ID:        p,
-			Responses: peers,
-		})
-
-		return &dhtQueryResult{closerPeers: peers}, nil
 	})
 
 	go func() {

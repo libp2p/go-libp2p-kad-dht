@@ -270,6 +270,20 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	return out, ctx.Err()
 }
 
+// Computes the desired number of results for each path, rounding up.
+func pathSize(resultsWanted int, numPaths int) int {
+	if resultsWanted < 0 { // resultsWanted == -1 indicates unlimited results
+		return -1
+	}
+
+	size := resultsWanted / numPaths
+	if size*numPaths < resultsWanted {
+		size++
+	}
+
+	return size
+}
+
 func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-chan RecvdVal, error) {
 	vals := make(chan RecvdVal, 1)
 
@@ -311,64 +325,73 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 	}
 
 	var valslock sync.Mutex
-	var got int
+	got := 0
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type: notif.SendingQuery,
-			ID:   p,
-		})
-
-		rec, peers, err := dht.getValueOrPeers(ctx, p, key)
-		switch err {
-		case routing.ErrNotFound:
-			// in this case, they responded with nothing,
-			// still send a notification so listeners can know the
-			// request has completed 'successfully'
+	query := dht.newQuery(key, func(pathIndex int, numPaths int) QueryFunc {
+		pSize := pathSize(nvals, numPaths)
+		var gotPerPath int // also protected by valslock above
+		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
 			notif.PublishQueryEvent(parent, &notif.QueryEvent{
-				Type: notif.PeerResponse,
+				Type: notif.SendingQuery,
 				ID:   p,
 			})
-			return nil, err
-		default:
-			return nil, err
 
-		case nil, errInvalidRecord:
-			// in either of these cases, we want to keep going
-		}
+			rec, peers, err := dht.getValueOrPeers(ctx, p, key)
+			switch err {
+			case routing.ErrNotFound:
+				// in this case, they responded with nothing,
+				// still send a notification so listeners can know the
+				// request has completed 'successfully'
+				notif.PublishQueryEvent(parent, &notif.QueryEvent{
+					Type: notif.PeerResponse,
+					ID:   p,
+				})
+				return nil, err
+			default:
+				return nil, err
 
-		res := &dhtQueryResult{closerPeers: peers}
-
-		if rec.GetValue() != nil || err == errInvalidRecord {
-			rv := RecvdVal{
-				Val:  rec.GetValue(),
-				From: p,
+			case nil, errInvalidRecord:
+				// in either of these cases, we want to keep going
 			}
-			valslock.Lock()
-			select {
-			case vals <- rv:
-			case <-ctx.Done():
+
+			res := &dhtQueryResult{closerPeers: peers}
+
+			if rec.GetValue() != nil || err == errInvalidRecord {
+				rv := RecvdVal{
+					Val:  rec.GetValue(),
+					From: p,
+				}
+				valslock.Lock()
+				// ensure we don't go over the desired number due to inequal division into paths
+				if nvals < 0 || got < nvals {
+					select {
+					case vals <- rv:
+					case <-ctx.Done():
+						valslock.Unlock()
+						return nil, ctx.Err()
+					}
+					gotPerPath++
+					got++
+				}
+
+				// If we have collected enough records, we're done
+				if nvals >= 0 && (gotPerPath >= pSize || got >= nvals) {
+					res.success = true
+					res.stopAllPaths = got >= nvals
+				}
 				valslock.Unlock()
-				return nil, ctx.Err()
 			}
-			got++
 
-			// If we have collected enough records, we're done
-			if nvals == got {
-				res.success = true
-			}
-			valslock.Unlock()
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type:      notif.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
+
+			return res, nil
 		}
-
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type:      notif.PeerResponse,
-			ID:        p,
-			Responses: peers,
-		})
-
-		return res, nil
 	})
 
 	go func() {
@@ -495,57 +518,76 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		}
 	}
 
+	remainingCount := count - ps.Size()
+	peers := dht.routingTable.NearestPeers(kb.ConvertKey(key.KeyString()), AlphaValue)
+
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(key.KeyString(), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type: notif.SendingQuery,
-			ID:   p,
-		})
-		pmes, err := dht.findProvidersSingle(ctx, p, key)
-		if err != nil {
-			return nil, err
-		}
-
-		log.Debugf("%d provider entries", len(pmes.GetProviderPeers()))
-		provs := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
-		log.Debugf("%d provider entries decoded", len(provs))
-
-		// Add unique providers from request, up to 'count'
-		for _, prov := range provs {
-			if prov.ID != dht.self {
-				dht.peerstore.AddAddrs(prov.ID, prov.Addrs, pstore.TempAddrTTL)
+	query := dht.newQuery(key.KeyString(), func(pathIndex int, numPaths int) QueryFunc {
+		pSize := pathSize(remainingCount, numPaths)
+		var got int
+		var gotMutex sync.Mutex
+		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type: notif.SendingQuery,
+				ID:   p,
+			})
+			pmes, err := dht.findProvidersSingle(ctx, p, key)
+			if err != nil {
+				return nil, err
 			}
-			log.Debugf("got provider: %s", prov)
-			if ps.TryAdd(prov.ID) {
-				log.Debugf("using provider: %s", prov)
-				select {
-				case peerOut <- *prov:
-				case <-ctx.Done():
-					log.Debug("context timed out sending more providers")
-					return nil, ctx.Err()
+
+			log.Debugf("%d provider entries", len(pmes.GetProviderPeers()))
+			provs := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
+			log.Debugf("%d provider entries decoded", len(provs))
+
+			// Add unique providers from request, up to pSize
+			for _, prov := range provs {
+				if prov.ID != dht.self {
+					dht.peerstore.AddAddrs(prov.ID, prov.Addrs, pstore.TempAddrTTL)
 				}
+				log.Debugf("got provider: %s", prov)
+				if ps.TryAdd(prov.ID) {
+
+					gotMutex.Lock()
+					got++
+					gotMutex.Unlock()
+					log.Debugf("using provider: %s", prov)
+					select {
+					case peerOut <- *prov:
+					case <-ctx.Done():
+						log.Debug("context timed out sending more providers")
+						return nil, ctx.Err()
+					}
+				}
+
+				gotMutex.Lock()
+				// Need to check both per-path and total due to rounding
+				if got >= pSize || ps.Size() >= count {
+					gotMutex.Unlock()
+					log.Debugf("got enough providers (%d/%d)", got, pSize)
+					return &dhtQueryResult{
+						success:      true,
+						stopAllPaths: ps.Size() >= count, // Total is enough
+					}, nil
+				}
+				gotMutex.Unlock()
 			}
-			if ps.Size() >= count {
-				log.Debugf("got enough providers (%d/%d)", ps.Size(), count)
-				return &dhtQueryResult{success: true}, nil
-			}
+
+			// Give closer peers back to the query to be queried
+			closer := pmes.GetCloserPeers()
+			clpeers := pb.PBPeersToPeerInfos(closer)
+			log.Debugf("got closer peers: %d %s", len(clpeers), clpeers)
+
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type:      notif.PeerResponse,
+				ID:        p,
+				Responses: clpeers,
+			})
+			return &dhtQueryResult{closerPeers: clpeers}, nil
 		}
-
-		// Give closer peers back to the query to be queried
-		closer := pmes.GetCloserPeers()
-		clpeers := pb.PBPeersToPeerInfos(closer)
-		log.Debugf("got closer peers: %d %s", len(clpeers), clpeers)
-
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type:      notif.PeerResponse,
-			ID:        p,
-			Responses: clpeers,
-		})
-		return &dhtQueryResult{closerPeers: clpeers}, nil
 	})
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertKey(key.KeyString()), AlphaValue)
 	_, err := query.Run(ctx, peers)
 	if err != nil {
 		log.Debugf("Query error: %s", err)
@@ -596,37 +638,40 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type: notif.SendingQuery,
-			ID:   p,
-		})
+	query := dht.newQuery(string(id), func(pathIndex int, numPaths int) QueryFunc {
+		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type: notif.SendingQuery,
+				ID:   p,
+			})
 
-		pmes, err := dht.findPeerSingle(ctx, p, id)
-		if err != nil {
-			return nil, err
-		}
-
-		closer := pmes.GetCloserPeers()
-		clpeerInfos := pb.PBPeersToPeerInfos(closer)
-
-		// see if we got the peer here
-		for _, npi := range clpeerInfos {
-			if npi.ID == id {
-				return &dhtQueryResult{
-					peer:    npi,
-					success: true,
-				}, nil
+			pmes, err := dht.findPeerSingle(ctx, p, id)
+			if err != nil {
+				return nil, err
 			}
+
+			closer := pmes.GetCloserPeers()
+			clpeerInfos := pb.PBPeersToPeerInfos(closer)
+
+			// see if we got the peer here
+			for _, npi := range clpeerInfos {
+				if npi.ID == id {
+					return &dhtQueryResult{
+						peer:         npi,
+						success:      true,
+						stopAllPaths: true,
+					}, nil
+				}
+			}
+
+			notif.PublishQueryEvent(parent, &notif.QueryEvent{
+				Type:      notif.PeerResponse,
+				ID:        p,
+				Responses: clpeerInfos,
+			})
+
+			return &dhtQueryResult{closerPeers: clpeerInfos}, nil
 		}
-
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type:      notif.PeerResponse,
-			ID:        p,
-			Responses: clpeerInfos,
-		})
-
-		return &dhtQueryResult{closerPeers: clpeerInfos}, nil
 	})
 
 	// run it!
@@ -635,12 +680,15 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 		return pstore.PeerInfo{}, err
 	}
 
-	log.Debugf("FindPeer %v %v", id, result.success)
-	if result.peer.ID == "" {
-		return pstore.PeerInfo{}, routing.ErrNotFound
+	for _, path := range result.paths {
+		if path.success && path.peer.ID != "" {
+			log.Debugf("FindPeer %v true", id)
+			return *path.peer, nil
+		}
 	}
 
-	return *result.peer, nil
+	log.Debugf("FindPeer %v true", false)
+	return pstore.PeerInfo{}, routing.ErrNotFound
 }
 
 // FindPeersConnectedToPeer searches for peers directly connected to a given peer.
@@ -656,44 +704,45 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 	}
 
 	// setup the Query
-	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-
-		pmes, err := dht.findPeerSingle(ctx, p, id)
-		if err != nil {
-			return nil, err
-		}
-
-		var clpeers []*pstore.PeerInfo
-		closer := pmes.GetCloserPeers()
-		for _, pbp := range closer {
-			pi := pb.PBPeerToPeerInfo(pbp)
-
-			// skip peers already seen
-			peersSeenMx.Lock()
-			if _, found := peersSeen[pi.ID]; found {
-				peersSeenMx.Unlock()
-				continue
+	query := dht.newQuery(string(id), func(pathIndex int, numPaths int) QueryFunc {
+		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+			pmes, err := dht.findPeerSingle(ctx, p, id)
+			if err != nil {
+				return nil, err
 			}
-			peersSeen[pi.ID] = struct{}{}
-			peersSeenMx.Unlock()
 
-			// if peer is connected, send it to our client.
-			if pb.Connectedness(pbp.Connection) == inet.Connected {
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case peerchan <- pi:
+			var clpeers []*pstore.PeerInfo
+			closer := pmes.GetCloserPeers()
+			for _, pbp := range closer {
+				pi := pb.PBPeerToPeerInfo(pbp)
+
+				// skip peers already seen
+				peersSeenMx.Lock()
+				if _, found := peersSeen[pi.ID]; found {
+					peersSeenMx.Unlock()
+					continue
+				}
+				peersSeen[pi.ID] = struct{}{}
+				peersSeenMx.Unlock()
+
+				// if peer is connected, send it to our client.
+				if pb.Connectedness(pbp.Connection) == inet.Connected {
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case peerchan <- pi:
+					}
+				}
+
+				// if peer is the peer we're looking for, don't bother querying it.
+				// TODO maybe query it?
+				if pb.Connectedness(pbp.Connection) != inet.Connected {
+					clpeers = append(clpeers, pi)
 				}
 			}
 
-			// if peer is the peer we're looking for, don't bother querying it.
-			// TODO maybe query it?
-			if pb.Connectedness(pbp.Connection) != inet.Connected {
-				clpeers = append(clpeers, pi)
-			}
+			return &dhtQueryResult{closerPeers: clpeers}, nil
 		}
-
-		return &dhtQueryResult{closerPeers: clpeers}, nil
 	})
 
 	// run it! run it asynchronously to gen peers as results are found.

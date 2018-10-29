@@ -12,13 +12,15 @@ import (
 var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
 var ProtocolDHTOld protocol.ID = "/ipfs/dht"
 var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
+var DefaultDisjointPaths = 10
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore ds.Batching
-	Validator record.Validator
-	Client    bool
-	Protocols []protocol.ID
+	Datastore     ds.Batching
+	Validator     record.Validator
+	Client        bool
+	Protocols     []protocol.ID
+	DisjointPaths int
 }
 
 // Apply applies the given options to this Option
@@ -42,6 +44,7 @@ var Defaults = func(o *Options) error {
 	}
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
+	o.DisjointPaths = DefaultDisjointPaths
 	return nil
 }
 
@@ -99,6 +102,21 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 func Protocols(protocols ...protocol.ID) Option {
 	return func(o *Options) error {
 		o.Protocols = protocols
+		return nil
+	}
+}
+
+// DisjointPaths sets the number of independent search paths.
+// This ensures that visiting fewer than this number of malicious
+// nodes will not cause a query to fail.
+//
+// Defaults to 10.
+func DisjointPaths(disjoint int) Option {
+	return func(o *Options) error {
+		if disjoint < 1 {
+			return fmt.Errorf("DisjointPaths must be positive")
+		}
+		o.DisjointPaths = disjoint
 		return nil
 	}
 }

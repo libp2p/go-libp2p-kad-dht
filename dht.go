@@ -64,6 +64,8 @@ type IpfsDHT struct {
 	plk sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+
+	disjointPaths int
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -82,7 +84,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
+	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.DisjointPaths)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -127,7 +129,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, disjointPaths int) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -139,16 +141,17 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 
 	return &IpfsDHT{
-		datastore:    dstore,
-		self:         h.ID(),
-		peerstore:    h.Peerstore(),
-		host:         h,
-		strmap:       make(map[peer.ID]*messageSender),
-		ctx:          ctx,
-		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
-		birth:        time.Now(),
-		routingTable: rt,
-		protocols:    protocols,
+		datastore:     dstore,
+		self:          h.ID(),
+		peerstore:     h.Peerstore(),
+		host:          h,
+		strmap:        make(map[peer.ID]*messageSender),
+		ctx:           ctx,
+		providers:     providers.NewProviderManager(ctx, h.ID(), dstore),
+		birth:         time.Now(),
+		routingTable:  rt,
+		protocols:     protocols,
+		disjointPaths: disjointPaths,
 	}
 }
 

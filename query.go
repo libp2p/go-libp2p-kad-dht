@@ -1,8 +1,3 @@
-// package query implement a query manager to drive concurrent workers
-// to query the DHT. A query is setup with a target key, a queryFunc tasked
-// to communicate with a peer, and a set of initial peers. As the query
-// progress, queryFunc can return closer peers that will be used to navigate
-// closer to the target key in the DHT until an answer is reached.
 package dht
 
 import (

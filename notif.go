@@ -1,15 +1,13 @@
 package dht
 
 import (
-	inet "github.com/libp2p/go-libp2p-net"
-	ma "github.com/multiformats/go-multiaddr"
-	mstream "github.com/multiformats/go-multistream"
+	ma "gx/ipfs/QmT4U94DnD8FRfqr21obWY32HLM5VExccPKMjQHofeYqr9/go-multiaddr"
+	inet "gx/ipfs/QmXuRkCR7BNQa9uqfpTiFWsTQLzmTWYg91Ja1w95gnqb6u/go-libp2p-net"
+	mstream "gx/ipfs/QmabLh8TrJ3emfAoQk5AbqbLTbMyj7XqumMFmAFxa9epo8/go-multistream"
 )
 
 // netNotifiee defines methods to be used with the IpfsDHT
 type netNotifiee IpfsDHT
-
-var dhtProtocols = []string{string(ProtocolDHT), string(ProtocolDHTOld)}
 
 func (nn *netNotifiee) DHT() *IpfsDHT {
 	return (*IpfsDHT)(nn)
@@ -24,7 +22,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	}
 
 	p := v.RemotePeer()
-	protos, err := dht.peerstore.SupportsProtocols(p, dhtProtocols...)
+	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
 	if err == nil && len(protos) != 0 {
 		// We lock here for consistency with the lock in testConnection.
 		// This probably isn't necessary because (dis)connect
@@ -37,7 +35,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		return
 	}
 
-	// Note: Unfortunately, the peerstore may not yet now that this peer is
+	// Note: Unfortunately, the peerstore may not yet know that this peer is
 	// a DHT server. So, if it didn't return a positive response above, test
 	// manually.
 	go nn.testConnection(v)
@@ -55,9 +53,9 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 		// Connection error
 		return
 	}
-	defer s.Close()
+	defer inet.FullClose(s)
 
-	selected, err := mstream.SelectOneOf(dhtProtocols, s)
+	selected, err := mstream.SelectOneOf(dht.protocolStrs(), s)
 	if err != nil {
 		// Doesn't support the protocol
 		return

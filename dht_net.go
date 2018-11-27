@@ -1,20 +1,47 @@
 package dht
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
-	ggio "github.com/gogo/protobuf/io"
-	ctxio "github.com/jbenet/go-context/io"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	inet "github.com/libp2p/go-libp2p-net"
-	peer "github.com/libp2p/go-libp2p-peer"
+	pb "gx/ipfs/QmQHnqaNULV8WeUGgh97o9K3KAW6kWQmDyNf9UuikgnPTe/go-libp2p-kad-dht/pb"
+	ctxio "gx/ipfs/QmTKsRYeY4simJyf37K93juSq75Lo8MVCDJ7owjmf46u8W/go-context/io"
+	peer "gx/ipfs/QmTRhk7cgjUf2gfQ3p2M9KPECNZEW9XUrmHcFCgog4cPgB/go-libp2p-peer"
+	inet "gx/ipfs/QmXuRkCR7BNQa9uqfpTiFWsTQLzmTWYg91Ja1w95gnqb6u/go-libp2p-net"
+	ggio "gx/ipfs/QmdxUuburamoF6zF9qjeQC4WYcWGbWuRmdLacMEsW8ioD8/gogo-protobuf/io"
 )
 
 var dhtReadMessageTimeout = time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
+
+type bufferedWriteCloser interface {
+	ggio.WriteCloser
+	Flush() error
+}
+
+// The Protobuf writer performs multiple small writes when writing a message.
+// We need to buffer those writes, to make sure that we're not sending a new
+// packet for every single write.
+type bufferedDelimitedWriter struct {
+	*bufio.Writer
+	ggio.WriteCloser
+}
+
+func newBufferedDelimitedWriter(str io.Writer) bufferedWriteCloser {
+	w := bufio.NewWriter(str)
+	return &bufferedDelimitedWriter{
+		Writer:      w,
+		WriteCloser: ggio.NewDelimitedWriter(w),
+	}
+}
+
+func (w *bufferedDelimitedWriter) Flush() error {
+	return w.Writer.Flush()
+}
 
 // handleNewStream implements the inet.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
@@ -22,19 +49,22 @@ func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 }
 
 func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
-	defer s.Close()
-
 	ctx := dht.Context()
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
 	r := ggio.NewDelimitedReader(cr, inet.MessageSizeMax)
-	w := ggio.NewDelimitedWriter(cw)
+	w := newBufferedDelimitedWriter(cw)
 	mPeer := s.Conn().RemotePeer()
 
 	for {
 		// receive msg
 		pmes := new(pb.Message)
-		if err := r.ReadMsg(pmes); err != nil {
+		switch err := r.ReadMsg(pmes); err {
+		case io.EOF:
+			s.Close()
+			return
+		case nil:
+		default:
 			s.Reset()
 			log.Debugf("Error unmarshaling data: %s", err)
 			return
@@ -66,7 +96,11 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		}
 
 		// send out response msg
-		if err := w.WriteMsg(rpmes); err != nil {
+		err = w.WriteMsg(rpmes)
+		if err == nil {
+			err = w.Flush()
+		}
+		if err != nil {
 			s.Reset()
 			log.Debugf("send response error: %s", err)
 			return
@@ -76,6 +110,10 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 
 func (dht *IpfsDHT) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	return dht.sendRequest(ctx, p, pmes)
+}
+
+func (dht *IpfsDHT) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+	return dht.sendMessage(ctx, p, pmes)
 }
 
 // sendRequest sends out a request, but also makes sure to
@@ -102,10 +140,6 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	return rpmes, nil
 }
 
-func (dht *IpfsDHT) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
-	return dht.sendMessage(ctx, p, pmes)
-}
-
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ms, err := dht.messageSenderForPeer(p)
@@ -121,7 +155,11 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 }
 
 func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
-	dht.Update(ctx, p)
+	// Make sure that this node is actually a DHT server, not just a client.
+	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+	if err == nil && len(protos) > 0 {
+		dht.Update(ctx, p)
+	}
 	return nil
 }
 
@@ -160,7 +198,7 @@ func (dht *IpfsDHT) messageSenderForPeer(p peer.ID) (*messageSender, error) {
 type messageSender struct {
 	s   inet.Stream
 	r   ggio.ReadCloser
-	w   ggio.WriteCloser
+	w   bufferedWriteCloser
 	lk  sync.Mutex
 	p   peer.ID
 	dht *IpfsDHT
@@ -198,13 +236,13 @@ func (ms *messageSender) prep() error {
 		return nil
 	}
 
-	nstr, err := ms.dht.host.NewStream(ms.dht.ctx, ms.p, ProtocolDHT, ProtocolDHTOld)
+	nstr, err := ms.dht.host.NewStream(ms.dht.ctx, ms.p, ms.dht.protocols...)
 	if err != nil {
 		return err
 	}
 
 	ms.r = ggio.NewDelimitedReader(nstr, inet.MessageSizeMax)
-	ms.w = ggio.NewDelimitedWriter(nstr)
+	ms.w = newBufferedDelimitedWriter(nstr)
 	ms.s = nstr
 
 	return nil
@@ -224,7 +262,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			return err
 		}
 
-		if err := ms.w.WriteMsg(pmes); err != nil {
+		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil
 
@@ -241,7 +279,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			ms.s.Close()
+			go inet.FullClose(ms.s)
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++
@@ -260,7 +298,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			return nil, err
 		}
 
-		if err := ms.w.WriteMsg(pmes); err != nil {
+		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil
 
@@ -292,7 +330,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			ms.s.Close()
+			go inet.FullClose(ms.s)
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++
@@ -300,6 +338,13 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 
 		return mes, nil
 	}
+}
+
+func (ms *messageSender) writeMsg(pmes *pb.Message) error {
+	if err := ms.w.WriteMsg(pmes); err != nil {
+		return err
+	}
+	return ms.w.Flush()
 }
 
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {

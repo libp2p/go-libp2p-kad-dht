@@ -1,20 +1,26 @@
+// package query implement a query manager to drive concurrent workers
+// to query the DHT. A query is setup with a target key, a queryFunc tasked
+// to communicate with a peer, and a set of initial peers. As the query
+// progress, queryFunc can return closer peers that will be used to navigate
+// closer to the target key in the DHT until an answer is reached.
 package dht
 
 import (
 	"context"
 	"sync"
 
-	u "github.com/ipfs/go-ipfs-util"
-	logging "github.com/ipfs/go-log"
-	todoctr "github.com/ipfs/go-todocounter"
-	process "github.com/jbenet/goprocess"
-	ctxproc "github.com/jbenet/goprocess/context"
-	peer "github.com/libp2p/go-libp2p-peer"
-	pset "github.com/libp2p/go-libp2p-peer/peerset"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
-	queue "github.com/libp2p/go-libp2p-peerstore/queue"
-	routing "github.com/libp2p/go-libp2p-routing"
-	notif "github.com/libp2p/go-libp2p-routing/notifications"
+	u "gx/ipfs/QmPdKqUcHGFdeSpvjVoaTRPPstGif9GBZb5Q56RVw9o69A/go-ipfs-util"
+	todoctr "gx/ipfs/QmQNQhNmY4STU1MURjH9vYEMpx2ncMS4gbwxXWtrEjzVAq/go-todocounter"
+	process "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess"
+	ctxproc "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess/context"
+	peer "gx/ipfs/QmTRhk7cgjUf2gfQ3p2M9KPECNZEW9XUrmHcFCgog4cPgB/go-libp2p-peer"
+	pset "gx/ipfs/QmTRhk7cgjUf2gfQ3p2M9KPECNZEW9XUrmHcFCgog4cPgB/go-libp2p-peer/peerset"
+	pstore "gx/ipfs/QmTTJcDL3gsnGDALjh2fDGg1onGRUdVgNL2hU2WEZcVrMX/go-libp2p-peerstore"
+	queue "gx/ipfs/QmTTJcDL3gsnGDALjh2fDGg1onGRUdVgNL2hU2WEZcVrMX/go-libp2p-peerstore/queue"
+	inet "gx/ipfs/QmXuRkCR7BNQa9uqfpTiFWsTQLzmTWYg91Ja1w95gnqb6u/go-libp2p-net"
+	logging "gx/ipfs/QmZChCsSt8DctjceaL56Eibc29CVQq4dGKRXC5JRZ6Ppae/go-log"
+	routing "gx/ipfs/QmcQ81jSyWCp1jpkQ8CMbtpXT3jK7Wg6ZtYmoyWFgBoF9c/go-libp2p-routing"
+	notif "gx/ipfs/QmcQ81jSyWCp1jpkQ8CMbtpXT3jK7Wg6ZtYmoyWFgBoF9c/go-libp2p-routing/notifications"
 )
 
 var maxQueryConcurrency = AlphaValue
@@ -33,7 +39,8 @@ type dhtQueryResult struct {
 	closerPeers   []*pstore.PeerInfo // *
 	success       bool
 
-	finalSet *pset.PeerSet
+	finalSet   *pset.PeerSet
+	queriedSet *pset.PeerSet
 }
 
 // constructs query
@@ -71,6 +78,7 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 type dhtQueryRunner struct {
 	query          *dhtQuery        // query to run
 	peersSeen      *pset.PeerSet    // all peers queried. prevent querying same peer 2x
+	peersQueried   *pset.PeerSet    // peers successfully connected to and queried
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
 
@@ -94,6 +102,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersToQuery:   queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key))),
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      pset.New(),
+		peersQueried:   pset.New(),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		proc:           proc,
 	}
@@ -158,7 +167,8 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	}
 
 	return &dhtQueryResult{
-		finalSet: r.peersSeen,
+		finalSet:   r.peersSeen,
+		queriedSet: r.peersQueried,
 	}, err
 }
 
@@ -224,14 +234,16 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	// make sure we do this when we exit
 	defer func() {
-		// signal we're done proccessing peer p
+		// signal we're done processing peer p
 		r.peersRemaining.Decrement(1)
 		r.rateLimit <- struct{}{}
 	}()
 
 	// make sure we're connected to the peer.
 	// FIXME abstract away into the network layer
-	if conns := r.query.dht.host.Network().ConnsToPeer(p); len(conns) == 0 {
+	// Note: Failure to connect in this block will cause the function to
+	// short circuit.
+	if r.query.dht.host.Network().Connectedness(p) == inet.NotConnected {
 		log.Debug("not connected. dialing.")
 
 		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
@@ -266,6 +278,8 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)
 
+	r.peersQueried.Add(p)
+
 	if err != nil {
 		log.Debugf("ERROR worker for: %v %v", p, err)
 		r.Lock()
@@ -283,7 +297,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	} else if len(res.closerPeers) > 0 {
 		log.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(res.closerPeers))
 		for _, next := range res.closerPeers {
-			if next.ID == r.query.dht.self { // dont add self.
+			if next.ID == r.query.dht.self { // don't add self.
 				log.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 				continue
 			}

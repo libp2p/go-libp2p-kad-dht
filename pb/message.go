@@ -1,12 +1,12 @@
 package dht_pb
 
 import (
-	logging "github.com/ipfs/go-log"
-	inet "github.com/libp2p/go-libp2p-net"
-	peer "github.com/libp2p/go-libp2p-peer"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
-	b58 "github.com/mr-tron/base58/base58"
-	ma "github.com/multiformats/go-multiaddr"
+	ma "gx/ipfs/QmT4U94DnD8FRfqr21obWY32HLM5VExccPKMjQHofeYqr9/go-multiaddr"
+	peer "gx/ipfs/QmTRhk7cgjUf2gfQ3p2M9KPECNZEW9XUrmHcFCgog4cPgB/go-libp2p-peer"
+	pstore "gx/ipfs/QmTTJcDL3gsnGDALjh2fDGg1onGRUdVgNL2hU2WEZcVrMX/go-libp2p-peerstore"
+	b58 "gx/ipfs/QmWFAMPqsEyUX7gDUsRVmMWz59FxSpJ1b2v6bJ1yYzo7jY/go-base58-fast/base58"
+	inet "gx/ipfs/QmXuRkCR7BNQa9uqfpTiFWsTQLzmTWYg91Ja1w95gnqb6u/go-libp2p-net"
+	logging "gx/ipfs/QmZChCsSt8DctjceaL56Eibc29CVQq4dGKRXC5JRZ6Ppae/go-log"
 )
 
 var log = logging.Logger("dht.pb")
@@ -17,10 +17,10 @@ type PeerRoutingInfo struct {
 }
 
 // NewMessage constructs a new dht message with given type, key, and level
-func NewMessage(typ Message_MessageType, key string, level int) *Message {
+func NewMessage(typ Message_MessageType, key []byte, level int) *Message {
 	m := &Message{
-		Type: &typ,
-		Key:  &key,
+		Type: typ,
+		Key:  key,
 	}
 	m.SetClusterLevel(level)
 	return m
@@ -34,9 +34,9 @@ func peerRoutingInfoToPBPeer(p PeerRoutingInfo) *Message_Peer {
 		pbp.Addrs[i] = maddr.Bytes() // Bytes, not String. Compressed.
 	}
 	s := string(p.ID)
-	pbp.Id = &s
+	pbp.Id = []byte(s)
 	c := ConnectionType(p.Connectedness)
-	pbp.Connection = &c
+	pbp.Connection = c
 	return pbp
 }
 
@@ -47,8 +47,7 @@ func peerInfoToPBPeer(p pstore.PeerInfo) *Message_Peer {
 	for i, maddr := range p.Addrs {
 		pbp.Addrs[i] = maddr.Bytes() // Bytes, not String. Compressed.
 	}
-	s := string(p.ID)
-	pbp.Id = &s
+	pbp.Id = []byte(p.ID)
 	return pbp
 }
 
@@ -78,7 +77,7 @@ func PeerInfosToPBPeers(n inet.Network, peers []pstore.PeerInfo) []*Message_Peer
 	pbps := RawPeerInfosToPBPeers(peers)
 	for i, pbp := range pbps {
 		c := ConnectionType(n.Connectedness(peers[i].ID))
-		pbp.Connection = &c
+		pbp.Connection = c
 	}
 	return pbps
 }
@@ -136,7 +135,7 @@ func (m *Message) GetClusterLevel() int {
 // default "no value" protobuf behavior (0)
 func (m *Message) SetClusterLevel(level int) {
 	lvl := int32(level)
-	m.ClusterLevelRaw = &lvl
+	m.ClusterLevelRaw = lvl
 }
 
 // Loggable turns a Message into machine-readable log output

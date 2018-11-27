@@ -1,5 +1,5 @@
 // Package dht implements a distributed hash table that satisfies the ipfs routing
-// interface. This DHT is modeled after kademlia with Coral and S/Kademlia modifications.
+// interface. This DHT is modeled after kademlia with S/Kademlia modifications.
 package dht
 
 import (
@@ -10,37 +10,36 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
-	routing "github.com/libp2p/go-libp2p-routing"
+	opts "gx/ipfs/QmQHnqaNULV8WeUGgh97o9K3KAW6kWQmDyNf9UuikgnPTe/go-libp2p-kad-dht/opts"
+	pb "gx/ipfs/QmQHnqaNULV8WeUGgh97o9K3KAW6kWQmDyNf9UuikgnPTe/go-libp2p-kad-dht/pb"
+	providers "gx/ipfs/QmQHnqaNULV8WeUGgh97o9K3KAW6kWQmDyNf9UuikgnPTe/go-libp2p-kad-dht/providers"
 
-	proto "github.com/gogo/protobuf/proto"
-	cid "github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
-	logging "github.com/ipfs/go-log"
-	goprocess "github.com/jbenet/goprocess"
-	goprocessctx "github.com/jbenet/goprocess/context"
-	ci "github.com/libp2p/go-libp2p-crypto"
-	host "github.com/libp2p/go-libp2p-host"
-	kb "github.com/libp2p/go-libp2p-kbucket"
-	peer "github.com/libp2p/go-libp2p-peer"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
-	protocol "github.com/libp2p/go-libp2p-protocol"
-	record "github.com/libp2p/go-libp2p-record"
-	recpb "github.com/libp2p/go-libp2p-record/pb"
-	base32 "github.com/whyrusleeping/base32"
+	cid "gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
+	ci "gx/ipfs/QmPvyPwuCgJ7pDmrKDxRtsScJgBaM5h4EpRL2qQJsmXf4n/go-libp2p-crypto"
+	goprocess "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess"
+	goprocessctx "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess/context"
+	peer "gx/ipfs/QmTRhk7cgjUf2gfQ3p2M9KPECNZEW9XUrmHcFCgog4cPgB/go-libp2p-peer"
+	pstore "gx/ipfs/QmTTJcDL3gsnGDALjh2fDGg1onGRUdVgNL2hU2WEZcVrMX/go-libp2p-peerstore"
+	kb "gx/ipfs/QmUmemULEGWabBBZxczWCS3AF9g5jDFcxfMXw9iQkZ3EdD/go-libp2p-kbucket"
+	inet "gx/ipfs/QmXuRkCR7BNQa9uqfpTiFWsTQLzmTWYg91Ja1w95gnqb6u/go-libp2p-net"
+	logging "gx/ipfs/QmZChCsSt8DctjceaL56Eibc29CVQq4dGKRXC5JRZ6Ppae/go-log"
+	protocol "gx/ipfs/QmZNkThpqfVXs9GNbexPrfBbXSLNYeKrE7jwFM2oqHbyqN/go-libp2p-protocol"
+	record "gx/ipfs/Qma9Eqp16mNHDX1EL73pcxhFfzbyXVcAYtaDd1xdmDRDtL/go-libp2p-record"
+	recpb "gx/ipfs/Qma9Eqp16mNHDX1EL73pcxhFfzbyXVcAYtaDd1xdmDRDtL/go-libp2p-record/pb"
+	ds "gx/ipfs/QmaRb5yNXKonhbkpNxNawoydk4N6es6b4fPj19sjEKsh5D/go-datastore"
+	routing "gx/ipfs/QmcQ81jSyWCp1jpkQ8CMbtpXT3jK7Wg6ZtYmoyWFgBoF9c/go-libp2p-routing"
+	host "gx/ipfs/QmdJfsSbKSZnMkfZ1kpopiyB9i3Hd6cp8VKWZmtWPa7Moc/go-libp2p-host"
+	proto "gx/ipfs/QmdxUuburamoF6zF9qjeQC4WYcWGbWuRmdLacMEsW8ioD8/gogo-protobuf/proto"
+	base32 "gx/ipfs/QmfVj3x4D6Jkq9SEoi5n2NmoUomLwoeiwnYz2KQa15wRw6/base32"
 )
 
 var log = logging.Logger("dht")
-
-var ProtocolDHT protocol.ID = "/openbazaar/kad/1.0.0"
-var ProtocolDHTOld protocol.ID = "/openbazaar/dht"
 
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
-// IpfsDHT is an implementation of Kademlia with Coral and S/Kademlia modifications.
+// IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base IpfsRouting module.
 type IpfsDHT struct {
 	host      host.Host        // the network services we need
@@ -54,8 +53,7 @@ type IpfsDHT struct {
 
 	birth time.Time // When this peer started up
 
-	Validator record.Validator // record validator funcs
-	Selector  record.Selector  // record selection funcs
+	Validator record.Validator
 
 	ctx  context.Context
 	proc goprocess.Process
@@ -64,21 +62,17 @@ type IpfsDHT struct {
 	smlk   sync.Mutex
 
 	plk sync.Mutex
+
+	protocols []protocol.ID // DHT protocols
 }
 
-// NewDHT creates a new DHT object with the given peer as the 'local' host
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := NewDHTClient(ctx, h, dstore)
-
-	h.SetStreamHandler(ProtocolDHT, dht.handleNewStream)
-	h.SetStreamHandler(ProtocolDHTOld, dht.handleNewStream)
-
-	return dht
-}
-
-// NewDHTClient creates a new DHT object with the given peer as the 'local' host
-func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht := makeDHT(ctx, h, dstore)
+// New creates a new DHT with the specified host and options.
+func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
+	var cfg opts.Options
+	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
+		return nil, err
+	}
+	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -90,14 +84,40 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	})
 
 	dht.proc.AddChild(dht.providers.Process())
+	dht.Validator = cfg.Validator
 
-	dht.Validator["pk"] = record.PublicKeyValidator
-	dht.Selector["pk"] = record.PublicKeySelector
+	if !cfg.Client {
+		for _, p := range cfg.Protocols {
+			h.SetStreamHandler(p, dht.handleNewStream)
+		}
+	}
+	return dht, nil
+}
 
+// NewDHT creates a new DHT object with the given peer as the 'local' host.
+// IpfsDHT's initialized with this function will respond to DHT requests,
+// whereas IpfsDHT's initialized with NewDHTClient will not.
+func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(ctx, h, opts.Datastore(dstore))
+	if err != nil {
+		panic(err)
+	}
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+// NewDHTClient creates a new DHT object with the given peer as the 'local'
+// host. IpfsDHT clients initialized with this function will not respond to DHT
+// requests. If you need a peer to respond to DHT requests, use NewDHT instead.
+// NewDHTClient creates a new DHT object with the given peer as the 'local' host
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(ctx, h, opts.Datastore(dstore), opts.Client(true))
+	if err != nil {
+		panic(err)
+	}
+	return dht
+}
+
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -118,36 +138,26 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
-
-		Validator: make(record.Validator),
-		Selector:  make(record.Selector),
+		protocols:    protocols,
 	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
-func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID,
-	key string, rec *recpb.Record) error {
+func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
 
-	pmes := pb.NewMessage(pb.Message_PUT_VALUE, key, 0)
+	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
-	switch err {
-	case ErrReadTimeout:
-		log.Warningf("read timeout: %s %s", p.Pretty(), key)
-		fallthrough
-	default:
-		return err
-	case nil:
-		break
-	}
-
 	if err != nil {
+		log.Debugf("putValueToPeer: %v. (peer: %s, key: %s)", err, p.Pretty(), loggableKey(string(rec.Key)))
 		return err
 	}
 
 	if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
+		log.Warningf("putValueToPeer: value not put correctly. (%v != %v)", pmes, rpmes)
 		return errors.New("value not put correctly")
 	}
+
 	return nil
 }
 
@@ -172,7 +182,7 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 		log.Debug("getValueOrPeers: got value")
 
 		// make sure record is valid.
-		err = dht.verifyRecordOnline(ctx, record)
+		err = dht.Validator.Validate(string(record.GetKey()), record.GetValue())
 		if err != nil {
 			log.Info("Received invalid record! (discarded)")
 			// return a sentinal to signify an invalid record was received
@@ -201,13 +211,13 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 	eip := log.EventBegin(ctx, "getValueSingle", meta)
 	defer eip.Done()
 
-	pmes := pb.NewMessage(pb.Message_GET_VALUE, key, 0)
+	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
 		return resp, nil
 	case ErrReadTimeout:
-		log.Warningf("read timeout: %s %s", p.Pretty(), key)
+		log.Warningf("getValueSingle: read timeout %s %s", p.Pretty(), key)
 		fallthrough
 	default:
 		eip.SetError(err)
@@ -218,29 +228,18 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 // getLocal attempts to retrieve the value from the datastore
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	log.Debugf("getLocal %s", key)
-
-	v, err := dht.datastore.Get(mkDsKey(key))
+	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
 	if err != nil {
-		return nil, err
-	}
-	log.Debugf("found %s in local datastore")
-
-	byt, ok := v.([]byte)
-	if !ok {
-		return nil, errors.New("value stored in datastore not []byte")
-	}
-	rec := new(recpb.Record)
-	err = proto.Unmarshal(byt, rec)
-	if err != nil {
+		log.Warningf("getLocal: %s", err)
 		return nil, err
 	}
 
-	err = dht.verifyRecordLocally(rec)
-	if err != nil {
-		log.Debugf("local record verify failed: %s (discarded)", err)
-		return nil, err
-	}
+	// Double check the key. Can't hurt.
+	if rec != nil && string(rec.GetKey()) != key {
+		log.Errorf("BUG getLocal: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
+		return nil, nil
 
+	}
 	return rec, nil
 }
 
@@ -257,8 +256,10 @@ func (dht *IpfsDHT) getOwnPrivateKey() (ci.PrivKey, error) {
 
 // putLocal stores the key value pair in the datastore
 func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
+	log.Debugf("putLocal: %v %v", key, rec)
 	data, err := proto.Marshal(rec)
 	if err != nil {
+		log.Warningf("putLocal: %s", err)
 		return err
 	}
 
@@ -274,19 +275,24 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
 func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
-	p := dht.routingTable.Find(id)
-	if p != "" {
-		return dht.peerstore.PeerInfo(p)
+	switch dht.host.Network().Connectedness(id) {
+	case inet.Connected, inet.CanConnect:
+		return dht.peerstore.PeerInfo(id)
+	default:
+		return pstore.PeerInfo{}
 	}
-	return pstore.PeerInfo{}
 }
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
 func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	eip := log.EventBegin(ctx, "findPeerSingle", p, id)
+	eip := log.EventBegin(ctx, "findPeerSingle",
+		logging.LoggableMap{
+			"peer":   p,
+			"target": id,
+		})
 	defer eip.Done()
 
-	pmes := pb.NewMessage(pb.Message_FIND_NODE, string(id), 0)
+	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
@@ -300,11 +306,11 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key *cid.Cid) (*pb.Message, error) {
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
 	eip := log.EventBegin(ctx, "findProvidersSingle", p, key)
 	defer eip.Done()
 
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.KeyString(), 0)
+	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
@@ -320,7 +326,7 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key *cid
 
 // nearestPeersToQuery returns the routing tables closest peers.
 func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
-	closer := dht.routingTable.NearestPeers(kb.ConvertKey(pmes.GetKey()), count)
+	closer := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count)
 	return closer
 }
 
@@ -330,7 +336,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 	// no node? nil
 	if closer == nil {
-		log.Warning("no closer peers to send:", p)
+		log.Warning("betterPeersToQuery: no closer peers to send:", p)
 		return nil
 	}
 
@@ -339,7 +345,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 		// == to self? thats bad
 		if clp == dht.self {
-			log.Warning("attempted to return self! this shouldn't happen...")
+			log.Error("BUG betterPeersToQuery: attempted to return self! this shouldn't happen...")
 			return nil
 		}
 		// Dont send a peer back themselves
@@ -367,6 +373,15 @@ func (dht *IpfsDHT) Process() goprocess.Process {
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
+}
+
+func (dht *IpfsDHT) protocolStrs() []string {
+	pstrs := make([]string, len(dht.protocols))
+	for idx, proto := range dht.protocols {
+		pstrs[idx] = string(proto)
+	}
+
+	return pstrs
 }
 
 func mkDsKey(s string) ds.Key {

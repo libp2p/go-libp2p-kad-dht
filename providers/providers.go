@@ -7,17 +7,16 @@ import (
 	"strings"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
-	cid "github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
-	dsq "github.com/ipfs/go-datastore/query"
-	logging "github.com/ipfs/go-log"
-	goprocess "github.com/jbenet/goprocess"
-	goprocessctx "github.com/jbenet/goprocess/context"
-	peer "github.com/libp2p/go-libp2p-peer"
-	autobatch "github.com/ipfs/go-datastore/autobatch"
-	base32 "github.com/whyrusleeping/base32"
-	"github.com/libp2p/go-libp2p-kad-dht/util"
+	cid "gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
+	lru "gx/ipfs/QmQjMHF8ptRgx4E57UFMiT4YM6kqaJeYxZ1MCDX23aw4rK/golang-lru"
+	goprocess "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess"
+	goprocessctx "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess/context"
+	peer "gx/ipfs/QmTRhk7cgjUf2gfQ3p2M9KPECNZEW9XUrmHcFCgog4cPgB/go-libp2p-peer"
+	logging "gx/ipfs/QmZChCsSt8DctjceaL56Eibc29CVQq4dGKRXC5JRZ6Ppae/go-log"
+	ds "gx/ipfs/QmaRb5yNXKonhbkpNxNawoydk4N6es6b4fPj19sjEKsh5D/go-datastore"
+	autobatch "gx/ipfs/QmaRb5yNXKonhbkpNxNawoydk4N6es6b4fPj19sjEKsh5D/go-datastore/autobatch"
+	dsq "gx/ipfs/QmaRb5yNXKonhbkpNxNawoydk4N6es6b4fPj19sjEKsh5D/go-datastore/query"
+	base32 "gx/ipfs/QmfVj3x4D6Jkq9SEoi5n2NmoUomLwoeiwnYz2KQa15wRw6/base32"
 )
 
 var batchBufferSize = 256
@@ -49,12 +48,12 @@ type providerSet struct {
 }
 
 type addProv struct {
-	k   *cid.Cid
+	k   cid.Cid
 	val peer.ID
 }
 
 type getProv struct {
-	k    *cid.Cid
+	k    cid.Cid
 	resp chan []peer.ID
 }
 
@@ -78,7 +77,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 const providersKeyPrefix = "/providers/"
 
-func mkProvKey(k *cid.Cid) string {
+func mkProvKey(k cid.Cid) string {
 	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
 }
 
@@ -86,7 +85,7 @@ func (pm *ProviderManager) Process() goprocess.Process {
 	return pm.proc
 }
 
-func (pm *ProviderManager) providersForKey(k *cid.Cid) ([]peer.ID, error) {
+func (pm *ProviderManager) providersForKey(k cid.Cid) ([]peer.ID, error) {
 	pset, err := pm.getProvSet(k)
 	if err != nil {
 		return nil, err
@@ -94,7 +93,7 @@ func (pm *ProviderManager) providersForKey(k *cid.Cid) ([]peer.ID, error) {
 	return pset.providers, nil
 }
 
-func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
+func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
 	cached, ok := pm.providers.Get(k.KeyString())
 	if ok {
 		return cached.(*providerSet), nil
@@ -112,7 +111,7 @@ func (pm *ProviderManager) getProvSet(k *cid.Cid) (*providerSet, error) {
 	return pset, nil
 }
 
-func loadProvSet(dstore ds.Datastore, k *cid.Cid) (*providerSet, error) {
+func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
 	if err != nil {
 		return nil, err
@@ -162,7 +161,7 @@ func readTimeValue(i interface{}) (time.Time, error) {
 	return time.Unix(0, nsec), nil
 }
 
-func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
+func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
 	iprovs, ok := pm.providers.Get(k.KeyString())
 	if !ok {
 		stored, err := loadProvSet(pm.dstore, k)
@@ -179,7 +178,7 @@ func (pm *ProviderManager) addProv(k *cid.Cid, p peer.ID) error {
 	return writeProviderEntry(pm.dstore, k, p, now)
 }
 
-func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time) error {
+func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) error {
 	dsk := mkProvKey(k) + "/" + base32.RawStdEncoding.EncodeToString([]byte(p))
 
 	buf := make([]byte, 16)
@@ -188,7 +187,7 @@ func writeProviderEntry(dstore ds.Datastore, k *cid.Cid, p peer.ID, t time.Time)
 	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
-func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
+func (pm *ProviderManager) deleteProvSet(k cid.Cid) error {
 	pm.providers.Remove(k.KeyString())
 
 	res, err := pm.dstore.Query(dsq.Query{
@@ -213,16 +212,16 @@ func (pm *ProviderManager) deleteProvSet(k *cid.Cid) error {
 	return nil
 }
 
-func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
+func (pm *ProviderManager) getProvKeys() (func() (cid.Cid, bool), error) {
 	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: false,
+		KeysOnly: true,
 		Prefix:   providersKeyPrefix,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	iter := func() (*cid.Cid, bool) {
+	iter := func() (cid.Cid, bool) {
 		for e := range res.Next() {
 			parts := strings.Split(e.Key, "/")
 			if len(parts) != 4 {
@@ -243,7 +242,7 @@ func (pm *ProviderManager) getProvKeys() (func() (*cid.Cid, bool), error) {
 
 			return c, true
 		}
-		return nil, false
+		return cid.Cid{}, false
 	}
 
 	return iter, nil
@@ -284,7 +283,7 @@ func (pm *ProviderManager) run() {
 					continue
 				}
 				for p, t := range provs.set {
-					if (now.Sub(t) > ProvideValidity && !util.IsPointer(p)) || (now.Sub(t) > util.PointerValidity && util.IsPointer(p)) {
+					if now.Sub(t) > ProvideValidity {
 						delete(provs.set, p)
 					}
 				}
@@ -310,7 +309,7 @@ func (pm *ProviderManager) run() {
 	}
 }
 
-func (pm *ProviderManager) AddProvider(ctx context.Context, k *cid.Cid, val peer.ID) {
+func (pm *ProviderManager) AddProvider(ctx context.Context, k cid.Cid, val peer.ID) {
 	prov := &addProv{
 		k:   k,
 		val: val,
@@ -321,7 +320,7 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k *cid.Cid, val peer
 	}
 }
 
-func (pm *ProviderManager) GetProviders(ctx context.Context, k *cid.Cid) []peer.ID {
+func (pm *ProviderManager) GetProviders(ctx context.Context, k cid.Cid) []peer.ID {
 	gp := &getProv{
 		k:    k,
 		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking

@@ -28,8 +28,6 @@ import (
 
 var maxQueryConcurrency = AlphaValue
 
-const NumDisjointPaths = 10
-
 type dhtQuery struct {
 	dht         *IpfsDHT
 	key         string        // the key we're querying for
@@ -86,7 +84,7 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryFullResul
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	numPaths := NumDisjointPaths
+	numPaths := q.dht.disjointPaths
 	// we don't want empty paths
 	if numPaths > len(peers) {
 		numPaths = len(peers)

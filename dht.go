@@ -372,7 +372,7 @@ func (dht *IpfsDHT) Process() goprocess.Process {
 
 // RoutingTable return dht's routingTable
 func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
-        return dht.routingTable
+	return dht.routingTable
 }
 
 // Close calls Process Close

@@ -209,6 +209,8 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 			select {
 			case p, more := <-r.peersToQuery.DeqChan:
 				if !more {
+					// Put this back so we can finish any outstanding queries.
+					r.rateLimit <- struct{}{}
 					return // channel closed.
 				}
 

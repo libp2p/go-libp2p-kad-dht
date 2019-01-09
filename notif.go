@@ -7,10 +7,10 @@ import (
 )
 
 // netNotifiee defines methods to be used with the IpfsDHT
-type netNotifiee IpfsDHT
+type netNotifiee Node
 
-func (nn *netNotifiee) DHT() *IpfsDHT {
-	return (*IpfsDHT)(nn)
+func (nn *netNotifiee) DHT() *Node {
+	return (*Node)(nn)
 }
 
 func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {

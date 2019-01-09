@@ -21,7 +21,7 @@ import (
 var maxQueryConcurrency = AlphaValue
 
 type dhtQuery struct {
-	dht         *IpfsDHT
+	dht         *Node
 	key         string    // the key we're querying for
 	qfunc       queryFunc // the function to execute per peer
 	concurrency int       // the concurrency parameter
@@ -39,7 +39,7 @@ type dhtQueryResult struct {
 }
 
 // constructs query
-func (dht *IpfsDHT) newQuery(k string, f queryFunc) *dhtQuery {
+func (dht *Node) newQuery(k string, f queryFunc) *dhtQuery {
 	return &dhtQuery{
 		key:         k,
 		dht:         dht,

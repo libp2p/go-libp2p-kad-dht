@@ -74,7 +74,7 @@ func TestNotifieeFuzz(t *testing.T) {
 	connect(t, ctx, d1, d2)
 }
 
-func checkRoutingTable(a, b *IpfsDHT) bool {
+func checkRoutingTable(a, b *Node) bool {
 	// loop until connection notification has been received.
 	// under high load, this may not happen as immediately as we would like.
 	return a.routingTable.Find(b.self) != "" && b.routingTable.Find(a.self) != ""

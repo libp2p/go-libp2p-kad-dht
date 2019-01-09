@@ -71,7 +71,7 @@ func (testValidator) Validate(_ string, b []byte) error {
 	return nil
 }
 
-func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
+func setupDHT(ctx context.Context, t *testing.T, client bool) *Node {
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
@@ -85,9 +85,9 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 	return d
 }
 
-func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer.ID, []*IpfsDHT) {
+func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer.ID, []*Node) {
 	addrs := make([]ma.Multiaddr, n)
-	dhts := make([]*IpfsDHT, n)
+	dhts := make([]*Node, n)
 	peers := make([]peer.ID, n)
 
 	sanityAddrsMap := make(map[string]struct{})
@@ -113,7 +113,7 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 	return addrs, peers, dhts
 }
 
-func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+func connectNoSync(t *testing.T, ctx context.Context, a, b *Node) {
 	t.Helper()
 
 	idB := b.self
@@ -129,7 +129,7 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	}
 }
 
-func wait(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+func wait(t *testing.T, ctx context.Context, a, b *Node) {
 	t.Helper()
 
 	// loop until connection notification has been received.
@@ -143,14 +143,14 @@ func wait(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	}
 }
 
-func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+func connect(t *testing.T, ctx context.Context, a, b *Node) {
 	t.Helper()
 	connectNoSync(t, ctx, a, b)
 	wait(t, ctx, a, b)
 	wait(t, ctx, b, a)
 }
 
-func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
+func bootstrap(t *testing.T, ctx context.Context, dhts []*Node) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -177,7 +177,7 @@ func TestValueGetSet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var dhts [5]*IpfsDHT
+	var dhts [5]*Node
 
 	for i := range dhts {
 		dhts[i] = setupDHT(ctx, t, false)
@@ -561,7 +561,7 @@ func TestLocalProvides(t *testing.T) {
 }
 
 // if minPeers or avgPeers is 0, dont test for it.
-func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int, timeout time.Duration) bool {
+func waitForWellFormedTables(t *testing.T, dhts []*Node, minPeers, avgPeers int, timeout time.Duration) bool {
 	// test "well-formed-ness" (>= minPeers peers in every routing table)
 
 	checkTables := func() bool {
@@ -597,7 +597,7 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 	}
 }
 
-func printRoutingTables(dhts []*IpfsDHT) {
+func printRoutingTables(dhts []*Node) {
 	// the routing tables should be full now. let's inspect them.
 	fmt.Printf("checking routing table of %d\n", len(dhts))
 	for _, dht := range dhts {
@@ -794,7 +794,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	getProvider := func(dht *IpfsDHT, k cid.Cid) {
+	getProvider := func(dht *Node, k cid.Cid) {
 		defer wg.Done()
 
 		expected := providers[k.KeyString()]

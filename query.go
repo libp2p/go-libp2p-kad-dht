@@ -1,11 +1,3 @@
-// package query implement a query manager to drive concurrent workers
-// to query the DHT. Per the S/Kademlia paper, each query consists of
-// multiple paths that query disjoint sets of peers. A query is setup
-// with a target key, a queryPathFunc that sets up a given path and
-// returns a QueryFunc tasked to communicate with a peer, and a set
-// of initial peers. As the query progress, QueryFunc can return
-// closer peers that will be used to navigate closer to the target
-// key in the DHT until an answer is reached.
 package dht
 
 import (
@@ -51,7 +43,12 @@ type dhtQueryFullResults struct {
 	queriedSet *pset.PeerSet
 }
 
-// constructs query
+// Constructs a query. Per the S/Kademlia paper, each query consists of
+// multiple paths that query disjoint sets of peers. A query is setup with a
+// target key, a queryPathFunc that sets up a given path and returns a
+// QueryFunc tasked to communicate with a peer, and a set of initial peers. As
+// the query progress, QueryFunc can return closer peers that will be used to
+// navigate closer to the target key in the DHT until an answer is reached.
 func (dht *IpfsDHT) newQuery(k string, f queryPathFunc) *dhtQuery {
 	return &dhtQuery{
 		key:         k,
@@ -280,6 +277,8 @@ func (p *dhtQueryPath) spawnWorkers(proc process.Process) {
 			select {
 			case peer, more := <-p.peersToQuery.DeqChan:
 				if !more {
+					// Put this back so we can finish any outstanding queries.
+					p.rateLimit <- struct{}{}
 					return // channel closed.
 				}
 

@@ -329,7 +329,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(key, func(pathIndex int, numPaths int) QueryFunc {
+	query := dht.newQuery(key, func(pathIndex int, numPaths int) queryFunc {
 		pSize := pathSize(nvals, numPaths)
 		var gotPerPath int // also protected by valslock above
 		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
@@ -523,7 +523,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(key.KeyString(), func(pathIndex int, numPaths int) QueryFunc {
+	query := dht.newQuery(key.KeyString(), func(pathIndex int, numPaths int) queryFunc {
 		pSize := pathSize(remainingCount, numPaths)
 		var got int
 		var gotMutex sync.Mutex
@@ -638,7 +638,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(string(id), func(pathIndex int, numPaths int) QueryFunc {
+	query := dht.newQuery(string(id), func(pathIndex int, numPaths int) queryFunc {
 		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
 			notif.PublishQueryEvent(parent, &notif.QueryEvent{
 				Type: notif.SendingQuery,
@@ -704,7 +704,7 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 	}
 
 	// setup the Query
-	query := dht.newQuery(string(id), func(pathIndex int, numPaths int) QueryFunc {
+	query := dht.newQuery(string(id), func(pathIndex int, numPaths int) queryFunc {
 		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
 			pmes, err := dht.findPeerSingle(ctx, p, id)
 			if err != nil {

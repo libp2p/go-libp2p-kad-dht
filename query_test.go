@@ -121,7 +121,7 @@ func TestQueryDisjoint(t *testing.T) {
 	var mux sync.Mutex
 	badEndVisited := false
 
-	query := dht.newQuery(string(target), func(pathIndex int, numPaths int) QueryFunc {
+	query := dht.newQuery(string(target), func(pathIndex int, numPaths int) queryFunc {
 		return func(ctx context.Context, id peer.ID) (*dhtQueryResult, error) {
 			res, end := next(id, pathIndex)
 			if res == nil {

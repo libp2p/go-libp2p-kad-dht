@@ -46,8 +46,8 @@ type dhtQueryFullResults struct {
 // Constructs a query. Per the S/Kademlia paper, each query consists of
 // multiple paths that query disjoint sets of peers. A query is setup with a
 // target key, a queryPathFunc that sets up a given path and returns a
-// QueryFunc tasked to communicate with a peer, and a set of initial peers. As
-// the query progress, QueryFunc can return closer peers that will be used to
+// queryFunc tasked to communicate with a peer, and a set of initial peers. As
+// the query progress, queryFunc can return closer peers that will be used to
 // navigate closer to the target key in the DHT until an answer is reached.
 func (dht *IpfsDHT) newQuery(k string, f queryPathFunc) *dhtQuery {
 	return &dhtQuery{
@@ -59,16 +59,16 @@ func (dht *IpfsDHT) newQuery(k string, f queryPathFunc) *dhtQuery {
 }
 
 // QueryPathFunc is a function that holds a path's state in its closure.
-// It returns the QueryFunc for one particular path. Its parameter, `path`,
+// It returns the queryFunc for one particular path. Its parameter, `path`,
 // specifies the path index number from 0 to numPaths - 1
-type queryPathFunc func(pathIndex int, numPaths int) QueryFunc
+type queryPathFunc func(pathIndex int, numPaths int) queryFunc
 
-// QueryFunc is a function that runs a particular query with a given peer.
+// queryFunc is a function that runs a particular query with a given peer.
 // It returns either:
 // - the value
 // - a list of peers potentially better able to serve the query
 // - an error
-type QueryFunc func(context.Context, peer.ID) (*dhtQueryResult, error)
+type queryFunc func(context.Context, peer.ID) (*dhtQueryResult, error)
 
 // Run runs the query at hand. pass in a list of peers to use first.
 func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryFullResults, error) {
@@ -93,7 +93,7 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryFullResul
 
 type dhtQueryPath struct {
 	runner         *dhtQueryRunner
-	qfunc          QueryFunc
+	qfunc          queryFunc
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
 

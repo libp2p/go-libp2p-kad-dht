@@ -65,7 +65,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	// since the query doesnt actually pass our context down
 	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
 	parent := ctx
-	query := dht.newQuery(key, func(pathIndex int, numPaths int) QueryFunc {
+	query := dht.newQuery(key, func(pathIndex int, numPaths int) queryFunc {
 		return func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
 			// For DHT query command
 			notif.PublishQueryEvent(parent, &notif.QueryEvent{

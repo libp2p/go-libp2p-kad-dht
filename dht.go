@@ -37,6 +37,8 @@ var log = logging.Logger("dht")
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
+type IpfsDHT = Node
+
 // Node is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base IpfsRouting module.
 type Node struct {

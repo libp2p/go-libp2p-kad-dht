@@ -15,6 +15,7 @@ import (
 	proto "github.com/gogo/protobuf/proto"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	namespacedds "github.com/ipfs/go-datastore/namespace"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
@@ -36,6 +37,10 @@ var log = logging.Logger("dht")
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
 const NumBootstrapQueries = 5
+
+// recordDsNamespace is the namespace for records stored in the datastore.
+// TODO(steb): consider moving this somewhere else.
+var recordDsNamespace = ds.NewKey("/records")
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base IpfsRouting module.
@@ -127,7 +132,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 
 	return &IpfsDHT{
-		datastore:    dstore,
+		datastore:    namespacedds.Wrap(dstore, recordDsNamespace),
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,

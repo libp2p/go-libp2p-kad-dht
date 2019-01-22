@@ -7,29 +7,11 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
-
-// Required in order for proper JSON marshaling
-func pointerizePeerInfos(pis []pstore.PeerInfo) []*pstore.PeerInfo {
-	out := make([]*pstore.PeerInfo, len(pis))
-	for i, p := range pis {
-		np := p
-		out[i] = &np
-	}
-	return out
-}
-
-func toPeerInfos(ps []peer.ID) []*pstore.PeerInfo {
-	out := make([]*pstore.PeerInfo, len(ps))
-	for i, p := range ps {
-		out[i] = &pstore.PeerInfo{ID: p}
-	}
-	return out
-}
 
 func tryFormatLoggableKey(k string) (string, error) {
 	if len(k) == 0 {
@@ -59,7 +41,7 @@ func tryFormatLoggableKey(k string) (string, error) {
 func loggableKey(k string) logging.LoggableMap {
 	newKey, err := tryFormatLoggableKey(k)
 	if err != nil {
-		log.Error(err)
+		log.Debug(err)
 	} else {
 		k = newKey
 	}
@@ -90,22 +72,21 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			ID:   p,
 		})
 
-		closer, err := dht.closerPeersSingle(ctx, key, p)
+		pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
 		if err != nil {
 			log.Debugf("error getting closer peers: %s", err)
 			return nil, err
 		}
-
-		peerinfos := toPeerInfos(closer)
+		peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
 		// For DHT query command
 		notif.PublishQueryEvent(parent, &notif.QueryEvent{
 			Type:      notif.PeerResponse,
 			ID:        p,
-			Responses: peerinfos, // todo: remove need for this pointerize thing
+			Responses: peers,
 		})
 
-		return &dhtQueryResult{closerPeers: peerinfos}, nil
+		return &dhtQueryResult{closerPeers: peers}, nil
 	})
 
 	go func() {
@@ -117,8 +98,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			log.Debugf("closestPeers query run error: %s", err)
 		}
 
-		if res != nil && res.finalSet != nil {
-			sorted := kb.SortClosestPeers(res.finalSet.Peers(), kb.ConvertKey(key))
+		if res != nil && res.queriedSet != nil {
+			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
 			if len(sorted) > KValue {
 				sorted = sorted[:KValue]
 			}
@@ -129,23 +110,5 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		}
 	}()
 
-	return out, nil
-}
-
-func (dht *IpfsDHT) closerPeersSingle(ctx context.Context, key string, p peer.ID) ([]peer.ID, error) {
-	pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
-	if err != nil {
-		return nil, err
-	}
-
-	closer := pmes.GetCloserPeers()
-	out := make([]peer.ID, 0, len(closer))
-	for _, pbp := range closer {
-		pid := peer.ID(pbp.GetId())
-		if pid != dht.self { // dont add self
-			dht.peerstore.AddAddrs(pid, pbp.Addresses(), pstore.TempAddrTTL)
-			out = append(out, pid)
-		}
-	}
 	return out, nil
 }

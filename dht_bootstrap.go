@@ -1,12 +1,11 @@
 // Package dht implements a distributed hash table that satisfies the ipfs routing
-// interface. This DHT is modeled after kademlia with Coral and S/Kademlia modifications.
+// interface. This DHT is modeled after Kademlia with S/Kademlia modifications.
 package dht
 
 import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"sync"
 	"time"
 
 	u "github.com/ipfs/go-ipfs-util"
@@ -22,10 +21,9 @@ import (
 // number of queries. We could support a higher period with less
 // queries.
 type BootstrapConfig struct {
-	Queries  int           // how many queries to run per period
-	Period   time.Duration // how often to run periodi cbootstrap.
-	Timeout  time.Duration // how long to wait for a bootstrao query to run
-	DoneChan chan struct{}
+	Queries int           // how many queries to run per period
+	Period  time.Duration // how often to run periodi cbootstrap.
+	Timeout time.Duration // how long to wait for a bootstrao query to run
 }
 
 var DefaultBootstrapConfig = BootstrapConfig{
@@ -35,17 +33,13 @@ var DefaultBootstrapConfig = BootstrapConfig{
 	// of our implementation's robustness, we should lower this down to 8 or 4.
 	Queries: 1,
 
-	// For now, this is set to 1 minute, which is a medium period. We are
+	// For now, this is set to 5 minutes, which is a medium period. We are
 	// We are currently more interested in ensuring we have a properly formed
 	// DHT than making sure our dht minimizes traffic.
 	Period: time.Duration(5 * time.Minute),
 
 	Timeout: time.Duration(10 * time.Second),
-
-	DoneChan: make(chan struct{}),
 }
-
-var bootstrapOnce sync.Once
 
 // Bootstrap ensures the dht routing table remains healthy as peers come and go.
 // it builds up a list of peers by requesting random peer IDs. The Bootstrap
@@ -82,14 +76,17 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 	if cfg.Queries <= 0 {
 		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	defer bootstrapOnce.Do(func() { close(DefaultBootstrapConfig.DoneChan) })
-
-	dht.runBootstrap(ctx, cfg)
-
-	proc := periodicproc.Tick(cfg.Period, dht.bootstrapWorker(cfg))
+	proc := dht.Process().Go(func(p goprocess.Process) {
+		<-p.Go(dht.bootstrapWorker(cfg)).Closed()
+		for {
+			select {
+			case <-time.After(cfg.Period):
+				<-p.Go(dht.bootstrapWorker(cfg)).Closed()
+			case <-p.Closing():
+				return
+			}
+		}
+	})
 
 	return proc, nil
 }
@@ -148,9 +145,10 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	}
 
 	// bootstrap sequentially, as results will compound
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
 	runQuery := func(ctx context.Context, id peer.ID) {
+		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+
 		p, err := dht.FindPeer(ctx, id)
 		if err == routing.ErrNotFound {
 			// this isn't an error. this is precisely what we expect.
@@ -165,34 +163,18 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 		}
 	}
 
-	sequential := true
-	if sequential {
-		// these should be parallel normally. but can make them sequential for debugging.
-		// note that the core/bootstrap context deadline should be extended too for that.
-		for i := 0; i < cfg.Queries; i++ {
-			id := randomID()
-			log.Debugf("Bootstrapping query (%d/%d) to random ID: %s", i+1, cfg.Queries, id)
-			runQuery(ctx, id)
-		}
-
-	} else {
-		// note on parallelism here: the context is passed in to the queries, so they
-		// **should** exit when it exceeds, making this function exit on ctx cancel.
-		// normally, we should be selecting on ctx.Done() here too, but this gets
-		// complicated to do with WaitGroup, and doesnt wait for the children to exit.
-		var wg sync.WaitGroup
-		for i := 0; i < cfg.Queries; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-
-				id := randomID()
-				log.Debugf("Bootstrapping query (%d/%d) to random ID: %s", i+1, cfg.Queries, id)
-				runQuery(ctx, id)
-			}()
-		}
-		wg.Wait()
+	// these should be parallel normally. but can make them sequential for debugging.
+	// note that the core/bootstrap context deadline should be extended too for that.
+	for i := 0; i < cfg.Queries; i++ {
+		id := randomID()
+		log.Debugf("Bootstrapping query (%d/%d) to random ID: %s", i+1, cfg.Queries, id)
+		runQuery(ctx, id)
 	}
+
+	// Find self to distribute peer info to our neighbors.
+	// Do this after bootstrapping.
+	log.Debugf("Bootstrapping query to self: %s", dht.self)
+	runQuery(ctx, dht.self)
 
 	if len(merr) > 0 {
 		return merr

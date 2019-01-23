@@ -709,10 +709,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
 	for _, dht := range dhts {
-		err := dht.BootstrapWithConfig(ctx, cfg)
-		if err != nil {
-			t.Fatalf("error bootstrapping a dht: %s", err)
-		}
+		go dht.BootstrapOnce(ctx, cfg)
 	}
 
 	// this is async, and we dont know when it's finished with one cycle, so keep checking

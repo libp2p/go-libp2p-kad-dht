@@ -65,6 +65,15 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 	return nil
 }
 
+// This is a synchronous bootstrap. cfg.Queries queries will run each with a
+// timeout of cfg.Timeout. cfg.Period is not used.
+func (dht *IpfsDHT) BootstrapOnce(ctx context.Context, cfg BootstrapConfig) error {
+	if cfg.Queries <= 0 {
+		return fmt.Errorf("invalid number of queries: %d", cfg.Queries)
+	}
+	return dht.runBootstrap(ctx, cfg)
+}
+
 func newRandomPeerId() peer.ID {
 	id := make([]byte, 32) // SHA256 is the default. TODO: Use a more canonical way to generate random IDs.
 	rand.Read(id)

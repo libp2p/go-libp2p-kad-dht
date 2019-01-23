@@ -49,14 +49,6 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 	if cfg.Queries <= 0 {
 		return fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	go func() {
-		defer cancel()
-		select {
-		case <-dht.Context().Done():
-		case <-ctx.Done():
-		}
-	}()
 	go func() {
 		for {
 			err := dht.runBootstrap(ctx, cfg)
@@ -96,8 +88,9 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 	case routing.ErrNotFound:
 		return nil
 	case nil:
-		// We found a peer from a randomly generated ID. This should be very unlikely.
-		log.Warningf("Bootstrap peer error: Actually FOUND peer. (%s, %s)", id, p)
+		// We found a peer from a randomly generated ID. This should be very
+		// unlikely.
+		log.Warningf("random walk toward %s actually found peer: %s", id, p)
 		return nil
 	default:
 		return err
@@ -106,7 +99,6 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 
 // runBootstrap builds up list of peers by requesting random peer IDs
 func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
-
 	bslog := func(msg string) {
 		log.Debugf("DHT %s dhtRunBootstrap %s -- routing table size: %d", dht.self, msg, dht.routingTable.Size())
 	}

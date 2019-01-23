@@ -8,6 +8,7 @@ import (
 
 	u "github.com/ipfs/go-ipfs-util"
 	goprocess "github.com/jbenet/goprocess"
+	periodicproc "github.com/jbenet/goprocess/periodic"
 	peer "github.com/libp2p/go-libp2p-peer"
 	routing "github.com/libp2p/go-libp2p-routing"
 )
@@ -85,6 +86,26 @@ func (dht *IpfsDHT) BootstrapWithConfig(cfg BootstrapConfig) (goprocess.Process,
 			}
 		}
 	})
+
+	return proc, nil
+}
+
+// SignalBootstrap ensures the dht routing table remains healthy as peers come and go.
+// it builds up a list of peers by requesting random peer IDs. The Bootstrap
+// process will run a number of queries each time, and run every time signal fires.
+// These parameters are configurable.
+//
+// SignalBootstrap returns a process, so the user can stop it.
+func (dht *IpfsDHT) BootstrapOnSignal(cfg BootstrapConfig, signal <-chan time.Time) (goprocess.Process, error) {
+	if cfg.Queries <= 0 {
+		return nil, fmt.Errorf("invalid number of queries: %d", cfg.Queries)
+	}
+
+	if signal == nil {
+		return nil, fmt.Errorf("invalid signal: %v", signal)
+	}
+
+	proc := periodicproc.Ticker(signal, dht.bootstrapWorker(cfg))
 
 	return proc, nil
 }

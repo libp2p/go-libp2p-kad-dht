@@ -8,7 +8,7 @@ import (
 
 	u "github.com/ipfs/go-ipfs-util"
 	peer "github.com/libp2p/go-libp2p-peer"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	routing "github.com/libp2p/go-libp2p-routing"
 )
 
@@ -84,7 +84,7 @@ func newRandomPeerId() peer.ID {
 }
 
 // Traverse the DHT toward the given ID.
-func (dht *IpfsDHT) walk(ctx context.Context, target peer.ID) (peerstore.PeerInfo, error) {
+func (dht *IpfsDHT) walk(ctx context.Context, target peer.ID) (pstore.PeerInfo, error) {
 	// TODO: Extract the query action (traversal logic?) inside FindPeer,
 	// don't actually call through the FindPeer machinery, which can return
 	// things out of the peer store etc.

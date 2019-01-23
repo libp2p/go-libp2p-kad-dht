@@ -46,6 +46,8 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 
 // Runs cfg.Queries bootstrap queries every cfg.Period.
 func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig) error {
+	// Because this method is not synchronous, we have to duplicate sanity
+	// checks on the config so that callers aren't oblivious.
 	if cfg.Queries <= 0 {
 		return fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}

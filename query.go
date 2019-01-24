@@ -248,10 +248,19 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 			ID:   p,
 		})
 
-		// while we dial, we do not take up a rate limit. this is to allow
+		// While we dial, we do not take up a rate limit. this is to allow
 		// forward progress during potentially very high latency dials.
-		r.queryLimit <- struct{}{}
+		//
+		// Also, take the dial token first so we block we don't end up
+		// with a bunch of queries stuck between dropping the query
+		// token and taking the dial token.
+		//
+		// TODO: Consider using some form of priority queue here.
+		// Ideally, *closer* peers would be dialed first. However, the
+		// query limit is small enough (3) that this shouldn't really
+		// matter.
 		<-r.dialLimit
+		r.queryLimit <- struct{}{}
 
 		pi := pstore.PeerInfo{ID: p}
 

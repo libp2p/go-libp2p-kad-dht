@@ -15,7 +15,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 )
 
-var dhtReadMessageTimeout = time.Minute
+// If a peer takes more than 5 seconds to respond, we should simply move on.
+var dhtReadMessageTimeout = 10 * time.Second
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 type bufferedWriteCloser interface {

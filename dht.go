@@ -64,16 +64,6 @@ type IpfsDHT struct {
 	protocols []protocol.ID // DHT protocols
 }
 
-// Assert that IPFS assumptions about interfaces aren't broken. These aren't a
-// guarantee, but we can use them to aid refactoring.
-var (
-	_ routing.ContentRouting = (*IpfsDHT)(nil)
-	_ routing.IpfsRouting    = (*IpfsDHT)(nil)
-	_ routing.PeerRouting    = (*IpfsDHT)(nil)
-	_ routing.PubKeyFetcher  = (*IpfsDHT)(nil)
-	_ routing.ValueStore     = (*IpfsDHT)(nil)
-)
-
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
 	var cfg opts.Options

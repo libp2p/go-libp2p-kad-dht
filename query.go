@@ -232,13 +232,6 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	// create a context from our proc.
 	ctx := ctxproc.OnClosingContext(proc)
 
-	// make sure we do this when we exit
-	defer func() {
-		// signal we're done processing peer p
-		r.peersRemaining.Decrement(1)
-		r.rateLimit <- struct{}{}
-	}()
-
 	// make sure we're connected to the peer.
 	// FIXME abstract away into the network layer
 	// Note: Failure to connect in this block will cause the function to
@@ -250,6 +243,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 			Type: notif.DialingPeer,
 			ID:   p,
 		})
+
 		// while we dial, we do not take up a rate limit. this is to allow
 		// forward progress during potentially very high latency dials.
 		r.rateLimit <- struct{}{}
@@ -268,12 +262,28 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 			r.Lock()
 			r.errs = append(r.errs, err)
 			r.Unlock()
-			<-r.rateLimit // need to grab it again, as we deferred.
+
+			// We're dropping this peer.
+			r.peersRemaining.Decrement(1)
 			return
 		}
-		<-r.rateLimit // need to grab it again, as we deferred.
 		log.Debugf("connected. dial success.")
+
+		// Put the peer back in the queue. There's no point in *jumping*
+		// the queue as we may have better peers to query.
+		select {
+		case r.peersToQuery.EnqChan <- p:
+		case <-r.proc.Closing():
+		}
+		return
 	}
+
+	// make sure we do this when we exit
+	defer func() {
+		// signal we're done processing peer p
+		r.peersRemaining.Decrement(1)
+		r.rateLimit <- struct{}{}
+	}()
 
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)

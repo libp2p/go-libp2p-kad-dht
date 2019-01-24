@@ -74,6 +74,7 @@ type dhtQueryRunner struct {
 	query          *dhtQuery        // query to run
 	peersSeen      *pset.PeerSet    // all peers queried. prevent querying same peer 2x
 	peersQueried   *pset.PeerSet    // peers successfully connected to and queried
+	peersDialed    *dialQueue       // peers we have dialed to
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
 
@@ -92,15 +93,18 @@ type dhtQueryRunner struct {
 func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 	proc := process.WithParent(process.Background())
 	ctx := ctxproc.OnClosingContext(proc)
-	return &dhtQueryRunner{
+	peersToQuery := queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key)))
+	r := &dhtQueryRunner{
 		query:          q,
-		peersToQuery:   queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key))),
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      pset.New(),
 		peersQueried:   pset.New(),
 		rateLimit:      make(chan struct{}, q.concurrency),
+		peersToQuery:   peersToQuery,
 		proc:           proc,
 	}
+	r.peersDialed = newDialQueue(ctx, q.key, peersToQuery, r.dialPeer, AlphaValue)
+	return r
 }
 
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
@@ -192,7 +196,6 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
 
 func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 	for {
-
 		select {
 		case <-r.peersRemaining.Done():
 			return
@@ -201,14 +204,14 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 			return
 
 		case <-r.rateLimit:
+			ch, err := r.peersDialed.Consume()
+			if err != nil {
+				log.Warningf("error while fetching a dialled peer: %v", err)
+				r.rateLimit <- struct{}{}
+				continue
+			}
 			select {
-			case p, more := <-r.peersToQuery.DeqChan:
-				if !more {
-					// Put this back so we can finish any outstanding queries.
-					r.rateLimit <- struct{}{}
-					return // channel closed.
-				}
-
+			case p, _ := <-ch:
 				// do it as a child func to make sure Run exits
 				// ONLY AFTER spawn workers has exited.
 				proc.Go(func(proc process.Process) {
@@ -223,6 +226,36 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 	}
 }
 
+func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
+	// short-circuit if we're already connected.
+	if r.query.dht.host.Network().Connectedness(p) == inet.Connected {
+		return nil
+	}
+
+	log.Debug("not connected. dialing.")
+	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
+		Type: notif.DialingPeer,
+		ID:   p,
+	})
+
+	pi := pstore.PeerInfo{ID: p}
+	if err := r.query.dht.host.Connect(ctx, pi); err != nil {
+		log.Debugf("error connecting: %s", err)
+		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
+			Type:  notif.QueryError,
+			Extra: err.Error(),
+			ID:    p,
+		})
+
+		r.Lock()
+		r.errs = append(r.errs, err)
+		r.Unlock()
+		return err
+	}
+	log.Debugf("connected. dial success.")
+	return nil
+}
+
 func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	// ok let's do this!
 
@@ -235,42 +268,6 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		r.peersRemaining.Decrement(1)
 		r.rateLimit <- struct{}{}
 	}()
-
-	// make sure we're connected to the peer.
-	// FIXME abstract away into the network layer
-	// Note: Failure to connect in this block will cause the function to
-	// short circuit.
-	if r.query.dht.host.Network().Connectedness(p) == inet.NotConnected {
-		log.Debug("not connected. dialing.")
-
-		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-			Type: notif.DialingPeer,
-			ID:   p,
-		})
-		// while we dial, we do not take up a rate limit. this is to allow
-		// forward progress during potentially very high latency dials.
-		r.rateLimit <- struct{}{}
-
-		pi := pstore.PeerInfo{ID: p}
-
-		if err := r.query.dht.host.Connect(ctx, pi); err != nil {
-			log.Debugf("Error connecting: %s", err)
-
-			notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-				Type:  notif.QueryError,
-				Extra: err.Error(),
-				ID:    p,
-			})
-
-			r.Lock()
-			r.errs = append(r.errs, err)
-			r.Unlock()
-			<-r.rateLimit // need to grab it again, as we deferred.
-			return
-		}
-		<-r.rateLimit // need to grab it again, as we deferred.
-		log.Debugf("connected. dial success.")
-	}
 
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)

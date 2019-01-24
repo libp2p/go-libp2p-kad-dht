@@ -9,6 +9,7 @@ import (
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pset "github.com/libp2p/go-libp2p-peer/peerset"
@@ -72,6 +73,7 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 
 type dhtQueryRunner struct {
 	query          *dhtQuery        // query to run
+	kbKey          kb.ID            // key in the kbucket space
 	peersSeen      *pset.PeerSet    // all peers queried. prevent querying same peer 2x
 	peersQueried   *pset.PeerSet    // peers successfully connected to and queried
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
@@ -94,6 +96,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 	ctx := ctxproc.OnClosingContext(proc)
 	return &dhtQueryRunner{
 		query:          q,
+		kbKey:          kb.ConvertKey(string(q.key)),
 		peersToQuery:   queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key))),
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      pset.New(),
@@ -293,6 +296,10 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	} else if len(res.closerPeers) > 0 {
 		log.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(res.closerPeers))
+
+		// Sort first to avoid dequeuing further peers before nearer peers.
+
+		peerIDs := make([]peer.ID, 0, len(res.closerPeers))
 		for _, next := range res.closerPeers {
 			if next.ID == r.query.dht.self { // don't add self.
 				log.Debugf("PEERS CLOSER -- worker for: %v found self", p)
@@ -301,8 +308,13 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 			// add their addresses to the dialer's peerstore
 			r.query.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-			r.addPeerToQuery(next.ID)
 			log.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
+			peerIDs = append(peerIDs, next.ID)
+		}
+
+		peerIDs = kb.SortClosestPeers(peerIDs, r.kbKey)
+		for _, next := range peerIDs {
+			r.addPeerToQuery(next)
 		}
 	} else {
 		log.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)

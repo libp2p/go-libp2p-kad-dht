@@ -21,7 +21,6 @@ import (
 	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 	ropts "github.com/libp2p/go-libp2p-routing/options"
-	"github.com/pkg/errors"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This
@@ -584,7 +583,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ pstore.PeerInfo
 
 	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), AlphaValue)
 	if len(peers) == 0 {
-		return pstore.PeerInfo{}, errors.WithStack(kb.ErrLookupFailure)
+		return pstore.PeerInfo{}, kb.ErrLookupFailure
 	}
 
 	// Sanity...

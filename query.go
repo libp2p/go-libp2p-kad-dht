@@ -82,8 +82,9 @@ type dhtQueryRunner struct {
 	result *dhtQueryResult // query result
 	errs   u.MultiErr      // result errors. maybe should be a map[peer.ID]error
 
-	rateLimit chan struct{} // processing semaphore
-	log       logging.EventLogger
+	queryLimit chan struct{} // processing semaphore
+	dialLimit  chan struct{} // processing semaphore
+	log        logging.EventLogger
 
 	runCtx context.Context
 
@@ -101,7 +102,8 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      pset.New(),
 		peersQueried:   pset.New(),
-		rateLimit:      make(chan struct{}, q.concurrency),
+		queryLimit:     make(chan struct{}, q.concurrency),
+		dialLimit:      make(chan struct{}, q.concurrency*5),
 		proc:           proc,
 	}
 }
@@ -116,8 +118,11 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	}
 
 	// setup concurrency rate limiting
-	for i := 0; i < r.query.concurrency; i++ {
-		r.rateLimit <- struct{}{}
+	for len(r.queryLimit) < cap(r.queryLimit) {
+		r.queryLimit <- struct{}{}
+	}
+	for len(r.dialLimit) < cap(r.dialLimit) {
+		r.dialLimit <- struct{}{}
 	}
 
 	// add all the peers we got first.
@@ -203,12 +208,11 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 		case <-r.proc.Closing():
 			return
 
-		case <-r.rateLimit:
+		case <-r.queryLimit:
 			select {
 			case p, more := <-r.peersToQuery.DeqChan:
 				if !more {
-					// Put this back so we can finish any outstanding queries.
-					r.rateLimit <- struct{}{}
+					r.queryLimit <- struct{}{}
 					return // channel closed.
 				}
 
@@ -246,11 +250,15 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 		// while we dial, we do not take up a rate limit. this is to allow
 		// forward progress during potentially very high latency dials.
-		r.rateLimit <- struct{}{}
+		r.queryLimit <- struct{}{}
+		<-r.dialLimit
 
 		pi := pstore.PeerInfo{ID: p}
 
-		if err := r.query.dht.host.Connect(ctx, pi); err != nil {
+		err := r.query.dht.host.Connect(ctx, pi)
+		r.dialLimit <- struct{}{}
+
+		if err != nil {
 			log.Debugf("Error connecting: %s", err)
 
 			notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
@@ -282,7 +290,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	defer func() {
 		// signal we're done processing peer p
 		r.peersRemaining.Decrement(1)
-		r.rateLimit <- struct{}{}
+		r.queryLimit <- struct{}{}
 	}()
 
 	// finally, run the query against this peer

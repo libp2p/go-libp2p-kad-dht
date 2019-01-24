@@ -15,6 +15,7 @@ import (
 
 // Check that GetPublicKey() correctly extracts a public key
 func TestPubkeyExtract(t *testing.T) {
+	t.Skip("public key extraction for ed25519 keys has been disabled. See https://github.com/libp2p/specs/issues/111")
 	ctx := context.Background()
 	dht := setupDHT(ctx, t, false)
 	defer dht.Close()

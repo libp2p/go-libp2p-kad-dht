@@ -255,10 +255,9 @@ func (m *Message_Peer) GetConnection() Message_ConnectionType {
 }
 
 func init() {
-	proto.RegisterType((*Message)(nil), "dht.pb.Message")
-	proto.RegisterType((*Message_Peer)(nil), "dht.pb.Message.Peer")
-	proto.RegisterEnum("dht.pb.Message_MessageType", Message_MessageType_name, Message_MessageType_value)
-	proto.RegisterEnum("dht.pb.Message_ConnectionType", Message_ConnectionType_name, Message_ConnectionType_value)
+	// OpenBazaar: removed the RegisterEnums that were here because they get registered
+	// when the default dht package that is part of go-ipfs/core gets registered. Thus if
+	// we don't remove these here we will get a duplicate enum registration panic.
 }
 func (m *Message) Marshal() (dAtA []byte, err error) {
 	size := m.Size()

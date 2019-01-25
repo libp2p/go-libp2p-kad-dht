@@ -1,0 +1,10 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/golang:1.11
+        environment:
+          GO111MODULE: "on"
+    steps:
+      - checkout
+      - run: go test -v -race -bench . ./...

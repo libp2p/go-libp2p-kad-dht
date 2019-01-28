@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-peer"
-	"github.com/libp2p/go-libp2p-peerstore/queue"
+	peer "github.com/libp2p/go-libp2p-peer"
+	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 )
 
 func init() {

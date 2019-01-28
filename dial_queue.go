@@ -36,7 +36,8 @@ type dialQueue struct {
 }
 
 // newDialQueue returns an adaptive dial queue that spawns a dynamically sized set of goroutines to preemptively
-// stage dials for later handoff to the DHT protocol for RPC.
+// stage dials for later handoff to the DHT protocol for RPC. It identifies backpressure on both ends (dial consumers
+// and dial producers), and takes compensating action by adjusting the worker pool.
 //
 // Why? Dialing is expensive. It's orders of magnitude slower than running an RPC on an already-established
 // connection, as it requires establishing a TCP connection, multistream handshake, crypto handshake, mux handshake,
@@ -46,11 +47,13 @@ type dialQueue struct {
 // dialled peers.
 //
 // The following events trigger scaling:
-//  - there are no successful dials to return immediately when requested (i.e. consumer stalls) => scale up.
-//  - there are no consumers to hand off a successful dial to when requested (i.e. producer stalls) => scale down.
+// - we scale up when we can't immediately return a successful dial to a new consumer.
+// - we scale down when we've been idle for a while waiting for new dial attempts.
+// - we scale down when we complete a dial and realise nobody was waiting for it.
 //
-// We ought to watch out for dialler throttling (e.g. FD limit exceeded), to avoid adding fuel to the fire. Since
-// we have no deterministic way to detect this, for now we are hard-limiting concurrency by a max factor.
+// Dialler throttling (e.g. FD limit exceeded) is a concern, as we can easily spin up more workers to compensate, and
+// end up adding fuel to the fire. Since we have no deterministic way to detect this for now, we hard-limit concurrency
+// to DialQueueMaxParallelism.
 func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialFn func(context.Context, peer.ID) error, nConsumers int) *dialQueue {
 	sq := &dialQueue{
 		ctx:           ctx,

@@ -91,6 +91,13 @@ func (dq *dialQueue) control() {
 		// This block is copied below; couldn't find a more concise way of doing this.
 		select {
 		case <-dq.ctx.Done():
+			// close channels.
+			if resp.ch != nil {
+				close(resp.ch)
+			}
+			for w := range waiting {
+				close(w.ch)
+			}
 			return
 		case p = <-dialled:
 			dialled, waiting = nil, dq.waitingCh

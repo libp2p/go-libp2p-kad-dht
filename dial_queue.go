@@ -10,9 +10,14 @@ import (
 )
 
 var (
-	DialQueueMinParallelism    = 6
-	DialQueueMaxParallelism    = 20
-	DialQueueMaxIdle           = 5 * time.Second
+	// DialQueueMinParallelism is the minimum number of worker dial goroutines that will be alive at any time.
+	DialQueueMinParallelism = 6
+	// DialQueueMaxParallelism is the maximum number of worker dial goroutines that can be alive at any time.
+	DialQueueMaxParallelism = 20
+	// DialQueueMaxIdle is the period that a worker dial goroutine waits before signalling a worker pool downscaling.
+	DialQueueMaxIdle = 5 * time.Second
+	// DialQueueScalingMutePeriod is the amount of time to ignore further worker pool scaling events, after one is
+	// processed. Its role is to reduce jitter.
 	DialQueueScalingMutePeriod = 1 * time.Second
 )
 

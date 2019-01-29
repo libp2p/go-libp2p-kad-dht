@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	opts "github.com/libp2p/go-libp2p-kad-dht/v5/opts"
+	pb "github.com/libp2p/go-libp2p-kad-dht/v5/pb"
 
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"

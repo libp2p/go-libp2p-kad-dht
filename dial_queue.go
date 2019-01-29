@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"errors"
 	"math"
 	"time"
 
@@ -16,8 +15,6 @@ var (
 	DialQueueMaxIdle           = 5 * time.Second
 	DialQueueScalingMutePeriod = 1 * time.Second
 )
-
-var ErrContextClosed = errors.New("context closed")
 
 type dialQueue struct {
 	ctx    context.Context
@@ -136,17 +133,19 @@ func (dq *dialQueue) control() {
 	}
 }
 
-func (dq *dialQueue) Consume() (<-chan peer.ID, error) {
+func (dq *dialQueue) Consume() <-chan peer.ID {
 	ch := make(chan peer.ID, 1)
 
-	// short circuit and return a dialled peer if it's immediately available.
 	select {
-	case <-dq.ctx.Done():
-		return nil, ErrContextClosed
 	case p := <-dq.out.DeqChan:
+		// short circuit and return a dialled peer if it's immediately available.
 		ch <- p
 		close(ch)
-		return ch, nil
+		return ch
+	case <-dq.ctx.Done():
+		// return a closed channel with no value if we're done.
+		close(ch)
+		return ch
 	default:
 	}
 
@@ -162,7 +161,7 @@ func (dq *dialQueue) Consume() (<-chan peer.ID, error) {
 	default:
 		panic("detected more consuming goroutines than declared upfront")
 	}
-	return ch, nil
+	return ch
 }
 
 func (dq *dialQueue) grow() {

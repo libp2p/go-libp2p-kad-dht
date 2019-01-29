@@ -16,22 +16,28 @@ func init() {
 }
 
 func TestDialQueueErrorsWithTooManyConsumers(t *testing.T) {
+	var calls int
+	defer func() {
+		if e := recover(); e == nil {
+			t.Error("expected a panic, got none")
+		} else if calls != 4 {
+			t.Errorf("expected a panic on the 4th call to Consume(); got it on call number %d", calls)
+		}
+	}()
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 	dialFn := func(ctx context.Context, p peer.ID) error {
 		<-hang
 		return nil
 	}
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
 
-	for i := 0; i < 3; i++ {
-		if _, err := dq.Consume(); err != nil {
-			t.Errorf("expected nil err, got: %v", err)
-		}
+	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
+	for ; calls < 3; calls++ {
+		dq.Consume()
 	}
-	if _, err := dq.Consume(); err == nil {
-		t.Error("expected err but got nil")
-	}
+	calls++
+	dq.Consume()
 }
 
 func TestDialQueueGrowsOnSlowDials(t *testing.T) {
@@ -55,7 +61,7 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 	dq := newDialQueue(context.Background(), "test", in, dialFn, 4)
 
 	for i := 0; i < 4; i++ {
-		_, _ = dq.Consume()
+		_ = dq.Consume()
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -96,7 +102,7 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 	// acquire 3 consumers, everytime we acquire a consumer, we will grow the pool because no dial job is completed
 	// and immediately returnable.
 	for i := 0; i < 3; i++ {
-		_, _ = dq.Consume()
+		_ = dq.Consume()
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -150,7 +156,7 @@ func TestDialQueueShrinksWithInactivity(t *testing.T) {
 
 	// keep up to speed with backlog by releasing the dial function every time we acquire a channel.
 	for i := 0; i < 13; i++ {
-		ch, _ := dq.Consume()
+		ch := dq.Consume()
 		hang <- struct{}{}
 		<-ch
 		time.Sleep(100 * time.Millisecond)
@@ -193,7 +199,7 @@ func TestDialQueueMutePeriodHonored(t *testing.T) {
 
 	// pick up three consumers.
 	for i := 0; i < 3; i++ {
-		_, _ = dq.Consume()
+		_ = dq.Consume()
 		time.Sleep(100 * time.Millisecond)
 	}
 

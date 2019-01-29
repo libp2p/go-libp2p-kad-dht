@@ -204,14 +204,13 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 			return
 
 		case <-r.rateLimit:
-			ch, err := r.peersDialed.Consume()
-			if err != nil {
-				log.Warningf("error while fetching a dialled peer: %v", err)
-				r.rateLimit <- struct{}{}
-				continue
-			}
+			ch := r.peersDialed.Consume()
 			select {
 			case p, _ := <-ch:
+				if p == "" {
+					// peer is nil; this signals context cancellation.
+					return
+				}
 				// do it as a child func to make sure Run exits
 				// ONLY AFTER spawn workers has exited.
 				proc.Go(func(proc process.Process) {

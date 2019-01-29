@@ -160,7 +160,7 @@ func (dq *dialQueue) Consume() (<-chan peer.ID, error) {
 	select {
 	case dq.waitingCh <- waitingCh{ch, time.Now()}:
 	default:
-		return nil, errors.New("detected more consuming goroutines than declared upfront")
+		panic("detected more consuming goroutines than declared upfront")
 	}
 	return ch, nil
 }

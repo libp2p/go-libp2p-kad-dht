@@ -4,17 +4,18 @@ import (
 	"context"
 	"errors"
 	"math"
-	"sync"
 	"time"
 
 	peer "github.com/libp2p/go-libp2p-peer"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 )
 
-var DialQueueMinParallelism = 6
-var DialQueueMaxParallelism = 20
-var DialQueueMaxIdle = 5 * time.Second
-var DialQueueScalingMutePeriod = 1 * time.Second
+var (
+	DialQueueMinParallelism    = 6
+	DialQueueMaxParallelism    = 20
+	DialQueueMaxIdle           = 5 * time.Second
+	DialQueueScalingMutePeriod = 1 * time.Second
+)
 
 var ErrContextClosed = errors.New("context closed")
 
@@ -22,7 +23,6 @@ type dialQueue struct {
 	ctx    context.Context
 	dialFn func(context.Context, peer.ID) error
 
-	lk            sync.Mutex
 	nWorkers      int
 	scalingFactor float64
 
@@ -166,8 +166,7 @@ func (dq *dialQueue) Consume() (<-chan peer.ID, error) {
 }
 
 func (dq *dialQueue) grow() {
-	dq.lk.Lock()
-	defer dq.lk.Unlock()
+	// no mutex needed as this is only called from the (single-threaded) control loop.
 	defer func(prev int) {
 		if prev == dq.nWorkers {
 			return
@@ -188,8 +187,7 @@ func (dq *dialQueue) grow() {
 }
 
 func (dq *dialQueue) shrink() {
-	dq.lk.Lock()
-	defer dq.lk.Unlock()
+	// no mutex needed as this is only called from the (single-threaded) control loop.
 	defer func(prev int) {
 		if prev == dq.nWorkers {
 			return

@@ -206,9 +206,9 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 		case <-r.rateLimit:
 			ch := r.peersDialed.Consume()
 			select {
-			case p, _ := <-ch:
-				if p == "" {
-					// peer is nil; this signals context cancellation.
+			case p, ok := <-ch:
+				if !ok {
+					// this signals context cancellation.
 					return
 				}
 				// do it as a child func to make sure Run exits

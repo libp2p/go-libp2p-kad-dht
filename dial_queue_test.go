@@ -2,7 +2,9 @@ package dht
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 
 func init() {
 	DialQueueScalingMutePeriod = 0
-	DialQueueMaxIdle = 1 * time.Second
 }
 
 func TestDialQueueErrorsWithTooManyConsumers(t *testing.T) {
@@ -41,13 +42,14 @@ func TestDialQueueErrorsWithTooManyConsumers(t *testing.T) {
 }
 
 func TestDialQueueGrowsOnSlowDials(t *testing.T) {
+	DialQueueMaxIdle = 10 * time.Minute
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 
-	var wg sync.WaitGroup
-	wg.Add(19) // we expect 19 workers
+	var cnt int32
 	dialFn := func(ctx context.Context, p peer.ID) error {
-		wg.Done()
+		atomic.AddInt32(&cnt, 1)
 		<-hang
 		return nil
 	}
@@ -65,26 +67,25 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	doneCh := make(chan struct{})
-
-	// wait in a goroutine in case the test fails and we block.
-	go func() {
-		defer close(doneCh)
-		wg.Wait()
-	}()
-
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-		t.Error("expected 19 concurrent dials, got less")
+	for i := 0; i < 20; i++ {
+		if atomic.LoadInt32(&cnt) > int32(DialQueueMinParallelism) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
+
+	t.Errorf("expected 19 concurrent dials, got %d", atomic.LoadInt32(&cnt))
+
 }
 
 func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
+	// reduce interference from the other shrink path.
+	DialQueueMaxIdle = 10 * time.Minute
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 
-	var wg sync.WaitGroup
+	wg := new(sync.WaitGroup)
 	wg.Add(13)
 	dialFn := func(ctx context.Context, p peer.ID) error {
 		wg.Done()
@@ -94,48 +95,55 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 
 	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
 
-	// Enqueue 13 jobs, one per worker we'll grow to.
-	for i := 0; i < 13; i++ {
-		in.EnqChan <- peer.ID(i)
-	}
+	defer func() {
+		recover()
+		fmt.Println(dq.nWorkers)
+	}()
 
 	// acquire 3 consumers, everytime we acquire a consumer, we will grow the pool because no dial job is completed
 	// and immediately returnable.
 	for i := 0; i < 3; i++ {
 		_ = dq.Consume()
-		time.Sleep(100 * time.Millisecond)
 	}
 
-	waitForWg(t, &wg, 2*time.Second)
+	// Enqueue 13 jobs, one per worker we'll grow to.
+	for i := 0; i < 13; i++ {
+		in.EnqChan <- peer.ID(i)
+	}
+
+	waitForWg(t, wg, 2*time.Second)
 
 	// Release a few dialFn, but not all of them because downscaling happens when workers detect there are no
 	// consumers to consume their values. So the other three will be these witnesses.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		hang <- struct{}{}
 	}
 
 	// allow enough time for signalling and dispatching values to outstanding consumers.
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
-	// unblock the other three.
-	hang <- struct{}{}
-	hang <- struct{}{}
-	hang <- struct{}{}
+	// unblock the rest.
+	for i := 0; i < 10; i++ {
+		hang <- struct{}{}
+	}
 
+	wg = new(sync.WaitGroup)
 	// we should now only have 6 workers, because all the shrink events will have been honoured.
 	wg.Add(6)
 
-	// enqueue more jobs
-	for i := 0; i < 20; i++ {
+	// enqueue more jobs.
+	for i := 0; i < 6; i++ {
 		in.EnqChan <- peer.ID(i)
 	}
 
 	// let's check we have 6 workers hanging.
-	waitForWg(t, &wg, 2*time.Second)
+	waitForWg(t, wg, 2*time.Second)
 }
 
 // Inactivity = workers are idle because the DHT query is progressing slow and is producing too few peers to dial.
-func TestDialQueueShrinksWithInactivity(t *testing.T) {
+func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
+	DialQueueMaxIdle = 1 * time.Second
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 

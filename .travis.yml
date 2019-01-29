@@ -19,7 +19,9 @@ script:
 
 cache:
     directories:
-        - $GOPATH/src/gx
+        - $GOPATH/pkg/mod
 
 notifications:
   email: false
+
+env: GO111MODULE=on

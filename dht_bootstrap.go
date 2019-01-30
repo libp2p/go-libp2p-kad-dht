@@ -125,7 +125,7 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	}
 
 	// Do all but one of the bootstrap queries as random walks.
-	for i := 1; i < cfg.Queries; i++ {
+	for i := 0; i < cfg.Queries; i++ {
 		err := doQuery(i, "random ID", dht.randomWalk)
 		if err != nil {
 			return err

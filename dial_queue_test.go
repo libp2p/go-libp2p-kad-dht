@@ -16,31 +16,6 @@ func init() {
 	DialQueueScalingMutePeriod = 0
 }
 
-func TestDialQueueErrorsWithTooManyConsumers(t *testing.T) {
-	var calls int
-	defer func() {
-		if e := recover(); e == nil {
-			t.Error("expected a panic, got none")
-		} else if calls != 4 {
-			t.Errorf("expected a panic on the 4th call to Consume(); got it on call number %d", calls)
-		}
-	}()
-
-	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
-	hang := make(chan struct{})
-	dialFn := func(ctx context.Context, p peer.ID) error {
-		<-hang
-		return nil
-	}
-
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
-	for ; calls < 3; calls++ {
-		dq.Consume()
-	}
-	calls++
-	dq.Consume()
-}
-
 func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 	DialQueueMaxIdle = 10 * time.Minute
 
@@ -60,7 +35,7 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 	}
 
 	// remove the mute period to grow faster.
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 4)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	for i := 0; i < 4; i++ {
 		_ = dq.Consume()
@@ -93,7 +68,7 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 		return nil
 	}
 
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	defer func() {
 		recover()
@@ -160,7 +135,7 @@ func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
 		in.EnqChan <- peer.ID(i)
 	}
 
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	// keep up to speed with backlog by releasing the dial function every time we acquire a channel.
 	for i := 0; i < 13; i++ {
@@ -203,7 +178,7 @@ func TestDialQueueMutePeriodHonored(t *testing.T) {
 		in.EnqChan <- peer.ID(i)
 	}
 
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 3)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	// pick up three consumers.
 	for i := 0; i < 3; i++ {

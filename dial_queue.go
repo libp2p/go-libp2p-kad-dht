@@ -61,7 +61,7 @@ type waitingCh struct {
 // Dialler throttling (e.g. FD limit exceeded) is a concern, as we can easily spin up more workers to compensate, and
 // end up adding fuel to the fire. Since we have no deterministic way to detect this for now, we hard-limit concurrency
 // to DialQueueMaxParallelism.
-func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialFn func(context.Context, peer.ID) error, nConsumers int) *dialQueue {
+func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialFn func(context.Context, peer.ID) error) *dialQueue {
 	sq := &dialQueue{
 		ctx:           ctx,
 		dialFn:        dialFn,
@@ -71,9 +71,9 @@ func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialF
 		in:  in,
 		out: queue.NewChanQueue(ctx, queue.NewXORDistancePQ(target)),
 
-		growCh:    make(chan struct{}, nConsumers),
+		growCh:    make(chan struct{}, 1),
 		shrinkCh:  make(chan struct{}, 1),
-		waitingCh: make(chan waitingCh, nConsumers),
+		waitingCh: make(chan waitingCh),
 		dieCh:     make(chan struct{}, DialQueueMaxParallelism),
 	}
 	for i := 0; i < DialQueueMinParallelism; i++ {
@@ -85,22 +85,16 @@ func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialF
 
 func (dq *dialQueue) control() {
 	var (
-		p              peer.ID
-		dialled        = dq.out.DeqChan
-		resp           waitingCh
-		waiting        <-chan waitingCh
+		dialled        <-chan peer.ID
+		waiting        []waitingCh
 		lastScalingEvt = time.Now()
 	)
 
 	defer func() {
-		// close channels.
-		if resp.ch != nil {
-			close(resp.ch)
-		}
-		close(dq.waitingCh)
-		for w := range dq.waitingCh {
+		for _, w := range waiting {
 			close(w.ch)
 		}
+		waiting = nil
 	}()
 
 	for {
@@ -109,16 +103,23 @@ func (dq *dialQueue) control() {
 		select {
 		case <-dq.ctx.Done():
 			return
-		case p = <-dialled:
-			dialled, waiting = nil, dq.waitingCh
+		case w := <-dq.waitingCh:
+			waiting = append(waiting, w)
+			dialled = dq.out.DeqChan
 			continue // onto the top.
-		case resp = <-waiting:
-			// got a channel that's waiting for a peer.
-			log.Debugf("delivering dialled peer to DHT; took %dms.", time.Now().Sub(resp.ts)/time.Millisecond)
-			resp.ch <- p
-			close(resp.ch)
-			dialled, waiting = dq.out.DeqChan, nil // stop consuming waiting jobs until we've cleared a peer.
-			resp.ch = nil
+		case p, ok := <-dialled:
+			if !ok {
+				return // we're done if the ChanQueue is closed, which happens when the context is closed.
+			}
+			w := waiting[0]
+			log.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
+			w.ch <- p
+			close(w.ch)
+			waiting = waiting[1:]
+			if len(waiting) == 0 {
+				// no more waiters, so stop consuming dialled jobs.
+				dialled = nil
+			}
 			continue // onto the top.
 		default:
 			// there's nothing to process, so proceed onto the main select block.
@@ -127,23 +128,30 @@ func (dq *dialQueue) control() {
 		select {
 		case <-dq.ctx.Done():
 			return
-		case p = <-dialled:
-			dialled, waiting = nil, dq.waitingCh
-		case resp = <-waiting:
-			// got a channel that's waiting for a peer.
-			log.Debugf("delivering dialled peer to DHT; took %dms.", time.Now().Sub(resp.ts)/time.Millisecond)
-			resp.ch <- p
-			close(resp.ch)
-			dialled, waiting = dq.out.DeqChan, nil // stop consuming waiting jobs until we've cleared a peer.
-			resp.ch = nil
+		case w := <-dq.waitingCh:
+			waiting = append(waiting, w)
+			dialled = dq.out.DeqChan
+		case p, ok := <-dialled:
+			if !ok {
+				return // we're done if the ChanQueue is closed, which happens when the context is closed.
+			}
+			w := waiting[0]
+			log.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
+			w.ch <- p
+			close(w.ch)
+			waiting = waiting[1:]
+			if len(waiting) == 0 {
+				// no more waiters, so stop consuming dialled jobs.
+				dialled = nil
+			}
 		case <-dq.growCh:
-			if time.Now().Sub(lastScalingEvt) < DialQueueScalingMutePeriod {
+			if time.Since(lastScalingEvt) < DialQueueScalingMutePeriod {
 				continue
 			}
 			dq.grow()
 			lastScalingEvt = time.Now()
 		case <-dq.shrinkCh:
-			if time.Now().Sub(lastScalingEvt) < DialQueueScalingMutePeriod {
+			if time.Since(lastScalingEvt) < DialQueueScalingMutePeriod {
 				continue
 			}
 			dq.shrink()
@@ -176,13 +184,11 @@ func (dq *dialQueue) Consume() <-chan peer.ID {
 
 	// park the channel until a dialled peer becomes available.
 	select {
+	case dq.waitingCh <- waitingCh{ch, time.Now()}:
+		// all good
 	case <-dq.ctx.Done():
 		// return a closed channel with no value if we're done.
 		close(ch)
-		return ch
-	case dq.waitingCh <- waitingCh{ch, time.Now()}:
-	default:
-		panic("detected more consuming goroutines than declared upfront")
 	}
 	return ch
 }
@@ -268,7 +274,7 @@ func (dq *dialQueue) worker() {
 				log.Debugf("discarding dialled peer because of error: %v", err)
 				continue
 			}
-			log.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Now().Sub(t)/time.Millisecond)
+			log.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Since(t)/time.Millisecond)
 			waiting := len(dq.waitingCh)
 			dq.out.EnqChan <- p
 			if waiting > 0 {

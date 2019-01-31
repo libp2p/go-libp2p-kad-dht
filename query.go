@@ -103,7 +103,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersToQuery:   peersToQuery,
 		proc:           proc,
 	}
-	r.peersDialed = newDialQueue(ctx, q.key, peersToQuery, r.dialPeer)
+	r.peersDialed = newDialQueue(ctx, q.key, peersToQuery, r.dialPeer, DialQueueMaxIdle, DialQueueScalingMutePeriod)
 	return r
 }
 

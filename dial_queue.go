@@ -9,7 +9,7 @@ import (
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 )
 
-var (
+const (
 	// DialQueueMinParallelism is the minimum number of worker dial goroutines that will be alive at any time.
 	DialQueueMinParallelism = 6
 	// DialQueueMaxParallelism is the maximum number of worker dial goroutines that can be alive at any time.
@@ -25,8 +25,10 @@ type dialQueue struct {
 	ctx    context.Context
 	dialFn func(context.Context, peer.ID) error
 
-	nWorkers      int
-	scalingFactor float64
+	nWorkers          int
+	scalingFactor     float64
+	scalingMutePeriod time.Duration
+	maxIdle           time.Duration
 
 	in  *queue.ChanQueue
 	out *queue.ChanQueue
@@ -61,12 +63,16 @@ type waitingCh struct {
 // Dialler throttling (e.g. FD limit exceeded) is a concern, as we can easily spin up more workers to compensate, and
 // end up adding fuel to the fire. Since we have no deterministic way to detect this for now, we hard-limit concurrency
 // to DialQueueMaxParallelism.
-func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialFn func(context.Context, peer.ID) error) *dialQueue {
+func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialFn func(context.Context, peer.ID) error,
+	maxIdle, scalingMutePeriod time.Duration,
+) *dialQueue {
 	sq := &dialQueue{
-		ctx:           ctx,
-		dialFn:        dialFn,
-		nWorkers:      DialQueueMinParallelism,
-		scalingFactor: 1.5,
+		ctx:               ctx,
+		dialFn:            dialFn,
+		nWorkers:          DialQueueMinParallelism,
+		scalingFactor:     1.5,
+		scalingMutePeriod: scalingMutePeriod,
+		maxIdle:           maxIdle,
 
 		in:  in,
 		out: queue.NewChanQueue(ctx, queue.NewXORDistancePQ(target)),
@@ -145,13 +151,13 @@ func (dq *dialQueue) control() {
 				dialled = nil
 			}
 		case <-dq.growCh:
-			if time.Since(lastScalingEvt) < DialQueueScalingMutePeriod {
+			if time.Since(lastScalingEvt) < dq.scalingMutePeriod {
 				continue
 			}
 			dq.grow()
 			lastScalingEvt = time.Now()
 		case <-dq.shrinkCh:
-			if time.Since(lastScalingEvt) < DialQueueScalingMutePeriod {
+			if time.Since(lastScalingEvt) < dq.scalingMutePeriod {
 				continue
 			}
 			dq.shrink()
@@ -259,7 +265,7 @@ func (dq *dialQueue) worker() {
 		case <-idleTimer.C:
 		default:
 		}
-		idleTimer.Reset(DialQueueMaxIdle)
+		idleTimer.Reset(dq.maxIdle)
 
 		select {
 		case <-dq.dieCh:

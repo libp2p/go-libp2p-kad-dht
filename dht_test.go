@@ -570,7 +570,7 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 			rtlen := dht.routingTable.Size()
 			totalPeers += rtlen
 			if minPeers > 0 && rtlen < minPeers {
-				t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+				//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
 				return false
 			}
 		}
@@ -608,7 +608,6 @@ func printRoutingTables(dhts []*IpfsDHT) {
 }
 
 func TestBootstrap(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -659,7 +658,6 @@ func TestBootstrap(t *testing.T) {
 }
 
 func TestPeriodicBootstrap(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if ci.IsRunning() {
 		t.Skip("skipping on CI. highly timing dependent")
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	stdLog "log"
 	"math/rand"
 	"sort"
 	"strings"
@@ -1214,7 +1213,7 @@ func testFindPeerQuery(t *testing.T, bootstrappers, leafs, bootstrapperLeafConns
 			reachableIds = append(reachableIds, allpeers[i])
 		}
 	}
-	stdLog.Printf("%d reachable ids", len(reachableIds))
+	t.Logf("%d reachable ids", len(reachableIds))
 
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
@@ -1235,7 +1234,7 @@ func testFindPeerQuery(t *testing.T, bootstrappers, leafs, bootstrapperLeafConns
 	sort.Sort(peer.IDSlice(outpeers))
 
 	exp := kb.SortClosestPeers(reachableIds, rtval)[:minInt(KValue, len(reachableIds))]
-	stdLog.Printf("got %d peers", len(outpeers))
+	t.Logf("got %d peers", len(outpeers))
 	got := kb.SortClosestPeers(outpeers, rtval)
 
 	assert.EqualValues(t, exp, got)

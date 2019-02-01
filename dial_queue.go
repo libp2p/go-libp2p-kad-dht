@@ -208,9 +208,11 @@ func (dq *dialQueue) Consume() <-chan peer.ID {
 	ch := make(chan peer.ID, 1)
 
 	select {
-	case p := <-dq.out.DeqChan:
-		// short circuit and return a dialled peer if it's immediately available.
-		ch <- p
+	case p, ok := <-dq.out.DeqChan:
+		// short circuit and return a dialled peer if it's immediately available, or abort if DeqChan is closed.
+		if ok {
+			ch <- p
+		}
 		close(ch)
 		return ch
 	case <-dq.ctx.Done():

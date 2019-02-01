@@ -1173,6 +1173,9 @@ func TestFindPeerQueryMinimal(t *testing.T) {
 }
 
 func TestFindPeerQuery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
 	if curFileLimit() < 1024 {
 		t.Skip("insufficient file descriptors available")
 	}

@@ -76,6 +76,8 @@ github.com/libp2p/go-addr-util v2.0.7+incompatible h1:Su3MLsvDzl7afq0Z99sCjQxhrj
 github.com/libp2p/go-addr-util v2.0.7+incompatible/go.mod h1:doh2auL/Rkfq1xHxDrWJGHZ8yDojPerOZoPu9XVwRB8=
 github.com/libp2p/go-buffer-pool v0.1.1 h1:G2HLfT76cZIb1x6jPJ3E14um5SzHn/fea4kMgNDPOuU=
 github.com/libp2p/go-buffer-pool v0.1.1/go.mod h1:xtyIz9PMobb13WaxR6Zo1Pd1zXJKYg0a8KiIvDp3TzQ=
+github.com/libp2p/go-buffer-pool v0.1.3 h1:L0rKTSV7CdgVzxqP75+6AmJsjkvyM+xY8BCcoR9XLLw=
+github.com/libp2p/go-buffer-pool v0.1.3/go.mod h1:xtyIz9PMobb13WaxR6Zo1Pd1zXJKYg0a8KiIvDp3TzQ=
 github.com/libp2p/go-conn-security v0.1.15 h1:Ohx7vYeje1Wal+eIBUkejcaQPhVjOAZveXoFmo5pArA=
 github.com/libp2p/go-conn-security v0.1.15/go.mod h1:lIqm8x2wrAxlG+6CzJ3z4Nk5/F73zdjkS6RKbHSbaJ4=
 github.com/libp2p/go-conn-security-multistream v0.1.15 h1:ZpIz9u+000dcUM4+S65rUfjSmwKNFFND+MFSLH0z6oc=

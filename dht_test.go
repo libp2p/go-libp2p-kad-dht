@@ -155,7 +155,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	log.Debugf("Bootstrapping DHTs...")
+	logger.Debugf("Bootstrapping DHTs...")
 
 	// tried async. sequential fares much better. compare:
 	// 100 async https://gist.github.com/jbenet/56d12f0578d5f34810b2
@@ -492,7 +492,7 @@ func TestProvides(t *testing.T) {
 	connect(t, ctx, dhts[1], dhts[3])
 
 	for _, k := range testCaseCids {
-		log.Debugf("announcing provider for %s", k)
+		logger.Debugf("announcing provider for %s", k)
 		if err := dhts[3].Provide(ctx, k, true); err != nil {
 			t.Fatal(err)
 		}
@@ -505,7 +505,7 @@ func TestProvides(t *testing.T) {
 	for _, c := range testCaseCids {
 		n = (n + 1) % 3
 
-		log.Debugf("getting providers for %s from %d", c, n)
+		logger.Debugf("getting providers for %s from %d", c, n)
 		ctxT, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		provchan := dhts[n].FindProvidersAsync(ctxT, c, 1)
@@ -542,7 +542,7 @@ func TestLocalProvides(t *testing.T) {
 	connect(t, ctx, dhts[1], dhts[3])
 
 	for _, k := range testCaseCids {
-		log.Debugf("announcing provider for %s", k)
+		logger.Debugf("announcing provider for %s", k)
 		if err := dhts[3].Provide(ctx, k, false); err != nil {
 			t.Fatal(err)
 		}
@@ -587,7 +587,7 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 	for {
 		select {
 		case <-timeoutA:
-			log.Debugf("did not reach well-formed routing tables by %s", timeout)
+			logger.Debugf("did not reach well-formed routing tables by %s", timeout)
 			return false // failed
 		case <-time.After(5 * time.Millisecond):
 			if checkTables() {
@@ -721,7 +721,6 @@ func TestPeriodicBootstrap(t *testing.T) {
 
 func TestProvidesMany(t *testing.T) {
 	t.Skip("this test doesn't work")
-	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -801,7 +800,7 @@ func TestProvidesMany(t *testing.T) {
 	for _, c := range testCaseCids {
 		// everyone should be able to find it...
 		for _, dht := range dhts {
-			log.Debugf("getting providers for %s at %s", c, dht.self)
+			logger.Debugf("getting providers for %s at %s", c, dht.self)
 			wg.Add(1)
 			go getProvider(dht, c)
 		}
@@ -986,7 +985,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 
 	// testPeerListsMatch(t, shouldFind, found)
 
-	log.Warning("TestFindPeersConnectedToPeer is not quite correct")
+	logger.Warning("TestFindPeersConnectedToPeer is not quite correct")
 	if len(found) == 0 {
 		t.Fatal("didn't find any peers.")
 	}
@@ -1031,7 +1030,7 @@ func TestConnectCollision(t *testing.T) {
 	runTimes := 10
 
 	for rtime := 0; rtime < runTimes; rtime++ {
-		log.Info("Running Time: ", rtime)
+		logger.Info("Running Time: ", rtime)
 
 		ctx, cancel := context.WithCancel(context.Background())
 

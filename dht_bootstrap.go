@@ -82,7 +82,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 		for {
 			err := dht.runBootstrap(ctx, cfg)
 			if err != nil {
-				log.Warningf("error bootstrapping: %s", err)
+				logger.Warningf("error bootstrapping: %s", err)
 			}
 			select {
 			case <-time.After(cfg.Period):
@@ -128,7 +128,7 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 	case nil:
 		// We found a peer from a randomly generated ID. This should be very
 		// unlikely.
-		log.Warningf("random walk toward %s actually found peer: %s", id, p)
+		logger.Warningf("random walk toward %s actually found peer: %s", id, p)
 		return nil
 	default:
 		return err
@@ -138,14 +138,14 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 // runBootstrap builds up list of peers by requesting random peer IDs
 func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
 	bslog := func(msg string) {
-		log.Debugf("DHT %s dhtRunBootstrap %s -- routing table size: %d", dht.self, msg, dht.routingTable.Size())
+		logger.Debugf("DHT %s dhtRunBootstrap %s -- routing table size: %d", dht.self, msg, dht.routingTable.Size())
 	}
 	bslog("start")
 	defer bslog("end")
-	defer log.EventBegin(ctx, "dhtRunBootstrap").Done()
+	defer logger.EventBegin(ctx, "dhtRunBootstrap").Done()
 
 	doQuery := func(n int, target string, f func(context.Context) error) error {
-		log.Debugf("Bootstrapping query (%d/%d) to %s", n, cfg.Queries, target)
+		logger.Debugf("Bootstrapping query (%d/%d) to %s", n, cfg.Queries, target)
 		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
 		return f(ctx)

@@ -196,7 +196,7 @@ func TestNotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*20)
 	defer cancel()
 	v, err := d.GetValue(ctx, "hello")
-	log.Debugf("get value got %v", v)
+	logger.Debugf("get value got %v", v)
 	if err != nil {
 		if merr, ok := err.(u.MultiErr); ok && len(merr) > 0 {
 			err = merr[0]

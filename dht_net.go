@@ -66,7 +66,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		case nil:
 		default:
 			s.Reset()
-			log.Debugf("Error unmarshaling data: %s", err)
+			logger.Debugf("Error unmarshaling data: %s", err)
 			return
 		}
 
@@ -77,7 +77,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		handler := dht.handlerForMsgType(pmes.GetType())
 		if handler == nil {
 			s.Reset()
-			log.Debug("got back nil handler from handlerForMsgType")
+			logger.Debug("got back nil handler from handlerForMsgType")
 			return
 		}
 
@@ -85,13 +85,13 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		rpmes, err := handler(ctx, mPeer, pmes)
 		if err != nil {
 			s.Reset()
-			log.Debugf("handle message error: %s", err)
+			logger.Debugf("handle message error: %s", err)
 			return
 		}
 
 		// if nil response, return it before serializing
 		if rpmes == nil {
-			log.Debug("got back nil response from request")
+			logger.Debug("got back nil response from request")
 			continue
 		}
 
@@ -102,7 +102,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 		}
 		if err != nil {
 			s.Reset()
-			log.Debugf("send response error: %s", err)
+			logger.Debugf("send response error: %s", err)
 			return
 		}
 	}
@@ -128,7 +128,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	dht.updateFromMessage(ctx, p, rpmes)
 
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	log.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
+	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
 	return rpmes, nil
 }
 
@@ -142,7 +142,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	if err := ms.SendMessage(ctx, pmes); err != nil {
 		return err
 	}
-	log.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
+	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
 	return nil
 }
 
@@ -259,16 +259,16 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			ms.s = nil
 
 			if retry {
-				log.Info("error writing message, bailing: ", err)
+				logger.Info("error writing message, bailing: ", err)
 				return err
 			} else {
-				log.Info("error writing message, trying again: ", err)
+				logger.Info("error writing message, trying again: ", err)
 				retry = true
 				continue
 			}
 		}
 
-		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
 			go inet.FullClose(ms.s)
@@ -295,10 +295,10 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.s = nil
 
 			if retry {
-				log.Info("error writing message, bailing: ", err)
+				logger.Info("error writing message, bailing: ", err)
 				return nil, err
 			} else {
-				log.Info("error writing message, trying again: ", err)
+				logger.Info("error writing message, trying again: ", err)
 				retry = true
 				continue
 			}
@@ -310,16 +310,16 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.s = nil
 
 			if retry {
-				log.Info("error reading message, bailing: ", err)
+				logger.Info("error reading message, bailing: ", err)
 				return nil, err
 			} else {
-				log.Info("error reading message, trying again: ", err)
+				logger.Info("error reading message, trying again: ", err)
 				retry = true
 				continue
 			}
 		}
 
-		log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
 			go inet.FullClose(ms.s)

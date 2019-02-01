@@ -156,7 +156,7 @@ func (dq *dialQueue) control() {
 				return // we're done if the ChanQueue is closed, which happens when the context is closed.
 			}
 			w := waiting[0]
-			log.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
+			logger.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
 			w.ch <- p
 			close(w.ch)
 			waiting = waiting[1:]
@@ -180,7 +180,7 @@ func (dq *dialQueue) control() {
 				return // we're done if the ChanQueue is closed, which happens when the context is closed.
 			}
 			w := waiting[0]
-			log.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
+			logger.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
 			w.ch <- p
 			close(w.ch)
 			waiting = waiting[1:]
@@ -243,7 +243,7 @@ func (dq *dialQueue) grow() {
 		if prev == dq.nWorkers {
 			return
 		}
-		log.Debugf("grew dial worker pool: %d => %d", prev, dq.nWorkers)
+		logger.Debugf("grew dial worker pool: %d => %d", prev, dq.nWorkers)
 	}(dq.nWorkers)
 
 	if dq.nWorkers == dq.config.maxParallelism {
@@ -265,7 +265,7 @@ func (dq *dialQueue) shrink() {
 		if prev == dq.nWorkers {
 			return
 		}
-		log.Debugf("shrunk dial worker pool: %d => %d", prev, dq.nWorkers)
+		logger.Debugf("shrunk dial worker pool: %d => %d", prev, dq.nWorkers)
 	}(dq.nWorkers)
 
 	if dq.nWorkers == dq.config.minParallelism {
@@ -280,7 +280,7 @@ func (dq *dialQueue) shrink() {
 		select {
 		case dq.dieCh <- struct{}{}:
 		default:
-			log.Debugf("too many die signals queued up.")
+			logger.Debugf("too many die signals queued up.")
 		}
 	}
 }
@@ -316,10 +316,10 @@ func (dq *dialQueue) worker() {
 		case p := <-dq.in.DeqChan:
 			t := time.Now()
 			if err := dq.dialFn(dq.ctx, p); err != nil {
-				log.Debugf("discarding dialled peer because of error: %v", err)
+				logger.Debugf("discarding dialled peer because of error: %v", err)
 				continue
 			}
-			log.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Since(t)/time.Millisecond)
+			logger.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Since(t)/time.Millisecond)
 			waiting := len(dq.waitingCh)
 			dq.out.EnqChan <- p
 			if waiting > 0 {

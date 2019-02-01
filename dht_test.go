@@ -1182,7 +1182,11 @@ func TestFindPeerQuery(t *testing.T) {
 	testFindPeerQuery(t, 20, 80, 16)
 }
 
-func testFindPeerQuery(t *testing.T, bootstrappers, leafs, bootstrapperLeafConns int) {
+func testFindPeerQuery(t *testing.T,
+	bootstrappers, // Number of nodes connected to the querying node
+	leafs, // Number of nodes that might be connected to from the bootstrappers
+	bootstrapperLeafConns int, // Number of connections each bootstrapper has to the leaf nodes
+) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

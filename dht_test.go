@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"math/rand"
 	"sort"
 	"strings"
@@ -1158,101 +1160,91 @@ func TestClientModeFindPeer(t *testing.T) {
 	}
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func TestFindPeerQueryMinimal(t *testing.T) {
+	testFindPeerQuery(t, 2, 22, 11)
+}
+
 func TestFindPeerQuery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+	if curFileLimit() < 1024 {
+		t.Skip("insufficient file descriptors available")
+	}
+	testFindPeerQuery(t, 20, 80, 16)
+}
+
+func testFindPeerQuery(t *testing.T,
+	bootstrappers, // Number of nodes connected to the querying node
+	leafs, // Number of nodes that might be connected to from the bootstrappers
+	bootstrapperLeafConns int, // Number of connections each bootstrapper has to the leaf nodes
+) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nDHTs := 101
-	_, allpeers, dhts := setupDHTS(ctx, nDHTs, t)
+	_, allpeers, dhts := setupDHTS(ctx, 1+bootstrappers+leafs, t)
 	defer func() {
-		for i := 0; i < nDHTs; i++ {
-			dhts[i].Close()
-			defer dhts[i].host.Close()
+		for _, d := range dhts {
+			d.Close()
+			d.host.Close()
 		}
 	}()
 
 	mrand := rand.New(rand.NewSource(42))
 	guy := dhts[0]
 	others := dhts[1:]
-	for i := 0; i < 20; i++ {
-		for j := 0; j < 16; j++ { // 16, high enough to probably not have any partitions
-			v := mrand.Intn(80)
-			connect(t, ctx, others[i], others[20+v])
+	for i := 0; i < bootstrappers; i++ {
+		for j := 0; j < bootstrapperLeafConns; j++ {
+			v := mrand.Intn(leafs)
+			connect(t, ctx, others[i], others[bootstrappers+v])
 		}
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := 0; i < bootstrappers; i++ {
 		connect(t, ctx, guy, others[i])
 	}
+
+	var reachableIds []peer.ID
+	for i, d := range dhts {
+		lp := len(d.host.Network().Peers())
+		//t.Log(i, lp)
+		if i != 0 && lp > 0 {
+			reachableIds = append(reachableIds, allpeers[i])
+		}
+	}
+	t.Logf("%d reachable ids", len(reachableIds))
 
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
 
 	rtablePeers := guy.routingTable.NearestPeers(rtval, AlphaValue)
-	if len(rtablePeers) != 3 {
-		t.Fatalf("expected 3 peers back from routing table, got %d", len(rtablePeers))
-	}
+	assert.Len(t, rtablePeers, minInt(bootstrappers, AlphaValue))
 
-	netpeers := guy.host.Network().Peers()
-	if len(netpeers) != 20 {
-		t.Fatalf("expected 20 peers to be connected, got %d", len(netpeers))
-	}
-
-	rtableset := make(map[peer.ID]bool)
-	for _, p := range rtablePeers {
-		rtableset[p] = true
-	}
+	assert.Len(t, guy.host.Network().Peers(), bootstrappers)
 
 	out, err := guy.GetClosestPeers(ctx, val)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	var notfromrtable int
-	var count int
 	var outpeers []peer.ID
 	for p := range out {
-		count++
-		if !rtableset[p] {
-			notfromrtable++
-		}
 		outpeers = append(outpeers, p)
 	}
 
-	if notfromrtable == 0 {
-		t.Fatal("got entirely peers from our routing table")
-	}
-
-	if count != 20 {
-		t.Fatal("should have only gotten 20 peers from getclosestpeers call")
-	}
-
-	sort.Sort(peer.IDSlice(allpeers[1:]))
 	sort.Sort(peer.IDSlice(outpeers))
 
-	actualclosest := kb.SortClosestPeers(allpeers[1:], rtval)
-	exp := actualclosest[:20]
+	exp := kb.SortClosestPeers(reachableIds, rtval)[:minInt(KValue, len(reachableIds))]
+	t.Logf("got %d peers", len(outpeers))
 	got := kb.SortClosestPeers(outpeers, rtval)
 
-	diffp := countDiffPeers(exp, got)
-	if diffp > 0 {
-		// could be a partition created during setup
-		t.Fatal("didnt get expected closest peers")
-	}
-}
-
-func countDiffPeers(a, b []peer.ID) int {
-	s := make(map[peer.ID]bool)
-	for _, p := range a {
-		s[p] = true
-	}
-	var out int
-	for _, p := range b {
-		if !s[p] {
-			out++
-		}
-	}
-	return out
+	assert.EqualValues(t, exp, got)
 }
 
 func TestFindClosestPeers(t *testing.T) {

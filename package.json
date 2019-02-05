@@ -172,6 +172,5 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.4.19"
+  "version": "4.4.20"
 }
-

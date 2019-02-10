@@ -11,17 +11,26 @@ env:
 go:
     - 1.11.x
 
-install:
-  - make deps
+install: true
 
-script:
-  - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
+jobs:
+  include:
+    - stage: "build and test"
+      name: "gx"
+      script:
+        - make deps
+        - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
+
+    - name: "go mod"
+      script:
+        - export GO111MODULE=on
+        - make mod_deps
+        - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
 
 cache:
     directories:
         - $GOPATH/pkg/mod
+        - $GOPATH/src/gx
 
 notifications:
   email: false
-
-env: GO111MODULE=on

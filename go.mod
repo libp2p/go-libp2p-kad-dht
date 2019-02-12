@@ -1,4 +1,4 @@
-module github.com/libp2p/go-libp2p-kad-dht
+module github.com/libp2p/go-libp2p-kad-dht/v5
 
 require (
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
@@ -22,7 +22,7 @@ require (
 	github.com/jbenet/goprocess v0.0.0-20160826012719-b497e2f366b8
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/libp2p/go-addr-util v2.0.7+incompatible // indirect
-	github.com/libp2p/go-buffer-pool v0.1.1 // indirect
+	github.com/libp2p/go-buffer-pool v0.1.3 // indirect
 	github.com/libp2p/go-conn-security v0.1.15 // indirect
 	github.com/libp2p/go-conn-security-multistream v0.1.15 // indirect
 	github.com/libp2p/go-flow-metrics v0.2.0 // indirect

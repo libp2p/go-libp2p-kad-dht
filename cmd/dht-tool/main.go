@@ -21,7 +21,7 @@ import (
 	"github.com/anacrolix/ipfslog"
 
 	libp2p "github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
+	dht "github.com/libp2p/go-libp2p-kad-dht/v5"
 )
 
 func main() {

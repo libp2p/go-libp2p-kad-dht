@@ -45,10 +45,11 @@ func (w *bufferedDelimitedWriter) Flush() error {
 
 // handleNewStream implements the inet.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
-	go dht.handleNewMessage(s)
+	defer s.Reset()
+	dht.handleNewMessage(s)
 }
 
-func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
+func (dht *IpfsDHT) handleNewMessage(s inet.Stream) error {
 	ctx := dht.Context()
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
@@ -57,36 +58,27 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 	mPeer := s.Conn().RemotePeer()
 
 	for {
-		// receive msg
-		pmes := new(pb.Message)
-		switch err := r.ReadMsg(pmes); err {
+		var pmes pb.Message
+		switch err := r.ReadMsg(&pmes); err {
 		case io.EOF:
-			s.Close()
-			return
-		case nil:
+			return nil
 		default:
-			s.Reset()
-			logger.Debugf("Error unmarshaling data: %s", err)
-			return
+			logger.Debugf("error reading message: %v", err)
+			return err
+		case nil:
 		}
 
-		// update the peer (on valid msgs only)
-		dht.updateFromMessage(ctx, mPeer, pmes)
-
-		// get handler for this msg type.
 		handler := dht.handlerForMsgType(pmes.GetType())
 		if handler == nil {
-			s.Reset()
-			logger.Debug("got back nil handler from handlerForMsgType")
-			return
+			logger.Warningf("can't handle received message of type %s", pmes.GetType())
+			return nil
 		}
 
 		// dispatch handler.
-		rpmes, err := handler(ctx, mPeer, pmes)
+		rpmes, err := handler(ctx, mPeer, &pmes)
 		if err != nil {
-			s.Reset()
 			logger.Debugf("handle message error: %s", err)
-			return
+			return err
 		}
 
 		// if nil response, return it before serializing
@@ -101,10 +93,12 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) {
 			err = w.Flush()
 		}
 		if err != nil {
-			s.Reset()
 			logger.Debugf("send response error: %s", err)
-			return
+			return nil
 		}
+
+		// update the peer (on valid msgs only)
+		dht.updateFromMessage(ctx, mPeer, &pmes)
 	}
 }
 

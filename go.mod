@@ -2,12 +2,14 @@ module github.com/libp2p/go-libp2p-kad-dht
 
 require (
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
+	github.com/anacrolix/ipfslog v0.0.0-20190125060547-dd66fe9c2392
 	github.com/btcsuite/btcd v0.0.0-20190115013929-ed77733ec07d // indirect
 	github.com/coreos/go-semver v0.2.0 // indirect
 	github.com/fd/go-nat v1.0.0 // indirect
 	github.com/go-check/check v0.0.0-20180628173108-788fd7840127 // indirect
 	github.com/gogo/protobuf v1.2.0
 	github.com/google/uuid v1.1.0 // indirect
+	github.com/gorilla/websocket v1.4.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.0
 	github.com/ipfs/go-cid v0.9.0
 	github.com/ipfs/go-datastore v3.2.0+incompatible
@@ -27,8 +29,11 @@ require (
 	github.com/libp2p/go-conn-security-multistream v0.1.15 // indirect
 	github.com/libp2p/go-flow-metrics v0.2.0 // indirect
 	github.com/libp2p/go-libp2p v6.0.29+incompatible
+	github.com/libp2p/go-libp2p-autonat v0.0.0-20190207233022-494f7fce997b // indirect
 	github.com/libp2p/go-libp2p-blankhost v0.3.15 // indirect
+	github.com/libp2p/go-libp2p-circuit v2.3.2+incompatible // indirect
 	github.com/libp2p/go-libp2p-crypto v2.0.1+incompatible
+	github.com/libp2p/go-libp2p-discovery v0.0.0-20190207233013-a666b9cafd4c // indirect
 	github.com/libp2p/go-libp2p-host v3.0.15+incompatible
 	github.com/libp2p/go-libp2p-interface-connmgr v0.0.21 // indirect
 	github.com/libp2p/go-libp2p-interface-pnet v3.0.0+incompatible // indirect
@@ -54,14 +59,16 @@ require (
 	github.com/libp2p/go-stream-muxer v3.0.1+incompatible // indirect
 	github.com/libp2p/go-tcp-transport v2.0.16+incompatible // indirect
 	github.com/libp2p/go-testutil v1.2.10
+	github.com/libp2p/go-ws-transport v2.0.15+incompatible // indirect
 	github.com/minio/sha256-simd v0.0.0-20190117184323-cc1980cb0338 // indirect
 	github.com/mr-tron/base58 v1.1.0
 	github.com/multiformats/go-multiaddr v1.4.0
 	github.com/multiformats/go-multiaddr-dns v0.2.5
 	github.com/multiformats/go-multibase v0.3.0 // indirect
 	github.com/multiformats/go-multistream v0.3.9
+	github.com/peterh/liner v1.1.0
 	github.com/pkg/errors v0.8.1 // indirect
-	github.com/stretchr/testify v1.2.2
+	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1 // indirect
 	github.com/whyrusleeping/go-notifier v0.0.0-20170827234753-097c5d47330f // indirect
@@ -71,5 +78,4 @@ require (
 	github.com/whyrusleeping/mafmt v1.2.8 // indirect
 	github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7 // indirect
 	github.com/whyrusleeping/yamux v1.1.5 // indirect
-	golang.org/x/net v0.0.0-20190119204137-ed066c81e75e // indirect
 )

@@ -174,3 +174,4 @@
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
   "version": "4.4.22"
 }
+

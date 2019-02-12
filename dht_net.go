@@ -10,7 +10,7 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 	ctxio "github.com/jbenet/go-context/io"
-	pb "github.com/libp2p/go-libp2p-kad-dht/v5/pb"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 )

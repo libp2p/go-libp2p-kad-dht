@@ -10,6 +10,3 @@ deps: gx
 
 publish:
 	gx-go rewrite --undo
-
-mod_deps:
-	env GO111MODULE=on go mod download

@@ -70,6 +70,6 @@ require (
 	github.com/whyrusleeping/go-smux-yamux v2.0.8+incompatible // indirect
 	github.com/whyrusleeping/mafmt v1.2.8 // indirect
 	github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7 // indirect
-	github.com/whyrusleeping/yamux v1.1.2 // indirect
+	github.com/whyrusleeping/yamux v1.1.5 // indirect
 	golang.org/x/net v0.0.0-20190119204137-ed066c81e75e // indirect
 )

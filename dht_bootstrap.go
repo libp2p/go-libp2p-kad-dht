@@ -163,3 +163,12 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 		return err
 	})
 }
+
+func (dht *IpfsDHT) BootstrapRandom(ctx context.Context) error {
+	return dht.randomWalk(ctx)
+}
+
+func (dht *IpfsDHT) BootstrapSelf(ctx context.Context) error {
+	_, err := dht.walk(ctx, dht.self)
+	return err
+}

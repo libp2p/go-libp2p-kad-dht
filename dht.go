@@ -401,6 +401,14 @@ func mkDsKey(s string) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }
 
+func (dht *IpfsDHT) PeerId() peer.ID {
+	return dht.self
+}
+
+func (dht *IpfsDHT) PeerKey() []byte {
+	return kb.ConvertPeerID(dht.self)
+}
+
 func (dht *IpfsDHT) SetClientMode() {
 	dht.client = true
 	for _, p := range dht.protocols {

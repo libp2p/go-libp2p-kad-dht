@@ -62,6 +62,7 @@ type IpfsDHT struct {
 	plk sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+	client    bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -81,6 +82,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
+	dht.client = cfg.Client
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -399,4 +401,11 @@ func (dht *IpfsDHT) protocolStrs() []string {
 
 func mkDsKey(s string) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
+}
+
+func (dht *IpfsDHT) SetClientMode() {
+	dht.client = true
+	for _, p := range dht.protocols {
+		dht.host.RemoveStreamHandler(p)
+	}
 }

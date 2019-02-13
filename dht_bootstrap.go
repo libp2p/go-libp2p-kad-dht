@@ -135,15 +135,11 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 
 // runBootstrap builds up list of peers by requesting random peer IDs
 func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
-	bslog := func(msg string) {
-		logger.Debugf("DHT %s dhtRunBootstrap %s -- routing table size: %d", dht.self, msg, dht.routingTable.Size())
-	}
-	bslog("start")
-	defer bslog("end")
-	defer logger.EventBegin(ctx, "dhtRunBootstrap").Done()
-
 	doQuery := func(n int, target string, f func(context.Context) error) error {
-		logger.Debugf("Bootstrapping query (%d/%d) to %s", n, cfg.Queries, target)
+		logger.Infof("starting bootstrap query (%d/%d) to %s (rt_len=%d)", n, cfg.Queries, target, dht.routingTable.Size())
+		defer func() {
+			logger.Infof("finished bootstrap query (%d/%d) to %s (rt_len=%d)", n, cfg.Queries, target, dht.routingTable.Size())
+		}()
 		queryCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
 		err := f(queryCtx)

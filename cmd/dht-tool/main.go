@@ -33,7 +33,8 @@ func main() {
 
 func errMain() error {
 	ipfslog.SetAllLoggerLevels(ipfslog.Warning)
-	ipfslog.SetModuleLevel("dht", ipfslog.Debug)
+	ipfslog.SetModuleLevel("dht", ipfslog.Info)
+	log.SetFlags(log.Flags() | log.Llongfile)
 	host, err := libp2p.New(context.Background())
 	if err != nil {
 		return fmt.Errorf("error creating host: %s", err)
@@ -52,6 +53,10 @@ const (
 	bootstrapOnce         = "bootstrap_once"
 	selectIndefinitely    = "select_indefinitely"
 	printRoutingTable     = "print_routing_table"
+	printSelfId           = "print_self_id"
+	setClientMode         = "set_client_mode"
+	bootstrapSelf         = "bootstrap_self"
+	bootstrapRandom       = "bootstrap_random"
 )
 
 var allCommands = []string{
@@ -59,6 +64,10 @@ var allCommands = []string{
 	bootstrapOnce,
 	selectIndefinitely,
 	printRoutingTable,
+	printSelfId,
+	setClientMode,
+	bootstrapSelf,
+	bootstrapRandom,
 }
 
 func interactiveLoop(d *dht.IpfsDHT, h host.Host) error {
@@ -110,14 +119,24 @@ func handleInput(input string, d *dht.IpfsDHT, h host.Host) bool {
 			log.Printf("connected to %d/%d bootstrap nodes", numConnected, len(bootstrapNodeAddrs))
 		}
 	case bootstrapOnce:
-		err := d.BootstrapOnce(ctx, dht.DefaultBootstrapConfig)
+		cfg := dht.DefaultBootstrapConfig
+		//cfg.Timeout = time.Minute
+		err := d.BootstrapOnce(ctx, cfg)
 		if err != nil {
 			log.Printf("error bootstrapping: %v", err)
 		}
+	case bootstrapSelf:
+		log.Print(d.BootstrapSelf(ctx))
+	case bootstrapRandom:
+		log.Print(d.BootstrapRandom(ctx))
 	case selectIndefinitely:
 		<-ctx.Done()
 	case printRoutingTable:
 		d.RoutingTable().Print()
+	case printSelfId:
+		log.Printf("%s (%x)", d.PeerId().Pretty(), d.PeerKey())
+	case setClientMode:
+		d.SetClientMode()
 	default:
 		log.Printf("unknown command: %q", input)
 		return false

@@ -2,14 +2,11 @@ package dht
 
 import (
 	"context"
-	"io"
 	"math/rand"
 	"testing"
 	"time"
 
 	ggio "github.com/gogo/protobuf/io"
-	ds "github.com/ipfs/go-datastore"
-	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
@@ -31,12 +28,15 @@ func TestGetFailures(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d, err := New(ctx, hosts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 	d.Update(ctx, hosts[1].ID())
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+		time.Sleep(400 * time.Millisecond)
 		s.Close()
 	})
 
@@ -48,7 +48,7 @@ func TestGetFailures(t *testing.T) {
 			err = merr[0]
 		}
 
-		if err != io.EOF {
+		if err != context.DeadlineExceeded {
 			t.Fatal("Got different error than we expected", err)
 		}
 	} else {
@@ -58,7 +58,7 @@ func TestGetFailures(t *testing.T) {
 	t.Log("Timeout test passed.")
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 		defer s.Close()
 
 		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
@@ -103,22 +103,14 @@ func TestGetFailures(t *testing.T) {
 		typ := pb.Message_GET_VALUE
 		str := "hello"
 
-		sk, err := d.getOwnPrivateKey()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		rec, err := record.MakePutRecord(sk, str, []byte("blah"), true)
-		if err != nil {
-			t.Fatal(err)
-		}
+		rec := record.MakePutRecord(str, []byte("blah"))
 		req := pb.Message{
-			Type:   &typ,
-			Key:    &str,
+			Type:   typ,
+			Key:    []byte(str),
 			Record: rec,
 		}
 
-		s, err := hosts[1].NewStream(context.Background(), hosts[0].ID(), ProtocolDHT)
+		s, err := hosts[1].NewStream(context.Background(), hosts[0].ID(), d.protocols[0])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,8 +148,10 @@ func TestNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d, err := New(ctx, hosts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, p := range hosts {
 		d.Update(ctx, p.ID())
@@ -166,7 +160,7 @@ func TestNotFound(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+		host.SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 			defer s.Close()
 
 			pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
@@ -192,7 +186,6 @@ func TestNotFound(t *testing.T) {
 				if err := pbw.WriteMsg(resp); err != nil {
 					panic(err)
 				}
-
 			default:
 				panic("Shouldnt recieve this.")
 			}
@@ -203,7 +196,7 @@ func TestNotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second*20)
 	defer cancel()
 	v, err := d.GetValue(ctx, "hello")
-	log.Debugf("get value got %v", v)
+	logger.Debugf("get value got %v", v)
 	if err != nil {
 		if merr, ok := err.(u.MultiErr); ok && len(merr) > 0 {
 			err = merr[0]
@@ -234,8 +227,10 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	tsds := dssync.MutexWrap(ds.NewMapDatastore())
-	d := NewDHT(ctx, hosts[0], tsds)
+	d, err := New(ctx, hosts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for i := 1; i < 5; i++ {
 		d.Update(ctx, hosts[i].ID())
@@ -244,7 +239,7 @@ func TestLessThanKResponses(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(ProtocolDHT, func(s inet.Stream) {
+		host.SetStreamHandler(d.protocols[0], func(s inet.Stream) {
 			defer s.Close()
 
 			pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
@@ -287,4 +282,71 @@ func TestLessThanKResponses(t *testing.T) {
 		}
 	}
 	t.Fatal("Expected to recieve an error.")
+}
+
+// Test multiple queries against a node that closes its stream after every query.
+func TestMultipleQueries(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	ctx := context.Background()
+	mn, err := mocknet.FullMeshConnected(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := mn.Hosts()
+	d, err := New(ctx, hosts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d.Update(ctx, hosts[1].ID())
+
+	// It would be nice to be able to just get a value and succeed but then
+	// we'd need to deal with selectors and validators...
+	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+		defer s.Close()
+
+		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+		pbw := ggio.NewDelimitedWriter(s)
+
+		pmes := new(pb.Message)
+		if err := pbr.ReadMsg(pmes); err != nil {
+			panic(err)
+		}
+
+		switch pmes.GetType() {
+		case pb.Message_GET_VALUE:
+			pi := hosts[1].Peerstore().PeerInfo(hosts[0].ID())
+			resp := &pb.Message{
+				Type:        pmes.Type,
+				CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []pstore.PeerInfo{pi}),
+			}
+
+			if err := pbw.WriteMsg(resp); err != nil {
+				panic(err)
+			}
+		default:
+			panic("Shouldnt recieve this.")
+		}
+	})
+
+	// long timeout to ensure timing is not at play.
+	ctx, cancel := context.WithTimeout(ctx, time.Second*20)
+	defer cancel()
+	for i := 0; i < 10; i++ {
+		if _, err := d.GetValue(ctx, "hello"); err != nil {
+			switch err {
+			case routing.ErrNotFound:
+				//Success!
+				continue
+			case u.ErrTimeout:
+				t.Fatal("Should not have gotten timeout!")
+			default:
+				t.Fatalf("Got unexpected error: %s", err)
+			}
+		}
+		t.Fatal("Expected to recieve an error.")
+	}
 }

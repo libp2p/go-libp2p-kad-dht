@@ -18,7 +18,9 @@ import (
 )
 
 func TestProviderManager(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	mid := peer.ID("testing")
 	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
 	a := cid.NewCidV0(u.Hash([]byte("test")))
@@ -35,13 +37,15 @@ func TestProvidersDatastore(t *testing.T) {
 	lruCacheSize = 10
 	defer func() { lruCacheSize = old }()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	mid := peer.ID("testing")
 	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
 	defer p.proc.Close()
 
 	friend := peer.ID("friend")
-	var cids []*cid.Cid
+	var cids []cid.Cid
 	for i := 0; i < 100; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)
@@ -88,8 +92,8 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal("failed to load set correctly")
 	}
 
-	if pt1 != lt1 {
-		t.Fatal("time wasnt serialized correctly")
+	if !pt1.Equal(lt1) {
+		t.Fatalf("time wasnt serialized correctly, %v != %v", pt1, lt1)
 	}
 
 	lt2, ok := pset.set[p2]
@@ -97,8 +101,8 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal("failed to load set correctly")
 	}
 
-	if pt2 != lt2 {
-		t.Fatal("time wasnt serialized correctly")
+	if !pt2.Equal(lt2) {
+		t.Fatalf("time wasnt serialized correctly, %v != %v", pt1, lt1)
 	}
 }
 
@@ -112,12 +116,14 @@ func TestProvidesExpire(t *testing.T) {
 		defaultCleanupInterval = cleanup
 	}()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	mid := peer.ID("testing")
 	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
 
 	peers := []peer.ID{"a", "b"}
-	var cids []*cid.Cid
+	var cids []cid.Cid
 	for i := 0; i < 10; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)
@@ -193,7 +199,7 @@ func TestLargeProvidersSet(t *testing.T) {
 	p := NewProviderManager(ctx, mid, lds)
 	defer p.proc.Close()
 
-	var cids []*cid.Cid
+	var cids []cid.Cid
 	for i := 0; i < 1000; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)
@@ -217,7 +223,8 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 1
 	defer func() { lruCacheSize = old }()
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
 	c1 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("1")))

@@ -2,40 +2,50 @@ package dht
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
-// Required in order for proper JSON marshaling
-func pointerizePeerInfos(pis []pstore.PeerInfo) []*pstore.PeerInfo {
-	out := make([]*pstore.PeerInfo, len(pis))
-	for i, p := range pis {
-		np := p
-		out[i] = &np
+func tryFormatLoggableKey(k string) (string, error) {
+	if len(k) == 0 {
+		return "", fmt.Errorf("loggableKey is empty")
 	}
-	return out
-}
+	var proto, cstr string
+	if k[0] == '/' {
+		// it's a path (probably)
+		protoEnd := strings.IndexByte(k[1:], '/')
+		if protoEnd < 0 {
+			return k, fmt.Errorf("loggableKey starts with '/' but is not a path: %x", k)
+		}
+		proto = k[1 : protoEnd+1]
+		cstr = k[protoEnd+2:]
+	} else {
+		proto = "provider"
+		cstr = k
+	}
 
-func toPeerInfos(ps []peer.ID) []*pstore.PeerInfo {
-	out := make([]*pstore.PeerInfo, len(ps))
-	for i, p := range ps {
-		out[i] = &pstore.PeerInfo{ID: p}
+	c, err := cid.Cast([]byte(cstr))
+	if err != nil {
+		return "", fmt.Errorf("loggableKey could not cast key to a CID: %x %v", k, err)
 	}
-	return out
+	return fmt.Sprintf("/%s/%s", proto, c.String()), nil
 }
 
 func loggableKey(k string) logging.LoggableMap {
-	cid, err := cid.Cast([]byte(k))
+	newKey, err := tryFormatLoggableKey(k)
 	if err != nil {
-		log.Errorf("loggableKey could not cast key: %v", err)
+		logger.Debug(err)
 	} else {
-		k = cid.String()
+		k = newKey
 	}
+
 	return logging.LoggableMap{
 		"key": k,
 	}
@@ -44,7 +54,7 @@ func loggableKey(k string) logging.LoggableMap {
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
-	e := log.EventBegin(ctx, "getClosestPeers", loggableKey(key))
+	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
 	if len(tablepeers) == 0 {
 		return nil, kb.ErrLookupFailure
@@ -62,22 +72,21 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			ID:   p,
 		})
 
-		closer, err := dht.closerPeersSingle(ctx, key, p)
+		pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
 		if err != nil {
-			log.Debugf("error getting closer peers: %s", err)
+			logger.Debugf("error getting closer peers: %s", err)
 			return nil, err
 		}
-
-		peerinfos := toPeerInfos(closer)
+		peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
 		// For DHT query command
 		notif.PublishQueryEvent(parent, &notif.QueryEvent{
 			Type:      notif.PeerResponse,
 			ID:        p,
-			Responses: peerinfos, // todo: remove need for this pointerize thing
+			Responses: peers,
 		})
 
-		return &dhtQueryResult{closerPeers: peerinfos}, nil
+		return &dhtQueryResult{closerPeers: peers}, nil
 	})
 
 	go func() {
@@ -86,11 +95,11 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		// run it!
 		res, err := query.Run(ctx, tablepeers)
 		if err != nil {
-			log.Debugf("closestPeers query run error: %s", err)
+			logger.Debugf("closestPeers query run error: %s", err)
 		}
 
-		if res != nil && res.finalSet != nil {
-			sorted := kb.SortClosestPeers(res.finalSet.Peers(), kb.ConvertKey(key))
+		if res != nil && res.queriedSet != nil {
+			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
 			if len(sorted) > KValue {
 				sorted = sorted[:KValue]
 			}
@@ -101,22 +110,5 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		}
 	}()
 
-	return out, nil
-}
-
-func (dht *IpfsDHT) closerPeersSingle(ctx context.Context, key string, p peer.ID) ([]peer.ID, error) {
-	pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
-	if err != nil {
-		return nil, err
-	}
-
-	var out []peer.ID
-	for _, pbp := range pmes.GetCloserPeers() {
-		pid := peer.ID(pbp.GetId())
-		if pid != dht.self { // dont add self
-			dht.peerstore.AddAddrs(pid, pbp.Addresses(), pstore.TempAddrTTL)
-			out = append(out, pid)
-		}
-	}
 	return out, nil
 }

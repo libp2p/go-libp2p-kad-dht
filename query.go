@@ -9,6 +9,7 @@ import (
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
+	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pset "github.com/libp2p/go-libp2p-peer/peerset"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -33,7 +34,8 @@ type dhtQueryResult struct {
 	closerPeers   []*pstore.PeerInfo // *
 	success       bool
 
-	finalSet *pset.PeerSet
+	finalSet   *pset.PeerSet
+	queriedSet *pset.PeerSet
 }
 
 // constructs query
@@ -71,6 +73,8 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 type dhtQueryRunner struct {
 	query          *dhtQuery        // query to run
 	peersSeen      *pset.PeerSet    // all peers queried. prevent querying same peer 2x
+	peersQueried   *pset.PeerSet    // peers successfully connected to and queried
+	peersDialed    *dialQueue       // peers we have dialed to
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
 
@@ -89,22 +93,36 @@ type dhtQueryRunner struct {
 func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 	proc := process.WithParent(process.Background())
 	ctx := ctxproc.OnClosingContext(proc)
-	return &dhtQueryRunner{
+	peersToQuery := queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key)))
+	r := &dhtQueryRunner{
 		query:          q,
-		peersToQuery:   queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key))),
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      pset.New(),
+		peersQueried:   pset.New(),
 		rateLimit:      make(chan struct{}, q.concurrency),
+		peersToQuery:   peersToQuery,
 		proc:           proc,
 	}
+	dq, err := newDialQueue(&dqParams{
+		ctx:    ctx,
+		target: q.key,
+		in:     peersToQuery,
+		dialFn: r.dialPeer,
+		config: dqDefaultConfig(),
+	})
+	if err != nil {
+		panic(err)
+	}
+	r.peersDialed = dq
+	return r
 }
 
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
-	r.log = log
+	r.log = logger
 	r.runCtx = ctx
 
 	if len(peers) == 0 {
-		log.Warning("Running query with no peers!")
+		logger.Warning("Running query with no peers!")
 		return nil, nil
 	}
 
@@ -143,7 +161,7 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 
 		// if every query to every peer failed, something must be very wrong.
 		if len(r.errs) > 0 && len(r.errs) == r.peersSeen.Size() {
-			log.Debugf("query errs: %s", r.errs)
+			logger.Debugf("query errs: %s", r.errs)
 			err = r.errs[0]
 		}
 
@@ -158,7 +176,8 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	}
 
 	return &dhtQueryResult{
-		finalSet: r.peersSeen,
+		finalSet:   r.peersSeen,
+		queriedSet: r.peersQueried,
 	}, err
 }
 
@@ -187,7 +206,6 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
 
 func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 	for {
-
 		select {
 		case <-r.peersRemaining.Done():
 			return
@@ -196,12 +214,13 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 			return
 
 		case <-r.rateLimit:
+			ch := r.peersDialed.Consume()
 			select {
-			case p, more := <-r.peersToQuery.DeqChan:
-				if !more {
-					return // channel closed.
+			case p, ok := <-ch:
+				if !ok {
+					// this signals context cancellation.
+					return
 				}
-
 				// do it as a child func to make sure Run exits
 				// ONLY AFTER spawn workers has exited.
 				proc.Go(func(proc process.Process) {
@@ -216,6 +235,36 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 	}
 }
 
+func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
+	// short-circuit if we're already connected.
+	if r.query.dht.host.Network().Connectedness(p) == inet.Connected {
+		return nil
+	}
+
+	logger.Debug("not connected. dialing.")
+	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
+		Type: notif.DialingPeer,
+		ID:   p,
+	})
+
+	pi := pstore.PeerInfo{ID: p}
+	if err := r.query.dht.host.Connect(ctx, pi); err != nil {
+		logger.Debugf("error connecting: %s", err)
+		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
+			Type:  notif.QueryError,
+			Extra: err.Error(),
+			ID:    p,
+		})
+
+		r.Lock()
+		r.errs = append(r.errs, err)
+		r.Unlock()
+		return err
+	}
+	logger.Debugf("connected. dial success.")
+	return nil
+}
+
 func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	// ok let's do this!
 
@@ -224,56 +273,24 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	// make sure we do this when we exit
 	defer func() {
-		// signal we're done proccessing peer p
+		// signal we're done processing peer p
 		r.peersRemaining.Decrement(1)
 		r.rateLimit <- struct{}{}
 	}()
 
-	// make sure we're connected to the peer.
-	// FIXME abstract away into the network layer
-	if conns := r.query.dht.host.Network().ConnsToPeer(p); len(conns) == 0 {
-		log.Debug("not connected. dialing.")
-
-		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-			Type: notif.DialingPeer,
-			ID:   p,
-		})
-		// while we dial, we do not take up a rate limit. this is to allow
-		// forward progress during potentially very high latency dials.
-		r.rateLimit <- struct{}{}
-
-		pi := pstore.PeerInfo{ID: p}
-
-		if err := r.query.dht.host.Connect(ctx, pi); err != nil {
-			log.Debugf("Error connecting: %s", err)
-
-			notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-				Type:  notif.QueryError,
-				Extra: err.Error(),
-				ID:    p,
-			})
-
-			r.Lock()
-			r.errs = append(r.errs, err)
-			r.Unlock()
-			<-r.rateLimit // need to grab it again, as we deferred.
-			return
-		}
-		<-r.rateLimit // need to grab it again, as we deferred.
-		log.Debugf("connected. dial success.")
-	}
-
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)
 
+	r.peersQueried.Add(p)
+
 	if err != nil {
-		log.Debugf("ERROR worker for: %v %v", p, err)
+		logger.Debugf("ERROR worker for: %v %v", p, err)
 		r.Lock()
 		r.errs = append(r.errs, err)
 		r.Unlock()
 
 	} else if res.success {
-		log.Debugf("SUCCESS worker for: %v %s", p, res)
+		logger.Debugf("SUCCESS worker for: %v %s", p, res)
 		r.Lock()
 		r.result = res
 		r.Unlock()
@@ -281,19 +298,19 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		// must be async, as we're one of the children, and Close blocks.
 
 	} else if len(res.closerPeers) > 0 {
-		log.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(res.closerPeers))
+		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(res.closerPeers))
 		for _, next := range res.closerPeers {
-			if next.ID == r.query.dht.self { // dont add self.
-				log.Debugf("PEERS CLOSER -- worker for: %v found self", p)
+			if next.ID == r.query.dht.self { // don't add self.
+				logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 				continue
 			}
 
 			// add their addresses to the dialer's peerstore
 			r.query.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
 			r.addPeerToQuery(next.ID)
-			log.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
+			logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
 		}
 	} else {
-		log.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
+		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
 	}
 }

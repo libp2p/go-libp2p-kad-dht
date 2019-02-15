@@ -168,7 +168,7 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	case <-r.proc.Closed():
 		r.RLock()
 		defer r.RUnlock()
-		err = context.DeadlineExceeded
+		err = r.runCtx.Err()
 	}
 
 	if r.result != nil && r.result.success {

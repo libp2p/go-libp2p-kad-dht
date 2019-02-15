@@ -27,8 +27,6 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		// We lock here for consistency with the lock in testConnection.
 		// This probably isn't necessary because (dis)connect
 		// notifications are serialized but it's nice to be consistent.
-		dht.plk.Lock()
-		defer dht.plk.Unlock()
 		if dht.host.Network().Connectedness(p) == inet.Connected {
 			dht.Update(dht.Context(), p)
 		}
@@ -63,11 +61,6 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 	// Remember this choice (makes subsequent negotiations faster)
 	dht.peerstore.AddProtocols(p, selected)
 
-	// We lock here as we race with disconnect. If we didn't lock, we could
-	// finish processing a connect after handling the associated disconnect
-	// event and add the peer to the routing table after removing it.
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
 	if dht.host.Network().Connectedness(p) == inet.Connected {
 		dht.Update(dht.Context(), p)
 	}
@@ -83,10 +76,6 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 
 	p := v.RemotePeer()
 
-	// Lock and check to see if we're still connected. We lock to make sure
-	// we don't concurrently process a connect event.
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
 	if dht.host.Network().Connectedness(p) == inet.Connected {
 		// We're still connected.
 		return

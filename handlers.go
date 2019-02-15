@@ -282,7 +282,6 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	for _, pi := range closestinfos {
 		if len(pi.Addrs) > 0 {
 			withAddresses = append(withAddresses, pi)
-			logger.Debugf("handleFindPeer: sending back '%s'", pi.ID)
 		}
 	}
 
@@ -366,7 +365,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			continue
 		}
 
-		logger.Infof("received provider %s for %s (addrs: %s)", p, c, pi.Addrs)
+		logger.Debugf("received provider %s for %s (addrs: %s)", p, c, pi.Addrs)
 		if pi.ID != dht.self { // don't add own addrs.
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, pstore.ProviderAddrTTL)

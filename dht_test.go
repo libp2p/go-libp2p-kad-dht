@@ -5,14 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -452,28 +453,6 @@ func TestValueGetInvalid(t *testing.T) {
 	testSetGet("newer", "newer", nil)
 	// Attempt to set older record again should be ignored
 	testSetGet("valid", "newer", nil)
-}
-
-func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dht := setupDHT(ctx, t, false)
-	defer dht.Close()
-
-	foo := peer.ID("asdasd")
-	_, err := dht.messageSenderForPeer(foo)
-	if err == nil {
-		t.Fatal("that shouldnt have succeeded")
-	}
-
-	dht.smlk.Lock()
-	mscnt := len(dht.strmap)
-	dht.smlk.Unlock()
-
-	if mscnt > 0 {
-		t.Fatal("should have no message senders in map")
-	}
 }
 
 func TestProvides(t *testing.T) {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
@@ -55,9 +54,6 @@ type IpfsDHT struct {
 
 	ctx  context.Context
 	proc goprocess.Process
-
-	strmap map[peer.ID]*messageSender
-	smlk   sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
 	client    bool
@@ -141,7 +137,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,
-		strmap:       make(map[peer.ID]*messageSender),
 		ctx:          ctx,
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),

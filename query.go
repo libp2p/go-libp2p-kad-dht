@@ -57,15 +57,9 @@ type queryFunc func(context.Context, peer.ID) (*dhtQueryResult, error)
 
 // Run runs the query at hand. pass in a list of peers to use first.
 func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return nil, ctx.Err()
-	default:
 	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	runner := newQueryRunner(q)
 	return runner.Run(ctx, peers)
 }

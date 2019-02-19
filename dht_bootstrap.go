@@ -146,10 +146,14 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	defer logger.EventBegin(ctx, "dhtRunBootstrap").Done()
 
 	doQuery := func(n int, target string, f func(context.Context) error) error {
-		logger.Debugf("Bootstrapping query (%d/%d) to %s", n, cfg.Queries, target)
-		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		logger.Infof("Bootstrapping query (%d/%d) to %s", n, cfg.Queries, target)
+		queryCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
-		return f(ctx)
+		err := f(queryCtx)
+		if err == context.DeadlineExceeded && queryCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+			return nil
+		}
+		return err
 	}
 
 	// Do all but one of the bootstrap queries as random walks.

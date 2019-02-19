@@ -323,7 +323,14 @@ func (dq *dialQueue) worker() {
 			}
 			logger.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Since(t)/time.Millisecond)
 			waiting := len(dq.waitingCh)
-			dq.out.EnqChan <- p
+
+			// by the time we're done dialling, it's possible that the context is closed, in which case there will
+			// be nobody listening on dq.out.EnqChan and we could block forever.
+			select {
+			case dq.out.EnqChan <- p:
+			case <-dq.ctx.Done():
+				return
+			}
 			if waiting > 0 {
 				// we have somebody to deliver this value to, so no need to shrink.
 				continue

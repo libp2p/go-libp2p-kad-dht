@@ -5,14 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -80,7 +81,6 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 		opts.Client(client),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1358,4 +1358,12 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			t.Fatalf("get should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 	})
+}
+
+func TestNodeSetClientModeAlreadyInitedAsClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := setupDHT(ctx, t, true)
+	defer func() { assert.NoError(t, d.Close()) }()
+	d.SetClientMode()
 }

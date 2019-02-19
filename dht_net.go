@@ -46,10 +46,14 @@ func (w *bufferedDelimitedWriter) Flush() error {
 // handleNewStream implements the inet.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 	defer s.Reset()
-	dht.handleNewMessage(s)
+	if dht.handleNewMessage(s) {
+		// Gracefully close the stream for writes.
+		s.Close()
+	}
 }
 
-func (dht *IpfsDHT) handleNewMessage(s inet.Stream) error {
+// Returns true on orderly completion of writes (so we can Close the stream).
+func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 	ctx := dht.Context()
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
@@ -58,49 +62,48 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) error {
 	mPeer := s.Conn().RemotePeer()
 
 	for {
-		var pmes pb.Message
-		switch err := r.ReadMsg(&pmes); err {
+		var req pb.Message
+		switch err := r.ReadMsg(&req); err {
 		case io.EOF:
-			return nil
+			return true
 		default:
+			// This string test is necessary because there isn't a single stream reset error
+			// instance	in use.
 			if err.Error() != "stream reset" {
 				logger.Debugf("error reading message: %#v", err)
 			}
-			return err
+			return false
 		case nil:
 		}
 
-		handler := dht.handlerForMsgType(pmes.GetType())
+		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
-			logger.Warningf("can't handle received message of type %s", pmes.GetType())
-			return nil
+			logger.Warningf("can't handle received message of type %v", req.GetType())
+			return false
 		}
 
-		// dispatch handler.
-		rpmes, err := handler(ctx, mPeer, &pmes)
+		resp, err := handler(ctx, mPeer, &req)
 		if err != nil {
-			logger.Debugf("handle message error: %s", err)
-			return err
+			logger.Debugf("error handling message: %v", err)
+			return false
 		}
 
-		// if nil response, return it before serializing
-		if rpmes == nil {
-			logger.Debug("got back nil response from request")
+		dht.updateFromMessage(ctx, mPeer, &req)
+
+		if resp == nil {
 			continue
 		}
 
 		// send out response msg
-		err = w.WriteMsg(rpmes)
+		err = w.WriteMsg(resp)
 		if err == nil {
 			err = w.Flush()
 		}
 		if err != nil {
-			logger.Debugf("send response error: %s", err)
-			return nil
+			logger.Debugf("error writing response: %v", err)
+			return false
 		}
 
-		// update the peer (on valid msgs only)
-		dht.updateFromMessage(ctx, mPeer, &pmes)
 	}
 }
 

@@ -110,7 +110,7 @@ type waitingCh struct {
 // end up adding fuel to the fire. Since we have no deterministic way to detect this for now, we hard-limit concurrency
 // to config.maxParallelism.
 func newDialQueue(params *dqParams) (*dialQueue, error) {
-	sq := &dialQueue{
+	dq := &dialQueue{
 		dqParams:  params,
 		nWorkers:  params.config.minParallelism,
 		out:       queue.NewChanQueue(params.ctx, queue.NewXORDistancePQ(params.target)),
@@ -121,10 +121,10 @@ func newDialQueue(params *dqParams) (*dialQueue, error) {
 	}
 
 	for i := 0; i < int(params.config.minParallelism); i++ {
-		go sq.worker()
+		go dq.worker()
 	}
-	go sq.control()
-	return sq, nil
+	go dq.control()
+	return dq, nil
 }
 
 func (dq *dialQueue) control() {

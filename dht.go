@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/xerrors"
+
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
@@ -416,4 +418,20 @@ func (dht *IpfsDHT) SetClientMode() {
 	for _, p := range dht.protocols {
 		dht.host.RemoveStreamHandler(p)
 	}
+}
+
+func (dht *IpfsDHT) Host() host.Host {
+	return dht.host
+}
+
+func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
+	req := pb.NewMessage(pb.Message_PING, nil, 0)
+	resp, err := dht.sendRequest(ctx, p, req)
+	if err != nil {
+		return xerrors.Errorf("sending request: %w", err)
+	}
+	if resp.Type != pb.Message_PING {
+		return xerrors.Errorf("got unexpected response type: %v", resp.Type)
+	}
+	return nil
 }

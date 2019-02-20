@@ -8,8 +8,6 @@ import (
 	"log"
 	"time"
 
-	"golang.org/x/xerrors"
-
 	ggio "github.com/gogo/protobuf/io"
 	ctxio "github.com/jbenet/go-context/io"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -114,33 +112,24 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (_ *pb.Message, err error) {
 	defer func(started time.Time) {
 		log.Printf("time taken to send request: %v: err=%v", time.Since(started), err)
 	}(time.Now())
-	s, err := dht.newStream(ctx, p)
+	ps, err := dht.getPoolStream(ctx, p)
 	if err != nil {
-		return nil, xerrors.Errorf("error creating new stream: %w", err)
+		return
 	}
-	defer s.Reset()
-	dr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
-	bdw := newBufferedDelimitedWriter(s)
+	defer dht.putPoolStream(ps, p)
 	start := time.Now()
-	err = bdw.WriteMsg(pmes)
+	reply, err := ps.request(ctx, req)
 	if err != nil {
-		return nil, xerrors.Errorf("error writing message: %w", err)
-	}
-	if err := bdw.Flush(); err != nil {
-		return nil, xerrors.Errorf("error flushing message: %w", err)
-	}
-	var reply pb.Message
-	if err := dr.ReadMsg(&reply); err != nil {
-		return nil, xerrors.Errorf("error reading reply: %w", err)
+		return
 	}
 	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, p, &reply)
+	dht.updateFromMessage(ctx, p, reply)
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	return &reply, nil
+	return reply, nil
 }
 
 func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (inet.Stream, error) {
@@ -152,20 +141,12 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	defer func(started time.Time) {
 		log.Printf("time taken to send message: %v: err=%v", time.Since(started), err)
 	}(time.Now())
-	s, err := dht.newStream(ctx, p)
+	ps, err := dht.getPoolStream(ctx, p)
 	if err != nil {
-		return xerrors.Errorf("error creating new stream: %w", err)
+		return
 	}
-	defer s.Reset()
-	bdw := newBufferedDelimitedWriter(s)
-	err = bdw.WriteMsg(pmes)
-	if err != nil {
-		return xerrors.Errorf("error writing message: %w", err)
-	}
-	if err := bdw.Flush(); err != nil {
-		return xerrors.Errorf("error flushing message: %w", err)
-	}
-	return nil
+	defer dht.putPoolStream(ps, p)
+	return ps.send(pmes)
 }
 
 func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {

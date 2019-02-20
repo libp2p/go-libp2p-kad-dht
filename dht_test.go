@@ -456,28 +456,6 @@ func TestValueGetInvalid(t *testing.T) {
 	testSetGet("valid", "newer", nil)
 }
 
-func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dht := setupDHT(ctx, t, false)
-	defer dht.Close()
-
-	foo := peer.ID("asdasd")
-	_, err := dht.messageSenderForPeer(ctx, foo)
-	if err == nil {
-		t.Fatal("that shouldnt have succeeded")
-	}
-
-	dht.smlk.Lock()
-	mscnt := len(dht.strmap)
-	dht.smlk.Unlock()
-
-	if mscnt > 0 {
-		t.Fatal("should have no message senders in map")
-	}
-}
-
 func TestProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())

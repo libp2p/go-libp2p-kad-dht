@@ -405,7 +405,7 @@ func mkDsKey(s string) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }
 
-func (dht *IpfsDHT) PeerId() peer.ID {
+func (dht *IpfsDHT) PeerID() peer.ID {
 	return dht.self
 }
 

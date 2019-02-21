@@ -101,7 +101,7 @@ func setupDHTS(t *testing.T, ctx context.Context, n int) []*IpfsDHT {
 
 	for i := 0; i < n; i++ {
 		dhts[i] = setupDHT(ctx, t, false)
-		peers[i] = dhts[i].PeerId()
+		peers[i] = dhts[i].PeerID()
 		addrs[i] = dhts[i].host.Addrs()[0]
 
 		if _, lol := sanityAddrsMap[addrs[i].String()]; lol {
@@ -928,7 +928,7 @@ func TestFindPeer(t *testing.T) {
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	p, err := dhts[0].FindPeer(ctxT, dhts[2].PeerId())
+	p, err := dhts[0].FindPeer(ctxT, dhts[2].PeerID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +937,7 @@ func TestFindPeer(t *testing.T) {
 		t.Fatal("Failed to find peer.")
 	}
 
-	if p.ID != dhts[2].PeerId() {
+	if p.ID != dhts[2].PeerID() {
 		t.Fatal("Didnt find expected peer.")
 	}
 }
@@ -974,7 +974,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	pchan, err := dhts[0].FindPeersConnectedToPeer(ctxT, dhts[2].PeerId())
+	pchan, err := dhts[0].FindPeersConnectedToPeer(ctxT, dhts[2].PeerID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1221,7 +1221,7 @@ func testFindPeerQuery(t *testing.T,
 		lp := len(d.host.Network().Peers())
 		//t.Log(i, lp)
 		if i != 0 && lp > 0 {
-			reachableIds = append(reachableIds, d.PeerId())
+			reachableIds = append(reachableIds, d.PeerID())
 		}
 	}
 	t.Logf("%d reachable ids", len(reachableIds))
@@ -1368,8 +1368,8 @@ func TestPing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ds := setupDHTS(t, ctx, 2)
-	ds[0].Host().Peerstore().AddAddrs(ds[1].PeerId(), ds[1].Host().Addrs(), pstore.AddressTTL)
-	assert.NoError(t, ds[0].Ping(context.Background(), ds[1].PeerId()))
+	ds[0].Host().Peerstore().AddAddrs(ds[1].PeerID(), ds[1].Host().Addrs(), pstore.AddressTTL)
+	assert.NoError(t, ds[0].Ping(context.Background(), ds[1].PeerID()))
 }
 
 func TestSetClientModeAfterInit(t *testing.T) {
@@ -1377,9 +1377,9 @@ func TestSetClientModeAfterInit(t *testing.T) {
 	defer cancel()
 	pinger := setupDHT(ctx, t, false)
 	client := setupDHT(ctx, t, false)
-	pinger.Host().Peerstore().AddAddrs(client.PeerId(), client.Host().Addrs(), pstore.AddressTTL)
+	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), pstore.AddressTTL)
 	client.SetClientMode()
-	err := pinger.Ping(context.Background(), client.PeerId())
+	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
 }
 
@@ -1388,7 +1388,7 @@ func TestClientModeAtInit(t *testing.T) {
 	defer cancel()
 	pinger := setupDHT(ctx, t, false)
 	client := setupDHT(ctx, t, true)
-	pinger.Host().Peerstore().AddAddrs(client.PeerId(), client.Host().Addrs(), pstore.AddressTTL)
-	err := pinger.Ping(context.Background(), client.PeerId())
+	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), pstore.AddressTTL)
+	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
 }

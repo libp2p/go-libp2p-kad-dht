@@ -11,7 +11,7 @@ import (
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	routing "github.com/libp2p/go-libp2p-routing"
 	multiaddr "github.com/multiformats/go-multiaddr"
-	_ "gx/ipfs/QmQc7jbDUsxUJZyFJzxVrnrWeECCct6fErEpMqtjyWvCX8/go-multiaddr-dns"
+	_ "github.com/multiformats/go-multiaddr-dns"
 )
 
 var DefaultBootstrapPeers []multiaddr.Multiaddr

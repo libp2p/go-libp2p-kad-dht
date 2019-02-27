@@ -315,7 +315,11 @@ func (dq *dialQueue) worker() {
 			return
 		case <-idleTimer.C:
 			// no new dial requests during our idle period; time to scale down.
-		case p := <-dq.in.DeqChan:
+		case p, ok := <-dq.in.DeqChan:
+			if !ok {
+				return
+			}
+
 			t := time.Now()
 			if err := dq.dialFn(dq.ctx, p); err != nil {
 				logger.Debugf("discarding dialled peer because of error: %v", err)

@@ -901,6 +901,41 @@ func TestLayeredGet(t *testing.T) {
 	}
 }
 
+func TestUnfindablePeer(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	maddrs, peers, dhts := setupDHTS(ctx, 4, t)
+	defer func() {
+		for i := 0; i < 4; i++ {
+			dhts[i].Close()
+			dhts[i].host.Close()
+		}
+	}()
+
+	connect(t, ctx, dhts[0], dhts[1])
+	connect(t, ctx, dhts[1], dhts[2])
+	connect(t, ctx, dhts[2], dhts[3])
+
+	// Give DHT 1 a bad addr for DHT 2.
+	dhts[1].host.Peerstore().ClearAddrs(peers[2])
+	dhts[1].host.Peerstore().AddAddr(peers[2], maddrs[0], time.Minute)
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_, err := dhts[0].FindPeer(ctxT, peers[3])
+	if err == nil {
+		t.Error("should have failed to find peer")
+	}
+	if ctxT.Err() != nil {
+		t.Error("FindPeer should have failed before context expired")
+	}
+}
+
 func TestFindPeer(t *testing.T) {
 	// t.Skip("skipping test to debug another")
 	if testing.Short() {

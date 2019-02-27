@@ -259,6 +259,9 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 		r.Lock()
 		r.errs = append(r.errs, err)
 		r.Unlock()
+
+		// This peer is dropping out of the race.
+		r.peersRemaining.Decrement(1)
 		return err
 	}
 	logger.Debugf("connected. dial success.")

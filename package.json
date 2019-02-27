@@ -165,6 +165,12 @@
       "hash": "QmPVkJMTeRC6iBByPWdrRkD3BE5UXsj5HPzb4kPqL186mS",
       "name": "testify",
       "version": "1.0.0"
+    },
+    {
+      "author": "anacrolix",
+      "hash": "QmTqdCYgW5BETmdeH38z1qW88MMxVSXF5WfqScnKhJT4Rh",
+      "name": "xerrors",
+      "version": "0.0.0"
     }
   ],
   "gxVersion": "0.4.0",

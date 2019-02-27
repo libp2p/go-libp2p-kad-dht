@@ -1,36 +1,33 @@
 os:
   - linux
 
-sudo: false
-
 language: go
 
-env:
-    - IPFS_REUSEPORT=false
-
 go:
-    - 1.11.x
+  - 1.11.x
 
-install: true
+env:
+  global:
+    - GOTFLAGS="-race"
+    - IPFS_REUSEPORT=false
+  matrix:
+    - BUILD_DEPTYPE=gx
+    - BUILD_DEPTYPE=gomod
 
-jobs:
-  include:
-    - stage: "build and test"
-      name: "gx"
-      script:
-        - make deps
-        - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
 
-    - name: "go mod"
-      script:
-        - export GO111MODULE=on
-        - make mod_deps
-        - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
+# disable travis install
+install:
+  - true
+
+script:
+  - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
+
 
 cache:
-    directories:
-        - $GOPATH/pkg/mod
-        - $GOPATH/src/gx
+  directories:
+    - $GOPATH/src/gx
+    - $GOPATH/pkg/mod
+    - /home/travis/.cache/go-build
 
 notifications:
   email: false

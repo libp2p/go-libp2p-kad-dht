@@ -2,11 +2,8 @@ package dht
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
-
-	tu "github.com/libp2p/go-testutil"
 )
 
 func TestNotifieeMultipleConn(t *testing.T) {
@@ -27,13 +24,13 @@ func TestNotifieeMultipleConn(t *testing.T) {
 	nn1.Connected(d1.host.Network(), c12)
 	nn2.Connected(d2.host.Network(), c21)
 
-	if !checkRoutingTable(d1, d2) {
+	if !nodesHaveEntriesForOneAnother(d1, d2) {
 		t.Fatal("no routes")
 	}
 	nn1.Disconnected(d1.host.Network(), c12)
 	nn2.Disconnected(d2.host.Network(), c21)
 
-	if !checkRoutingTable(d1, d2) {
+	if !nodesHaveEntriesForOneAnother(d1, d2) {
 		t.Fatal("no routes")
 	}
 
@@ -43,13 +40,6 @@ func TestNotifieeMultipleConn(t *testing.T) {
 	for _, conn := range d2.host.Network().ConnsToPeer(d1.self) {
 		conn.Close()
 	}
-
-	tu.WaitFor(ctx, func() error {
-		if checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should not have routes")
-		}
-		return nil
-	})
 }
 
 func TestNotifieeFuzz(t *testing.T) {
@@ -65,16 +55,10 @@ func TestNotifieeFuzz(t *testing.T) {
 			conn.Close()
 		}
 	}
-	tu.WaitFor(ctx, func() error {
-		if checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should not have routes")
-		}
-		return nil
-	})
 	connect(t, ctx, d1, d2)
 }
 
-func checkRoutingTable(a, b *IpfsDHT) bool {
+func nodesHaveEntriesForOneAnother(a, b *IpfsDHT) bool {
 	// loop until connection notification has been received.
 	// under high load, this may not happen as immediately as we would like.
 	return a.routingTable.Find(b.self) != "" && b.routingTable.Find(a.self) != ""

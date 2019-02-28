@@ -73,43 +73,7 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 	}
 }
 
-func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
-	dht := nn.DHT()
-	select {
-	case <-dht.Process().Closing():
-		return
-	default:
-	}
-
-	p := v.RemotePeer()
-
-	// Lock and check to see if we're still connected. We lock to make sure
-	// we don't concurrently process a connect event.
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
-	if dht.host.Network().Connectedness(p) == inet.Connected {
-		// We're still connected.
-		return
-	}
-
-	dht.routingTable.Remove(p)
-
-	dht.smlk.Lock()
-	defer dht.smlk.Unlock()
-	ms, ok := dht.strmap[p]
-	if !ok {
-		return
-	}
-	delete(dht.strmap, p)
-
-	// Do this asynchronously as ms.lk can block for a while.
-	go func() {
-		ms.lk.Lock()
-		defer ms.lk.Unlock()
-		ms.invalidate()
-	}()
-}
-
+func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn)   {}
 func (nn *netNotifiee) OpenedStream(n inet.Network, v inet.Stream) {}
 func (nn *netNotifiee) ClosedStream(n inet.Network, v inet.Stream) {}
 func (nn *netNotifiee) Listen(n inet.Network, a ma.Multiaddr)      {}

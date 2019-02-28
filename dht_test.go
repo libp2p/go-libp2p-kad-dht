@@ -913,11 +913,11 @@ func TestUnfindablePeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	maddrs, peers, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
-			dhts[i].host.Close()
+			dhts[i].Host().Close()
 		}
 	}()
 
@@ -926,12 +926,12 @@ func TestUnfindablePeer(t *testing.T) {
 	connect(t, ctx, dhts[2], dhts[3])
 
 	// Give DHT 1 a bad addr for DHT 2.
-	dhts[1].host.Peerstore().ClearAddrs(peers[2])
-	dhts[1].host.Peerstore().AddAddr(peers[2], maddrs[0], time.Minute)
+	dhts[1].host.Peerstore().ClearAddrs(dhts[2].PeerID())
+	dhts[1].host.Peerstore().AddAddr(dhts[2].PeerID(), dhts[0].Host().Addrs()[0], time.Minute)
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	_, err := dhts[0].FindPeer(ctxT, peers[3])
+	_, err := dhts[0].FindPeer(ctxT, dhts[3].PeerID())
 	if err == nil {
 		t.Error("should have failed to find peer")
 	}

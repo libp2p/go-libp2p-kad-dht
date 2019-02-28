@@ -1407,17 +1407,6 @@ func TestPing(t *testing.T) {
 	assert.NoError(t, ds[0].Ping(context.Background(), ds[1].PeerID()))
 }
 
-func TestSetClientModeAfterInit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pinger := setupDHT(ctx, t, false)
-	client := setupDHT(ctx, t, false)
-	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), pstore.AddressTTL)
-	client.SetClientMode()
-	err := pinger.Ping(context.Background(), client.PeerID())
-	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
-}
-
 func TestClientModeAtInit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

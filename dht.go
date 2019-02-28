@@ -413,13 +413,6 @@ func (dht *IpfsDHT) PeerKey() []byte {
 	return kb.ConvertPeerID(dht.self)
 }
 
-func (dht *IpfsDHT) SetClientMode() {
-	dht.client = true
-	for _, p := range dht.protocols {
-		dht.host.RemoveStreamHandler(p)
-	}
-}
-
 func (dht *IpfsDHT) Host() host.Host {
 	return dht.host
 }

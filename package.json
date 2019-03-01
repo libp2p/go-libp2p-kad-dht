@@ -168,9 +168,9 @@
     },
     {
       "author": "anacrolix",
-      "hash": "QmRqjtopUdKNVGJquqcjrTQRaNxf7E1vv3U1dCMKha9igt",
+      "hash": "QmSQLb62DKrDCQhkz94uUtWHnDB6D9g7vobKbYCU3cYVpm",
       "name": "xerrors",
-      "version": "0.0.0"
+      "version": "0.0.1"
     }
   ],
   "gxVersion": "0.4.0",

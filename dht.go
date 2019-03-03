@@ -64,7 +64,6 @@ type IpfsDHT struct {
 	plk sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
-	client    bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -84,7 +83,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
-	dht.client = cfg.Client
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))

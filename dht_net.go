@@ -46,9 +46,6 @@ func (w *bufferedDelimitedWriter) Flush() error {
 // handleNewStream implements the inet.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 	defer s.Reset()
-	if dht.client {
-		return
-	}
 	if dht.handleNewMessage(s) {
 		// Gracefully close the stream for writes.
 		s.Close()

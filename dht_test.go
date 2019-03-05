@@ -5,14 +5,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"math/rand"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	multistream "github.com/multiformats/go-multistream"
+
+	"golang.org/x/xerrors"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -80,14 +85,13 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 		opts.Client(client),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
-
 	if err != nil {
 		t.Fatal(err)
 	}
 	return d
 }
 
-func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer.ID, []*IpfsDHT) {
+func setupDHTS(t *testing.T, ctx context.Context, n int) []*IpfsDHT {
 	addrs := make([]ma.Multiaddr, n)
 	dhts := make([]*IpfsDHT, n)
 	peers := make([]peer.ID, n)
@@ -97,8 +101,8 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 
 	for i := 0; i < n; i++ {
 		dhts[i] = setupDHT(ctx, t, false)
-		peers[i] = dhts[i].self
-		addrs[i] = dhts[i].peerstore.Addrs(dhts[i].self)[0]
+		peers[i] = dhts[i].PeerID()
+		addrs[i] = dhts[i].host.Addrs()[0]
 
 		if _, lol := sanityAddrsMap[addrs[i].String()]; lol {
 			t.Fatal("While setting up DHTs address got duplicated.")
@@ -112,7 +116,7 @@ func setupDHTS(ctx context.Context, n int, t *testing.T) ([]ma.Multiaddr, []peer
 		}
 	}
 
-	return addrs, peers, dhts
+	return dhts
 }
 
 func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
@@ -481,7 +485,7 @@ func TestProvides(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -531,7 +535,7 @@ func TestLocalProvides(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -618,7 +622,7 @@ func TestBootstrap(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	dhts := setupDHTS(t, ctx, nDHTs)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -671,7 +675,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	dhts := setupDHTS(t, ctx, nDHTs)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -727,7 +731,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 40
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	dhts := setupDHTS(t, ctx, nDHTs)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -828,7 +832,7 @@ func TestProvidesAsync(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -870,7 +874,7 @@ func TestLayeredGet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -909,11 +913,11 @@ func TestUnfindablePeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	maddrs, peers, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
-			dhts[i].host.Close()
+			dhts[i].Host().Close()
 		}
 	}()
 
@@ -922,12 +926,12 @@ func TestUnfindablePeer(t *testing.T) {
 	connect(t, ctx, dhts[2], dhts[3])
 
 	// Give DHT 1 a bad addr for DHT 2.
-	dhts[1].host.Peerstore().ClearAddrs(peers[2])
-	dhts[1].host.Peerstore().AddAddr(peers[2], maddrs[0], time.Minute)
+	dhts[1].host.Peerstore().ClearAddrs(dhts[2].PeerID())
+	dhts[1].host.Peerstore().AddAddr(dhts[2].PeerID(), dhts[0].Host().Addrs()[0], time.Minute)
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	_, err := dhts[0].FindPeer(ctxT, peers[3])
+	_, err := dhts[0].FindPeer(ctxT, dhts[3].PeerID())
 	if err == nil {
 		t.Error("should have failed to find peer")
 	}
@@ -945,7 +949,7 @@ func TestFindPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, peers, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -959,7 +963,7 @@ func TestFindPeer(t *testing.T) {
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	p, err := dhts[0].FindPeer(ctxT, peers[2])
+	p, err := dhts[0].FindPeer(ctxT, dhts[2].PeerID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -968,7 +972,7 @@ func TestFindPeer(t *testing.T) {
 		t.Fatal("Failed to find peer.")
 	}
 
-	if p.ID != peers[2] {
+	if p.ID != dhts[2].PeerID() {
 		t.Fatal("Didnt find expected peer.")
 	}
 }
@@ -983,7 +987,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, peers, dhts := setupDHTS(ctx, 4, t)
+	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
 		for i := 0; i < 4; i++ {
 			dhts[i].Close()
@@ -1005,7 +1009,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	pchan, err := dhts[0].FindPeersConnectedToPeer(ctxT, peers[2])
+	pchan, err := dhts[0].FindPeersConnectedToPeer(ctxT, dhts[2].PeerID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1225,7 +1229,7 @@ func testFindPeerQuery(t *testing.T,
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, allpeers, dhts := setupDHTS(ctx, 1+bootstrappers+leafs, t)
+	dhts := setupDHTS(t, ctx, 1+bootstrappers+leafs)
 	defer func() {
 		for _, d := range dhts {
 			d.Close()
@@ -1252,7 +1256,7 @@ func testFindPeerQuery(t *testing.T,
 		lp := len(d.host.Network().Peers())
 		//t.Log(i, lp)
 		if i != 0 && lp > 0 {
-			reachableIds = append(reachableIds, allpeers[i])
+			reachableIds = append(reachableIds, d.PeerID())
 		}
 	}
 	t.Logf("%d reachable ids", len(reachableIds))
@@ -1287,7 +1291,7 @@ func TestFindClosestPeers(t *testing.T) {
 	defer cancel()
 
 	nDHTs := 30
-	_, _, dhts := setupDHTS(ctx, nDHTs, t)
+	dhts := setupDHTS(t, ctx, nDHTs)
 	defer func() {
 		for i := 0; i < nDHTs; i++ {
 			dhts[i].Close()
@@ -1393,4 +1397,22 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			t.Fatalf("get should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 	})
+}
+
+func TestPing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ds := setupDHTS(t, ctx, 2)
+	ds[0].Host().Peerstore().AddAddrs(ds[1].PeerID(), ds[1].Host().Addrs(), pstore.AddressTTL)
+	assert.NoError(t, ds[0].Ping(context.Background(), ds[1].PeerID()))
+}
+
+func TestClientModeAtInit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pinger := setupDHT(ctx, t, false)
+	client := setupDHT(ctx, t, true)
+	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), pstore.AddressTTL)
+	err := pinger.Ping(context.Background(), client.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
 }

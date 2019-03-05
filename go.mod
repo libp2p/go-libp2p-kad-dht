@@ -28,4 +28,5 @@ require (
 	github.com/multiformats/go-multistream v0.0.1
 	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
+	golang.org/x/xerrors v0.0.0-20190212162355-a5947ffaace3
 )

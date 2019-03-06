@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"time"
 
@@ -11,78 +10,33 @@ import (
 )
 
 const (
-	// DefaultDialQueueMinParallelism is the default value for the minimum number of worker dial goroutines that will
-	// be alive at any time.
-	DefaultDialQueueMinParallelism = 6
-	// DefaultDialQueueMaxParallelism is the default value for the maximum number of worker dial goroutines that can
-	// be alive at any time.
-	DefaultDialQueueMaxParallelism = 20
-	// DefaultDialQueueMaxIdle is the default value for the period that a worker dial goroutine waits before signalling
-	// a worker pool downscaling.
-	DefaultDialQueueMaxIdle = 5 * time.Second
-	// DefaultDialQueueScalingMutePeriod is the default value for the amount of time to ignore further worker pool
-	// scaling events, after one is processed. Its role is to reduce jitter.
-	DefaultDialQueueScalingMutePeriod = 1 * time.Second
-	// DefaultDialQueueScalingFactor is the default factor by which the current number of workers will be multiplied
-	// or divided when upscaling and downscaling events occur, respectively.
-	DefaultDialQueueScalingFactor = 1.5
+	// DialQueueMinParallelism is the minimum number of worker dial goroutines that will be alive at any time.
+	DialQueueMinParallelism = 6
+	// DialQueueMaxParallelism is the maximum number of worker dial goroutines that can be alive at any time.
+	DialQueueMaxParallelism = 20
+	// DialQueueMaxIdle is the period that a worker dial goroutine waits before signalling a worker pool downscaling.
+	DialQueueMaxIdle = 5 * time.Second
+	// DialQueueScalingMutePeriod is the amount of time to ignore further worker pool scaling events, after one is
+	// processed. Its role is to reduce jitter.
+	DialQueueScalingMutePeriod = 1 * time.Second
 )
 
 type dialQueue struct {
-	*dqParams
+	ctx    context.Context
+	dialFn func(context.Context, peer.ID) error
 
-	nWorkers uint
-	out      *queue.ChanQueue
+	nWorkers          int
+	scalingFactor     float64
+	scalingMutePeriod time.Duration
+	maxIdle           time.Duration
+
+	in  *queue.ChanQueue
+	out *queue.ChanQueue
 
 	waitingCh chan waitingCh
 	dieCh     chan struct{}
 	growCh    chan struct{}
 	shrinkCh  chan struct{}
-}
-
-type dqParams struct {
-	ctx    context.Context
-	target string
-	dialFn func(context.Context, peer.ID) error
-	in     *queue.ChanQueue
-	config dqConfig
-}
-
-type dqConfig struct {
-	// minParallelism is the minimum number of worker dial goroutines that will be alive at any time.
-	minParallelism uint
-	// maxParallelism is the maximum number of worker dial goroutines that can be alive at any time.
-	maxParallelism uint
-	// scalingFactor is the factor by which the current number of workers will be multiplied or divided when upscaling
-	// and downscaling events occur, respectively.
-	scalingFactor float64
-	// mutePeriod is the amount of time to ignore further worker pool scaling events, after one is processed.
-	// Its role is to reduce jitter.
-	mutePeriod time.Duration
-	// maxIdle is the period that a worker dial goroutine waits before signalling a worker pool downscaling.
-	maxIdle time.Duration
-}
-
-// dqDefaultConfig returns the default configuration for dial queues. See const documentation to learn the default values.
-func dqDefaultConfig() dqConfig {
-	return dqConfig{
-		minParallelism: DefaultDialQueueMinParallelism,
-		maxParallelism: DefaultDialQueueMaxParallelism,
-		scalingFactor:  DefaultDialQueueScalingFactor,
-		maxIdle:        DefaultDialQueueMaxIdle,
-		mutePeriod:     DefaultDialQueueScalingMutePeriod,
-	}
-}
-
-func (dqc *dqConfig) validate() error {
-	if dqc.minParallelism > dqc.maxParallelism {
-		return fmt.Errorf("minParallelism must be below maxParallelism; actual values: min=%d, max=%d",
-			dqc.minParallelism, dqc.maxParallelism)
-	}
-	if dqc.scalingFactor < 1 {
-		return fmt.Errorf("scalingFactor must be >= 1; actual value: %f", dqc.scalingFactor)
-	}
-	return nil
 }
 
 type waitingCh struct {
@@ -98,7 +52,7 @@ type waitingCh struct {
 // connection, as it requires establishing a TCP connection, multistream handshake, crypto handshake, mux handshake,
 // and protocol negotiation.
 //
-// We start with config.minParallelism number of workers, and scale up and down based on demand and supply of
+// We start with DialQueueMinParallelism number of workers, and scale up and down based on demand and supply of
 // dialled peers.
 //
 // The following events trigger scaling:
@@ -108,23 +62,31 @@ type waitingCh struct {
 //
 // Dialler throttling (e.g. FD limit exceeded) is a concern, as we can easily spin up more workers to compensate, and
 // end up adding fuel to the fire. Since we have no deterministic way to detect this for now, we hard-limit concurrency
-// to config.maxParallelism.
-func newDialQueue(params *dqParams) (*dialQueue, error) {
+// to DialQueueMaxParallelism.
+func newDialQueue(ctx context.Context, target string, in *queue.ChanQueue, dialFn func(context.Context, peer.ID) error,
+	maxIdle, scalingMutePeriod time.Duration,
+) *dialQueue {
 	sq := &dialQueue{
-		dqParams:  params,
-		nWorkers:  params.config.minParallelism,
-		out:       queue.NewChanQueue(params.ctx, queue.NewXORDistancePQ(params.target)),
+		ctx:               ctx,
+		dialFn:            dialFn,
+		nWorkers:          DialQueueMinParallelism,
+		scalingFactor:     1.5,
+		scalingMutePeriod: scalingMutePeriod,
+		maxIdle:           maxIdle,
+
+		in:  in,
+		out: queue.NewChanQueue(ctx, queue.NewXORDistancePQ(target)),
+
 		growCh:    make(chan struct{}, 1),
 		shrinkCh:  make(chan struct{}, 1),
 		waitingCh: make(chan waitingCh),
-		dieCh:     make(chan struct{}, params.config.maxParallelism),
+		dieCh:     make(chan struct{}, DialQueueMaxParallelism),
 	}
-
-	for i := 0; i < int(params.config.minParallelism); i++ {
+	for i := 0; i < DialQueueMinParallelism; i++ {
 		go sq.worker()
 	}
 	go sq.control()
-	return sq, nil
+	return sq
 }
 
 func (dq *dialQueue) control() {
@@ -189,13 +151,13 @@ func (dq *dialQueue) control() {
 				dialled = nil
 			}
 		case <-dq.growCh:
-			if time.Since(lastScalingEvt) < dq.config.mutePeriod {
+			if time.Since(lastScalingEvt) < dq.scalingMutePeriod {
 				continue
 			}
 			dq.grow()
 			lastScalingEvt = time.Now()
 		case <-dq.shrinkCh:
-			if time.Since(lastScalingEvt) < dq.config.mutePeriod {
+			if time.Since(lastScalingEvt) < dq.scalingMutePeriod {
 				continue
 			}
 			dq.shrink()
@@ -239,20 +201,19 @@ func (dq *dialQueue) Consume() <-chan peer.ID {
 
 func (dq *dialQueue) grow() {
 	// no mutex needed as this is only called from the (single-threaded) control loop.
-	defer func(prev uint) {
+	defer func(prev int) {
 		if prev == dq.nWorkers {
 			return
 		}
 		logger.Debugf("grew dial worker pool: %d => %d", prev, dq.nWorkers)
 	}(dq.nWorkers)
 
-	if dq.nWorkers == dq.config.maxParallelism {
+	if dq.nWorkers == DialQueueMaxParallelism {
 		return
 	}
-	// choosing not to worry about uint wrapping beyond max value.
-	target := uint(math.Floor(float64(dq.nWorkers) * dq.config.scalingFactor))
-	if target > dq.config.maxParallelism {
-		target = dq.config.maxParallelism
+	target := int(math.Floor(float64(dq.nWorkers) * dq.scalingFactor))
+	if target > DialQueueMaxParallelism {
+		target = DialQueueMinParallelism
 	}
 	for ; dq.nWorkers < target; dq.nWorkers++ {
 		go dq.worker()
@@ -261,19 +222,19 @@ func (dq *dialQueue) grow() {
 
 func (dq *dialQueue) shrink() {
 	// no mutex needed as this is only called from the (single-threaded) control loop.
-	defer func(prev uint) {
+	defer func(prev int) {
 		if prev == dq.nWorkers {
 			return
 		}
 		logger.Debugf("shrunk dial worker pool: %d => %d", prev, dq.nWorkers)
 	}(dq.nWorkers)
 
-	if dq.nWorkers == dq.config.minParallelism {
+	if dq.nWorkers == DialQueueMinParallelism {
 		return
 	}
-	target := uint(math.Floor(float64(dq.nWorkers) / dq.config.scalingFactor))
-	if target < dq.config.minParallelism {
-		target = dq.config.minParallelism
+	target := int(math.Floor(float64(dq.nWorkers) / dq.scalingFactor))
+	if target < DialQueueMinParallelism {
+		target = DialQueueMinParallelism
 	}
 	// send as many die signals as workers we have to prune.
 	for ; dq.nWorkers > target; dq.nWorkers-- {
@@ -304,7 +265,7 @@ func (dq *dialQueue) worker() {
 		case <-idleTimer.C:
 		default:
 		}
-		idleTimer.Reset(dq.config.maxIdle)
+		idleTimer.Reset(dq.maxIdle)
 
 		select {
 		case <-dq.dieCh:

@@ -12,6 +12,7 @@ import (
 )
 
 func TestDialQueueGrowsOnSlowDials(t *testing.T) {
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 
@@ -28,19 +29,7 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 	}
 
 	// remove the mute period to grow faster.
-	config := dqDefaultConfig()
-	config.maxIdle = 10 * time.Minute
-	config.mutePeriod = 0
-	dq, err := newDialQueue(&dqParams{
-		ctx:    context.Background(),
-		target: "test",
-		in:     in,
-		dialFn: dialFn,
-		config: config,
-	})
-	if err != nil {
-		t.Error("unexpected error when constructing the dial queue", err)
-	}
+	dq := newDialQueue(context.Background(), "test", in, dialFn, 10*time.Minute, 0)
 
 	for i := 0; i < 4; i++ {
 		_ = dq.Consume()
@@ -48,7 +37,7 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 	}
 
 	for i := 0; i < 20; i++ {
-		if atomic.LoadInt32(&cnt) > int32(DefaultDialQueueMinParallelism) {
+		if atomic.LoadInt32(&cnt) > int32(DialQueueMinParallelism) {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -72,19 +61,7 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 		return nil
 	}
 
-	config := dqDefaultConfig()
-	config.maxIdle = 10 * time.Minute
-	config.mutePeriod = 0
-	dq, err := newDialQueue(&dqParams{
-		ctx:    context.Background(),
-		target: "test",
-		in:     in,
-		dialFn: dialFn,
-		config: config,
-	})
-	if err != nil {
-		t.Error("unexpected error when constructing the dial queue", err)
-	}
+	dq := newDialQueue(context.Background(), "test", in, dialFn, 10*time.Minute, 0)
 
 	// acquire 3 consumers, everytime we acquire a consumer, we will grow the pool because no dial job is completed
 	// and immediately returnable.
@@ -144,19 +121,7 @@ func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
 		in.EnqChan <- peer.ID(i)
 	}
 
-	config := dqDefaultConfig()
-	config.maxIdle = 1 * time.Second
-	config.mutePeriod = 0
-	dq, err := newDialQueue(&dqParams{
-		ctx:    context.Background(),
-		target: "test",
-		in:     in,
-		dialFn: dialFn,
-		config: config,
-	})
-	if err != nil {
-		t.Error("unexpected error when constructing the dial queue", err)
-	}
+	dq := newDialQueue(context.Background(), "test", in, dialFn, time.Second, 0)
 
 	// keep up to speed with backlog by releasing the dial function every time we acquire a channel.
 	for i := 0; i < 13; i++ {
@@ -197,18 +162,7 @@ func TestDialQueueMutePeriodHonored(t *testing.T) {
 		in.EnqChan <- peer.ID(i)
 	}
 
-	config := dqDefaultConfig()
-	config.mutePeriod = 2 * time.Second
-	dq, err := newDialQueue(&dqParams{
-		ctx:    context.Background(),
-		target: "test",
-		in:     in,
-		dialFn: dialFn,
-		config: config,
-	})
-	if err != nil {
-		t.Error("unexpected error when constructing the dial queue", err)
-	}
+	dq := newDialQueue(context.Background(), "test", in, dialFn, DialQueueMaxIdle, 2*time.Second)
 
 	// pick up three consumers.
 	for i := 0; i < 3; i++ {

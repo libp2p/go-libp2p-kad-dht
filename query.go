@@ -103,17 +103,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersToQuery:   peersToQuery,
 		proc:           proc,
 	}
-	dq, err := newDialQueue(&dqParams{
-		ctx:    ctx,
-		target: q.key,
-		in:     peersToQuery,
-		dialFn: r.dialPeer,
-		config: dqDefaultConfig(),
-	})
-	if err != nil {
-		panic(err)
-	}
-	r.peersDialed = dq
+	r.peersDialed = newDialQueue(ctx, q.key, peersToQuery, r.dialPeer, DialQueueMaxIdle, DialQueueScalingMutePeriod)
 	return r
 }
 

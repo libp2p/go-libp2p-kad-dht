@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,7 +12,12 @@ import (
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 )
 
+func init() {
+	DialQueueScalingMutePeriod = 0
+}
+
 func TestDialQueueGrowsOnSlowDials(t *testing.T) {
+	DialQueueMaxIdle = 10 * time.Minute
 
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
@@ -29,7 +35,7 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 	}
 
 	// remove the mute period to grow faster.
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 10*time.Minute, 0)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	for i := 0; i < 4; i++ {
 		_ = dq.Consume()
@@ -49,6 +55,7 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 
 func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 	// reduce interference from the other shrink path.
+	DialQueueMaxIdle = 10 * time.Minute
 
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
@@ -61,7 +68,12 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 		return nil
 	}
 
-	dq := newDialQueue(context.Background(), "test", in, dialFn, 10*time.Minute, 0)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
+
+	defer func() {
+		recover()
+		fmt.Println(dq.nWorkers)
+	}()
 
 	// acquire 3 consumers, everytime we acquire a consumer, we will grow the pool because no dial job is completed
 	// and immediately returnable.
@@ -105,6 +117,8 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 
 // Inactivity = workers are idle because the DHT query is progressing slow and is producing too few peers to dial.
 func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
+	DialQueueMaxIdle = 1 * time.Second
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 
@@ -121,7 +135,7 @@ func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
 		in.EnqChan <- peer.ID(i)
 	}
 
-	dq := newDialQueue(context.Background(), "test", in, dialFn, time.Second, 0)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	// keep up to speed with backlog by releasing the dial function every time we acquire a channel.
 	for i := 0; i < 13; i++ {
@@ -147,6 +161,8 @@ func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
 }
 
 func TestDialQueueMutePeriodHonored(t *testing.T) {
+	DialQueueScalingMutePeriod = 2 * time.Second
+
 	in := queue.NewChanQueue(context.Background(), queue.NewXORDistancePQ("test"))
 	hang := make(chan struct{})
 	var wg sync.WaitGroup
@@ -162,7 +178,7 @@ func TestDialQueueMutePeriodHonored(t *testing.T) {
 		in.EnqChan <- peer.ID(i)
 	}
 
-	dq := newDialQueue(context.Background(), "test", in, dialFn, DialQueueMaxIdle, 2*time.Second)
+	dq := newDialQueue(context.Background(), "test", in, dialFn)
 
 	// pick up three consumers.
 	for i := 0; i < 3; i++ {

@@ -114,9 +114,9 @@
     },
     {
       "author": "whyrusleeping",
-      "hash": "QmRxk6AUaGaKCfzS1xSNRojiAPd7h2ih8GuCdjJBF3Y6GK",
+      "hash": "QmeKNtwDqFhJrq4R36QtNCemGvbMCBmzxoqKUJWj5Ueu3u",
       "name": "go-libp2p",
-      "version": "6.0.39"
+      "version": "6.0.40"
     },
     {
       "author": "whyrusleeping",
@@ -178,6 +178,5 @@
   "license": "MIT",
   "name": "go-libp2p-kad-dht",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "4.4.31"
+  "version": "4.4.32"
 }
-

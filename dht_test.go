@@ -466,7 +466,7 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 	defer dht.Close()
 
 	foo := peer.ID("asdasd")
-	_, err := dht.messageSenderForPeer(foo)
+	_, err := dht.messageSenderForPeer(ctx, foo)
 	if err == nil {
 		t.Fatal("that shouldnt have succeeded")
 	}

@@ -12,7 +12,7 @@ import (
 var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
 var ProtocolDHTOld protocol.ID = "/ipfs/dht"
 var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
-var DefaultDisjointPaths = 10
+var DefaultDisjointPaths = 1
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
@@ -110,7 +110,7 @@ func Protocols(protocols ...protocol.ID) Option {
 // This ensures that visiting fewer than this number of malicious
 // nodes will not cause a query to fail.
 //
-// Defaults to 10.
+// Defaults to 1 (disjoint paths disabled).
 func DisjointPaths(disjoint int) Option {
 	return func(o *Options) error {
 		if disjoint < 1 {

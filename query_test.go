@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
+
 	host "github.com/libp2p/go-libp2p-host"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -113,7 +115,7 @@ func TestQueryDisjoint(t *testing.T) {
 	hosts := mn.Hosts()
 	target, starts, next := createDisjiontTracks(t, hosts, goodLength)
 
-	dht, err := New(ctx, hosts[0])
+	dht, err := New(ctx, hosts[0], opts.DisjointPaths(2))
 	if err != nil {
 		t.Fatal(err)
 	}

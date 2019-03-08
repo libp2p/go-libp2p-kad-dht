@@ -7,6 +7,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
 
 	logging "github.com/ipfs/go-log"
 	todoctr "github.com/ipfs/go-todocounter"
@@ -15,7 +16,6 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/routing"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
@@ -281,7 +281,11 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)
 
-	r.peersQueried.Add(p)
+	if err == nil {
+		// Make sure we only return DHT peers that actually respond to
+		// the query.
+		r.peersQueried.Add(p)
+	}
 
 	if err != nil {
 		logger.Debugf("ERROR worker for: %v %v", p, err)

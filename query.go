@@ -7,17 +7,17 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
+
+	kpeerset "github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 
 	logging "github.com/ipfs/go-log"
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-
-	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
-	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
@@ -37,8 +37,7 @@ type dhtQueryResult struct {
 	closerPeers []*peer.AddrInfo // *
 	success     bool
 
-	finalSet   *peer.Set
-	queriedSet *peer.Set
+	finalSet []peer.ID
 }
 
 // constructs query
@@ -79,12 +78,12 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 }
 
 type dhtQueryRunner struct {
-	query          *dhtQuery        // query to run
-	peersSeen      *peer.Set        // all peers queried. prevent querying same peer 2x
-	peersQueried   *peer.Set        // peers successfully connected to and queried
-	peersDialed    *dialQueue       // peers we have dialed to
-	peersToQuery   *queue.ChanQueue // peers remaining to be queried
-	peersRemaining todoctr.Counter  // peersToQuery + currently processing
+	query          *dhtQuery          // query to run
+	peersSeen      *peer.Set          // all peers queried. prevent querying same peer 2x
+	kPeers         *kpeerset.KPeerSet // k best peers queried.
+	peersDialed    *dialQueue         // peers we have dialed to
+	peersToQuery   *queue.ChanQueue   // peers remaining to be queried
+	peersRemaining todoctr.Counter    // peersToQuery + currently processing
 
 	result *dhtQueryResult // query result
 
@@ -105,7 +104,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		query:          q,
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      peer.NewSet(),
-		peersQueried:   peer.NewSet(),
+		kPeers:         kpeerset.New(KValue, q.key),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		peersToQuery:   peersToQuery,
 		proc:           proc,
@@ -159,7 +158,7 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	select {
 	case <-r.peersRemaining.Done():
 		r.proc.Close()
-		if r.peersQueried.Size() == 0 {
+		if r.kPeers.Len() == 0 {
 			err = ErrNoPeersQueried
 		} else {
 			err = routing.ErrNotFound
@@ -177,8 +176,7 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	}
 
 	return &dhtQueryResult{
-		finalSet:   r.peersSeen,
-		queriedSet: r.peersQueried,
+		finalSet: r.kPeers.Peers(),
 	}, err
 }
 
@@ -193,8 +191,12 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
 		return
 	}
 
-	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-		Type: notif.AddingPeer,
+	if !r.kPeers.Check(next) {
+		return
+	}
+
+	routing.PublishQueryEvent(r.runCtx, &routing.QueryEvent{
+		Type: routing.AddingPeer,
 		ID:   next,
 	})
 
@@ -237,22 +239,27 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 }
 
 func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
+	if !r.kPeers.Check(p) {
+		// Don't bother with this peer. We'll skip it in the query phase as well.
+		return nil
+	}
+
 	// short-circuit if we're already connected.
 	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
 		return nil
 	}
 
 	logger.Debug("not connected. dialing.")
-	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-		Type: notif.DialingPeer,
+	routing.PublishQueryEvent(r.runCtx, &routing.QueryEvent{
+		Type: routing.DialingPeer,
 		ID:   p,
 	})
 
 	pi := peer.AddrInfo{ID: p}
 	if err := r.query.dht.host.Connect(ctx, pi); err != nil {
 		logger.Debugf("error connecting: %s", err)
-		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-			Type:  notif.QueryError,
+		routing.PublishQueryEvent(r.runCtx, &routing.QueryEvent{
+			Type:  routing.QueryError,
 			Extra: err.Error(),
 			ID:    p,
 		})
@@ -278,13 +285,18 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		r.rateLimit <- struct{}{}
 	}()
 
+	if !r.kPeers.Check(p) {
+		// Don't bother with this peer.
+		return
+	}
+
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)
 
 	if err == nil {
 		// Make sure we only return DHT peers that actually respond to
 		// the query.
-		r.peersQueried.Add(p)
+		r.kPeers.Add(p)
 	}
 
 	if err != nil {

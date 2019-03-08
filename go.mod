@@ -1,6 +1,7 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
 require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gogo/protobuf v1.2.1
 	github.com/hashicorp/golang-lru v0.5.1
 	github.com/ipfs/go-cid v0.0.2
@@ -12,9 +13,9 @@ require (
 	github.com/libp2p/go-libp2p v0.1.0
 	github.com/libp2p/go-libp2p-core v0.0.1
 	github.com/libp2p/go-libp2p-kbucket v0.2.0
+	github.com/libp2p/go-libp2p-peer v0.2.0
 	github.com/libp2p/go-libp2p-peerstore v0.1.0
 	github.com/libp2p/go-libp2p-record v0.1.0
-	github.com/libp2p/go-libp2p-routing v0.1.0
 	github.com/libp2p/go-libp2p-swarm v0.1.0
 	github.com/libp2p/go-libp2p-testing v0.0.3
 	github.com/mr-tron/base58 v1.1.2
@@ -23,6 +24,7 @@ require (
 	github.com/multiformats/go-multistream v0.1.0
 	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
+	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.21.0
 	golang.org/x/xerrors v0.0.0-20190513163551-3ee3066db522
 )

@@ -297,6 +297,9 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		r.Lock()
 		r.result = res
 		r.Unlock()
+		if res.peer != nil {
+			r.query.dht.peerstore.AddAddrs(res.peer.ID, res.peer.Addrs, pstore.TempAddrTTL)
+		}
 		go r.proc.Close() // signal to everyone that we're done.
 		// must be async, as we're one of the children, and Close blocks.
 

@@ -4,8 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
+
+	"go.opencensus.io/metric/metricdata"
+
+	"go.opencensus.io/stats"
+
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"go.opencensus.io/tag"
 
 	"golang.org/x/xerrors"
 
@@ -128,26 +136,62 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
-	cmgr := h.ConnManager()
-	rt.PeerAdded = func(p peer.ID) {
-		cmgr.TagPeer(p, "kbucket", 5)
-	}
-	rt.PeerRemoved = func(p peer.ID) {
-		cmgr.UntagPeer(p, "kbucket")
-	}
-
-	return &IpfsDHT{
+	dht := &IpfsDHT{
 		datastore:    dstore,
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,
 		strmap:       make(map[peer.ID]*messageSender),
-		ctx:          ctx,
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
 		protocols:    protocols,
 	}
+	dht.ctx = dht.withLocalTags(ctx)
+
+	cmgr := h.ConnManager()
+	rt.PeerAdded = func(p peer.ID) {
+		cmgr.TagPeer(p, "kbucket", 5)
+		stats.Record(dht.ctx, metrics.RoutingTablePeersAdded.M(1))
+	}
+	rt.PeerRemoved = func(p peer.ID) {
+		cmgr.UntagPeer(p, "kbucket")
+		stats.Record(dht.ctx, metrics.RoutingTablePeersRemoved.M(1))
+	}
+	metrics.RoutingTableNumEntries.UpsertEntry(
+		func() int64 {
+			return int64(rt.Size())
+		},
+		metricdata.LabelValue{dht.localPeerIdTagValue(), true},
+		metricdata.LabelValue{dht.instanceIdTagValue(), true},
+	)
+	return dht
+}
+
+func (dht *IpfsDHT) localPeerIdTagValue() string {
+	return dht.self.String()
+}
+
+func (dht *IpfsDHT) instanceIdTagValue() string {
+	return fmt.Sprintf("%p", dht)
+}
+
+func (dht *IpfsDHT) tagMutators() []tag.Mutator {
+	return []tag.Mutator{
+		tag.Upsert(metrics.KeyLocalPeerID, dht.localPeerIdTagValue()),
+		tag.Upsert(metrics.KeyInstanceID, dht.instanceIdTagValue()),
+	}
+}
+
+func (dht *IpfsDHT) withLocalTags(ctx context.Context) context.Context {
+	ctx, err := tag.New(
+		ctx,
+		dht.tagMutators()...,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return ctx
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'

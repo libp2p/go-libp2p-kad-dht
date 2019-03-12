@@ -10,9 +10,12 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 	ctxio "github.com/jbenet/go-context/io"
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 )
 
 var dhtReadMessageTimeout = time.Minute
@@ -55,6 +58,7 @@ func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 // Returns true on orderly completion of writes (so we can Close the stream).
 func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 	ctx := dht.Context()
+
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
 	r := ggio.NewDelimitedReader(cr, inet.MessageSizeMax)
@@ -75,6 +79,17 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			return false
 		case nil:
 		}
+
+		startedHandling := time.Now()
+
+		stats.RecordWithTags(
+			ctx,
+			[]tag.Mutator{
+				tag.Upsert(metrics.KeyMessageType, req.GetType().String()),
+			},
+			metrics.ReceivedMessages.M(1),
+			metrics.ReceivedMessageSizeBytes.M(int64(req.Size())),
+		)
 
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
@@ -104,13 +119,31 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			return false
 		}
 
+		stats.RecordWithTags(
+			ctx,
+			[]tag.Mutator{metrics.UpsertMessageType(&req)},
+			metrics.InboundRequestHandlingTimeMs.M(time.Since(startedHandling).Seconds()*1000),
+		)
 	}
 }
 
-// sendRequest sends out a request, but also makes sure to
-// measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+// Starts a timer for message write latency, and returns a function to be called immediately before
+// writing the message.
+func (dht *IpfsDHT) beginMessageWriteLatency(ctx context.Context, m *pb.Message) func() {
+	now := time.Now()
+	return func() {
+		stats.RecordWithTags(
+			ctx,
+			append(dht.tagMutators(), metrics.UpsertMessageType(m)),
+			metrics.MessageWriteLatencyMs.M(time.Since(now).Seconds()*1000),
+		)
+	}
+}
 
+// sendRequest sends out a request, but also makes sure to measure the RTT for latency measurements.
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+	dht.recordOutboundMessage(ctx, pmes)
+	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		return nil, err
@@ -118,7 +151,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	start := time.Now()
 
-	rpmes, err := ms.SendRequest(ctx, pmes)
+	rpmes, err := ms.SendRequest(ctx, pmes, beforeWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -133,16 +166,27 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+	dht.recordOutboundMessage(ctx, pmes)
+	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		return err
 	}
 
-	if err := ms.SendMessage(ctx, pmes); err != nil {
+	if err := ms.SendMessage(ctx, pmes, beforeWrite); err != nil {
 		return err
 	}
 	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
 	return nil
+}
+
+func (dht *IpfsDHT) recordOutboundMessage(ctx context.Context, m *pb.Message) {
+	stats.RecordWithTags(
+		ctx,
+		append(dht.tagMutators(), metrics.UpsertMessageType(m)),
+		metrics.SentMessages.M(1),
+		metrics.SentMessageSizeBytes.M(int64(m.Size())),
+	)
 }
 
 func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
@@ -244,7 +288,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 // behaviour.
 const streamReuseTries = 3
 
-func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) error {
+func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message, beforeWrite func()) error {
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
@@ -253,6 +297,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			return err
 		}
 
+		beforeWrite()
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil
@@ -280,7 +325,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	}
 }
 
-func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
+func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message, beforeWrite func()) (*pb.Message, error) {
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
@@ -289,6 +334,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			return nil, err
 		}
 
+		beforeWrite()
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil
@@ -302,6 +348,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				continue
 			}
 		}
+
+		startedWaitingForResponse := time.Now()
 
 		mes := new(pb.Message)
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
@@ -317,6 +365,12 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				continue
 			}
 		}
+
+		stats.RecordWithTags(ctx,
+			[]tag.Mutator{
+				tag.Upsert(metrics.KeyMessageType, pmes.Type.String()),
+			},
+			metrics.OutboundRequestResponseLatencyMs.M(time.Since(startedWaitingForResponse).Seconds()*1000))
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 

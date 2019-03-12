@@ -63,10 +63,30 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 	out := make(chan peer.ID, KValue)
 
+	query := dht.newClosestPeersQuery(ctx, key, nil)
+
+	go func() {
+		defer close(out)
+		defer e.Done()
+		// run it!
+		res, err := query.Run(ctx, tablepeers)
+		if err != nil {
+			logger.Debugf("closestPeers query run error: %s", err)
+		}
+
+		for _, p := range res {
+			out <- p
+		}
+	}()
+
+	return out, nil
+}
+
+func (dht *IpfsDHT) newClosestPeersQuery(ctx context.Context, key string, finish finishFunc) *dhtQuery {
 	// since the query doesnt actually pass our context down
 	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
 	parent := ctx
-	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+	return dht.newQuery(key, func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 		// For DHT query command
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
@@ -87,29 +107,6 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			Responses: peers,
 		})
 
-		return &dhtQueryResult{closerPeers: peers}, nil
-	})
-
-	go func() {
-		defer close(out)
-		defer e.Done()
-		// run it!
-		res, err := query.Run(ctx, tablepeers)
-		if err != nil {
-			logger.Debugf("closestPeers query run error: %s", err)
-		}
-
-		if len(res) > 0 {
-			sorted := kb.SortClosestPeers(res, kb.ConvertKey(key))
-			if len(sorted) > KValue {
-				sorted = sorted[:KValue]
-			}
-
-			for _, p := range sorted {
-				out <- p
-			}
-		}
-	}()
-
-	return out, nil
+		return peers, nil
+	}, finish)
 }

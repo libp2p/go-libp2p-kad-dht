@@ -83,31 +83,22 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	pchan, err := dht.GetClosestPeers(ctx, key)
-	if err != nil {
-		return err
+	query := dht.newClosestPeersQuery(ctx, key, func(ctx context.Context, p peer.ID) error {
+		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+			Type: routing.Value,
+			ID:   p,
+		})
+
+		return dht.putValueToPeer(ctx, p, rec)
+	})
+
+	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
+	if len(tablepeers) == 0 {
+		return kb.ErrLookupFailure
 	}
 
-	wg := sync.WaitGroup{}
-	for p := range pchan {
-		wg.Add(1)
-		go func(p peer.ID) {
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			defer wg.Done()
-			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-				Type: routing.Value,
-				ID:   p,
-			})
-
-			err := dht.putValueToPeer(ctx, p, rec)
-			if err != nil {
-				logger.Debugf("failed putting value to peer: %s", err)
-			}
-		}(p)
-	}
-	wg.Wait()
-	return nil
+	_, err = query.Run(ctx, tablepeers)
+	return err
 }
 
 // RecvdVal stores a value and the peer from which we got the value.
@@ -318,7 +309,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
 			ID:   p,
@@ -342,8 +333,6 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 			// in either of these cases, we want to keep going
 		}
 
-		res := &dhtQueryResult{closerPeers: peers}
-
 		if rec.GetValue() != nil || err == errInvalidRecord {
 			rv := RecvdVal{
 				Val:  rec.GetValue(),
@@ -362,8 +351,8 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 			Responses: peers,
 		})
 
-		return res, nil
-	})
+		return peers, nil
+	}, nil)
 
 	go func() {
 		reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
@@ -396,30 +385,23 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return nil
 	}
 
-	peers, err := dht.GetClosestPeers(ctx, key.KeyString())
-	if err != nil {
-		return err
-	}
-
 	mes, err := dht.makeProvRecord(key)
 	if err != nil {
 		return err
 	}
 
-	wg := sync.WaitGroup{}
-	for p := range peers {
-		wg.Add(1)
-		go func(p peer.ID) {
-			defer wg.Done()
-			logger.Debugf("putProvider(%s, %s)", key, p)
-			err := dht.sendMessage(ctx, p, mes)
-			if err != nil {
-				logger.Debug(err)
-			}
-		}(p)
+	dhtKey := key.KeyString()
+
+	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(dhtKey), AlphaValue)
+	if len(tablepeers) == 0 {
+		return kb.ErrLookupFailure
 	}
-	wg.Wait()
-	return nil
+
+	query := dht.newClosestPeersQuery(ctx, dhtKey, func(ctx context.Context, p peer.ID) error {
+		return dht.sendMessage(ctx, p, mes)
+	})
+	_, err = query.Run(ctx, tablepeers)
+	return err
 }
 func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {
 	pi := peer.AddrInfo{
@@ -491,7 +473,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(key.KeyString(), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+	query := dht.newQuery(key.KeyString(), func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
 			ID:   p,
@@ -532,8 +514,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 			ID:        p,
 			Responses: clpeers,
 		})
-		return &dhtQueryResult{closerPeers: clpeers}, nil
-	})
+		return clpeers, nil
+	}, nil)
 
 	_, err := query.Run(ctx, peers)
 	if err != nil {
@@ -667,7 +649,7 @@ func (dht *IpfsDHT) FindPeerAsync(ctx context.Context, id peer.ID) (<-chan ma.Mu
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
 			ID:   p,
@@ -698,8 +680,8 @@ func (dht *IpfsDHT) FindPeerAsync(ctx context.Context, id peer.ID) (<-chan ma.Mu
 			Responses: clpeerInfos,
 		})
 
-		return &dhtQueryResult{closerPeers: clpeerInfos}, nil
-	})
+		return clpeerInfos, nil
+	}, nil)
 
 	go func() {
 		defer close(inp)
@@ -722,7 +704,7 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 	}
 
 	// setup the Query
-	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 
 		pmes, err := dht.findPeerSingle(ctx, p, id)
 		if err != nil {
@@ -759,8 +741,8 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 			}
 		}
 
-		return &dhtQueryResult{closerPeers: clpeers}, nil
-	})
+		return clpeers, nil
+	}, nil)
 
 	// run it! run it asynchronously to gen peers as results are found.
 	// this does no error checking

@@ -2,12 +2,11 @@ package dht
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"time"
 
 	peer "github.com/libp2p/go-libp2p-peer"
-	queue "github.com/libp2p/go-libp2p-peerstore/queue"
+	"github.com/libp2p/go-libp2p-peerstore/queue"
 )
 
 const (
@@ -72,17 +71,6 @@ func dqDefaultConfig() dqConfig {
 		maxIdle:        DefaultDialQueueMaxIdle,
 		mutePeriod:     DefaultDialQueueScalingMutePeriod,
 	}
-}
-
-func (dqc *dqConfig) validate() error {
-	if dqc.minParallelism > dqc.maxParallelism {
-		return fmt.Errorf("minParallelism must be below maxParallelism; actual values: min=%d, max=%d",
-			dqc.minParallelism, dqc.maxParallelism)
-	}
-	if dqc.scalingFactor < 1 {
-		return fmt.Errorf("scalingFactor must be >= 1; actual value: %f", dqc.scalingFactor)
-	}
-	return nil
 }
 
 type waitingCh struct {

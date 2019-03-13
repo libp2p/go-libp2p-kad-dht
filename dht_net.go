@@ -108,20 +108,37 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (_ *pb.Message, err error) {
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (*pb.Message, error) {
 	ps, _, err := dht.getPoolStream(ctx, p)
 	if err != nil {
-		return
+		return nil, err
 	}
 	start := time.Now()
-	reply, err := ps.request(ctx, req)
+	replyChan, err := ps.request(ctx, req)
 	if err != nil {
-		return
+		ps.reset()
+		return nil, err
 	}
-	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, p, reply)
-	dht.peerstore.RecordLatency(p, time.Since(start))
-	return reply, nil
+	onReply := func(reply *pb.Message) {
+		dht.putPoolStream(ps, p)
+		dht.updateFromMessage(ctx, p, reply)
+		dht.peerstore.RecordLatency(p, time.Since(start))
+	}
+	select {
+	case reply, ok := <-replyChan:
+		if !ok {
+			return nil, ps.err()
+		}
+		onReply(reply)
+		return reply, nil
+	case <-ctx.Done():
+		go func() {
+			if reply, ok := <-replyChan; ok {
+				onReply(reply)
+			}
+		}()
+		return nil, ctx.Err()
+	}
 }
 
 func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (inet.Stream, error) {

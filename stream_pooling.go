@@ -64,14 +64,11 @@ func (dht *IpfsDHT) newPoolStream(ctx context.Context, p peer.ID) (*poolStream, 
 		r:      pbio.NewDelimitedReader(s, inet.MessageSizeMax),
 		m:      make(chan chan *pb.Message, 1),
 	}
-	ps.onReaderErr = func() {
-		ps.reset()
+	go func() {
+		ps.reader()
 		dht.deletePoolStream(ps, p)
-	}
-	ps.onReady = func() {
-		dht.putPoolStream(ps, p)
-	}
-	go ps.reader()
+		ps.reset()
+	}()
 	return ps, nil
 }
 
@@ -81,10 +78,6 @@ type poolStream struct {
 	}
 	w bufferedWriteCloser
 	r pbio.ReadCloser
-	// Called when the reader dies.
-	onReaderErr func()
-	// Called after reading an expected message.
-	onReady func()
 
 	// Synchronizes m and readerErr.
 	mu sync.Mutex
@@ -112,10 +105,10 @@ func (me *poolStream) send(m *pb.Message) (err error) {
 	return nil
 }
 
-func (me *poolStream) request(ctx context.Context, req *pb.Message) (*pb.Message, error) {
+func (me *poolStream) request(ctx context.Context, req *pb.Message) (<-chan *pb.Message, error) {
 	replyChan := make(chan *pb.Message, 1)
 	me.mu.Lock()
-	if err := me.err(); err != nil {
+	if err := me.errLocked(); err != nil {
 		me.mu.Unlock()
 		return nil, err
 	}
@@ -127,18 +120,7 @@ func (me *poolStream) request(ctx context.Context, req *pb.Message) (*pb.Message
 	}
 	me.mu.Unlock()
 	err := me.send(req)
-	if err != nil {
-		return nil, err
-	}
-	select {
-	case reply, ok := <-replyChan:
-		if !ok {
-			return nil, me.err()
-		}
-		return reply, nil
-	case <-ctx.Done():
-		return nil, xerrors.Errorf("while waiting for reply: %w", ctx.Err())
-	}
+	return replyChan, err
 }
 
 // Handles the error returned from the read loop.
@@ -148,7 +130,6 @@ func (me *poolStream) reader() {
 	me.readerErr = err
 	close(me.m)
 	me.mu.Unlock()
-	me.onReaderErr()
 	for mc := range me.m {
 		close(mc)
 	}
@@ -165,15 +146,20 @@ func (me *poolStream) readLoop() error {
 		select {
 		case mc := <-me.m:
 			mc <- &m
-			me.onReady()
 		default:
 			return xerrors.New("read superfluous message")
 		}
 	}
 }
 
-// A stream has gone bad when the reader has given up.
 func (me *poolStream) err() error {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	return me.errLocked()
+}
+
+// A stream has gone bad when the reader has given up.
+func (me *poolStream) errLocked() error {
 	if me.readerErr != nil {
 		return xerrors.Errorf("reader: %w", me.readerErr)
 	}

@@ -136,6 +136,15 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 	}
 }
 
+// Traverse the DHT toward the self ID
+func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
+	_, err := dht.walk(ctx, dht.self)
+	if err == routing.ErrNotFound {
+		return nil
+	}
+	return err
+}
+
 // runBootstrap builds up list of peers by requesting random peer IDs
 func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
 	doQuery := func(n int, target string, f func(context.Context) error) error {
@@ -163,10 +172,7 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	}
 
 	// Find self to distribute peer info to our neighbors.
-	return doQuery(cfg.Queries, fmt.Sprintf("self: %s", dht.self), func(ctx context.Context) error {
-		_, err := dht.walk(ctx, dht.self)
-		return err
-	})
+	return doQuery(cfg.Queries, fmt.Sprintf("self: %s", dht.self), dht.selfWalk)
 }
 
 func (dht *IpfsDHT) BootstrapRandom(ctx context.Context) error {
@@ -174,6 +180,5 @@ func (dht *IpfsDHT) BootstrapRandom(ctx context.Context) error {
 }
 
 func (dht *IpfsDHT) BootstrapSelf(ctx context.Context) error {
-	_, err := dht.walk(ctx, dht.self)
-	return err
+	return dht.selfWalk(ctx)
 }

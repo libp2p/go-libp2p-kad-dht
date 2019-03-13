@@ -12,7 +12,7 @@ import (
 var (
 	ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
 	// Deprecated: The old format did not support more than one message per stream, and is not
-	// supported or relevant with stream pooling.
+	// supported or relevant with stream pooling. ProtocolDHT should be used instead.
 	ProtocolDHTOld   protocol.ID = "/ipfs/dht"
 	DefaultProtocols             = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
 )

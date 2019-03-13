@@ -42,6 +42,8 @@ func TestDialQueueGrowsOnSlowDials(t *testing.T) {
 		t.Error("unexpected error when constructing the dial queue", err)
 	}
 
+	dq.Start()
+
 	for i := 0; i < 4; i++ {
 		_ = dq.Consume()
 		time.Sleep(100 * time.Millisecond)
@@ -85,6 +87,8 @@ func TestDialQueueShrinksWithNoConsumers(t *testing.T) {
 	if err != nil {
 		t.Error("unexpected error when constructing the dial queue", err)
 	}
+
+	dq.Start()
 
 	// acquire 3 consumers, everytime we acquire a consumer, we will grow the pool because no dial job is completed
 	// and immediately returnable.
@@ -158,6 +162,8 @@ func TestDialQueueShrinksWithWhenIdle(t *testing.T) {
 		t.Error("unexpected error when constructing the dial queue", err)
 	}
 
+	dq.Start()
+
 	// keep up to speed with backlog by releasing the dial function every time we acquire a channel.
 	for i := 0; i < 13; i++ {
 		ch := dq.Consume()
@@ -209,6 +215,8 @@ func TestDialQueueMutePeriodHonored(t *testing.T) {
 	if err != nil {
 		t.Error("unexpected error when constructing the dial queue", err)
 	}
+
+	dq.Start()
 
 	// pick up three consumers.
 	for i := 0; i < 3; i++ {

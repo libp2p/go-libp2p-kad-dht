@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	peer "github.com/libp2p/go-libp2p-peer"
@@ -33,6 +34,7 @@ type dialQueue struct {
 
 	nWorkers uint
 	out      *queue.ChanQueue
+	started  int32
 
 	waitingCh chan waitingCh
 	dieCh     chan struct{}
@@ -90,9 +92,10 @@ type waitingCh struct {
 	ts time.Time
 }
 
-// newDialQueue returns an adaptive dial queue that spawns a dynamically sized set of goroutines to preemptively
-// stage dials for later handoff to the DHT protocol for RPC. It identifies backpressure on both ends (dial consumers
-// and dial producers), and takes compensating action by adjusting the worker pool.
+// newDialQueue returns an _unstarted_ adaptive dial queue that spawns a dynamically sized set of goroutines to
+// preemptively stage dials for later handoff to the DHT protocol for RPC. It identifies backpressure on both
+// ends (dial consumers and dial producers), and takes compensating action by adjusting the worker pool. To
+// activate the dial queue, call Start().
 //
 // Why? Dialing is expensive. It's orders of magnitude slower than running an RPC on an already-established
 // connection, as it requires establishing a TCP connection, multistream handshake, crypto handshake, mux handshake,
@@ -112,7 +115,6 @@ type waitingCh struct {
 func newDialQueue(params *dqParams) (*dialQueue, error) {
 	dq := &dialQueue{
 		dqParams:  params,
-		nWorkers:  params.config.minParallelism,
 		out:       queue.NewChanQueue(params.ctx, queue.NewXORDistancePQ(params.target)),
 		growCh:    make(chan struct{}, 1),
 		shrinkCh:  make(chan struct{}, 1),
@@ -120,11 +122,20 @@ func newDialQueue(params *dqParams) (*dialQueue, error) {
 		dieCh:     make(chan struct{}, params.config.maxParallelism),
 	}
 
-	for i := 0; i < int(params.config.minParallelism); i++ {
-		go dq.worker()
-	}
 	go dq.control()
 	return dq, nil
+}
+
+// Start initiates action on this dial queue. It should only be called once; subsequent calls are ignored.
+func (dq *dialQueue) Start() {
+	if !atomic.CompareAndSwapInt32(&dq.started, 0, 1) {
+		return
+	}
+	tgt := int(dq.dqParams.config.minParallelism)
+	for i := 0; i < tgt; i++ {
+		go dq.worker()
+	}
+	dq.nWorkers = uint(tgt)
 }
 
 func (dq *dialQueue) control() {

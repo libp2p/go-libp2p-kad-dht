@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	peer "github.com/libp2p/go-libp2p-peer"
@@ -32,9 +32,9 @@ const (
 type dialQueue struct {
 	*dqParams
 
-	nWorkers uint
-	out      *queue.ChanQueue
-	started  int32
+	nWorkers  uint
+	out       *queue.ChanQueue
+	startOnce sync.Once
 
 	waitingCh chan waitingCh
 	dieCh     chan struct{}
@@ -128,14 +128,13 @@ func newDialQueue(params *dqParams) (*dialQueue, error) {
 
 // Start initiates action on this dial queue. It should only be called once; subsequent calls are ignored.
 func (dq *dialQueue) Start() {
-	if !atomic.CompareAndSwapInt32(&dq.started, 0, 1) {
-		return
-	}
-	tgt := int(dq.dqParams.config.minParallelism)
-	for i := 0; i < tgt; i++ {
-		go dq.worker()
-	}
-	dq.nWorkers = uint(tgt)
+	dq.startOnce.Do(func() {
+		tgt := int(dq.dqParams.config.minParallelism)
+		for i := 0; i < tgt; i++ {
+			go dq.worker()
+		}
+		dq.nWorkers = uint(tgt)
+	})
 }
 
 func (dq *dialQueue) control() {

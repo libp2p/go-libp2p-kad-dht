@@ -140,12 +140,12 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,
+		streamPool:   make(map[peer.ID]map[*poolStream]struct{}),
 		ctx:          ctx,
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
 		protocols:    protocols,
-		streamPool:   make(map[peer.ID]map[*poolStream]struct{}),
 	}
 }
 

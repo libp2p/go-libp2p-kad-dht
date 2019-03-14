@@ -36,7 +36,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-var testCaseValues = map[string][]byte{}
 var testCaseCids []cid.Cid
 
 func init() {
@@ -58,9 +57,9 @@ type testValidator struct{}
 func (testValidator) Select(_ string, bs [][]byte) (int, error) {
 	index := -1
 	for i, b := range bs {
-		if bytes.Compare(b, []byte("newer")) == 0 {
+		if bytes.Equal(b, []byte("newer")) {
 			index = i
-		} else if bytes.Compare(b, []byte("valid")) == 0 {
+		} else if bytes.Equal(b, []byte("valid")) {
 			if index == -1 {
 				index = i
 			}
@@ -72,7 +71,7 @@ func (testValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 func (testValidator) Validate(_ string, b []byte) error {
-	if bytes.Compare(b, []byte("expired")) == 0 {
+	if bytes.Equal(b, []byte("expired")) {
 		return errors.New("expired")
 	}
 	return nil
@@ -168,8 +167,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	// 100 sync https://gist.github.com/jbenet/6c59e7c15426e48aaedd
 	// probably because results compound
 
-	var cfg BootstrapConfig
-	cfg = DefaultBootstrapConfig
+	cfg := DefaultBootstrapConfig
 	cfg.Queries = 3
 
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
@@ -683,8 +681,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 		}
 	}()
 
-	var cfg BootstrapConfig
-	cfg = DefaultBootstrapConfig
+	cfg := DefaultBootstrapConfig
 	cfg.Queries = 5
 
 	t.Logf("dhts are not connected. %d", nDHTs)
@@ -1029,33 +1026,6 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 	logger.Warning("TestFindPeersConnectedToPeer is not quite correct")
 	if len(found) == 0 {
 		t.Fatal("didn't find any peers.")
-	}
-}
-
-func testPeerListsMatch(t *testing.T, p1, p2 []peer.ID) {
-
-	if len(p1) != len(p2) {
-		t.Fatal("did not find as many peers as should have", p1, p2)
-	}
-
-	ids1 := make([]string, len(p1))
-	ids2 := make([]string, len(p2))
-
-	for i, p := range p1 {
-		ids1[i] = string(p)
-	}
-
-	for i, p := range p2 {
-		ids2[i] = string(p)
-	}
-
-	sort.Sort(sort.StringSlice(ids1))
-	sort.Sort(sort.StringSlice(ids2))
-
-	for i := range ids1 {
-		if ids1[i] != ids2[i] {
-			t.Fatal("Didnt find expected peer", ids1[i], ids2)
-		}
 	}
 }
 

@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"log"
 	"sync"
 
 	pbio "github.com/gogo/protobuf/io"
@@ -91,11 +90,6 @@ func (me *poolStream) reset() {
 }
 
 func (me *poolStream) send(m *pb.Message) (err error) {
-	defer func() {
-		if err != nil {
-			log.Printf("error sending message: %v", err)
-		}
-	}()
 	if err := me.w.WriteMsg(m); err != nil {
 		return xerrors.Errorf("writing message: %w", err)
 	}

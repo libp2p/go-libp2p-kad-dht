@@ -11,53 +11,12 @@ import (
 	"golang.org/x/xerrors"
 )
 
-func (dht *IpfsDHT) getPoolStream(ctx context.Context, p peer.ID) (_ *poolStream, reused bool, _ error) {
-	dht.streamPoolMu.Lock()
-	for ps := range dht.streamPool[p] {
-		dht.deletePoolStreamLocked(ps, p)
-		if ps.err() != nil {
-			// Stream went bad and hasn't deleted itself yet.
-			continue
-		}
-		dht.streamPoolMu.Unlock()
-		return ps, true, nil
-	}
-	dht.streamPoolMu.Unlock()
-	ps, err := dht.newPoolStream(ctx, p)
-	return ps, false, err
-}
-
-func (dht *IpfsDHT) putPoolStream(ps *poolStream, p peer.ID) {
-	dht.streamPoolMu.Lock()
-	defer dht.streamPoolMu.Unlock()
-	if ps.err() != nil {
-		return
-	}
-	if dht.streamPool[p] == nil {
-		dht.streamPool[p] = make(map[*poolStream]struct{})
-	}
-	dht.streamPool[p][ps] = struct{}{}
-}
-
-func (dht *IpfsDHT) deletePoolStream(ps *poolStream, p peer.ID) {
-	dht.streamPoolMu.Lock()
-	dht.deletePoolStreamLocked(ps, p)
-	dht.streamPoolMu.Unlock()
-}
-
-func (dht *IpfsDHT) deletePoolStreamLocked(ps *poolStream, p peer.ID) {
-	delete(dht.streamPool[p], ps)
-	if len(dht.streamPool) == 0 {
-		delete(dht.streamPool, p)
-	}
-}
-
-func (dht *IpfsDHT) newPoolStream(ctx context.Context, p peer.ID) (*poolStream, error) {
-	s, err := dht.newStream(ctx, p)
+func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (*stream, error) {
+	s, err := dht.host.NewStream(ctx, p, dht.protocols...)
 	if err != nil {
 		return nil, xerrors.Errorf("opening stream: %w", err)
 	}
-	ps := &poolStream{
+	ps := &stream{
 		stream: s,
 		w:      newBufferedDelimitedWriter(s),
 		r:      pbio.NewDelimitedReader(s, inet.MessageSizeMax),
@@ -65,13 +24,13 @@ func (dht *IpfsDHT) newPoolStream(ctx context.Context, p peer.ID) (*poolStream, 
 	}
 	go func() {
 		ps.reader()
-		dht.deletePoolStream(ps, p)
+		dht.streamPool.delete(ps, p)
 		ps.reset()
 	}()
 	return ps, nil
 }
 
-type poolStream struct {
+type stream struct {
 	stream interface {
 		Reset() error
 	}
@@ -85,11 +44,11 @@ type poolStream struct {
 	readerErr error
 }
 
-func (me *poolStream) reset() {
+func (me *stream) reset() {
 	me.stream.Reset()
 }
 
-func (me *poolStream) send(m *pb.Message) (err error) {
+func (me *stream) send(m *pb.Message) (err error) {
 	if err := me.w.WriteMsg(m); err != nil {
 		return xerrors.Errorf("writing message: %w", err)
 	}
@@ -99,7 +58,7 @@ func (me *poolStream) send(m *pb.Message) (err error) {
 	return nil
 }
 
-func (me *poolStream) request(ctx context.Context, req *pb.Message) (<-chan *pb.Message, error) {
+func (me *stream) request(ctx context.Context, req *pb.Message) (<-chan *pb.Message, error) {
 	replyChan := make(chan *pb.Message, 1)
 	me.mu.Lock()
 	if err := me.errLocked(); err != nil {
@@ -118,7 +77,7 @@ func (me *poolStream) request(ctx context.Context, req *pb.Message) (<-chan *pb.
 }
 
 // Handles the error returned from the read loop.
-func (me *poolStream) reader() {
+func (me *stream) reader() {
 	err := me.readLoop()
 	me.mu.Lock()
 	me.readerErr = err
@@ -130,7 +89,7 @@ func (me *poolStream) reader() {
 }
 
 // Reads from the stream until something is wrong.
-func (me *poolStream) readLoop() error {
+func (me *stream) readLoop() error {
 	for {
 		var m pb.Message
 		err := me.r.ReadMsg(&m)
@@ -146,14 +105,14 @@ func (me *poolStream) readLoop() error {
 	}
 }
 
-func (me *poolStream) err() error {
+func (me *stream) err() error {
 	me.mu.Lock()
 	defer me.mu.Unlock()
 	return me.errLocked()
 }
 
 // A stream has gone bad when the reader has given up.
-func (me *poolStream) errLocked() error {
+func (me *stream) errLocked() error {
 	if me.readerErr != nil {
 		return xerrors.Errorf("reader: %w", me.readerErr)
 	}

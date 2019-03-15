@@ -109,7 +109,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (*pb.Message, error) {
-	ps, _, err := dht.getPoolStream(ctx, p)
+	ps, err := dht.getStream(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 		return nil, err
 	}
 	onReply := func(reply *pb.Message) {
-		dht.putPoolStream(ps, p)
+		dht.streamPool.put(ps, p)
 		dht.updateFromMessage(ctx, p, reply)
 		dht.peerstore.RecordLatency(p, time.Since(start))
 	}
@@ -141,26 +141,29 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 	}
 }
 
-func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (inet.Stream, error) {
-	return dht.host.NewStream(ctx, p, dht.protocols...)
-}
-
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) (err error) {
-	ps, _, err := dht.getPoolStream(ctx, p)
+	ps, err := dht.getStream(ctx, p)
 	if err != nil {
 		return
 	}
 	err = ps.send(pmes)
 	if err == nil {
 		// Put the stream back in the pool, because we're not waiting for a reply.
-		dht.putPoolStream(ps, p)
+		dht.streamPool.put(ps, p)
 	} else {
 		// Destroy the stream, because we don't intend to use it again.
 		// Presumably it's in a bad state if we had an error while sending a message.
 		ps.reset()
 	}
 	return err
+}
+
+func (dht *IpfsDHT) getStream(ctx context.Context, p peer.ID) (*stream, error) {
+	if ps, ok := dht.streamPool.get(ctx, p); ok {
+		return ps, nil
+	}
+	return dht.newStream(ctx, p)
 }
 
 func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {

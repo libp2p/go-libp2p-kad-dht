@@ -56,8 +56,7 @@ type IpfsDHT struct {
 	ctx  context.Context
 	proc goprocess.Process
 
-	streamPoolMu sync.Mutex
-	streamPool   map[peer.ID]map[*poolStream]struct{}
+	streamPool streamPool
 
 	plk       sync.Mutex
 	protocols []protocol.ID // DHT protocols
@@ -140,7 +139,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,
-		streamPool:   make(map[peer.ID]map[*poolStream]struct{}),
 		ctx:          ctx,
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),

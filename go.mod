@@ -26,7 +26,6 @@ require (
 	github.com/multiformats/go-multiaddr v0.0.1
 	github.com/multiformats/go-multiaddr-dns v0.0.2
 	github.com/multiformats/go-multistream v0.0.1
-	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
 	golang.org/x/xerrors v0.0.0-20190212162355-a5947ffaace3

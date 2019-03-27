@@ -110,18 +110,13 @@ func newDialQueue(params *dqParams) (*dialQueue, error) {
 		dieCh:     make(chan struct{}, params.config.maxParallelism),
 	}
 
-	go dq.control()
 	return dq, nil
 }
 
 // Start initiates action on this dial queue. It should only be called once; subsequent calls are ignored.
 func (dq *dialQueue) Start() {
 	dq.startOnce.Do(func() {
-		tgt := int(dq.dqParams.config.minParallelism)
-		for i := 0; i < tgt; i++ {
-			go dq.worker()
-		}
-		dq.nWorkers = uint(tgt)
+		go dq.control()
 	})
 }
 
@@ -138,6 +133,16 @@ func (dq *dialQueue) control() {
 		}
 		waiting = nil
 	}()
+
+	// start workers
+
+	tgt := int(dq.dqParams.config.minParallelism)
+	for i := 0; i < tgt; i++ {
+		go dq.worker()
+	}
+	dq.nWorkers = uint(tgt)
+
+	// control workers
 
 	for {
 		// First process any backlog of dial jobs and waiters -- making progress is the priority.

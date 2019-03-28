@@ -31,9 +31,10 @@ func newGaugeFunc(name string, f func() float64, labels prometheus.Labels) prome
 
 func newOpts(name string) prometheus.Opts {
 	return prometheus.Opts{
-		Namespace: namespace,
-		Subsystem: subsystem,
-		Name:      name,
+		Namespace:   namespace,
+		Subsystem:   subsystem,
+		Name:        name,
+		ConstLabels: prometheus.Labels{"branch": "prom-metrics"},
 	}
 }
 

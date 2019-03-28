@@ -12,7 +12,7 @@ import (
 )
 
 func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (*stream, error) {
-	s, err := dht.host.NewStream(ctx, p, dht.protocols...)
+	s, err := dht.newNetStream(ctx, p)
 	if err != nil {
 		return nil, xerrors.Errorf("opening stream: %w", err)
 	}

@@ -2,7 +2,6 @@ package dht
 
 import (
 	"fmt"
-	"log"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,13 +9,14 @@ import (
 )
 
 var (
-	messageSizeBytesBuckets = []float64{0, 1, 10, 30, 70, 100, 200, 1000, 10000}
-	latencySecondsBuckets   = []float64{0, 0.001, 0.010, 0.100, 0.300, 1, 10, 100}
+	messageSizeBytesBuckets      = []float64{0, 1, 10, 30, 70, 100, 200, 1000, 10000}
+	networkLatencySecondsBuckets = []float64{0, 0.001, 0.010, 0.100, 0.300, 1, 10, 100}
 )
 
 const (
-	namespace   = "libp2p"
-	subsystem   = "kad_dht"
+	namespace = "libp2p"
+	subsystem = "kad_dht"
+
 	messageType = "message_type"
 	instanceId  = "instance_id"
 	localPeerId = "local_peer_id"
@@ -31,9 +31,10 @@ func newGaugeFunc(name string, f func() float64, labels prometheus.Labels) prome
 
 func newOpts(name string) prometheus.Opts {
 	return prometheus.Opts{
-		Namespace: namespace,
-		Subsystem: subsystem,
-		Name:      name,
+		Namespace:   namespace,
+		Subsystem:   subsystem,
+		Name:        name,
+		ConstLabels: prometheus.Labels{"branch": "stream-pooling-with-metrics"},
 	}
 }
 
@@ -79,7 +80,7 @@ var (
 		newHistogramOpts("received_message_size_bytes", messageSizeBytesBuckets),
 		messageLabels())
 	inboundRequestHandlingTimeSeconds = promauto.NewHistogramVec(
-		newHistogramOpts("inbound_request_handling_time_seconds", latencySecondsBuckets),
+		newHistogramOpts("inbound_request_handling_time_seconds", networkLatencySecondsBuckets),
 		messageLabels())
 
 	sentMessages = promauto.NewCounterVec(
@@ -90,13 +91,19 @@ var (
 		messageLabels())
 
 	outboundRequestResponseLatencySeconds = promauto.NewHistogramVec(
-		newHistogramOpts("outbound_request_response_latency_seconds", latencySecondsBuckets),
+		newHistogramOpts("outbound_request_response_latency_seconds", networkLatencySecondsBuckets),
 		messageLabels())
 	messageWriteLatencySeconds = promauto.NewHistogramVec(
 		newHistogramOpts("message_write_latency_seconds",
 			// We're only looking for large spikes due to contention.
-			prometheus.ExponentialBuckets(0.001, 10, 6)),
+			[]float64{0, 0.001, 0.01, 0.1, 1, 10, 100, 1000}),
 		messageLabels())
+	newStreamTimeSeconds = promauto.NewHistogramVec(
+		newHistogramOpts("new_stream_time_seconds", networkLatencySecondsBuckets),
+		dhtInstanceLabels())
+	newStreamTimeErrorSeconds = promauto.NewHistogramVec(
+		newHistogramOpts("new_stream_time_error_seconds", networkLatencySecondsBuckets),
+		dhtInstanceLabels())
 
 	routingTablePeersAdded = promauto.NewCounterVec(
 		prometheus.CounterOpts(newOpts("routing_table_peers_added")),
@@ -114,10 +121,8 @@ func (dht *IpfsDHT) initRoutingTableNumEntriesGaugeFunc() {
 			return float64(dht.routingTable.Size())
 		},
 		dht.instanceLabels())
-	log.Printf("registered %p", dht)
 	go func() {
 		<-dht.Context().Done()
 		prometheus.DefaultRegisterer.Unregister(gf)
-		log.Printf("unregistered %p", dht)
 	}()
 }

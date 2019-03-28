@@ -2,7 +2,6 @@ package dht
 
 import (
 	"fmt"
-	"log"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/prometheus/client_golang/prometheus"
@@ -114,10 +113,8 @@ func (dht *IpfsDHT) initRoutingTableNumEntriesGaugeFunc() {
 			return float64(dht.routingTable.Size())
 		},
 		dht.instanceLabels())
-	log.Printf("registered %p", dht)
 	go func() {
 		<-dht.Context().Done()
 		prometheus.DefaultRegisterer.Unregister(gf)
-		log.Printf("unregistered %p", dht)
 	}()
 }

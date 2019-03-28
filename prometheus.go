@@ -22,7 +22,7 @@ const (
 	localPeerId = "local_peer_id"
 )
 
-var constLabels = prometheus.Labels{"stream-pooling": "master"}
+var constLabels = prometheus.Labels{"stream_pooling": "master"}
 
 // See https://groups.google.com/d/msg/prometheus-developers/ntZHQz216c0/DSbqaA-4EwAJ
 func newGaugeFunc(name string, f func() float64, labels prometheus.Labels) prometheus.GaugeFunc {

@@ -125,16 +125,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
-
-	cmgr := h.ConnManager()
-	rt.PeerAdded = func(p peer.ID) {
-		cmgr.TagPeer(p, "kbucket", 5)
-	}
-	rt.PeerRemoved = func(p peer.ID) {
-		cmgr.UntagPeer(p, "kbucket")
-	}
-
-	return &IpfsDHT{
+	dht := &IpfsDHT{
 		datastore:    dstore,
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
@@ -145,6 +136,17 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTable: rt,
 		protocols:    protocols,
 	}
+	cmgr := h.ConnManager()
+	rt.PeerAdded = func(p peer.ID) {
+		cmgr.TagPeer(p, "kbucket", 5)
+		routingTablePeersAdded.WithLabelValues(dht.instanceLabelValues()...).Inc()
+	}
+	rt.PeerRemoved = func(p peer.ID) {
+		cmgr.UntagPeer(p, "kbucket")
+		routingTablePeersRemoved.WithLabelValues(dht.instanceLabelValues()...).Inc()
+	}
+	dht.initRoutingTableNumEntriesGaugeFunc()
+	return dht
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'

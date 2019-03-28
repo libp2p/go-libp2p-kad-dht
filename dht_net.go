@@ -75,6 +75,11 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 		case nil:
 		}
 
+		startedHandling := time.Now()
+
+		receivedMessages.WithLabelValues(dht.messageLabelValues(&req)...).Inc()
+		receivedMessageSizeBytes.WithLabelValues(dht.messageLabelValues(&req)...).Observe(float64(req.Size()))
+
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
 			logger.Warningf("can't handle received message of type %v", req.GetType())
@@ -102,18 +107,30 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			logger.Debugf("error writing response: %v", err)
 			return false
 		}
+		inboundRequestHandlingTimeSeconds.WithLabelValues(dht.messageLabelValues(&req)...).Observe(time.Since(startedHandling).Seconds())
+	}
+}
 
+// Starts a timer for message write latency, and returns a function to be called immediately before
+// writing the message.
+func (dht *IpfsDHT) beginMessageWriteLatency(ctx context.Context, m *pb.Message) func() {
+	now := time.Now()
+	return func() {
+		messageWriteLatencySeconds.WithLabelValues(dht.messageLabelValues(m)...).Observe(time.Since(now).Seconds())
 	}
 }
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (*pb.Message, error) {
+	dht.recordOutboundMessage(ctx, req)
+	beforeWrite := dht.beginMessageWriteLatency(ctx, req)
 	ps, err := dht.getStream(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	start := time.Now()
+	beforeWrite()
 	replyChan, err := ps.request(ctx, req)
 	if err != nil {
 		ps.reset()
@@ -143,10 +160,13 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) (err error) {
+	dht.recordOutboundMessage(ctx, pmes)
+	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
 	ps, err := dht.getStream(ctx, p)
 	if err != nil {
 		return
 	}
+	beforeWrite()
 	err = ps.send(pmes)
 	if err == nil {
 		// Put the stream back in the pool, because we're not waiting for a reply.
@@ -164,6 +184,12 @@ func (dht *IpfsDHT) getStream(ctx context.Context, p peer.ID) (*stream, error) {
 		return ps, nil
 	}
 	return dht.newStream(ctx, p)
+}
+
+func (dht *IpfsDHT) recordOutboundMessage(ctx context.Context, m *pb.Message) {
+	lvs := dht.messageLabelValues(m)
+	sentMessages.WithLabelValues(lvs...).Inc()
+	sentMessageSizeBytes.WithLabelValues(lvs...).Observe(float64(m.Size()))
 }
 
 func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {

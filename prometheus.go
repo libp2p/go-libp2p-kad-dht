@@ -95,8 +95,14 @@ var (
 	messageWriteLatencySeconds = promauto.NewHistogramVec(
 		newHistogramOpts("message_write_latency_seconds",
 			// We're only looking for large spikes due to contention.
-			prometheus.ExponentialBuckets(0.001, 10, 6)),
+			[]float64{0, 0.001, 0.01, 0.1, 1, 10, 100, 1000}),
 		messageLabels())
+	newStreamTimeSeconds = promauto.NewHistogramVec(
+		newHistogramOpts("new_stream_time_seconds", networkLatencySecondsBuckets),
+		dhtInstanceLabels())
+	newStreamTimeErrorSeconds = promauto.NewHistogramVec(
+		newHistogramOpts("new_stream_time_error_seconds", networkLatencySecondsBuckets),
+		dhtInstanceLabels())
 
 	routingTablePeersAdded = promauto.NewCounterVec(
 		prometheus.CounterOpts(newOpts("routing_table_peers_added")),

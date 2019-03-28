@@ -9,13 +9,14 @@ import (
 )
 
 var (
-	messageSizeBytesBuckets = []float64{0, 1, 10, 30, 70, 100, 200, 1000, 10000}
-	latencySecondsBuckets   = []float64{0, 0.001, 0.010, 0.100, 0.300, 1, 10, 100}
+	messageSizeBytesBuckets      = []float64{0, 1, 10, 30, 70, 100, 200, 1000, 10000}
+	networkLatencySecondsBuckets = []float64{0, 0.001, 0.010, 0.100, 0.300, 1, 10, 100}
 )
 
 const (
-	namespace   = "libp2p"
-	subsystem   = "kad_dht"
+	namespace = "libp2p"
+	subsystem = "kad_dht"
+
 	messageType = "message_type"
 	instanceId  = "instance_id"
 	localPeerId = "local_peer_id"
@@ -78,7 +79,7 @@ var (
 		newHistogramOpts("received_message_size_bytes", messageSizeBytesBuckets),
 		messageLabels())
 	inboundRequestHandlingTimeSeconds = promauto.NewHistogramVec(
-		newHistogramOpts("inbound_request_handling_time_seconds", latencySecondsBuckets),
+		newHistogramOpts("inbound_request_handling_time_seconds", networkLatencySecondsBuckets),
 		messageLabels())
 
 	sentMessages = promauto.NewCounterVec(
@@ -89,7 +90,7 @@ var (
 		messageLabels())
 
 	outboundRequestResponseLatencySeconds = promauto.NewHistogramVec(
-		newHistogramOpts("outbound_request_response_latency_seconds", latencySecondsBuckets),
+		newHistogramOpts("outbound_request_response_latency_seconds", networkLatencySecondsBuckets),
 		messageLabels())
 	messageWriteLatencySeconds = promauto.NewHistogramVec(
 		newHistogramOpts("message_write_latency_seconds",

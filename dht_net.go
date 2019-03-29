@@ -187,11 +187,48 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	return err
 }
 
+type streamAndError struct {
+	*stream
+	error
+}
+
 func (dht *IpfsDHT) getStream(ctx context.Context, p peer.ID) (*stream, error) {
-	if ps, ok := dht.streamPool.get(ctx, p); ok {
+	if ps, ok := dht.streamPool.get(p); ok {
 		return ps, nil
 	}
-	return dht.newStream(ctx, p)
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch := make(chan streamAndError)
+	go func() {
+		s, ok := dht.streamPool.wait(waitCtx, p)
+		if ok {
+			ch <- streamAndError{s, nil}
+		} else {
+			ch <- streamAndError{s, waitCtx.Err()}
+		}
+	}()
+	go func() {
+		s, err := dht.newStream(ctx, p)
+		ch <- streamAndError{s, err}
+	}()
+	left := 2
+	defer func() {
+		go func() {
+			for ; left > 0; left-- {
+				se := <-ch
+				if se.error == nil {
+					dht.streamPool.put(se.stream, p)
+				}
+			}
+		}()
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case se := <-ch:
+		left--
+		return se.stream, se.error
+	}
 }
 
 func (dht *IpfsDHT) recordOutboundMessage(ctx context.Context, m *pb.Message) {

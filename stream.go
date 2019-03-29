@@ -58,7 +58,7 @@ func (me *stream) send(m *pb.Message) (err error) {
 	return nil
 }
 
-func (me *stream) request(ctx context.Context, req *pb.Message) (<-chan *pb.Message, error) {
+func (me *stream) request(ctx context.Context, req *pb.Message) (*pb.Message, error) {
 	replyChan := make(chan *pb.Message, 1)
 	me.mu.Lock()
 	if err := me.errLocked(); err != nil {
@@ -73,7 +73,14 @@ func (me *stream) request(ctx context.Context, req *pb.Message) (<-chan *pb.Mess
 	}
 	me.mu.Unlock()
 	err := me.send(req)
-	return replyChan, err
+	if err != nil {
+		return nil, err
+	}
+	reply, ok := <-replyChan
+	if !ok {
+		return nil, me.err()
+	}
+	return reply, nil
 }
 
 // Handles the error returned from the read loop.

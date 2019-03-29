@@ -141,30 +141,27 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 		return nil, err
 	}
 	start := time.Now()
-	beforeWrite()
-	replyChan, err := ps.request(ctx, req)
-	if err != nil {
-		ps.reset()
-		return nil, err
+	type requestResult struct {
+		*pb.Message
+		error
 	}
-	onReply := func(reply *pb.Message) {
-		dht.streamPool.put(ps, p)
-		dht.updateFromMessage(ctx, p, reply)
-		dht.peerstore.RecordLatency(p, time.Since(start))
-	}
-	select {
-	case reply, ok := <-replyChan:
-		if !ok {
-			return nil, ps.err()
+	requestResultChan := make(chan requestResult, 1)
+	go func() {
+		beforeWrite()
+		reply, err := ps.request(ctx, req)
+		if err == nil {
+			dht.streamPool.put(ps, p)
+			dht.updateFromMessage(ctx, p, reply)
+			dht.peerstore.RecordLatency(p, time.Since(start))
+		} else {
+			ps.reset()
 		}
-		onReply(reply)
-		return reply, nil
+		requestResultChan <- requestResult{reply, err}
+	}()
+	select {
+	case reply := <-requestResultChan:
+		return reply.Message, reply.error
 	case <-ctx.Done():
-		go func() {
-			if reply, ok := <-replyChan; ok {
-				onReply(reply)
-			}
-		}()
 		return nil, ctx.Err()
 	}
 }

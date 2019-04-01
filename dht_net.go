@@ -132,10 +132,19 @@ func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (inet.Stream, erro
 	return s, err
 }
 
-// sendRequest sends out a request, but also makes sure to measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	dht.recordOutboundMessage(ctx, pmes)
-	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (resp *pb.Message, err error) {
+	dht.recordOutboundMessage(ctx, req)
+	beforeWrite := dht.beginMessageWriteLatency(ctx, req)
+	started := time.Now()
+	defer func() {
+		var errStr string
+		if err != nil {
+			errStr = err.Error()
+		}
+		outboundRequestResponseLatencySeconds.WithLabelValues(
+			append(dht.messageLabelValues(req), errStr)...,
+		).Observe(time.Since(started).Seconds())
+	}()
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		return nil, err
@@ -143,23 +152,33 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	start := time.Now()
 
-	rpmes, err := ms.SendRequest(ctx, pmes, beforeWrite)
+	resp, err = ms.SendRequest(ctx, req, beforeWrite)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, p, rpmes)
+	dht.updateFromMessage(ctx, p, resp)
 
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
-	return rpmes, nil
+	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, resp)
+	return resp, nil
 }
 
 // sendMessage sends out a message
-func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) (err error) {
 	dht.recordOutboundMessage(ctx, pmes)
 	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
+	started := time.Now()
+	defer func() {
+		var errStr string
+		if err != nil {
+			errStr = err.Error()
+		}
+		sendMessageLatencySeconds.WithLabelValues(
+			append(dht.messageLabelValues(pmes), errStr)...,
+		).Observe(time.Since(started).Seconds())
+	}()
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		return err
@@ -338,8 +357,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message, befo
 			}
 		}
 
-		startedWaitingForResponse := time.Now()
-
 		mes := new(pb.Message)
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
 			ms.s.Reset()
@@ -354,8 +371,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message, befo
 				continue
 			}
 		}
-
-		outboundRequestResponseLatencySeconds.WithLabelValues(ms.dht.messageLabelValues(pmes)...).Observe(time.Since(startedWaitingForResponse).Seconds())
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 

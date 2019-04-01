@@ -17,9 +17,10 @@ const (
 	namespace = "libp2p"
 	subsystem = "kad_dht"
 
-	messageType = "message_type"
-	instanceId  = "instance_id"
-	localPeerId = "local_peer_id"
+	messageType    = "message_type"
+	instanceId     = "instance_id"
+	localPeerId    = "local_peer_id"
+	errorLabelName = "error"
 )
 
 var constLabels = prometheus.Labels{"stream_pooling": "master"}
@@ -94,9 +95,13 @@ var (
 		newHistogramOpts("sent_message_size_bytes", messageSizeBytesBuckets),
 		messageLabels())
 
+	sendMessageLatencySeconds = promauto.NewHistogramVec(
+		newHistogramOpts("send_message_latency_seconds", networkLatencySecondsBuckets),
+		append(messageLabels(), errorLabelName))
 	outboundRequestResponseLatencySeconds = promauto.NewHistogramVec(
 		newHistogramOpts("outbound_request_response_latency_seconds", networkLatencySecondsBuckets),
-		messageLabels())
+		append(messageLabels(), errorLabelName))
+
 	messageWriteLatencySeconds = promauto.NewHistogramVec(
 		newHistogramOpts("message_write_latency_seconds",
 			// We're only looking for large spikes due to contention.

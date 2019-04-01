@@ -157,6 +157,8 @@ func (sp *streamPool) deletePeer(p peer.ID) {
 }
 
 func (me *peerStreamPool) delete(s *stream) {
+	me.mu.Lock()
+	defer me.mu.Unlock()
 	delete(me.streams, s)
 }
 

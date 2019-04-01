@@ -133,9 +133,19 @@ func (dht *IpfsDHT) newNetStream(ctx context.Context, p peer.ID) (inet.Stream, e
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (*pb.Message, error) {
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (resp *pb.Message, err error) {
 	dht.recordOutboundMessage(ctx, req)
 	beforeWrite := dht.beginMessageWriteLatency(ctx, req)
+	started := time.Now()
+	defer func() {
+		var errStr string
+		if err != nil {
+			errStr = err.Error()
+		}
+		outboundRequestResponseLatencySeconds.WithLabelValues(
+			append(dht.messageLabelValues(req), errStr)...,
+		).Observe(time.Since(started).Seconds())
+	}()
 	ps, err := dht.getStream(ctx, p)
 	if err != nil {
 		return nil, err
@@ -185,6 +195,16 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 		ps.reset()
 	}
 	return err
+	started := time.Now()
+	defer func() {
+		var errStr string
+		if err != nil {
+			errStr = err.Error()
+		}
+		sendMessageLatencySeconds.WithLabelValues(
+			append(dht.messageLabelValues(pmes), errStr)...,
+		).Observe(time.Since(started).Seconds())
+	}()
 }
 
 type streamAndError struct {

@@ -114,13 +114,20 @@ func (sp *streamPool) initPeer(p peer.ID) {
 	if _, ok := sp.m[p]; ok {
 		return
 	}
-	sp.m[p] = &peerStreamPool{
+	psp := &peerStreamPool{
 		newStream: func(ctx context.Context) (*stream, error) {
 			return sp.newStream(ctx, p)
 		},
 		waiters: make(map[chan *stream]struct{}),
 		streams: make(map[*stream]struct{}),
 	}
+	sp.m[p] = psp
+	go func() {
+		s, err := psp.newStream(context.Background())
+		if err == nil {
+			psp.put(s)
+		}
+	}()
 }
 
 func (sp *streamPool) put(s *stream, p peer.ID) {

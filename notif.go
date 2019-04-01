@@ -35,6 +35,8 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		return
 	}
 
+	dht.streamPool.getPeer(p)
+
 	// Note: Unfortunately, the peerstore may not yet know that this peer is
 	// a DHT server. So, if it didn't return a positive response above, test
 	// manually.

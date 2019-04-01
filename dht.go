@@ -146,6 +146,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTablePeersRemoved.WithLabelValues(dht.instanceLabelValues()...).Inc()
 	}
 	dht.initRoutingTableNumEntriesGaugeFunc()
+	dht.streamPool.newStream = dht.newStream
 	return dht
 }
 

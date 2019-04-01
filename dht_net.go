@@ -180,21 +180,6 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) (err error) {
 	dht.recordOutboundMessage(ctx, pmes)
 	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
-	ps, err := dht.getStream(ctx, p)
-	if err != nil {
-		return
-	}
-	beforeWrite()
-	err = ps.send(pmes)
-	if err == nil {
-		// Put the stream back in the pool, because we're not waiting for a reply.
-		dht.streamPool.put(ps, p)
-	} else {
-		// Destroy the stream, because we don't intend to use it again.
-		// Presumably it's in a bad state if we had an error while sending a message.
-		ps.reset()
-	}
-	return err
 	started := time.Now()
 	defer func() {
 		var errStr string
@@ -205,6 +190,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 			append(dht.messageLabelValues(pmes), errStr)...,
 		).Observe(time.Since(started).Seconds())
 	}()
+	return dht.streamPool.getPeer(p).send(ctx, pmes, beforeWrite)
 }
 
 type streamAndError struct {

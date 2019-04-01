@@ -4,18 +4,22 @@ import (
 	"context"
 	"sync"
 
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	peer "github.com/libp2p/go-libp2p-peer"
 )
 
 type streamPool struct {
-	mu sync.Mutex
-	m  map[peer.ID]*peerStreamPool
+	newStream func(context.Context, peer.ID) (*stream, error)
+	mu        sync.Mutex
+	m         map[peer.ID]*peerStreamPool
 }
 
 type peerStreamPool struct {
-	mu      sync.Mutex
-	streams map[*stream]struct{}
-	waiters map[chan *stream]struct{}
+	newStream func(context.Context) (*stream, error)
+	mu        sync.Mutex
+	streams   map[*stream]struct{}
+	waiters   map[chan *stream]struct{}
+	sendMu    sync.Mutex
 }
 
 func (sp *streamPool) get(p peer.ID) (*stream, bool) {
@@ -39,6 +43,13 @@ func (me *peerStreamPool) get() (*stream, bool) {
 		return s, true
 	}
 	return nil, false
+}
+
+func (me *streamPool) getPeer(p peer.ID) *peerStreamPool {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	me.initPeer(p)
+	return me.m[p]
 }
 
 func (me *peerStreamPool) put(s *stream) {
@@ -104,6 +115,9 @@ func (sp *streamPool) initPeer(p peer.ID) {
 		return
 	}
 	sp.m[p] = &peerStreamPool{
+		newStream: func(ctx context.Context) (*stream, error) {
+			return sp.newStream(ctx, p)
+		},
 		waiters: make(map[chan *stream]struct{}),
 		streams: make(map[*stream]struct{}),
 	}
@@ -148,4 +162,20 @@ func (me *peerStreamPool) delete(s *stream) {
 
 func (me *peerStreamPool) empty() bool {
 	return len(me.streams) == 0 && len(me.waiters) == 0
+}
+
+func (me *peerStreamPool) send(ctx context.Context, m *pb.Message, beforeWrite func()) error {
+	me.sendMu.Lock()
+	defer me.sendMu.Unlock()
+	s, ok := me.get()
+	if !ok {
+		var err error
+		s, err = me.newStream(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	defer me.put(s)
+	beforeWrite()
+	return s.send(m)
 }

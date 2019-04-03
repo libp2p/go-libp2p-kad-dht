@@ -88,7 +88,9 @@ func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {
 	defer cancel()
 	go func() {
 		<-ctx.Done()
-		w.set(nil, ctx.Err())
+		me.mu.Lock()
+		me.resolve(w, nil, ctx.Err())
+		me.mu.Unlock()
 	}()
 	w.ret.Lock()
 	return w.s, w.err
@@ -113,8 +115,9 @@ func (me *peerStreamPool) putStream(s *stream, err error) {
 
 func (me *peerStreamPool) putStreamLocked(s *stream, err error) {
 	for w := range me.waiters {
-		w.set(s, err)
-		delete(me.waiters, w)
+		if !me.resolve(w, s, err) {
+			panic("waiter already done but still present")
+		}
 		return
 	}
 	if err != nil {
@@ -169,23 +172,23 @@ func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message, before
 	}
 }
 
+func (me *peerStreamPool) resolve(w *streamWaiter, s *stream, err error) bool {
+	if w.done {
+		return false
+	}
+	delete(me.waiters, w)
+	go func() {
+		w.s = s
+		w.err = err
+		w.done = true
+		w.ret.Unlock()
+	}()
+	return true
+}
+
 type streamWaiter struct {
-	mu   sync.Mutex
 	s    *stream
 	err  error
 	done bool
 	ret  sync.Mutex
-}
-
-func (me *streamWaiter) set(s *stream, err error) {
-	me.mu.Lock()
-	if me.done {
-		me.mu.Unlock()
-		return
-	}
-	me.s = s
-	me.err = err
-	me.done = true
-	me.mu.Unlock()
-	me.ret.Unlock()
 }

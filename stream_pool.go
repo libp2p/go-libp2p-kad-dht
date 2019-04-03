@@ -139,6 +139,7 @@ func (me *peerStreamPool) send(ctx context.Context, m *pb.Message, beforeWrite f
 	if err != nil {
 		return xerrors.Errorf("getting stream: %w", err)
 	}
+	beforeWrite()
 	err = s.send(m)
 	me.putStream(s, err)
 	return err
@@ -155,6 +156,7 @@ func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message, before
 	}
 	rrCh := make(chan requestResult, 1)
 	go func() {
+		beforeWrite()
 		resp, err := s.request(ctx, req)
 		rrCh <- requestResult{resp, err}
 		me.putStream(s, err)

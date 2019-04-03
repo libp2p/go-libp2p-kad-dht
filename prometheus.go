@@ -28,7 +28,7 @@ var constLabels = prometheus.Labels{"stream_pooling": "race_wait_and_new_pipelin
 // See https://groups.google.com/d/msg/prometheus-developers/ntZHQz216c0/DSbqaA-4EwAJ
 func newGaugeFunc(name string, f func() float64, labels prometheus.Labels) prometheus.GaugeFunc {
 	opts := prometheus.GaugeOpts(newOpts(name))
-	opts.ConstLabels = labels
+	opts.ConstLabels = combineLabels(opts.ConstLabels, labels)
 	return promauto.NewGaugeFunc(opts, f)
 }
 
@@ -133,4 +133,15 @@ func (dht *IpfsDHT) initRoutingTableNumEntriesGaugeFunc() {
 		<-dht.Context().Done()
 		prometheus.DefaultRegisterer.Unregister(gf)
 	}()
+}
+
+// Create a new Labels instance, favouring values in later instances.
+func combineLabels(lss ...prometheus.Labels) prometheus.Labels {
+	ret := make(prometheus.Labels)
+	for _, ls := range lss {
+		for k, v := range ls {
+			ret[k] = v
+		}
+	}
+	return ret
 }

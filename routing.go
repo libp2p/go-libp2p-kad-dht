@@ -444,7 +444,7 @@ func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {
 	// // only share WAN-friendly addresses ??
 	// pi.Addrs = addrutil.WANShareableAddrs(pi.Addrs)
 	if len(pi.Addrs) < 1 {
-		return nil, fmt.Errorf("no known addresses for self. cannot put provider.")
+		return nil, fmt.Errorf("no known addresses for self. cannot put provider")
 	}
 
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, skey.Bytes(), 0)

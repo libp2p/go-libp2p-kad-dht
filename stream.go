@@ -24,7 +24,7 @@ func (dht *IpfsDHT) newStream(ctx context.Context, p peer.ID) (*stream, error) {
 	}
 	go func() {
 		ps.reader()
-		dht.streamPool.delete(ps, p)
+		dht.streamPool.deleteStream(ps, p)
 		ps.reset()
 	}()
 	return ps, nil
@@ -48,7 +48,7 @@ func (me *stream) reset() {
 	me.stream.Reset()
 }
 
-func (me *stream) send(m *pb.Message) (err error) {
+func (me *stream) send(m *pb.Message) error {
 	if err := me.w.WriteMsg(m); err != nil {
 		return xerrors.Errorf("writing message: %w", err)
 	}

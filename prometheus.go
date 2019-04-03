@@ -23,7 +23,7 @@ const (
 	errorLabelName = "error"
 )
 
-var constLabels = prometheus.Labels{"stream_pooling": "race_wait_and_new"}
+var constLabels = prometheus.Labels{"stream_pooling": "race_wait_and_new_pipeline_sends"}
 
 // See https://groups.google.com/d/msg/prometheus-developers/ntZHQz216c0/DSbqaA-4EwAJ
 func newGaugeFunc(name string, f func() float64, labels prometheus.Labels) prometheus.GaugeFunc {

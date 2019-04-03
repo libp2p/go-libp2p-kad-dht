@@ -133,7 +133,7 @@ func (dht *IpfsDHT) newNetStream(ctx context.Context, p peer.ID) (inet.Stream, e
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (resp *pb.Message, err error) {
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (_ *pb.Message, err error) {
 	dht.recordOutboundMessage(ctx, req)
 	beforeWrite := dht.beginMessageWriteLatency(ctx, req)
 	started := time.Now()
@@ -146,34 +146,12 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 			append(dht.messageLabelValues(req), errStr)...,
 		).Observe(time.Since(started).Seconds())
 	}()
-	ps, err := dht.getStream(ctx, p)
-	if err != nil {
-		return nil, err
+	reply, err := dht.streamPool.getPeer(p).doRequest(ctx, req, beforeWrite)
+	if err == nil {
+		dht.updateFromMessage(ctx, p, reply)
+		dht.peerstore.RecordLatency(p, time.Since(started))
 	}
-	start := time.Now()
-	type requestResult struct {
-		*pb.Message
-		error
-	}
-	requestResultChan := make(chan requestResult, 1)
-	go func() {
-		beforeWrite()
-		reply, err := ps.request(ctx, req)
-		if err == nil {
-			dht.streamPool.put(ps, p)
-			dht.updateFromMessage(ctx, p, reply)
-			dht.peerstore.RecordLatency(p, time.Since(start))
-		} else {
-			ps.reset()
-		}
-		requestResultChan <- requestResult{reply, err}
-	}()
-	select {
-	case reply := <-requestResultChan:
-		return reply.Message, reply.error
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return reply, err
 }
 
 // sendMessage sends out a message
@@ -191,50 +169,6 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 		).Observe(time.Since(started).Seconds())
 	}()
 	return dht.streamPool.getPeer(p).send(ctx, pmes, beforeWrite)
-}
-
-type streamAndError struct {
-	*stream
-	error
-}
-
-func (dht *IpfsDHT) getStream(ctx context.Context, p peer.ID) (*stream, error) {
-	if ps, ok := dht.streamPool.get(p); ok {
-		return ps, nil
-	}
-	waitCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	ch := make(chan streamAndError)
-	go func() {
-		s, ok := dht.streamPool.wait(waitCtx, p)
-		if ok {
-			ch <- streamAndError{s, nil}
-		} else {
-			ch <- streamAndError{s, waitCtx.Err()}
-		}
-	}()
-	go func() {
-		s, err := dht.newStream(ctx, p)
-		ch <- streamAndError{s, err}
-	}()
-	left := 2
-	defer func() {
-		go func() {
-			for ; left > 0; left-- {
-				se := <-ch
-				if se.error == nil {
-					dht.streamPool.put(se.stream, p)
-				}
-			}
-		}()
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case se := <-ch:
-		left--
-		return se.stream, se.error
-	}
 }
 
 func (dht *IpfsDHT) recordOutboundMessage(ctx context.Context, m *pb.Message) {

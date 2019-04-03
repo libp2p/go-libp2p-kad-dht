@@ -14,7 +14,7 @@ var (
 	// Deprecated: The old format did not support more than one message per stream, and is not
 	// supported or relevant with stream pooling. ProtocolDHT should be used instead.
 	ProtocolDHTOld   protocol.ID = "/ipfs/dht"
-	DefaultProtocols             = []protocol.ID{ProtocolDHT}
+	DefaultProtocols             = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
 )
 
 // Options is a structure containing all the options that can be used when constructing a DHT.

@@ -14,7 +14,6 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 )
 
-var dhtReadMessageTimeout = time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 type bufferedWriteCloser interface {
@@ -111,42 +110,25 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 	}
 }
 
-// Starts a timer for message write latency, and returns a function to be called immediately before
-// writing the message.
-func (dht *IpfsDHT) beginMessageWriteLatency(ctx context.Context, m *pb.Message) func() {
-	now := time.Now()
-	return func() {
-		messageWriteLatencySeconds.WithLabelValues(dht.messageLabelValues(m)...).Observe(time.Since(now).Seconds())
-	}
-}
-
 func (dht *IpfsDHT) newNetStream(ctx context.Context, p peer.ID) (inet.Stream, error) {
 	t := time.Now()
 	s, err := dht.host.NewStream(ctx, p, dht.protocols...)
-	if err == nil {
-		newStreamTimeSeconds.WithLabelValues(dht.instanceLabelValues()...).Observe(time.Since(t).Seconds())
-	} else {
-		newStreamTimeErrorSeconds.WithLabelValues(dht.instanceLabelValues()...).Observe(time.Since(t).Seconds())
-	}
+	newStreamTimeSeconds.WithLabelValues(errorLabelValue(err)).Observe(time.Since(t).Seconds())
 	return s, err
 }
 
-// sendRequest sends out a request, but also makes sure to
-// measure the RTT for latency measurements.
+func (dht *IpfsDHT) observeRpcLatency(sent *pb.Message, rpcType string, err *error, started time.Time) {
+	outboundRpcLatencySeconds.WithLabelValues(
+		sent.Type.String(), rpcType, errorLabelValue(*err),
+	).Observe(time.Since(started).Seconds())
+}
+
+// sendRequest sends out a request, but also makes sure to measure the RTT for latency measurements.
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message) (_ *pb.Message, err error) {
 	dht.recordOutboundMessage(ctx, req)
-	beforeWrite := dht.beginMessageWriteLatency(ctx, req)
 	started := time.Now()
-	defer func() {
-		var errStr string
-		if err != nil {
-			errStr = err.Error()
-		}
-		outboundRequestResponseLatencySeconds.WithLabelValues(
-			append(dht.messageLabelValues(req), errStr)...,
-		).Observe(time.Since(started).Seconds())
-	}()
-	reply, err := dht.streamPool.getPeer(p).doRequest(ctx, req, beforeWrite)
+	defer dht.observeRpcLatency(req, "request", &err, started)
+	reply, err := dht.streamPool.getPeer(p).doRequest(ctx, req)
 	if err == nil {
 		dht.updateFromMessage(ctx, p, reply)
 		dht.peerstore.RecordLatency(p, time.Since(started))
@@ -157,18 +139,9 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, req *pb.Message)
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) (err error) {
 	dht.recordOutboundMessage(ctx, pmes)
-	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
 	started := time.Now()
-	defer func() {
-		var errStr string
-		if err != nil {
-			errStr = err.Error()
-		}
-		sendMessageLatencySeconds.WithLabelValues(
-			append(dht.messageLabelValues(pmes), errStr)...,
-		).Observe(time.Since(started).Seconds())
-	}()
-	return dht.streamPool.getPeer(p).send(ctx, pmes, beforeWrite)
+	defer dht.observeRpcLatency(pmes, "send", &err, started)
+	return dht.streamPool.getPeer(p).send(ctx, pmes)
 }
 
 func (dht *IpfsDHT) recordOutboundMessage(ctx context.Context, m *pb.Message) {

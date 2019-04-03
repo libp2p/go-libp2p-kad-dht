@@ -17,10 +17,11 @@ const (
 	namespace = "libp2p"
 	subsystem = "kad_dht"
 
-	messageType    = "message_type"
-	instanceId     = "instance_id"
-	localPeerId    = "local_peer_id"
-	errorLabelName = "error"
+	messageType      = "message_type"
+	instanceId       = "instance_id"
+	localPeerId      = "local_peer_id"
+	errorLabelName   = "error"
+	rpcTypeLabelName = "rpc_type"
 )
 
 var constLabels = prometheus.Labels{"stream_pooling": "race_wait_and_new_pipeline_sends"}
@@ -49,6 +50,15 @@ func newHistogramOpts(name string, buckets []float64) prometheus.HistogramOpts {
 		Name:        name,
 		ConstLabels: constLabels,
 		Buckets:     buckets,
+	}
+}
+
+func newSummaryOpts(name string) prometheus.SummaryOpts {
+	return prometheus.SummaryOpts{
+		Namespace:   namespace,
+		Subsystem:   subsystem,
+		Name:        name,
+		ConstLabels: constLabels,
 	}
 }
 
@@ -95,23 +105,13 @@ var (
 		newHistogramOpts("sent_message_size_bytes", messageSizeBytesBuckets),
 		messageLabels())
 
-	sendMessageLatencySeconds = promauto.NewHistogramVec(
-		newHistogramOpts("send_message_latency_seconds", networkLatencySecondsBuckets),
-		append(messageLabels(), errorLabelName))
-	outboundRequestResponseLatencySeconds = promauto.NewHistogramVec(
-		newHistogramOpts("outbound_request_response_latency_seconds", networkLatencySecondsBuckets),
-		append(messageLabels(), errorLabelName))
-	messageWriteLatencySeconds = promauto.NewHistogramVec(
-		newHistogramOpts("message_write_latency_seconds",
-			// We're only looking for large spikes due to contention.
-			[]float64{0, 0.001, 0.01, 0.1, 1, 10, 100, 1000}),
-		messageLabels())
-	newStreamTimeSeconds = promauto.NewHistogramVec(
-		newHistogramOpts("new_stream_time_seconds", networkLatencySecondsBuckets),
-		dhtInstanceLabels())
-	newStreamTimeErrorSeconds = promauto.NewHistogramVec(
-		newHistogramOpts("new_stream_time_error_seconds", networkLatencySecondsBuckets),
-		dhtInstanceLabels())
+	outboundRpcLatencySeconds = promauto.NewSummaryVec(
+		newSummaryOpts("outbound_rpc_latency_seconds"),
+		[]string{messageType, rpcTypeLabelName, errorLabelName})
+
+	newStreamTimeSeconds = promauto.NewSummaryVec(
+		newSummaryOpts("new_stream_time_seconds"),
+		[]string{errorLabelName})
 
 	routingTablePeersAdded = promauto.NewCounterVec(
 		prometheus.CounterOpts(newOpts("routing_table_peers_added")),
@@ -133,6 +133,13 @@ func (dht *IpfsDHT) initRoutingTableNumEntriesGaugeFunc() {
 		<-dht.Context().Done()
 		prometheus.DefaultRegisterer.Unregister(gf)
 	}()
+}
+
+func errorLabelValue(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Create a new Labels instance, favouring values in later instances.

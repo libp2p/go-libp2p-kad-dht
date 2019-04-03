@@ -58,10 +58,11 @@ func (sp *streamPool) deletePeer(p peer.ID) {
 
 type peerStreamPool struct {
 	newStream func(context.Context) (*stream, error)
-	mu        sync.Mutex
-	streams   map[*stream]struct{}
-	waiters   map[*streamWaiter]struct{}
-	pending   int
+
+	mu      sync.Mutex
+	streams map[*stream]struct{}
+	waiters map[*streamWaiter]struct{}
+	pending int
 	//sendMu    sync.Mutex
 }
 

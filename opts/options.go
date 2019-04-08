@@ -2,9 +2,12 @@ package dhtopts
 
 import (
 	"fmt"
+	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	persist "github.com/libp2p/go-libp2p-kad-dht/persist"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	"github.com/libp2p/go-libp2p-protocol"
 	record "github.com/libp2p/go-libp2p-record"
 )
@@ -13,12 +16,20 @@ var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
 var ProtocolDHTOld protocol.ID = "/ipfs/dht"
 var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
 
+type PersistConfig struct {
+	Snapshotter      persist.Snapshotter
+	Seeder           persist.Seeder
+	SnapshotInterval time.Duration
+	FallbackPeers    []pstore.PeerInfo
+}
+
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore ds.Batching
-	Validator record.Validator
-	Client    bool
-	Protocols []protocol.ID
+	Datastore   ds.Batching
+	Validator   record.Validator
+	Client      bool
+	Protocols   []protocol.ID
+	Persistence *PersistConfig
 }
 
 // Apply applies the given options to this Option
@@ -43,6 +54,16 @@ var Defaults = func(o *Options) error {
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
 	return nil
+}
+
+// Persist configures routing table persistence and seeding.
+//
+// Defaults to volatile routing tables.
+func Persist(config *PersistConfig) Option {
+	return func(o *Options) error {
+		o.Persistence = config
+		return nil
+	}
 }
 
 // Datastore configures the DHT to use the specified datastore.

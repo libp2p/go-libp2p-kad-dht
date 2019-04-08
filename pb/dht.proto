@@ -69,3 +69,12 @@ message Message {
 	// GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
 	repeated Peer providerPeers = 9;
 }
+
+// Encapsulates a routing table snapshot for persistence.
+message RoutingTableSnapshot {
+	// The peers that were members of the routing table.
+	repeated bytes peers = 1;
+
+	// The timestamp when this snapshot was taken.
+	int64 timestamp = 2;
+}

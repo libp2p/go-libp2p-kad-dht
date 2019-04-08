@@ -80,7 +80,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
+	dht := makeDHT(ctx, h, &cfg)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -125,7 +125,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -136,23 +136,36 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
+	// TODO this is just an example of how the Persist/Seeder API would be used.
+	//  We should set the Snapshotter and the Seeder as fielkds in IpfsDHT.
+	if cfg.Persistence != nil {
+		if cfg.Persistence.Snapshotter != nil && cfg.Persistence.Seeder != nil {
+			candidates, err := cfg.Persistence.Snapshotter.Load()
+			if err != nil {
+				logger.Warningf("error while loading a previous snapshot: %s", err)
+			}
+			if err = cfg.Persistence.Seeder.Seed(rt, candidates, cfg.Persistence.FallbackPeers); err != nil {
+				logger.Warningf("error while seedindg candidates to the routing table: %s", err)
+			}
+		}
+	}
+
 	return &IpfsDHT{
-		datastore:    dstore,
+		datastore:    cfg.Datastore,
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,
 		strmap:       make(map[peer.ID]*messageSender),
 		ctx:          ctx,
-		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
+		providers:    providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
 		birth:        time.Now(),
 		routingTable: rt,
-		protocols:    protocols,
+		protocols:    cfg.Protocols,
 	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)

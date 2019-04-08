@@ -72,6 +72,7 @@ type IpfsDHT struct {
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
+	bootstrapCfg          opts.BootstrapConfig
 	triggerRtRefresh      chan chan<- error
 
 	maxRecordAge time.Duration
@@ -99,6 +100,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
+
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
@@ -107,6 +109,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.maxRecordAge = cfg.MaxRecordAge
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
+	dht.bootstrapCfg = cfg.BootstrapConfig
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -166,6 +169,20 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
+	// TODO this is just an example of how the Persist/Seeder API would be used.
+	//  We should set the Snapshotter and the Seeder as fields in IpfsDHT.
+	/*if cfg.Persistence != nil {
+		if cfg.Persistence.Snapshotter != nil && cfg.Persistence.Seeder != nil {
+			candidates, err := cfg.Persistence.Snapshotter.Load()
+			if err != nil {
+				logger.Warningf("error while loading a previous snapshot: %s", err)
+			}
+			if err = cfg.Persistence.Seeder.Seed(rt, candidates, cfg.Persistence.FallbackPeers); err != nil {
+				logger.Warningf("error while seedindg candidates to the routing table: %s", err)
+			}
+		}
+	}*/
+
 	dht := &IpfsDHT{
 		datastore:        dstore,
 		self:             h.ID(),
@@ -193,7 +210,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	writeResp := func(errorChan chan error, err error) {
 		select {
 		case <-proc.Closing():
-		case errorChan <- errChan:
+		case errorChan <- err:
 		}
 		close(errorChan)
 	}
@@ -223,7 +240,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)

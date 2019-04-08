@@ -6,7 +6,9 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/libp2p/go-libp2p-core/protocol"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
+	persist "github.com/libp2p/go-libp2p-kad-dht/persist"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
 	"github.com/libp2p/go-libp2p-record"
 )
 
@@ -18,6 +20,21 @@ var (
 	ProtocolDHT      protocol.ID = "/ipfs/kad/1.0.0"
 	DefaultProtocols             = []protocol.ID{ProtocolDHT}
 )
+
+// BootstrapConfig specifies parameters used for bootstrapping the DHT.
+type BootstrapConfig struct {
+	BucketPeriod             time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
+	Timeout                  time.Duration // how long to wait for a bootstrap query to run
+	RoutingTableScanInterval time.Duration // how often to scan the RT for k-buckets that haven't been queried since the given period
+	SelfQueryInterval        time.Duration // how often to query for self
+}
+
+type PersistConfig struct {
+	Snapshotter      persist.Snapshotter
+	Seeder           persist.Seeder
+	SnapshotInterval time.Duration
+	FallbackPeers    []pstore.PeerInfo
+}
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
@@ -35,6 +52,8 @@ type Options struct {
 		RefreshPeriod       time.Duration
 		AutoRefresh         bool
 	}
+	Persistence     *PersistConfig
+	BootstrapConfig BootstrapConfig
 }
 
 // Apply applies the given options to this Option
@@ -87,6 +106,16 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 func RoutingTableRefreshPeriod(period time.Duration) Option {
 	return func(o *Options) error {
 		o.RoutingTable.RefreshPeriod = period
+		return nil
+	}
+}
+
+// Persist configures routing table persistence and seeding.
+//
+// Defaults to volatile routing tables.
+func Persist(config *PersistConfig) Option {
+	return func(o *Options) error {
+		o.Persistence = config
 		return nil
 	}
 }

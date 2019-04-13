@@ -757,13 +757,13 @@ func TestProvidesMany(t *testing.T) {
 		}
 	}
 
-	providers := make(map[string]peer.ID)
+	providers := make(map[cid.Cid]peer.ID)
 
 	d := 0
 	for _, c := range testCaseCids {
 		d = (d + 1) % len(dhts)
 		dht := dhts[d]
-		providers[c.KeyString()] = dht.self
+		providers[c] = dht.self
 
 		t.Logf("announcing provider for %s", c)
 		if err := dht.Provide(ctx, c, true); err != nil {
@@ -783,7 +783,7 @@ func TestProvidesMany(t *testing.T) {
 	getProvider := func(dht *IpfsDHT, k cid.Cid) {
 		defer wg.Done()
 
-		expected := providers[k.KeyString()]
+		expected := providers[k]
 
 		provchan := dht.FindProvidersAsync(ctxT, k, 1)
 		select {

@@ -312,6 +312,7 @@ func (pm *ProviderManager) run() {
 	}
 }
 
+// AddProvider adds a provider.
 func (pm *ProviderManager) AddProvider(ctx context.Context, k cid.Cid, val peer.ID) {
 	prov := &addProv{
 		k:   k,
@@ -323,6 +324,8 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k cid.Cid, val peer.
 	}
 }
 
+// GetProviders returns the set of providers for the given key.
+// This method _does not_ copy the set. Do not modify it.
 func (pm *ProviderManager) GetProviders(ctx context.Context, k cid.Cid) []peer.ID {
 	gp := &getProv{
 		k:    k,

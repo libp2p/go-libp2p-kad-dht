@@ -92,7 +92,7 @@ func (pm *ProviderManager) providersForKey(k cid.Cid) ([]peer.ID, error) {
 }
 
 func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
-	cached, ok := pm.providers.Get(k.KeyString())
+	cached, ok := pm.providers.Get(k)
 	if ok {
 		return cached.(*providerSet), nil
 	}
@@ -103,7 +103,7 @@ func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
 	}
 
 	if len(pset.providers) > 0 {
-		pm.providers.Add(k.KeyString(), pset)
+		pm.providers.Add(k, pset)
 	}
 
 	return pset, nil
@@ -160,14 +160,14 @@ func readTimeValue(i interface{}) (time.Time, error) {
 }
 
 func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
-	iprovs, ok := pm.providers.Get(k.KeyString())
+	iprovs, ok := pm.providers.Get(k)
 	if !ok {
 		stored, err := loadProvSet(pm.dstore, k)
 		if err != nil {
 			return err
 		}
 		iprovs = stored
-		pm.providers.Add(k.KeyString(), iprovs)
+		pm.providers.Add(k, iprovs)
 	}
 	provs := iprovs.(*providerSet)
 	now := time.Now()
@@ -186,7 +186,7 @@ func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) 
 }
 
 func (pm *ProviderManager) deleteProvSet(k cid.Cid) error {
-	pm.providers.Remove(k.KeyString())
+	pm.providers.Remove(k)
 
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,

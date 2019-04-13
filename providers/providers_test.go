@@ -27,7 +27,15 @@ func TestProviderManager(t *testing.T) {
 	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
 	a := cid.NewCidV0(u.Hash([]byte("test")))
 	p.AddProvider(ctx, a, peer.ID("testingprovider"))
+
+	// Not cached
 	resp := p.GetProviders(ctx, a)
+	if len(resp) != 1 {
+		t.Fatal("Could not retrieve provider.")
+	}
+
+	// Cached
+	resp = p.GetProviders(ctx, a)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
@@ -235,10 +243,32 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	c2 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("2")))
 	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
 
+	// add provider
 	pm.AddProvider(ctx, c1, p1)
 	// make the cached provider for c1 go to datastore
 	pm.AddProvider(ctx, c2, p1)
 	// now just offloaded record should be brought back and joined with p2
+	pm.AddProvider(ctx, c1, p2)
+
+	c1Provs := pm.GetProviders(ctx, c1)
+	if len(c1Provs) != 2 {
+		t.Fatalf("expected c1 to be provided by 2 peers, is by %d", len(c1Provs))
+	}
+}
+
+func TestWriteUpdatesCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p1, p2 := peer.ID("a"), peer.ID("b")
+	c1 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("1")))
+	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
+
+	// add provider
+	pm.AddProvider(ctx, c1, p1)
+	// force into the cache
+	pm.GetProviders(ctx, c1)
+	// add a second provider
 	pm.AddProvider(ctx, c1, p2)
 
 	c1Provs := pm.GetProviders(ctx, c1)

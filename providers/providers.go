@@ -115,6 +115,7 @@ func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 		return nil, err
 	}
 
+	now := time.Now()
 	out := newProviderSet()
 	for {
 		e, ok := res.NextSync()
@@ -126,21 +127,35 @@ func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 			continue
 		}
 
+		// check expiration time
+		t, err := readTimeValue(e.Value)
+		switch {
+		case err != nil:
+			// couldn't parse the time
+			log.Warning("parsing providers record from disk: ", err)
+			fallthrough
+		case now.Sub(t) > ProvideValidity:
+			// or just expired
+			err = dstore.Delete(ds.RawKey(e.Key))
+			if err != nil && err != ds.ErrNotFound {
+				log.Warning("failed to remove provider record from disk: ", err)
+			}
+			continue
+		}
+
 		lix := strings.LastIndex(e.Key, "/")
 
 		decstr, err := base32.RawStdEncoding.DecodeString(e.Key[lix+1:])
 		if err != nil {
 			log.Error("base32 decoding error: ", err)
+			err = dstore.Delete(ds.RawKey(e.Key))
+			if err != nil && err != ds.ErrNotFound {
+				log.Warning("failed to remove provider record from disk: ", err)
+			}
 			continue
 		}
 
 		pid := peer.ID(decstr)
-
-		t, err := readTimeValue(e.Value)
-		if err != nil {
-			log.Warning("parsing providers record from disk: ", err)
-			continue
-		}
 
 		out.setVal(pid, t)
 	}

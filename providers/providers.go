@@ -114,6 +114,7 @@ func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Close()
 
 	now := time.Now()
 	out := newProviderSet()

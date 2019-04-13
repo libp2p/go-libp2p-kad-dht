@@ -148,13 +148,11 @@ func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 	return out, nil
 }
 
-func readTimeValue(i interface{}) (time.Time, error) {
-	data, ok := i.([]byte)
-	if !ok {
-		return time.Time{}, fmt.Errorf("data was not a []byte")
+func readTimeValue(data []byte) (time.Time, error) {
+	nsec, n := binary.Varint(data)
+	if n <= 0 {
+		return time.Time{}, fmt.Errorf("failed to parse time")
 	}
-
-	nsec, _ := binary.Varint(data)
 
 	return time.Unix(0, nsec), nil
 }

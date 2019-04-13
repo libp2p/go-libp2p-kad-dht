@@ -160,18 +160,10 @@ func readTimeValue(i interface{}) (time.Time, error) {
 }
 
 func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
-	iprovs, ok := pm.providers.Get(k)
-	if !ok {
-		stored, err := loadProvSet(pm.dstore, k)
-		if err != nil {
-			return err
-		}
-		iprovs = stored
-		pm.providers.Add(k, iprovs)
-	}
-	provs := iprovs.(*providerSet)
 	now := time.Now()
-	provs.setVal(p, now)
+	if provs, ok := pm.providers.Get(k); ok {
+		provs.(*providerSet).setVal(p, now)
+	} // else not cached, just write through
 
 	return writeProviderEntry(pm.dstore, k, p, now)
 }

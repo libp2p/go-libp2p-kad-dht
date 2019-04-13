@@ -10,6 +10,8 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	dsq "github.com/ipfs/go-datastore/query"
+	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
 	peer "github.com/libp2p/go-libp2p-peer"
 	//
@@ -22,7 +24,7 @@ func TestProviderManager(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
+	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
 	a := cid.NewCidV0(u.Hash([]byte("test")))
 	p.AddProvider(ctx, a, peer.ID("testingprovider"))
 	resp := p.GetProviders(ctx, a)
@@ -41,7 +43,7 @@ func TestProvidersDatastore(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
+	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
 	defer p.proc.Close()
 
 	friend := peer.ID("friend")
@@ -64,7 +66,7 @@ func TestProvidersDatastore(t *testing.T) {
 }
 
 func TestProvidersSerialization(t *testing.T) {
-	dstore := ds.NewMapDatastore()
+	dstore := dssync.MutexWrap(ds.NewMapDatastore())
 
 	k := cid.NewCidV0(u.Hash(([]byte("my key!"))))
 	p1 := peer.ID("peer one")
@@ -120,7 +122,7 @@ func TestProvidesExpire(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, ds.NewMapDatastore())
+	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
 
 	peers := []peer.ID{"a", "b"}
 	var cids []cid.Cid
@@ -150,13 +152,15 @@ func TestProvidesExpire(t *testing.T) {
 		t.Fatal("providers map not cleaned up")
 	}
 
-	proviter, err := p.getProvKeys()
+	res, err := p.dstore.Query(dsq.Query{Prefix: providersKeyPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	_, ok := proviter()
-	if ok {
+	rest, err := res.Rest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) > 0 {
 		t.Fatal("expected everything to be cleaned out of the datastore")
 	}
 }
@@ -229,7 +233,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	p1, p2 := peer.ID("a"), peer.ID("b")
 	c1 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("1")))
 	c2 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("2")))
-	pm := NewProviderManager(ctx, p1, ds.NewMapDatastore())
+	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
 
 	pm.AddProvider(ctx, c1, p1)
 	// make the cached provider for c1 go to datastore

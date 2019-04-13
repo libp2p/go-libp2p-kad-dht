@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/simplelru"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	autobatch "github.com/ipfs/go-datastore/autobatch"
@@ -30,7 +30,7 @@ var defaultCleanupInterval = time.Hour
 type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
 	// the run method
-	providers *lru.Cache
+	providers *lru.LRU
 	dstore    ds.Datastore
 
 	newprovs chan *addProv
@@ -60,7 +60,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 	pm.getprovs = make(chan *getProv)
 	pm.newprovs = make(chan *addProv)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
-	cache, err := lru.New(lruCacheSize)
+	cache, err := lru.NewLRU(lruCacheSize, nil)
 	if err != nil {
 		panic(err) //only happens if negative value is passed to lru constructor
 	}

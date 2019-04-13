@@ -68,7 +68,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 	pm.proc = goprocessctx.WithContext(ctx)
 	pm.cleanupInterval = defaultCleanupInterval
-	pm.proc.Go(func(p goprocess.Process) { pm.run() })
+	pm.proc.Go(pm.run)
 
 	return pm
 }
@@ -191,69 +191,49 @@ func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) 
 	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
-func (pm *ProviderManager) deleteProvSet(k cid.Cid) error {
-	pm.providers.Remove(k)
-
-	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: true,
-		Prefix:   mkProvKey(k),
-	})
-	if err != nil {
-		return err
-	}
-
-	entries, err := res.Rest()
-	if err != nil {
-		return err
-	}
-
-	for _, e := range entries {
-		err := pm.dstore.Delete(ds.NewKey(e.Key))
-		if err != nil {
-			log.Error("deleting provider set: ", err)
-		}
-	}
-	return nil
-}
-
-func (pm *ProviderManager) getProvKeys() (func() (cid.Cid, bool), error) {
+func (pm *ProviderManager) gc() {
 	res, err := pm.dstore.Query(dsq.Query{
 		KeysOnly: true,
 		Prefix:   providersKeyPrefix,
 	})
 	if err != nil {
-		return nil, err
+		log.Error("error garbage collecting provider records: ", err)
+		return
 	}
+	defer res.Close()
 
-	iter := func() (cid.Cid, bool) {
-		for e := range res.Next() {
-			parts := strings.Split(e.Key, "/")
-			if len(parts) != 4 {
-				log.Warningf("incorrectly formatted provider entry in datastore: %s", e.Key)
-				continue
-			}
-			decoded, err := base32.RawStdEncoding.DecodeString(parts[2])
-			if err != nil {
-				log.Warning("error decoding base32 provider key: %s: %s", parts[2], err)
-				continue
-			}
-
-			c, err := cid.Cast(decoded)
-			if err != nil {
-				log.Warning("error casting key to cid from datastore key: %s", err)
-				continue
-			}
-
-			return c, true
+	now := time.Now()
+	for {
+		e, ok := res.NextSync()
+		if !ok {
+			return
 		}
-		return cid.Cid{}, false
-	}
 
-	return iter, nil
+		if e.Error != nil {
+			log.Error("got an error: ", e.Error)
+			continue
+		}
+
+		// check expiration time
+		t, err := readTimeValue(e.Value)
+		switch {
+		case err != nil:
+			// couldn't parse the time
+			log.Warning("parsing providers record from disk: ", err)
+			fallthrough
+		case now.Sub(t) > ProvideValidity:
+			// or just expired
+			err = pm.dstore.Delete(ds.RawKey(e.Key))
+			if err != nil {
+				log.Warning("failed to remove provider record from disk: ", err)
+			}
+		}
+	}
 }
 
-func (pm *ProviderManager) run() {
+func (pm *ProviderManager) run(proc goprocess.Process) {
 	tick := time.NewTicker(pm.cleanupInterval)
+	defer tick.Stop()
 	for {
 		select {
 		case np := <-pm.newprovs:
@@ -267,47 +247,16 @@ func (pm *ProviderManager) run() {
 				log.Error("error reading providers: ", err)
 			}
 
-			gp.resp <- provs
+			// set the cap so the user can't append to this.
+			gp.resp <- provs[0:len(provs):len(provs)]
 		case <-tick.C:
-			keys, err := pm.getProvKeys()
-			if err != nil {
-				log.Error("Error loading provider keys: ", err)
-				continue
-			}
-			now := time.Now()
-			for {
-				k, ok := keys()
-				if !ok {
-					break
-				}
-
-				provs, err := pm.getProvSet(k)
-				if err != nil {
-					log.Error("error loading known provset: ", err)
-					continue
-				}
-				for p, t := range provs.set {
-					if now.Sub(t) > ProvideValidity {
-						delete(provs.set, p)
-					}
-				}
-				// have we run out of providers?
-				if len(provs.set) == 0 {
-					provs.providers = nil
-					err := pm.deleteProvSet(k)
-					if err != nil {
-						log.Error("error deleting provider set: ", err)
-					}
-				} else if len(provs.set) < len(provs.providers) {
-					// We must have modified the providers set, recompute.
-					provs.providers = make([]peer.ID, 0, len(provs.set))
-					for p := range provs.set {
-						provs.providers = append(provs.providers, p)
-					}
-				}
-			}
-		case <-pm.proc.Closing():
-			tick.Stop()
+			// You know the wonderful thing about caches? You can
+			// drop them.
+			//
+			// Much faster than GCing.
+			pm.providers.Purge()
+			pm.gc()
+		case <-proc.Closing():
 			return
 		}
 	}

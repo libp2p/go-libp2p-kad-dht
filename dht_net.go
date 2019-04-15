@@ -76,6 +76,11 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			if err.Error() != "stream reset" {
 				logger.Debugf("error reading message: %#v", err)
 			}
+			stats.RecordWithTags(
+				ctx,
+				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
+				metrics.ReceivedMessageErrors.M(1),
+			)
 			return false
 		case nil:
 		}
@@ -94,12 +99,14 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
+			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			logger.Warningf("can't handle received message of type %v", req.GetType())
 			return false
 		}
 
 		resp, err := handler(ctx, mPeer, &req)
 		if err != nil {
+			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			logger.Debugf("error handling message: %v", err)
 			return false
 		}
@@ -116,6 +123,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			err = w.Flush()
 		}
 		if err != nil {
+			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			logger.Debugf("error writing response: %v", err)
 			return false
 		}
@@ -133,6 +141,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
+		stats.Record(ctx, metrics.SentRequestErrors.M(1))
 		return nil, err
 	}
 
@@ -140,6 +149,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
+		stats.Record(ctx, metrics.SentRequestErrors.M(1))
 		return nil, err
 	}
 
@@ -165,10 +175,12 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
+		stats.Record(ctx, metrics.SentMessageErrors.M(1))
 		return err
 	}
 
 	if err := ms.SendMessage(ctx, pmes); err != nil {
+		stats.Record(ctx, metrics.SentMessageErrors.M(1))
 		return err
 	}
 

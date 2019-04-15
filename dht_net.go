@@ -127,23 +127,9 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 	}
 }
 
-// Starts a timer for message write latency, and returns a function to be called immediately before
-// writing the message.
-func (dht *IpfsDHT) beginMessageWriteLatency(ctx context.Context, m *pb.Message) func() {
-	now := time.Now()
-	return func() {
-		stats.RecordWithTags(
-			ctx,
-			append(dht.tagMutators(), metrics.UpsertMessageType(m)),
-			metrics.MessageWriteLatencyMs.M(time.Since(now).Seconds()*1000),
-		)
-	}
-}
-
 // sendRequest sends out a request, but also makes sure to measure the RTT for latency measurements.
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	dht.recordOutboundMessage(ctx, pmes)
-	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		return nil, err
@@ -151,7 +137,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	start := time.Now()
 
-	rpmes, err := ms.SendRequest(ctx, pmes, beforeWrite)
+	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
 		return nil, err
 	}
@@ -167,13 +153,12 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	dht.recordOutboundMessage(ctx, pmes)
-	beforeWrite := dht.beginMessageWriteLatency(ctx, pmes)
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		return err
 	}
 
-	if err := ms.SendMessage(ctx, pmes, beforeWrite); err != nil {
+	if err := ms.SendMessage(ctx, pmes); err != nil {
 		return err
 	}
 	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
@@ -288,7 +273,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 // behaviour.
 const streamReuseTries = 3
 
-func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message, beforeWrite func()) error {
+func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) error {
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
@@ -297,7 +282,6 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message, befo
 			return err
 		}
 
-		beforeWrite()
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil
@@ -325,7 +309,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message, befo
 	}
 }
 
-func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message, beforeWrite func()) (*pb.Message, error) {
+func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
@@ -334,7 +318,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message, befo
 			return nil, err
 		}
 
-		beforeWrite()
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil

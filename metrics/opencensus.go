@@ -37,11 +37,6 @@ var (
 	SentMessages                     = stats.Int64(namePrefix+"sent_messages", "Total number of messages sent", stats.UnitDimensionless)
 	SentMessageSizeBytes             = stats.Int64(namePrefix+"sent_message_size_bytes", "Sent message sizes", stats.UnitBytes)
 	OutboundRequestResponseLatencyMs = stats.Float64(namePrefix+"outbound_request_response_latency_ms", "Outbound request latency", stats.UnitMilliseconds)
-	MessageWriteLatencyMs            = stats.Float64(
-		namePrefix+"message_write_latency_ms",
-		"Time between wanting to send a message, and writing it",
-		stats.UnitMilliseconds,
-	)
 
 	RoutingTablePeersAdded   = stats.Int64(namePrefix+"routing_table_peers_added", "", stats.UnitDimensionless)
 	RoutingTablePeersRemoved = stats.Int64(namePrefix+"routing_table_peers_removed", "", stats.UnitDimensionless)
@@ -76,10 +71,6 @@ var Views = []*view.View{{
 	Measure:     SentMessageSizeBytes,
 	TagKeys:     []tag.Key{KeyMessageType, KeyLocalPeerID, KeyInstanceID},
 	Aggregation: messageSizeBytesDistribution,
-}, {
-	Measure:     MessageWriteLatencyMs,
-	TagKeys:     []tag.Key{KeyMessageType, KeyLocalPeerID, KeyInstanceID},
-	Aggregation: view.Distribution(0, 1, 10, 100),
 }, {
 	Measure:     RoutingTablePeersAdded,
 	TagKeys:     []tag.Key{KeyLocalPeerID, KeyInstanceID},

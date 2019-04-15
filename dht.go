@@ -8,11 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"go.opencensus.io/metric/metricdata"
-
-	"go.opencensus.io/stats"
-
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"go.opencensus.io/metric/metricdata"
+	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 
 	"golang.org/x/xerrors"

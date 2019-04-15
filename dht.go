@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
-	periodicproc "github.com/jbenet/goprocess/periodic"
+	"go.opencensus.io/tag"
 	"golang.org/x/xerrors"
 
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
@@ -81,41 +83,16 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
+	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
 
-	dht := makeDHT(ctx, h, &cfg)
+	// register for network notifs.
+	dht.host.Network().Notify((*netNotifiee)(dht))
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*netNotifiee)(dht))
 		return nil
 	})
-
-	var (
-		candidates []peer.ID
-		err        error
-	)
-
-	if cfg.Snapshotter != nil {
-		candidates, err = cfg.Snapshotter.Load()
-		if err != nil {
-			logger.Warningf("error while loading snapshot of DHT routing table: %s", err)
-		}
-		sproc := periodicproc.Tick(cfg.SnapshotInterval, func(proc goprocess.Process) {
-			logger.Debugf("storing snapshot of DHT routing table")
-			err := cfg.Snapshotter.Store(dht.routingTable)
-			if err != nil {
-				logger.Warningf("error while storing snapshot of DHT routing table snapshot: %s", err)
-			}
-		})
-		dht.proc.AddChild(sproc)
-	}
-
-	if err := cfg.Seeder.Seed(dht.routingTable, candidates, cfg.FallbackPeers); err != nil {
-		logger.Warningf("error while seedindg candidates to the routing table: %s", err)
-	}
-
-	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
@@ -151,7 +128,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -162,22 +139,27 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
-	return &IpfsDHT{
-		datastore:    cfg.Datastore,
+	dht := &IpfsDHT{
+		datastore:    dstore,
 		self:         h.ID(),
 		peerstore:    h.Peerstore(),
 		host:         h,
 		strmap:       make(map[peer.ID]*messageSender),
 		ctx:          ctx,
-		providers:    providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
+		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
-		protocols:    cfg.Protocols,
+		protocols:    protocols,
 	}
+
+	dht.ctx = dht.newContextWithLocalTags(ctx)
+
+	return dht
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
+
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
@@ -437,4 +419,20 @@ func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 		return xerrors.Errorf("got unexpected response type: %v", resp.Type)
 	}
 	return nil
+}
+
+// newContextWithLocalTags returns a new context.Context with the InstanceID and
+// PeerID keys populated. It will also take any extra tags that need adding to
+// the context as tag.Mutators.
+func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...tag.Mutator) context.Context {
+	extraTags = append(
+		extraTags,
+		tag.Upsert(metrics.KeyPeerID, dht.self.Pretty()),
+		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", dht)),
+	)
+	ctx, _ = tag.New(
+		ctx,
+		extraTags...,
+	) // ignoring error as it is unrelated to the actual function of this code.
+	return ctx
 }

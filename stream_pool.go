@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 
+	"go.opencensus.io/trace"
 	"golang.org/x/xerrors"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -63,10 +64,12 @@ type peerStreamPool struct {
 	streams map[*stream]struct{}
 	waiters map[*streamWaiter]struct{}
 	pending int
-	//sendMu    sync.Mutex
+	sendMu  sync.Mutex
 }
 
 func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {
+	ctx, span := trace.StartSpan(ctx, "get stream")
+	defer span.End()
 	me.mu.Lock()
 	for s := range me.streams {
 		delete(me.streams, s)
@@ -89,7 +92,7 @@ func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {
 	go func() {
 		<-ctx.Done()
 		me.mu.Lock()
-		me.resolve(w, nil, ctx.Err())
+		me.resolveWaiter(w, nil, ctx.Err())
 		me.mu.Unlock()
 	}()
 	w.ret.Lock()
@@ -115,7 +118,7 @@ func (me *peerStreamPool) putStream(s *stream, err error) {
 
 func (me *peerStreamPool) putStreamLocked(s *stream, err error) {
 	for w := range me.waiters {
-		if !me.resolve(w, s, err) {
+		if !me.resolveWaiter(w, s, err) {
 			panic("waiter already done but still present")
 		}
 		return
@@ -138,16 +141,22 @@ func (me *peerStreamPool) empty() bool {
 }
 
 func (me *peerStreamPool) send(ctx context.Context, m *pb.Message) error {
+	me.sendMu.Lock()
+	defer me.sendMu.Unlock()
 	s, err := me.getStream(ctx)
 	if err != nil {
 		return xerrors.Errorf("getting stream: %w", err)
 	}
 	err = s.send(m)
-	me.putStream(s, err)
+	if err == nil {
+		me.putStream(s, nil)
+	}
 	return err
 }
 
 func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message) (*pb.Message, error) {
+	ctx, span := trace.StartSpan(ctx, "peer request")
+	defer span.End()
 	s, err := me.getStream(ctx)
 	if err != nil {
 		return nil, xerrors.Errorf("getting stream: %w", err)
@@ -170,7 +179,7 @@ func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message) (*pb.M
 	}
 }
 
-func (me *peerStreamPool) resolve(w *streamWaiter, s *stream, err error) bool {
+func (me *peerStreamPool) resolveWaiter(w *streamWaiter, s *stream, err error) bool {
 	if w.done {
 		return false
 	}

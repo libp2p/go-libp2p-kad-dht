@@ -1,6 +1,7 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
 require (
+	contrib.go.opencensus.io/exporter/stackdriver v0.10.0 // indirect
 	github.com/gogo/protobuf v1.2.1
 	github.com/hashicorp/golang-lru v0.5.1
 	github.com/ipfs/go-cid v0.0.1
@@ -29,8 +30,5 @@ require (
 	github.com/prometheus/client_golang v0.9.3-0.20190325082328-7490f0a74525
 	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
-	golang.org/x/net v0.0.0-20190311183353-d8887717615a // indirect
-	golang.org/x/sync v0.0.0-20190227155943-e225da77a7e6 // indirect
 	golang.org/x/xerrors v0.0.0-20190212162355-a5947ffaace3
-	gopkg.in/yaml.v2 v2.2.2 // indirect
 )

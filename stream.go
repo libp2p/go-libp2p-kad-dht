@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"sync"
+	"time"
 
 	pbio "github.com/gogo/protobuf/io"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -49,12 +50,24 @@ func (me *stream) reset() {
 }
 
 func (me *stream) send(m *pb.Message) error {
-	if err := me.w.WriteMsg(m); err != nil {
+	beganWrite := time.Now()
+	err := me.w.WriteMsg(m)
+	outboundRpcSendWriteLatencySeconds.WithLabelValues(
+		m.Type.String(), errorLabelValue(err),
+	).Observe(time.Since(beganWrite).Seconds())
+	if err != nil {
 		return xerrors.Errorf("writing message: %w", err)
 	}
-	if err := me.w.Flush(); err != nil {
+
+	beganFlush := time.Now()
+	err = me.w.Flush()
+	outboundRpcSendFlushLatencySeconds.WithLabelValues(
+		m.Type.String(), errorLabelValue(err),
+	).Observe(time.Since(beganFlush).Seconds())
+	if err != nil {
 		return xerrors.Errorf("flushing: %w", err)
 	}
+
 	return nil
 }
 

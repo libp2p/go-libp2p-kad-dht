@@ -2,6 +2,7 @@ package dht
 
 import (
 	"fmt"
+	"time"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,7 +11,7 @@ import (
 
 var (
 	messageSizeBytesBuckets      = []float64{0, 1, 10, 30, 70, 100, 200, 1000, 10000}
-	networkLatencySecondsBuckets = []float64{0, 0.001, 0.010, 0.100, 0.300, 1, 10, 100}
+	networkLatencySecondsBuckets = []float64{0, 0.001, 0.010, 0.050, 0.100, 0.200, 0.300, 1, 5, 10, 60}
 )
 
 const (
@@ -24,7 +25,10 @@ const (
 	rpcTypeLabelName = "rpc_type"
 )
 
-var constLabels = prometheus.Labels{"stream_pooling": "race_wait_and_new_pipeline_sends"}
+var constLabels = prometheus.Labels{
+	"stream_pooling": "yes",
+	"single_sender":  "yes",
+}
 
 // See https://groups.google.com/d/msg/prometheus-developers/ntZHQz216c0/DSbqaA-4EwAJ
 func newGaugeFunc(name string, f func() float64, labels prometheus.Labels) prometheus.GaugeFunc {
@@ -59,6 +63,7 @@ func newSummaryOpts(name string) prometheus.SummaryOpts {
 		Subsystem:   subsystem,
 		Name:        name,
 		ConstLabels: constLabels,
+		MaxAge:      time.Hour,
 	}
 }
 
@@ -108,6 +113,12 @@ var (
 	outboundRpcLatencySeconds = promauto.NewSummaryVec(
 		newSummaryOpts("outbound_rpc_latency_seconds"),
 		[]string{messageType, rpcTypeLabelName, errorLabelName})
+	outboundRpcSendFlushLatencySeconds = promauto.NewHistogramVec(
+		newHistogramOpts("outbound_rpc_send_flush_latency_seconds", networkLatencySecondsBuckets),
+		[]string{messageType, errorLabelName})
+	outboundRpcSendWriteLatencySeconds = promauto.NewHistogramVec(
+		newHistogramOpts("outbound_rpc_send_write_latency_seconds", networkLatencySecondsBuckets),
+		[]string{messageType, errorLabelName})
 
 	newStreamTimeSeconds = promauto.NewSummaryVec(
 		newSummaryOpts("new_stream_time_seconds"),

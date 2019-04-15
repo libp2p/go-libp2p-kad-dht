@@ -10,20 +10,28 @@ import (
 )
 
 type peerStreamPool struct {
+	// Callback that returns a stream. The pool exists to minimize calls to this.
 	newStream func(context.Context) (*stream, error)
 
-	mu      sync.Mutex
+	mu sync.Mutex
+	// Spare streams not in use
 	streams map[*stream]struct{}
+	// Sync machinery for goroutines waiting on streams.
 	waiters map[*streamWaiter]struct{}
+	// This is the number of new streams being created concurrently.
 	pending int
-	sendMu  sync.Mutex
+
+	// This synchronizes all send-only messages to minimize unnecessary concurrent stream use.
+	sendMu sync.Mutex
 }
 
+// State for someone waiting on a stream.
 type streamWaiter struct {
 	s    *stream
 	err  error
 	done bool
-	ret  sync.Mutex
+	// Unlocked when the above fields are ready.
+	ret sync.Mutex
 }
 
 func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {

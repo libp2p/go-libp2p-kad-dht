@@ -2,31 +2,28 @@ package dhtopts
 
 import (
 	"fmt"
-	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	persist "github.com/libp2p/go-libp2p-kad-dht/persist"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
-	"github.com/libp2p/go-libp2p-protocol"
+	protocol "github.com/libp2p/go-libp2p-protocol"
 	record "github.com/libp2p/go-libp2p-record"
 )
 
-var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
-var ProtocolDHTOld protocol.ID = "/ipfs/dht"
-var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
-var DefaultSnapshotInterval = 5 * time.Minute
+// Deprecated: The old format did not support more than one message per stream, and is not supported
+// or relevant with stream pooling. ProtocolDHT should be used instead.
+const ProtocolDHTOld protocol.ID = "/ipfs/dht"
+
+var (
+	ProtocolDHT      protocol.ID = "/ipfs/kad/1.0.0"
+	DefaultProtocols             = []protocol.ID{ProtocolDHT}
+)
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore        ds.Batching
-	Validator        record.Validator
-	Client           bool
-	Protocols        []protocol.ID
-	Snapshotter      persist.Snapshotter
-	Seeder           persist.Seeder
-	SnapshotInterval time.Duration
-	FallbackPeers    []pstore.PeerInfo
+	Datastore ds.Batching
+	Validator record.Validator
+	Client    bool
+	Protocols []protocol.ID
 }
 
 // Apply applies the given options to this Option
@@ -50,30 +47,7 @@ var Defaults = func(o *Options) error {
 	}
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
-	o.SnapshotInterval = DefaultSnapshotInterval
 	return nil
-}
-
-func Seeder(seeder persist.Seeder) Option {
-	return func(o *Options) error {
-		o.Seeder = seeder
-		return nil
-	}
-}
-
-func Snapshotter(snpshttr persist.Snapshotter, interval time.Duration) Option {
-	return func(o *Options) error {
-		o.Snapshotter = snpshttr
-		o.SnapshotInterval = interval
-		return nil
-	}
-}
-
-func FallbackPeers(fallback []pstore.PeerInfo) Option {
-	return func(o *Options) error {
-		o.FallbackPeers = fallback
-		return nil
-	}
 }
 
 // Datastore configures the DHT to use the specified datastore.

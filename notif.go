@@ -35,6 +35,8 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		return
 	}
 
+	dht.streamPool.getPeer(p)
+
 	// Note: Unfortunately, the peerstore may not yet know that this peer is
 	// a DHT server. So, if it didn't return a positive response above, test
 	// manually.
@@ -93,21 +95,6 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 	}
 
 	dht.routingTable.Remove(p)
-
-	dht.smlk.Lock()
-	defer dht.smlk.Unlock()
-	ms, ok := dht.strmap[p]
-	if !ok {
-		return
-	}
-	delete(dht.strmap, p)
-
-	// Do this asynchronously as ms.lk can block for a while.
-	go func() {
-		ms.lk.Lock()
-		defer ms.lk.Unlock()
-		ms.invalidate()
-	}()
 }
 
 func (nn *netNotifiee) OpenedStream(n inet.Network, v inet.Stream) {}

@@ -145,11 +145,9 @@ func (me *peerStreamPool) resolveWaiter(w *streamWaiter, s *stream, err error) b
 		return false
 	}
 	delete(me.waiters, w)
-	go func() {
-		w.s = s
-		w.err = err
-		w.done = true
-		w.ret.Unlock()
-	}()
+	w.s = s
+	w.err = err
+	w.done = true
+	w.ret.Unlock()
 	return true
 }

@@ -19,6 +19,8 @@ var (
 	// KeyInstanceID identifies a dht instance by the pointer address.
 	// Useful for differentiating between different dhts that have the same peer id.
 	KeyInstanceID, _ = tag.NewKey("instance_id")
+	KeyRpcType, _    = tag.NewKey("rpc_type")
+	KeyError, _      = tag.NewKey("error")
 )
 
 // UpsertMessageType is a convenience upserts the message type
@@ -29,16 +31,12 @@ func UpsertMessageType(m *pb.Message) tag.Mutator {
 
 // Measures
 var (
-	ReceivedMessages       = stats.Int64("libp2p.io/dht/kad/received_messages", "Total number of messages received per RPC", stats.UnitDimensionless)
-	ReceivedMessageErrors  = stats.Int64("libp2p.io/dht/kad/received_message_errors", "Total number of errors for messages received per RPC", stats.UnitDimensionless)
-	ReceivedBytes          = stats.Int64("libp2p.io/dht/kad/received_bytes", "Total received bytes per RPC", stats.UnitBytes)
-	InboundRequestLatency  = stats.Float64("libp2p.io/dht/kad/inbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
-	OutboundRequestLatency = stats.Float64("libp2p.io/dht/kad/outbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
-	SentMessages           = stats.Int64("libp2p.io/dht/kad/sent_messages", "Total number of messages sent per RPC", stats.UnitDimensionless)
-	SentMessageErrors      = stats.Int64("libp2p.io/dht/kad/sent_message_errors", "Total number of errors for messages sent per RPC", stats.UnitDimensionless)
-	SentRequests           = stats.Int64("libp2p.io/dht/kad/sent_requests", "Total number of requests sent per RPC", stats.UnitDimensionless)
-	SentRequestErrors      = stats.Int64("libp2p.io/dht/kad/sent_request_errors", "Total number of errors for requests sent per RPC", stats.UnitDimensionless)
-	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
+	ReceivedMessages      = stats.Int64("libp2p.io/dht/kad/received_messages", "Total number of messages received per RPC", stats.UnitDimensionless)
+	ReceivedMessageErrors = stats.Int64("libp2p.io/dht/kad/received_message_errors", "Total number of errors for messages received per RPC", stats.UnitDimensionless)
+	ReceivedBytes         = stats.Int64("libp2p.io/dht/kad/received_bytes", "Total received bytes per RPC", stats.UnitBytes)
+	InboundRequestLatency = stats.Float64("libp2p.io/dht/kad/inbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
+	OutboundRpcLatencyMs  = stats.Float64("libp2p.io/dht/kad/outbound_rpc_latency_ms", "Time to send message and receive response, if any", stats.UnitMilliseconds)
+	OutboundMessageBytes  = stats.Int64("libp2p.io/dht/kad/outbound_message_bytes", "Outbound message sizes", stats.UnitBytes)
 )
 
 // Views
@@ -63,34 +61,15 @@ var (
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
 	}
-	OutboundRequestLatencyView = &view.View{
-		Measure:     OutboundRequestLatency,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+
+	OutboundRpcLatencyMsView = &view.View{
+		Measure:     OutboundRpcLatencyMs,
+		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID, KeyRpcType, KeyError},
 		Aggregation: defaultMillisecondsDistribution,
 	}
-	SentMessagesView = &view.View{
-		Measure:     SentMessages,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
-	SentMessageErrorsView = &view.View{
-		Measure:     SentMessageErrors,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
-	SentRequestsView = &view.View{
-		Measure:     SentRequests,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
-	SentRequestErrorsView = &view.View{
-		Measure:     SentRequestErrors,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
-	SentBytesView = &view.View{
-		Measure:     SentBytes,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+	OutboundMessageBytesView = &view.View{
+		Measure:     OutboundMessageBytes,
+		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID, KeyRpcType, KeyError},
 		Aggregation: defaultBytesDistribution,
 	}
 )

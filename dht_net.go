@@ -136,12 +136,12 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
+	defer dht.recordOutboundRpc(ctx, time.Now(), pmes, "request", &err)
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
-		stats.Record(ctx, metrics.SentRequestErrors.M(1))
 		return nil, err
 	}
 
@@ -149,47 +149,30 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
-		stats.Record(ctx, metrics.SentRequestErrors.M(1))
 		return nil, err
 	}
 
 	// update the peer (on valid msgs only)
 	dht.updateFromMessage(ctx, p, rpmes)
-
-	stats.Record(
-		ctx,
-		metrics.SentRequests.M(1),
-		metrics.SentBytes.M(int64(pmes.Size())),
-		metrics.OutboundRequestLatency.M(
-			float64(time.Since(start))/float64(time.Millisecond),
-		),
-	)
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
+
 	return rpmes, nil
 }
 
 // sendMessage sends out a message
-func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) (err error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
+	defer dht.recordOutboundRpc(ctx, time.Now(), pmes, "send", &err)
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
-		stats.Record(ctx, metrics.SentMessageErrors.M(1))
 		return err
 	}
 
 	if err := ms.SendMessage(ctx, pmes); err != nil {
-		stats.Record(ctx, metrics.SentMessageErrors.M(1))
 		return err
 	}
 
-	stats.Record(
-		ctx,
-		metrics.SentMessages.M(1),
-		metrics.SentBytes.M(int64(pmes.Size())),
-	)
-	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
 	return nil
 }
 
@@ -400,4 +383,20 @@ func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error 
 	case <-t.C:
 		return ErrReadTimeout
 	}
+}
+
+func (dht *IpfsDHT) recordOutboundRpc(ctx context.Context, started time.Time, sent *pb.Message, rpcType string, err *error) {
+	var errStr string
+	if *err != nil {
+		errStr = (*err).Error()
+	}
+	stats.RecordWithTags(ctx,
+		[]tag.Mutator{
+			metrics.UpsertMessageType(sent),
+			tag.Upsert(metrics.KeyError, errStr),
+			tag.Upsert(metrics.KeyRpcType, rpcType),
+		},
+		metrics.OutboundMessageBytes.M(int64(sent.Size())),
+		metrics.OutboundRpcLatencyMs.M(time.Since(started).Seconds()*1000),
+	)
 }

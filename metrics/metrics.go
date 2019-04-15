@@ -30,14 +30,11 @@ func UpsertMessageType(m *pb.Message) tag.Mutator {
 // Measures
 var (
 	ReceivedMessages       = stats.Int64("libp2p.io/dht/kad/received_messages", "Total number of messages received per RPC", stats.UnitDimensionless)
-	ReceivedMessageErrors  = stats.Int64("libp2p.io/dht/kad/received_message_errors", "Total number of errors for messages received per RPC", stats.UnitDimensionless)
 	ReceivedBytes          = stats.Int64("libp2p.io/dht/kad/received_bytes", "Total received bytes per RPC", stats.UnitBytes)
 	InboundRequestLatency  = stats.Float64("libp2p.io/dht/kad/inbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
 	OutboundRequestLatency = stats.Float64("libp2p.io/dht/kad/outbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
 	SentMessages           = stats.Int64("libp2p.io/dht/kad/sent_messages", "Total number of messages sent per RPC", stats.UnitDimensionless)
-	SentMessageErrors      = stats.Int64("libp2p.io/dht/kad/sent_message_errors", "Total number of errors for messages sent per RPC", stats.UnitDimensionless)
 	SentRequests           = stats.Int64("libp2p.io/dht/kad/sent_requests", "Total number of requests sent per RPC", stats.UnitDimensionless)
-	SentRequestErrors      = stats.Int64("libp2p.io/dht/kad/sent_request_errors", "Total number of errors for requests sent per RPC", stats.UnitDimensionless)
 	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
 )
 
@@ -45,11 +42,6 @@ var (
 var (
 	ReceivedMessagesView = &view.View{
 		Measure:     ReceivedMessages,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
-	ReceivedMessageErrorsView = &view.View{
-		Measure:     ReceivedMessageErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
@@ -73,18 +65,8 @@ var (
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
-	SentMessageErrorsView = &view.View{
-		Measure:     SentMessageErrors,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
 	SentRequestsView = &view.View{
 		Measure:     SentRequests,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
-		Aggregation: view.Count(),
-	}
-	SentRequestErrorsView = &view.View{
-		Measure:     SentRequestErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	}

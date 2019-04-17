@@ -35,14 +35,17 @@ type streamWaiter struct {
 }
 
 func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {
+
 	ctx, span := trace.StartSpan(ctx, "get stream")
 	defer span.End()
+
 	me.mu.Lock()
 	for s := range me.streams {
 		delete(me.streams, s)
 		me.mu.Unlock()
 		return s, nil
 	}
+
 	w := &streamWaiter{}
 	w.ret.Lock()
 	me.waiters[w] = struct{}{}
@@ -51,9 +54,12 @@ func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {
 		go me.addStream()
 	}
 	if me.pending < len(me.waiters) {
+		// There should be a pending stream for every waiter, in case there are no streams to be
+		// returned from other callers.
 		panic("not enough pending streams")
 	}
 	me.mu.Unlock()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -62,6 +68,7 @@ func (me *peerStreamPool) getStream(ctx context.Context) (*stream, error) {
 		me.resolveWaiter(w, nil, ctx.Err())
 		me.mu.Unlock()
 	}()
+	// Wait for the waiter to be resolved.
 	w.ret.Lock()
 	return w.s, w.err
 }
@@ -124,12 +131,15 @@ func (me *peerStreamPool) send(ctx context.Context, m *pb.Message) error {
 }
 
 func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message) (*pb.Message, error) {
+
 	ctx, span := trace.StartSpan(ctx, "peer request")
 	defer span.End()
+
 	s, err := me.getStream(ctx)
 	if err != nil {
 		return nil, xerrors.Errorf("getting stream: %w", err)
 	}
+
 	type requestResult struct {
 		*pb.Message
 		error
@@ -140,6 +150,7 @@ func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message) (*pb.M
 		rrCh <- requestResult{resp, err}
 		me.putStream(s, err)
 	}()
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -148,6 +159,7 @@ func (me *peerStreamPool) doRequest(ctx context.Context, req *pb.Message) (*pb.M
 	}
 }
 
+// Wakes a waiter, setting the stream and error if the waiter is not already done.
 func (me *peerStreamPool) resolveWaiter(w *streamWaiter, s *stream, err error) bool {
 	if w.done {
 		return false

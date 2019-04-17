@@ -39,7 +39,8 @@ type stream struct {
 
 	// Synchronizes m and readerErr.
 	mu sync.Mutex
-	// Receives channels to send responses on.
+	// Receives channels to send responses on. When a message is read, it's expected that a channel
+	// is available to consume it immediately.
 	m         chan chan *pb.Message
 	readerErr error
 }
@@ -71,6 +72,8 @@ func (me *stream) request(ctx context.Context, req *pb.Message) (*pb.Message, er
 	case me.m <- replyChan:
 	default:
 		me.mu.Unlock()
+		// There's already an ongoing request on this stream. There should never be more than one
+		// user of a stream at a time.
 		panic("message pipeline full")
 	}
 	me.mu.Unlock()

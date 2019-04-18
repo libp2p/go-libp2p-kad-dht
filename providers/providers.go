@@ -31,7 +31,7 @@ type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
 	// the run method
 	providers *lru.LRU
-	dstore    ds.Datastore
+	dstore    *autobatch.Datastore
 
 	newprovs chan *addProv
 	getprovs chan *getProv
@@ -233,6 +233,8 @@ func (pm *ProviderManager) gc() {
 func (pm *ProviderManager) run(proc goprocess.Process) {
 	tick := time.NewTicker(pm.cleanupInterval)
 	defer tick.Stop()
+	defer pm.dstore.Flush()
+
 	for {
 		select {
 		case np := <-pm.newprovs:

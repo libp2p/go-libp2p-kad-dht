@@ -193,8 +193,7 @@ func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) 
 
 func (pm *ProviderManager) gc() {
 	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: true,
-		Prefix:   providersKeyPrefix,
+		Prefix: providersKeyPrefix,
 	})
 	if err != nil {
 		log.Error("error garbage collecting provider records: ", err)

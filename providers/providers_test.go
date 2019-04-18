@@ -129,38 +129,62 @@ func TestProvidesExpire(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	ds := dssync.MutexWrap(ds.NewMapDatastore())
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	p := NewProviderManager(ctx, mid, ds)
 
 	peers := []peer.ID{"a", "b"}
 	var cids []cid.Cid
 	for i := 0; i < 10; i++ {
 		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
 		cids = append(cids, c)
+	}
+
+	for _, c := range cids[:5] {
 		p.AddProvider(ctx, c, peers[0])
 		p.AddProvider(ctx, c, peers[1])
 	}
 
-	for i := 0; i < 10; i++ {
-		out := p.GetProviders(ctx, cids[i])
+	time.Sleep(time.Second / 4)
+
+	for _, c := range cids[5:] {
+		p.AddProvider(ctx, c, peers[0])
+		p.AddProvider(ctx, c, peers[1])
+	}
+
+	for _, c := range cids {
+		out := p.GetProviders(ctx, c)
 		if len(out) != 2 {
 			t.Fatal("expected providers to still be there")
 		}
 	}
 
-	time.Sleep(time.Second)
-	for i := 0; i < 10; i++ {
-		out := p.GetProviders(ctx, cids[i])
+	time.Sleep(3 * time.Second / 8)
+
+	for _, c := range cids[:5] {
+		out := p.GetProviders(ctx, c)
 		if len(out) > 0 {
 			t.Fatal("expected providers to be cleaned up, got: ", out)
 		}
 	}
 
+	for _, c := range cids[5:] {
+		out := p.GetProviders(ctx, c)
+		if len(out) != 2 {
+			t.Fatal("expected providers to still be there")
+		}
+	}
+
+	time.Sleep(time.Second / 2)
+
+	// Stop to prevent data races
+	p.Process().Close()
+
 	if p.providers.Len() != 0 {
 		t.Fatal("providers map not cleaned up")
 	}
 
-	res, err := p.dstore.Query(dsq.Query{Prefix: providersKeyPrefix})
+	res, err := ds.Query(dsq.Query{Prefix: providersKeyPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}

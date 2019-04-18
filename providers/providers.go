@@ -15,6 +15,7 @@ import (
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
+	periodicproc "github.com/jbenet/goprocess/periodic"
 	peer "github.com/libp2p/go-libp2p-peer"
 	base32 "github.com/whyrusleeping/base32"
 )
@@ -31,7 +32,8 @@ type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
 	// the run method
 	providers *lru.LRU
-	dstore    *autobatch.Datastore
+	dstore    ds.Batching
+	batchds   *autobatch.Datastore
 
 	newprovs chan *addProv
 	getprovs chan *getProv
@@ -59,7 +61,8 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 	pm := new(ProviderManager)
 	pm.getprovs = make(chan *getProv)
 	pm.newprovs = make(chan *addProv)
-	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
+	pm.dstore = dstore
+	pm.batchds = autobatch.NewAutoBatching(dstore, batchBufferSize)
 	cache, err := lru.NewLRU(lruCacheSize, nil)
 	if err != nil {
 		panic(err) //only happens if negative value is passed to lru constructor
@@ -69,6 +72,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 	pm.proc = goprocessctx.WithContext(ctx)
 	pm.cleanupInterval = defaultCleanupInterval
 	pm.proc.Go(pm.run)
+	pm.proc.AddChild(periodicproc.Tick(pm.cleanupInterval, pm.gc))
 
 	return pm
 }
@@ -97,7 +101,7 @@ func (pm *ProviderManager) getProvSet(k cid.Cid) (*providerSet, error) {
 		return cached.(*providerSet), nil
 	}
 
-	pset, err := loadProvSet(pm.dstore, k)
+	pset, err := loadProvSet(pm.batchds, k)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +183,7 @@ func (pm *ProviderManager) addProv(k cid.Cid, p peer.ID) error {
 		provs.(*providerSet).setVal(p, now)
 	} // else not cached, just write through
 
-	return writeProviderEntry(pm.dstore, k, p, now)
+	return writeProviderEntry(pm.batchds, k, p, now)
 }
 
 func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) error {
@@ -191,7 +195,22 @@ func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) 
 	return dstore.Put(ds.NewKey(dsk), buf[:n])
 }
 
-func (pm *ProviderManager) gc() {
+func (pm *ProviderManager) gc(proc goprocess.Process) {
+	// Don't use the batching dstore, it's not thread-safe and we call this
+	// in a separate thread.
+
+	// Note 1: we'll ignore some puts/deletes buffered in the batching
+	// datastore. Basically, this means we may not GC something we should be
+	// GCing but, meh.
+	//
+	// Note 2: there's a tiny race where we may remove a non-expired provider record:
+	//
+	// 1. Record expires.
+	// 2. We start a query for the record.
+	// 3. New put comes through for the record.
+	//
+	// While fixable, I'm not sure it's worth it as the DHT isn't supposed
+	// to have reliable storage anyways.
 	res, err := pm.dstore.Query(dsq.Query{
 		Prefix: providersKeyPrefix,
 	})
@@ -201,16 +220,33 @@ func (pm *ProviderManager) gc() {
 	}
 	defer res.Close()
 
+	batch, err := pm.dstore.Batch()
+	if err != nil {
+		log.Error("failed to create batch for provider gc: ", err)
+		return
+	}
+	defer func() {
+		err := batch.Commit()
+		if err != nil {
+			log.Error("failed to commit batch gc: ", err)
+		}
+	}()
+
 	now := time.Now()
 	for {
-		e, ok := res.NextSync()
-		if !ok {
+		var e dsq.Entry
+		select {
+		case r, ok := <-res.Next():
+			if !ok {
+				return
+			}
+			if r.Error != nil {
+				log.Error("got an error: ", r.Error)
+				continue
+			}
+			e = r.Entry
+		case <-proc.Closing():
 			return
-		}
-
-		if e.Error != nil {
-			log.Error("got an error: ", e.Error)
-			continue
 		}
 
 		// check expiration time
@@ -222,7 +258,7 @@ func (pm *ProviderManager) gc() {
 			fallthrough
 		case now.Sub(t) > ProvideValidity:
 			// or just expired
-			err = pm.dstore.Delete(ds.RawKey(e.Key))
+			err = batch.Delete(ds.RawKey(e.Key))
 			if err != nil {
 				log.Warning("failed to remove provider record from disk: ", err)
 			}
@@ -256,7 +292,6 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 			//
 			// Much faster than GCing.
 			pm.providers.Purge()
-			pm.gc()
 		case <-proc.Closing():
 			return
 		}

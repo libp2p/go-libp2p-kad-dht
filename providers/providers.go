@@ -31,7 +31,7 @@ type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
 	// the run method
 	providers *lru.LRU
-	dstore    ds.Datastore
+	dstore    *autobatch.Datastore
 
 	newprovs chan *addProv
 	getprovs chan *getProv
@@ -193,8 +193,7 @@ func writeProviderEntry(dstore ds.Datastore, k cid.Cid, p peer.ID, t time.Time) 
 
 func (pm *ProviderManager) gc() {
 	res, err := pm.dstore.Query(dsq.Query{
-		KeysOnly: true,
-		Prefix:   providersKeyPrefix,
+		Prefix: providersKeyPrefix,
 	})
 	if err != nil {
 		log.Error("error garbage collecting provider records: ", err)
@@ -234,6 +233,8 @@ func (pm *ProviderManager) gc() {
 func (pm *ProviderManager) run(proc goprocess.Process) {
 	tick := time.NewTicker(pm.cleanupInterval)
 	defer tick.Stop()
+	defer pm.dstore.Flush()
+
 	for {
 		select {
 		case np := <-pm.newprovs:

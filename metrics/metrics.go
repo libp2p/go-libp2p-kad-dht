@@ -41,7 +41,7 @@ var (
 	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
 )
 
-var Views = []*view.View{
+var DefaultViews = []*view.View{
 	&view.View{
 		Measure:     ReceivedMessages,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},

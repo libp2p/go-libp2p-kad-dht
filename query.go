@@ -9,6 +9,7 @@ import (
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pset "github.com/libp2p/go-libp2p-peer/peerset"
@@ -58,6 +59,11 @@ type queryFunc func(context.Context, peer.ID) (*dhtQueryResult, error)
 
 // Run runs the query at hand. pass in a list of peers to use first.
 func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
+	if len(peers) == 0 {
+		logger.Warning("Running query with no peers!")
+		return nil, kb.ErrLookupFailure
+	}
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -120,11 +126,6 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
 	r.log = logger
 	r.runCtx = ctx
-
-	if len(peers) == 0 {
-		logger.Warning("Running query with no peers!")
-		return nil, nil
-	}
 
 	// setup concurrency rate limiting
 	for i := 0; i < r.query.concurrency; i++ {

@@ -495,6 +495,15 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		}
 	}
 
+	peers := dht.routingTable.NearestPeers(kb.ConvertKey(key.KeyString()), AlphaValue)
+	if len(peers) == 0 {
+		notif.PublishQueryEvent(ctx, &notif.QueryEvent{
+			Type:  notif.QueryError,
+			Extra: kb.ErrLookupFailure.Error(),
+		})
+		return
+	}
+
 	// setup the Query
 	parent := ctx
 	query := dht.newQuery(key.KeyString(), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
@@ -545,7 +554,6 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		return &dhtQueryResult{closerPeers: clpeers}, nil
 	})
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertKey(key.KeyString()), AlphaValue)
 	_, err := query.Run(ctx, peers)
 	if err != nil {
 		logger.Debugf("Query error: %s", err)

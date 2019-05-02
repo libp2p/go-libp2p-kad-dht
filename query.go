@@ -135,7 +135,7 @@ func (r *dhtQueryRunner) run(ctx context.Context, peers []peer.ID) ([]peer.ID, e
 
 func (r *dhtQueryRunner) recurse(ctx context.Context, peers []peer.ID) error {
 	// setup concurrency rate limiting
-	for i := 0; i < r.query.concurrency; i++ {
+	for len(r.rateLimit) < cap(r.rateLimit) {
 		r.rateLimit <- struct{}{}
 	}
 

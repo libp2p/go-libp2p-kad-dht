@@ -28,6 +28,14 @@ import (
 // results will wait for the channel to drain.
 var asyncQueryBuffer = 10
 
+const (
+	// Timeout for a FindPeer (not FindPeerAsync) request.
+	findPeerTimeout = time.Minute
+
+	// Time to wait for more addresses after we've seen the first one in FindPeer
+	findPeerWaitTimeout = 5 * time.Second
+)
+
 // This file implements the Routing interface for the IpfsDHT struct.
 
 // Basic Put/Get
@@ -549,6 +557,9 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pinfo peer.AddrInfo, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	eip := logger.EventBegin(ctx, "FindPeer", id)
 	defer func() {
 		if err != nil {
@@ -564,8 +575,22 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pinfo peer.AddrIn
 		return pinfo, err
 	}
 
-	for addr := range addrs {
-		pinfo.Addrs = append(pinfo.Addrs, addr)
+	timeout := time.NewTimer(findPeerTimeout)
+	defer timeout.Stop()
+loop:
+	for {
+		select {
+		case <-timeout.C:
+			break loop
+		case addr, ok := <-addrs:
+			if !ok {
+				break loop
+			}
+			// Wait a bit just in case we get some additional
+			// answers.
+			timeout.Reset(findPeerWaitTimeout)
+			pinfo.Addrs = append(pinfo.Addrs, addr)
+		}
 	}
 
 	if len(pinfo.Addrs) == 0 {

@@ -615,7 +615,7 @@ func (dht *IpfsDHT) FindPeerAsync(ctx context.Context, id peer.ID) (<-chan ma.Mu
 		return nil, kb.ErrLookupFailure
 	}
 
-	out := make(chan ma.Multiaddr)
+	out := make(chan ma.Multiaddr, 16)
 	inp := make(chan []ma.Multiaddr)
 
 	go func(in <-chan []ma.Multiaddr) {
@@ -629,10 +629,20 @@ func (dht *IpfsDHT) FindPeerAsync(ctx context.Context, id peer.ID) (<-chan ma.Mu
 				sendCh  chan ma.Multiaddr
 				sendVal ma.Multiaddr
 			)
-			if len(queue) > 0 {
-				sendCh = out
-				sendVal = queue[len(queue)-1]
+
+		drain:
+			for len(queue) > 0 {
+				select {
+				case out <- queue[len(queue)-1]:
+					queue[len(queue)-1] = nil
+					queue = queue[:len(queue)-1]
+				default:
+					sendCh = out
+					sendVal = queue[len(queue)-1]
+					break drain
+				}
 			}
+
 			select {
 			case <-ctx.Done():
 				return

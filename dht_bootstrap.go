@@ -68,12 +68,12 @@ var DefaultBootstrapConfig = BootstrapConfig{
 
 // A method in the IpfsRouting interface. It calls BootstrapWithConfig with
 // the default bootstrap config.
-func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
+func (dht *KadDHT) Bootstrap(ctx context.Context) error {
 	return dht.BootstrapWithConfig(ctx, DefaultBootstrapConfig)
 }
 
 // Runs cfg.Queries bootstrap queries every cfg.Period.
-func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig) error {
+func (dht *KadDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig) error {
 	// Because this method is not synchronous, we have to duplicate sanity
 	// checks on the config so that callers aren't oblivious.
 	if cfg.Queries <= 0 {
@@ -97,7 +97,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 
 // This is a synchronous bootstrap. cfg.Queries queries will run each with a
 // timeout of cfg.Timeout. cfg.Period is not used.
-func (dht *IpfsDHT) BootstrapOnce(ctx context.Context, cfg BootstrapConfig) error {
+func (dht *KadDHT) BootstrapOnce(ctx context.Context, cfg BootstrapConfig) error {
 	if cfg.Queries <= 0 {
 		return fmt.Errorf("invalid number of queries: %d", cfg.Queries)
 	}
@@ -112,7 +112,7 @@ func newRandomPeerId() peer.ID {
 }
 
 // Traverse the DHT toward the given ID.
-func (dht *IpfsDHT) walk(ctx context.Context, target peer.ID) (pstore.PeerInfo, error) {
+func (dht *KadDHT) walk(ctx context.Context, target peer.ID) (pstore.PeerInfo, error) {
 	// TODO: Extract the query action (traversal logic?) inside FindPeer,
 	// don't actually call through the FindPeer machinery, which can return
 	// things out of the peer store etc.
@@ -120,7 +120,7 @@ func (dht *IpfsDHT) walk(ctx context.Context, target peer.ID) (pstore.PeerInfo, 
 }
 
 // Traverse the DHT toward a random ID.
-func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
+func (dht *KadDHT) randomWalk(ctx context.Context) error {
 	id := newRandomPeerId()
 	p, err := dht.walk(ctx, id)
 	switch err {
@@ -137,7 +137,7 @@ func (dht *IpfsDHT) randomWalk(ctx context.Context) error {
 }
 
 // Traverse the DHT toward the self ID
-func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
+func (dht *KadDHT) selfWalk(ctx context.Context) error {
 	_, err := dht.walk(ctx, dht.self)
 	if err == routing.ErrNotFound {
 		return nil
@@ -146,7 +146,7 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 }
 
 // runBootstrap builds up list of peers by requesting random peer IDs
-func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
+func (dht *KadDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
 	doQuery := func(n int, target string, f func(context.Context) error) error {
 		logger.Infof("starting bootstrap query (%d/%d) to %s (routing table size was %d)",
 			n, cfg.Queries, target, dht.routingTable.Size())
@@ -175,10 +175,10 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	return doQuery(cfg.Queries, fmt.Sprintf("self: %s", dht.self), dht.selfWalk)
 }
 
-func (dht *IpfsDHT) BootstrapRandom(ctx context.Context) error {
+func (dht *KadDHT) BootstrapRandom(ctx context.Context) error {
 	return dht.randomWalk(ctx)
 }
 
-func (dht *IpfsDHT) BootstrapSelf(ctx context.Context) error {
+func (dht *KadDHT) BootstrapSelf(ctx context.Context) error {
 	return dht.selfWalk(ctx)
 }

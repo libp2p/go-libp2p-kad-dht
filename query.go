@@ -25,7 +25,7 @@ var ErrNoPeersQueried = errors.New("failed to query any peers")
 var maxQueryConcurrency = AlphaValue
 
 type dhtQuery struct {
-	dht         *IpfsDHT
+	dht         *KadDHT
 	key         string    // the key we're querying for
 	qfunc       queryFunc // the function to execute per peer
 	concurrency int       // the concurrency parameter
@@ -41,7 +41,7 @@ type dhtQueryResult struct {
 }
 
 // constructs query
-func (dht *IpfsDHT) newQuery(k string, f queryFunc) *dhtQuery {
+func (dht *KadDHT) newQuery(k string, f queryFunc) *dhtQuery {
 	return &dhtQuery{
 		key:         k,
 		dht:         dht,

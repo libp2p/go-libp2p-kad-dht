@@ -11,7 +11,7 @@ require (
 	github.com/ipfs/go-todocounter v0.0.1
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99
 	github.com/jbenet/goprocess v0.1.3
-	github.com/libp2p/go-libp2p v0.0.26
+	github.com/libp2p/go-libp2p v0.0.27
 	github.com/libp2p/go-libp2p-crypto v0.0.2
 	github.com/libp2p/go-libp2p-host v0.0.3
 	github.com/libp2p/go-libp2p-kbucket v0.1.1
@@ -21,7 +21,7 @@ require (
 	github.com/libp2p/go-libp2p-protocol v0.0.1
 	github.com/libp2p/go-libp2p-record v0.0.1
 	github.com/libp2p/go-libp2p-routing v0.0.1
-	github.com/libp2p/go-libp2p-swarm v0.0.5
+	github.com/libp2p/go-libp2p-swarm v0.0.6
 	github.com/libp2p/go-testutil v0.0.1
 	github.com/mr-tron/base58 v1.1.2
 	github.com/multiformats/go-multiaddr v0.0.4

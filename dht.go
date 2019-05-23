@@ -15,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 
+	periodicproc "github.com/jbenet/goprocess/periodic"
 	"go.opencensus.io/tag"
 	"golang.org/x/xerrors"
 
@@ -36,6 +37,10 @@ import (
 )
 
 var logger = logging.Logger("dht")
+
+// NumBootstrapQueries defines the number of random dht queries to do to
+// collect members of the routing table.
+const NumBootstrapQueries = 5
 
 const BaseConnMgrScore = 5
 
@@ -111,14 +116,38 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableValues = cfg.EnableValues
 	dht.bootstrapCfg = cfg.BootstrapConfig
 
-	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
-
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*netNotifiee)(dht))
 		return nil
 	})
+
+	var (
+		candidates []peer.ID
+		err        error
+	)
+
+	if cfg.Persistence.Snapshotter != nil {
+		candidates, err = cfg.Persistence.Snapshotter.Load()
+		if err != nil {
+			logger.Warningf("error while loading snapshot of DHT routing table: %s", err)
+		}
+		sproc := periodicproc.Tick(cfg.Persistence.SnapshotInterval, func(proc goprocess.Process) {
+			logger.Debugf("storing snapshot of DHT routing table")
+			err := cfg.Persistence.Snapshotter.Store(dht.routingTable)
+			if err != nil {
+				logger.Warningf("error while storing snapshot of DHT routing table snapshot: %s", err)
+			}
+		})
+		dht.proc.AddChild(sproc)
+	}
+
+	if err := cfg.Persistence.Seeder.Seed(dht.routingTable, candidates, cfg.Persistence.FallbackPeers); err != nil {
+		logger.Warningf("error while seedindg candidates to the routing table: %s", err)
+	}
+
+	// register for network notifs.
+	dht.host.Network().Notify((*netNotifiee)(dht))
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator

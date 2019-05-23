@@ -6,9 +6,9 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	protocol "github.com/libp2p/go-libp2p-core/protocol"
-	persist "github.com/libp2p/go-libp2p-kad-dht/persist"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p-kad-dht/persist"
 	"github.com/libp2p/go-libp2p-record"
 )
 
@@ -33,8 +33,10 @@ type PersistConfig struct {
 	Snapshotter      persist.Snapshotter
 	Seeder           persist.Seeder
 	SnapshotInterval time.Duration
-	FallbackPeers    []pstore.PeerInfo
+	FallbackPeers    []peer.ID
 }
+
+var DefaultSnapshotInterval = 5 * time.Minute
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
@@ -95,6 +97,9 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 		o.RoutingTable.RefreshQueryTimeout = timeout
 		return nil
 	}
+	o.Persistence = new(PersistConfig)
+	o.Persistence.SnapshotInterval = DefaultSnapshotInterval
+	return nil
 }
 
 // RoutingTableRefreshPeriod sets the period for refreshing buckets in the
@@ -110,12 +115,24 @@ func RoutingTableRefreshPeriod(period time.Duration) Option {
 	}
 }
 
-// Persist configures routing table persistence and seeding.
-//
-// Defaults to volatile routing tables.
-func Persist(config *PersistConfig) Option {
+func Seeder(seeder persist.Seeder) Option {
 	return func(o *Options) error {
-		o.Persistence = config
+		o.Persistence.Seeder = seeder
+		return nil
+	}
+}
+
+func Snapshotter(snpshttr persist.Snapshotter, interval time.Duration) Option {
+	return func(o *Options) error {
+		o.Persistence.Snapshotter = snpshttr
+		o.Persistence.SnapshotInterval = interval
+		return nil
+	}
+}
+
+func FallbackPeers(fallback []peer.ID) Option {
+	return func(o *Options) error {
+		o.Persistence.FallbackPeers = fallback
 		return nil
 	}
 }

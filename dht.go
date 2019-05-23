@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	periodicproc "github.com/jbenet/goprocess/periodic"
 	"golang.org/x/xerrors"
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
@@ -80,16 +81,41 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, &cfg)
 
-	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
+	dht := makeDHT(ctx, h, &cfg)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*netNotifiee)(dht))
 		return nil
 	})
+
+	var (
+		candidates []peer.ID
+		err        error
+	)
+
+	if cfg.Snapshotter != nil {
+		candidates, err = cfg.Snapshotter.Load()
+		if err != nil {
+			logger.Warningf("error while loading snapshot of DHT routing table: %s", err)
+		}
+		sproc := periodicproc.Tick(cfg.SnapshotInterval, func(proc goprocess.Process) {
+			logger.Debugf("storing snapshot of DHT routing table")
+			err := cfg.Snapshotter.Store(dht.routingTable)
+			if err != nil {
+				logger.Warningf("error while storing snapshot of DHT routing table snapshot: %s", err)
+			}
+		})
+		dht.proc.AddChild(sproc)
+	}
+
+	if err := cfg.Seeder.Seed(dht.routingTable, candidates, cfg.FallbackPeers); err != nil {
+		logger.Warningf("error while seedindg candidates to the routing table: %s", err)
+	}
+
+	// register for network notifs.
+	dht.host.Network().Notify((*netNotifiee)(dht))
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
@@ -134,20 +160,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 	}
 	rt.PeerRemoved = func(p peer.ID) {
 		cmgr.UntagPeer(p, "kbucket")
-	}
-
-	// TODO this is just an example of how the Persist/Seeder API would be used.
-	//  We should set the Snapshotter and the Seeder as fielkds in IpfsDHT.
-	if cfg.Persistence != nil {
-		if cfg.Persistence.Snapshotter != nil && cfg.Persistence.Seeder != nil {
-			candidates, err := cfg.Persistence.Snapshotter.Load()
-			if err != nil {
-				logger.Warningf("error while loading a previous snapshot: %s", err)
-			}
-			if err = cfg.Persistence.Seeder.Seed(rt, candidates, cfg.Persistence.FallbackPeers); err != nil {
-				logger.Warningf("error while seedindg candidates to the routing table: %s", err)
-			}
-		}
 	}
 
 	return &IpfsDHT{

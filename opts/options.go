@@ -15,21 +15,18 @@ import (
 var ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
 var ProtocolDHTOld protocol.ID = "/ipfs/dht"
 var DefaultProtocols = []protocol.ID{ProtocolDHT, ProtocolDHTOld}
+var DefaultSnapshotInterval = 5 * time.Minute
 
-type PersistConfig struct {
+// Options is a structure containing all the options that can be used when constructing a DHT.
+type Options struct {
+	Datastore        ds.Batching
+	Validator        record.Validator
+	Client           bool
+	Protocols        []protocol.ID
 	Snapshotter      persist.Snapshotter
 	Seeder           persist.Seeder
 	SnapshotInterval time.Duration
 	FallbackPeers    []pstore.PeerInfo
-}
-
-// Options is a structure containing all the options that can be used when constructing a DHT.
-type Options struct {
-	Datastore   ds.Batching
-	Validator   record.Validator
-	Client      bool
-	Protocols   []protocol.ID
-	Persistence *PersistConfig
 }
 
 // Apply applies the given options to this Option
@@ -53,15 +50,28 @@ var Defaults = func(o *Options) error {
 	}
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
+	o.SnapshotInterval = DefaultSnapshotInterval
 	return nil
 }
 
-// Persist configures routing table persistence and seeding.
-//
-// Defaults to volatile routing tables.
-func Persist(config *PersistConfig) Option {
+func Seeder(seeder persist.Seeder) Option {
 	return func(o *Options) error {
-		o.Persistence = config
+		o.Seeder = seeder
+		return nil
+	}
+}
+
+func Snapshotter(snpshttr persist.Snapshotter, interval time.Duration) Option {
+	return func(o *Options) error {
+		o.Snapshotter = snpshttr
+		o.SnapshotInterval = interval
+		return nil
+	}
+}
+
+func FallbackPeers(fallback []pstore.PeerInfo) Option {
+	return func(o *Options) error {
+		o.FallbackPeers = fallback
 		return nil
 	}
 }

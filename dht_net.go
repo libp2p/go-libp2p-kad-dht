@@ -18,6 +18,7 @@ import (
 )
 
 var dhtReadMessageTimeout = time.Minute
+var dhtStreamIdleTimeout = 10 * time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 // The Protobuf writer performs multiple small writes when writing a message.
@@ -69,6 +70,9 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 	r := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
 	mPeer := s.Conn().RemotePeer()
 
+	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { s.Reset() })
+	defer timer.Stop()
+
 	for {
 		var req pb.Message
 		switch err := r.ReadMsg(&req); err {
@@ -88,6 +92,8 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			return false
 		case nil:
 		}
+
+		timer.Reset(dhtStreamIdleTimeout)
 
 		startTime := time.Now()
 		ctx, _ = tag.New(

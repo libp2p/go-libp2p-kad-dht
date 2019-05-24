@@ -178,15 +178,14 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 }
 
 func TestValueGetSet(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	var dhts [5]*IpfsDHT
 
 	for i := range dhts {
 		dhts[i] = setupDHT(ctx, t, false)
-		defer dhts[i].Close()
 		defer dhts[i].host.Close()
+		defer dhts[i].Close()
 	}
 
 	connect(t, ctx, dhts[0], dhts[1])
@@ -253,16 +252,15 @@ func TestValueGetSet(t *testing.T) {
 }
 
 func TestValueSetInvalid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhtA := setupDHT(ctx, t, false)
 	dhtB := setupDHT(ctx, t, false)
 
-	defer dhtA.Close()
-	defer dhtB.Close()
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
+	defer dhtA.Close()
+	defer dhtB.Close()
 
 	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
 	dhtB.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
@@ -306,16 +304,15 @@ func TestValueSetInvalid(t *testing.T) {
 }
 
 func TestSearchValue(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhtA := setupDHT(ctx, t, false)
 	dhtB := setupDHT(ctx, t, false)
 
-	defer dhtA.Close()
-	defer dhtB.Close()
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
+	defer dhtA.Close()
+	defer dhtB.Close()
 
 	connect(t, ctx, dhtA, dhtB)
 
@@ -362,16 +359,15 @@ func TestSearchValue(t *testing.T) {
 }
 
 func TestGetValues(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhtA := setupDHT(ctx, t, false)
 	dhtB := setupDHT(ctx, t, false)
 
-	defer dhtA.Close()
-	defer dhtB.Close()
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
+	defer dhtA.Close()
+	defer dhtB.Close()
 
 	connect(t, ctx, dhtA, dhtB)
 
@@ -410,16 +406,15 @@ func TestGetValues(t *testing.T) {
 }
 
 func TestValueGetInvalid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhtA := setupDHT(ctx, t, false)
 	dhtB := setupDHT(ctx, t, false)
 
-	defer dhtA.Close()
-	defer dhtB.Close()
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
+	defer dhtA.Close()
+	defer dhtB.Close()
 
 	dhtA.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
 	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
@@ -457,11 +452,9 @@ func TestValueGetInvalid(t *testing.T) {
 }
 
 func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dht := setupDHT(ctx, t, false)
-	defer dht.Close()
 
 	foo := peer.ID("asdasd")
 	_, err := dht.messageSenderForPeer(ctx, foo)
@@ -480,8 +473,7 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 
 func TestProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -530,8 +522,7 @@ func TestProvides(t *testing.T) {
 
 func TestLocalProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -616,8 +607,7 @@ func TestBootstrap(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	nDHTs := 30
 	dhts := setupDHTS(t, ctx, nDHTs)
@@ -669,8 +659,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	nDHTs := 30
 	dhts := setupDHTS(t, ctx, nDHTs)
@@ -724,8 +713,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 
 func TestProvidesMany(t *testing.T) {
 	t.Skip("this test doesn't work")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	nDHTs := 40
 	dhts := setupDHTS(t, ctx, nDHTs)
@@ -826,8 +814,7 @@ func TestProvidesAsync(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -868,8 +855,7 @@ func TestProvidesAsync(t *testing.T) {
 }
 
 func TestLayeredGet(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -907,8 +893,7 @@ func TestUnfindablePeer(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -943,8 +928,7 @@ func TestFindPeer(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -981,8 +965,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 4)
 	defer func() {
@@ -1095,10 +1078,10 @@ func TestConnectCollision(t *testing.T) {
 }
 
 func TestBadProtoMessages(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	ctx := context.Background()
 	d := setupDHT(ctx, t, false)
+	defer d.host.Close()
+	defer d.Close()
 
 	nilrec := new(pb.Message)
 	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
@@ -1107,11 +1090,15 @@ func TestBadProtoMessages(t *testing.T) {
 }
 
 func TestClientModeConnect(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	a := setupDHT(ctx, t, false)
 	b := setupDHT(ctx, t, true)
+
+	defer a.host.Close()
+	defer b.host.Close()
+	defer a.Close()
+	defer b.Close()
 
 	connectNoSync(t, ctx, a, b)
 
@@ -1147,6 +1134,13 @@ func TestClientModeFindPeer(t *testing.T) {
 	a := setupDHT(ctx, t, false)
 	b := setupDHT(ctx, t, true)
 	c := setupDHT(ctx, t, true)
+
+	defer a.host.Close()
+	defer b.host.Close()
+	defer c.host.Close()
+	defer a.Close()
+	defer b.Close()
+	defer c.Close()
 
 	connectNoSync(t, ctx, b, a)
 	connectNoSync(t, ctx, c, a)
@@ -1196,14 +1190,13 @@ func testFindPeerQuery(t *testing.T,
 	leafs, // Number of nodes that might be connected to from the bootstrappers
 	bootstrapperLeafConns int, // Number of connections each bootstrapper has to the leaf nodes
 ) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	dhts := setupDHTS(t, ctx, 1+bootstrappers+leafs)
 	defer func() {
 		for _, d := range dhts {
 			d.Close()
-			d.host.Close()
+			defer d.host.Close()
 		}
 	}()
 
@@ -1257,8 +1250,7 @@ func testFindPeerQuery(t *testing.T,
 }
 
 func TestFindClosestPeers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	nDHTs := 30
 	dhts := setupDHTS(t, ctx, nDHTs)
@@ -1291,8 +1283,7 @@ func TestFindClosestPeers(t *testing.T) {
 
 func TestGetSetPluggedProtocol(t *testing.T) {
 	t.Run("PutValue/GetValue - same protocol", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := context.Background()
 
 		os := []opts.Option{
 			opts.Protocols("/esh/dht"),
@@ -1304,11 +1295,15 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer dhtA.host.Close()
+		defer dhtA.Close()
 
 		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer dhtB.host.Close()
+		defer dhtB.Close()
 
 		connect(t, ctx, dhtA, dhtB)
 
@@ -1340,6 +1335,8 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer dhtA.host.Close()
+		defer dhtA.Close()
 
 		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/lsr/dht"),
@@ -1349,6 +1346,8 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer dhtB.host.Close()
+		defer dhtB.Close()
 
 		connectNoSync(t, ctx, dhtA, dhtB)
 
@@ -1370,18 +1369,27 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	ds := setupDHTS(t, ctx, 2)
+	defer func() {
+		for i := 0; i < len(ds); i++ {
+			ds[i].Close()
+			defer ds[i].host.Close()
+		}
+	}()
+
 	ds[0].Host().Peerstore().AddAddrs(ds[1].PeerID(), ds[1].Host().Addrs(), pstore.AddressTTL)
 	assert.NoError(t, ds[0].Ping(context.Background(), ds[1].PeerID()))
 }
 
 func TestClientModeAtInit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	pinger := setupDHT(ctx, t, false)
+	defer pinger.host.Close()
+	defer pinger.Close()
 	client := setupDHT(ctx, t, true)
+	defer client.host.Close()
+	defer client.Close()
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), pstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))

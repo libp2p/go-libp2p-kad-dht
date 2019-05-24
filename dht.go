@@ -56,8 +56,9 @@ type IpfsDHT struct {
 
 	Validator record.Validator
 
-	ctx  context.Context
-	proc goprocess.Process
+	ctx    context.Context
+	cancel context.CancelFunc
+	proc   goprocess.Process
 
 	strmap map[peer.ID]*messageSender
 	smlk   sync.Mutex
@@ -88,7 +89,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
 
-	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
+	dht.proc = goprocessctx.WithContextAndTeardown(dht.ctx, func() error {
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*netNotifiee)(dht))
 		return nil
@@ -129,6 +130,8 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
+	ctx, cancel := context.WithCancel(ctx)
+
 	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
@@ -146,6 +149,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		host:         h,
 		strmap:       make(map[peer.ID]*messageSender),
 		ctx:          ctx,
+		cancel:       cancel,
 		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:        time.Now(),
 		routingTable: rt,
@@ -381,6 +385,7 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
+	dht.cancel()
 	return dht.proc.Close()
 }
 

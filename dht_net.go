@@ -9,7 +9,6 @@ import (
 	"time"
 
 	ggio "github.com/gogo/protobuf/io"
-	ctxio "github.com/jbenet/go-context/io"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
@@ -19,6 +18,7 @@ import (
 )
 
 var dhtReadMessageTimeout = time.Minute
+var dhtStreamIdleTimeout = 10 * time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 // The Protobuf writer performs multiple small writes when writing a message.
@@ -67,11 +67,11 @@ func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 // Returns true on orderly completion of writes (so we can Close the stream).
 func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 	ctx := dht.ctx
-
-	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
-	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
-	r := ggio.NewDelimitedReader(cr, inet.MessageSizeMax)
+	r := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
 	mPeer := s.Conn().RemotePeer()
+
+	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { s.Reset() })
+	defer timer.Stop()
 
 	for {
 		var req pb.Message
@@ -92,6 +92,8 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 			return false
 		case nil:
 		}
+
+		timer.Reset(dhtStreamIdleTimeout)
 
 		startTime := time.Now()
 		ctx, _ = tag.New(
@@ -126,7 +128,7 @@ func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
 		}
 
 		// send out response msg
-		err = writeMsg(cw, resp)
+		err = writeMsg(s, resp)
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			logger.Debugf("error writing response: %v", err)

@@ -12,6 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/routing"
+
 	multistream "github.com/multiformats/go-multistream"
 
 	"golang.org/x/xerrors"
@@ -25,14 +29,11 @@ import (
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	peer "github.com/libp2p/go-libp2p-peer"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
-	routing "github.com/libp2p/go-libp2p-routing"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
+	ci "github.com/libp2p/go-libp2p-testing/ci"
+	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
-	ci "github.com/libp2p/go-testutil/ci"
-	travisci "github.com/libp2p/go-testutil/ci/travis"
 	ma "github.com/multiformats/go-multiaddr"
 )
 
@@ -127,8 +128,8 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 		t.Fatal("peers setup incorrectly: no local address")
 	}
 
-	a.peerstore.AddAddrs(idB, addrB, pstore.TempAddrTTL)
-	pi := pstore.PeerInfo{ID: idB}
+	a.peerstore.AddAddrs(idB, addrB, peerstore.TempAddrTTL)
+	pi := peer.AddrInfo{ID: idB}
 	if err := a.host.Connect(ctx, pi); err != nil {
 		t.Fatal(err)
 	}
@@ -1012,7 +1013,7 @@ func TestFindPeersConnectedToPeer(t *testing.T) {
 	}
 
 	// shouldFind := []peer.ID{peers[1], peers[3]}
-	var found []*pstore.PeerInfo
+	var found []*peer.AddrInfo
 	for nextp := range pchan {
 		found = append(found, nextp)
 	}
@@ -1056,14 +1057,14 @@ func TestConnectCollision(t *testing.T) {
 
 		errs := make(chan error)
 		go func() {
-			dhtA.peerstore.AddAddr(peerB, addrB, pstore.TempAddrTTL)
-			pi := pstore.PeerInfo{ID: peerB}
+			dhtA.peerstore.AddAddr(peerB, addrB, peerstore.TempAddrTTL)
+			pi := peer.AddrInfo{ID: peerB}
 			err := dhtA.host.Connect(ctx, pi)
 			errs <- err
 		}()
 		go func() {
-			dhtB.peerstore.AddAddr(peerA, addrA, pstore.TempAddrTTL)
-			pi := pstore.PeerInfo{ID: peerA}
+			dhtB.peerstore.AddAddr(peerA, addrA, peerstore.TempAddrTTL)
+			pi := peer.AddrInfo{ID: peerA}
 			err := dhtB.host.Connect(ctx, pi)
 			errs <- err
 		}()
@@ -1373,7 +1374,7 @@ func TestPing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ds := setupDHTS(t, ctx, 2)
-	ds[0].Host().Peerstore().AddAddrs(ds[1].PeerID(), ds[1].Host().Addrs(), pstore.AddressTTL)
+	ds[0].Host().Peerstore().AddAddrs(ds[1].PeerID(), ds[1].Host().Addrs(), peerstore.AddressTTL)
 	assert.NoError(t, ds[0].Ping(context.Background(), ds[1].PeerID()))
 }
 
@@ -1382,7 +1383,7 @@ func TestClientModeAtInit(t *testing.T) {
 	defer cancel()
 	pinger := setupDHT(ctx, t, false)
 	client := setupDHT(ctx, t, true)
-	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), pstore.AddressTTL)
+	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
 }

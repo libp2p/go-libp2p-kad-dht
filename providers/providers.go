@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/peer"
+
 	lru "github.com/hashicorp/golang-lru/simplelru"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -15,7 +17,6 @@ import (
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	peer "github.com/libp2p/go-libp2p-peer"
 	base32 "github.com/whyrusleeping/base32"
 )
 

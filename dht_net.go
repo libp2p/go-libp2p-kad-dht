@@ -8,11 +8,15 @@ import (
 	"sync"
 	"time"
 
-	ggio "github.com/gogo/protobuf/io"
+	"github.com/libp2p/go-libp2p-core/helpers"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	inet "github.com/libp2p/go-libp2p-net"
-	peer "github.com/libp2p/go-libp2p-peer"
+
+	ggio "github.com/gogo/protobuf/io"
+
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -55,8 +59,8 @@ func (w *bufferedDelimitedWriter) Flush() error {
 	return w.Writer.Flush()
 }
 
-// handleNewStream implements the inet.StreamHandler
-func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
+// handleNewStream implements the network.StreamHandler
+func (dht *IpfsDHT) handleNewStream(s network.Stream) {
 	defer s.Reset()
 	if dht.handleNewMessage(s) {
 		// Gracefully close the stream for writes.
@@ -65,9 +69,10 @@ func (dht *IpfsDHT) handleNewStream(s inet.Stream) {
 }
 
 // Returns true on orderly completion of writes (so we can Close the stream).
-func (dht *IpfsDHT) handleNewMessage(s inet.Stream) bool {
+func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	ctx := dht.ctx
-	r := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+	r := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+
 	mPeer := s.Conn().RemotePeer()
 
 	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { s.Reset() })
@@ -242,7 +247,7 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 }
 
 type messageSender struct {
-	s   inet.Stream
+	s   network.Stream
 	r   ggio.ReadCloser
 	lk  sync.Mutex
 	p   peer.ID
@@ -286,7 +291,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 		return err
 	}
 
-	ms.r = ggio.NewDelimitedReader(nstr, inet.MessageSizeMax)
+	ms.r = ggio.NewDelimitedReader(nstr, network.MessageSizeMax)
 	ms.s = nstr
 
 	return nil
@@ -322,7 +327,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			go inet.FullClose(ms.s)
+			go helpers.FullClose(ms.s)
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++
@@ -371,7 +376,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
-			go inet.FullClose(ms.s)
+			go helpers.FullClose(ms.s)
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++

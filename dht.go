@@ -8,6 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p-core/routing"
+
 	"go.opencensus.io/tag"
 	"golang.org/x/xerrors"
 
@@ -22,15 +29,9 @@ import (
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	host "github.com/libp2p/go-libp2p-host"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	inet "github.com/libp2p/go-libp2p-net"
-	peer "github.com/libp2p/go-libp2p-peer"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
-	protocol "github.com/libp2p/go-libp2p-protocol"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	routing "github.com/libp2p/go-libp2p-routing"
 	base32 "github.com/whyrusleeping/base32"
 )
 
@@ -41,11 +42,11 @@ var logger = logging.Logger("dht")
 const NumBootstrapQueries = 5
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
-// It is used to implement the base IpfsRouting module.
+// It is used to implement the base Routing module.
 type IpfsDHT struct {
-	host      host.Host        // the network services we need
-	self      peer.ID          // Local peer (yourself)
-	peerstore pstore.Peerstore // Peer Registry
+	host      host.Host           // the network services we need
+	self      peer.ID             // Local peer (yourself)
+	peerstore peerstore.Peerstore // Peer Registry
 
 	datastore ds.Datastore // Local data
 
@@ -71,7 +72,7 @@ type IpfsDHT struct {
 // guarantee, but we can use them to aid refactoring.
 var (
 	_ routing.ContentRouting = (*IpfsDHT)(nil)
-	_ routing.IpfsRouting    = (*IpfsDHT)(nil)
+	_ routing.Routing        = (*IpfsDHT)(nil)
 	_ routing.PeerRouting    = (*IpfsDHT)(nil)
 	_ routing.PubKeyFetcher  = (*IpfsDHT)(nil)
 	_ routing.ValueStore     = (*IpfsDHT)(nil)
@@ -182,7 +183,7 @@ var errInvalidRecord = errors.New("received invalid record")
 // key. It returns either the value or a list of closer peers.
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*pstore.PeerInfo, error) {
+func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
 
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
@@ -278,12 +279,12 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
-func (dht *IpfsDHT) FindLocal(id peer.ID) pstore.PeerInfo {
+func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
 	switch dht.host.Network().Connectedness(id) {
-	case inet.Connected, inet.CanConnect:
+	case network.Connected, network.CanConnect:
 		return dht.peerstore.PeerInfo(id)
 	default:
-		return pstore.PeerInfo{}
+		return peer.AddrInfo{}
 	}
 }
 

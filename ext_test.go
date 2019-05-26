@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
+
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	inet "github.com/libp2p/go-libp2p-net"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
-	routing "github.com/libp2p/go-libp2p-routing"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
@@ -35,7 +36,7 @@ func TestGetFailures(t *testing.T) {
 	d.Update(ctx, hosts[1].ID())
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
 		time.Sleep(400 * time.Millisecond)
 		s.Close()
 	})
@@ -58,10 +59,10 @@ func TestGetFailures(t *testing.T) {
 	t.Log("Timeout test passed.")
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
 		defer s.Close()
 
-		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
 		pbw := ggio.NewDelimitedWriter(s)
 
 		pmes := new(pb.Message)
@@ -116,7 +117,7 @@ func TestGetFailures(t *testing.T) {
 		}
 		defer s.Close()
 
-		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
 		pbw := ggio.NewDelimitedWriter(s)
 
 		if err := pbw.WriteMsg(&req); err != nil {
@@ -160,10 +161,10 @@ func TestNotFound(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+		host.SetStreamHandler(d.protocols[0], func(s network.Stream) {
 			defer s.Close()
 
-			pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
 			pbw := ggio.NewDelimitedWriter(s)
 
 			pmes := new(pb.Message)
@@ -175,7 +176,7 @@ func TestNotFound(t *testing.T) {
 			case pb.Message_GET_VALUE:
 				resp := &pb.Message{Type: pmes.Type}
 
-				ps := []pstore.PeerInfo{}
+				ps := []peer.AddrInfo{}
 				for i := 0; i < 7; i++ {
 					p := hosts[rand.Intn(len(hosts))].ID()
 					pi := host.Peerstore().PeerInfo(p)
@@ -239,10 +240,10 @@ func TestLessThanKResponses(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+		host.SetStreamHandler(d.protocols[0], func(s network.Stream) {
 			defer s.Close()
 
-			pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
 			pbw := ggio.NewDelimitedWriter(s)
 
 			pmes := new(pb.Message)
@@ -255,7 +256,7 @@ func TestLessThanKResponses(t *testing.T) {
 				pi := host.Peerstore().PeerInfo(hosts[1].ID())
 				resp := &pb.Message{
 					Type:        pmes.Type,
-					CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []pstore.PeerInfo{pi}),
+					CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []peer.AddrInfo{pi}),
 				}
 
 				if err := pbw.WriteMsg(resp); err != nil {
@@ -305,10 +306,10 @@ func TestMultipleQueries(t *testing.T) {
 
 	// It would be nice to be able to just get a value and succeed but then
 	// we'd need to deal with selectors and validators...
-	hosts[1].SetStreamHandler(d.protocols[0], func(s inet.Stream) {
+	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
 		defer s.Close()
 
-		pbr := ggio.NewDelimitedReader(s, inet.MessageSizeMax)
+		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
 		pbw := ggio.NewDelimitedWriter(s)
 
 		pmes := new(pb.Message)
@@ -321,7 +322,7 @@ func TestMultipleQueries(t *testing.T) {
 			pi := hosts[1].Peerstore().PeerInfo(hosts[0].ID())
 			resp := &pb.Message{
 				Type:        pmes.Type,
-				CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []pstore.PeerInfo{pi}),
+				CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []peer.AddrInfo{pi}),
 			}
 
 			if err := pbw.WriteMsg(resp); err != nil {

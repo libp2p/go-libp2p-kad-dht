@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	ci "github.com/libp2p/go-libp2p-crypto"
-	peer "github.com/libp2p/go-libp2p-peer"
-	routing "github.com/libp2p/go-libp2p-routing"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
+
+	ci "github.com/libp2p/go-libp2p-core/crypto"
 )
 
 // MaxRecordAge specifies the maximum time that any node will hold onto a record

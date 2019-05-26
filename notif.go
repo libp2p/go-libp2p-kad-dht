@@ -1,7 +1,9 @@
 package dht
 
 import (
-	inet "github.com/libp2p/go-libp2p-net"
+	"github.com/libp2p/go-libp2p-core/helpers"
+	"github.com/libp2p/go-libp2p-core/network"
+
 	ma "github.com/multiformats/go-multiaddr"
 	mstream "github.com/multiformats/go-multistream"
 )
@@ -13,7 +15,7 @@ func (nn *netNotifiee) DHT() *IpfsDHT {
 	return (*IpfsDHT)(nn)
 }
 
-func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
+func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 	dht := nn.DHT()
 	select {
 	case <-dht.Process().Closing():
@@ -29,7 +31,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 		// notifications are serialized but it's nice to be consistent.
 		dht.plk.Lock()
 		defer dht.plk.Unlock()
-		if dht.host.Network().Connectedness(p) == inet.Connected {
+		if dht.host.Network().Connectedness(p) == network.Connected {
 			dht.Update(dht.Context(), p)
 		}
 		return
@@ -41,7 +43,7 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	go nn.testConnection(v)
 }
 
-func (nn *netNotifiee) testConnection(v inet.Conn) {
+func (nn *netNotifiee) testConnection(v network.Conn) {
 	dht := nn.DHT()
 	p := v.RemotePeer()
 
@@ -53,7 +55,7 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 		// Connection error
 		return
 	}
-	defer inet.FullClose(s)
+	defer helpers.FullClose(s)
 
 	selected, err := mstream.SelectOneOf(dht.protocolStrs(), s)
 	if err != nil {
@@ -68,12 +70,12 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 	// event and add the peer to the routing table after removing it.
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
-	if dht.host.Network().Connectedness(p) == inet.Connected {
+	if dht.host.Network().Connectedness(p) == network.Connected {
 		dht.Update(dht.Context(), p)
 	}
 }
 
-func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
+func (nn *netNotifiee) Disconnected(n network.Network, v network.Conn) {
 	dht := nn.DHT()
 	select {
 	case <-dht.Process().Closing():
@@ -87,7 +89,7 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 	// we don't concurrently process a connect event.
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
-	if dht.host.Network().Connectedness(p) == inet.Connected {
+	if dht.host.Network().Connectedness(p) == network.Connected {
 		// We're still connected.
 		return
 	}
@@ -110,7 +112,7 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 	}()
 }
 
-func (nn *netNotifiee) OpenedStream(n inet.Network, v inet.Stream) {}
-func (nn *netNotifiee) ClosedStream(n inet.Network, v inet.Stream) {}
-func (nn *netNotifiee) Listen(n inet.Network, a ma.Multiaddr)      {}
-func (nn *netNotifiee) ListenClose(n inet.Network, a ma.Multiaddr) {}
+func (nn *netNotifiee) OpenedStream(n network.Network, v network.Stream) {}
+func (nn *netNotifiee) ClosedStream(n network.Network, v network.Stream) {}
+func (nn *netNotifiee) Listen(n network.Network, a ma.Multiaddr)         {}
+func (nn *netNotifiee) ListenClose(n network.Network, a ma.Multiaddr)    {}

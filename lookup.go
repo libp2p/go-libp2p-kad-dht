@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/libp2p/go-libp2p-core/peer"
+
 	cid "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	peer "github.com/libp2p/go-libp2p-peer"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 

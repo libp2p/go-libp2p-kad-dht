@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tu "github.com/libp2p/go-testutil"
+	tu "github.com/libp2p/go-libp2p-testing/etc"
 )
 
 func TestNotifieeMultipleConn(t *testing.T) {

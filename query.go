@@ -5,17 +5,18 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+
 	logging "github.com/ipfs/go-log"
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	inet "github.com/libp2p/go-libp2p-net"
-	peer "github.com/libp2p/go-libp2p-peer"
-	pset "github.com/libp2p/go-libp2p-peer/peerset"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
+
+	pstore "github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/routing"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
-	routing "github.com/libp2p/go-libp2p-routing"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
@@ -32,12 +33,12 @@ type dhtQuery struct {
 }
 
 type dhtQueryResult struct {
-	peer        *pstore.PeerInfo   // FindPeer
-	closerPeers []*pstore.PeerInfo // *
+	peer        *peer.AddrInfo   // FindPeer
+	closerPeers []*peer.AddrInfo // *
 	success     bool
 
-	finalSet   *pset.PeerSet
-	queriedSet *pset.PeerSet
+	finalSet   *peer.Set
+	queriedSet *peer.Set
 }
 
 // constructs query
@@ -79,8 +80,8 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 
 type dhtQueryRunner struct {
 	query          *dhtQuery        // query to run
-	peersSeen      *pset.PeerSet    // all peers queried. prevent querying same peer 2x
-	peersQueried   *pset.PeerSet    // peers successfully connected to and queried
+	peersSeen      *peer.Set        // all peers queried. prevent querying same peer 2x
+	peersQueried   *peer.Set        // peers successfully connected to and queried
 	peersDialed    *dialQueue       // peers we have dialed to
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
@@ -103,8 +104,8 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 	r := &dhtQueryRunner{
 		query:          q,
 		peersRemaining: todoctr.NewSyncCounter(),
-		peersSeen:      pset.New(),
-		peersQueried:   pset.New(),
+		peersSeen:      peer.NewSet(),
+		peersQueried:   peer.NewSet(),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		peersToQuery:   peersToQuery,
 		proc:           proc,
@@ -237,7 +238,7 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 
 func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 	// short-circuit if we're already connected.
-	if r.query.dht.host.Network().Connectedness(p) == inet.Connected {
+	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
 		return nil
 	}
 
@@ -247,7 +248,7 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 		ID:   p,
 	})
 
-	pi := pstore.PeerInfo{ID: p}
+	pi := peer.AddrInfo{ID: p}
 	if err := r.query.dht.host.Connect(ctx, pi); err != nil {
 		logger.Debugf("error connecting: %s", err)
 		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{

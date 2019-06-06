@@ -1275,6 +1275,10 @@ func TestFindClosestPeers(t *testing.T) {
 		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
 	}
 
+	for i := 0; i < nDHTs; i++ {
+		dhts[i].BootstrapOnce(ctx, DefaultBootstrapConfig)
+	}
+
 	peers, err := dhts[1].GetClosestPeers(ctx, "foo")
 	if err != nil {
 		t.Fatal(err)

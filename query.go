@@ -354,6 +354,13 @@ func (r *dhtQueryRunner) finish(ctx context.Context) ([]peer.ID, error) {
 		go func() {
 			defer wg.Done()
 			for p := range workQ {
+				if !requery && r.peersQueried.Contains(p) {
+					// no need to re-query this peer as we've already sent
+					// them this query.
+					resultQ <- p
+					return
+				}
+
 				if qfunc(ctx, p) == nil {
 					resultQ <- p
 					return
@@ -370,14 +377,6 @@ func (r *dhtQueryRunner) finish(ctx context.Context) ([]peer.ID, error) {
 	// No need to handle the context, assuming the _user_ does in rfunc.
 
 	for len(bucket) < KValue && len(closest) > 0 {
-		if !requery && r.peersQueried.Contains(closest[0]) {
-			// no need to re-query this peer as we've already sent
-			// them this query.
-			bucket = append(bucket, closest[0])
-			closest = closest[1:]
-			continue
-		}
-
 		select {
 		case workQ <- closest[0]:
 			closest = closest[1:]

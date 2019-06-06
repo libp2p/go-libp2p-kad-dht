@@ -92,7 +92,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return dht.putValueToPeer(ctx, p, rec)
 	})
 
-	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
+	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), KValue)
 	if len(tablepeers) == 0 {
 		return kb.ErrLookupFailure
 	}
@@ -300,7 +300,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 	}
 
 	// get closest peers in the routing table
-	rtp := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
+	rtp := dht.routingTable.NearestPeers(kb.ConvertKey(key), KValue)
 	logger.Debugf("peers in rt: %d %s", len(rtp), rtp)
 	if len(rtp) == 0 {
 		logger.Warning("No peers from routing table!")
@@ -392,7 +392,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 
 	dhtKey := key.KeyString()
 
-	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(dhtKey), AlphaValue)
+	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(dhtKey), KValue)
 	if len(tablepeers) == 0 {
 		return kb.ErrLookupFailure
 	}
@@ -462,7 +462,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		}
 	}
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertKey(key.KeyString()), AlphaValue)
+	peers := dht.routingTable.NearestPeers(kb.ConvertKey(key.KeyString()), KValue)
 	if len(peers) == 0 {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,
@@ -592,7 +592,7 @@ func (dht *IpfsDHT) FindPeerAsync(ctx context.Context, id peer.ID) (<-chan ma.Mu
 		return addrs, nil
 	}
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), AlphaValue)
+	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), KValue)
 	if len(peers) == 0 {
 		return nil, kb.ErrLookupFailure
 	}
@@ -698,7 +698,7 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 	peersSeen := make(map[peer.ID]struct{})
 	var peersSeenMx sync.Mutex
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), AlphaValue)
+	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), KValue)
 	if len(peers) == 0 {
 		return nil, kb.ErrLookupFailure
 	}

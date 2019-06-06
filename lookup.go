@@ -56,7 +56,7 @@ func loggableKey(k string) logging.LoggableMap {
 // to the given key
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
-	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
+	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), KValue)
 	if len(tablepeers) == 0 {
 		return nil, kb.ErrLookupFailure
 	}

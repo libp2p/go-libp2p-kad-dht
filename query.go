@@ -307,7 +307,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 			// add their addresses to the dialer's peerstore
 			r.query.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
 			r.addPeerToQuery(next.ID)
-			logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
+			// logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
 		}
 	} else {
 		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)

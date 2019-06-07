@@ -340,11 +340,17 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			ms.s.Reset()
 			ms.s = nil
 
+			elapsedTime := time.Since(startTime)
+			latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
+
 			if retry {
-				logger.Info("error writing message, bailing: ", err)
+				logger.Infof("[outbound rpc] error while writing fire-and-forget, bailing; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%v, providers=%v, elapsed_ms=%f",
+					err, ms.p, pmes.GetType(), c, pid, pmes.Key, pb.PBPeersToPeerInfos(pmes.GetCloserPeers()), pb.PBPeersToPeerInfos(pmes.ProviderPeers), latencyMillis)
 				return err
 			}
-			logger.Info("error writing message, trying again: ", err)
+			logger.Infof("[outbound rpc] error while writing fire-and-forget, trying again; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%v, providers=%v, elapsed_ms=%f",
+				err, ms.p, pmes.GetType(), c, pid, pmes.Key, pb.PBPeersToPeerInfos(pmes.GetCloserPeers()), pb.PBPeersToPeerInfos(pmes.ProviderPeers), latencyMillis)
+
 			retry = true
 			continue
 		}

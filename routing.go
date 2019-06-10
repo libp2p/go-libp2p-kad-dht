@@ -542,7 +542,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		// Give closer peers back to the query to be queried
 		closer := pmes.GetCloserPeers()
 		clpeers := pb.PBPeersToPeerInfos(closer)
-		logger.Debugf("got closer peers: %d %s", len(clpeers), clpeers)
+		// logger.Debugf("got closer peers: %d %s", len(clpeers), clpeers)
 
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type:      routing.PeerResponse,

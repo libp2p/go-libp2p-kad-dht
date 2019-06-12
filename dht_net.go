@@ -11,9 +11,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kbucket/keyspace"
+	"github.com/multiformats/go-multiaddr"
 
 	ggio "github.com/gogo/protobuf/io"
 	"github.com/ipfs/go-cid"
@@ -75,6 +76,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	r := ggio.NewDelimitedReader(s, network.MessageSizeMax)
 
 	mPeer := s.Conn().RemotePeer()
+	addr := s.Conn().RemoteMultiaddr()
 
 	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { s.Reset() })
 	defer timer.Stop()
@@ -117,8 +119,8 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		pid, _ := peer.IDFromBytes(req.Key)
 
 		// note: MessageType implements Stringer.
-		logger.Debugf("[inbound rpc] handling incoming message; from_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d",
-			mPeer, req.GetType(), c, pid, req.Key, len(req.GetCloserPeers()), len(req.ProviderPeers))
+		logger.Debugf("[inbound rpc] handling incoming message; from_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, remote_addr=%s",
+			mPeer, req.GetType(), c, pid, req.Key, len(req.GetCloserPeers()), len(req.ProviderPeers), addr)
 
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
@@ -140,8 +142,8 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			continue
 		}
 
-		logger.Debugf("[inbound rpc] writing response message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d",
-			mPeer, resp.GetType(), c, pid, req.Key, len(resp.GetCloserPeers()), len(resp.ProviderPeers))
+		logger.Debugf("[inbound rpc] writing response message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, remote_addr=%s",
+			mPeer, resp.GetType(), c, pid, req.Key, len(resp.GetCloserPeers()), len(resp.ProviderPeers), addr)
 
 		// send out response msg
 		err = writeMsg(s, resp)
@@ -155,8 +157,8 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 
 		// note: MessageType implements Stringer.
-		logger.Debugf("[inbound rpc] wrote response message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f",
-			mPeer, resp.GetType(), c, pid, req.Key, len(resp.GetCloserPeers()), len(resp.ProviderPeers), latencyMillis)
+		logger.Debugf("[inbound rpc] wrote response message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, remote_addr=%s",
+			mPeer, resp.GetType(), c, pid, req.Key, len(resp.GetCloserPeers()), len(resp.ProviderPeers), latencyMillis, addr)
 
 		stats.Record(ctx, metrics.InboundRequestLatency.M(latencyMillis))
 	}
@@ -326,14 +328,20 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	c, _ := cid.Cast(pmes.Key)
 	pid, _ := peer.IDFromBytes(pmes.Key)
 
+	distance := keyspace.ZeroPrefixLen(keyspace.XORKeySpace.Key(pmes.Key).Distance(keyspace.XORKeySpace.Key([]byte(ms.p))).Bytes())
+	var addr multiaddr.Multiaddr
+	if ms.s != nil {
+		addr = ms.s.Conn().RemoteMultiaddr()
+	}
+
 	for {
 		if err := ms.prep(ctx); err != nil {
 			return err
 		}
 
 		// note: MessageType implements Stringer.
-		logger.Debugf("[outbound rpc] writing fire-and-forget outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d",
-			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers))
+		logger.Debugf("[outbound rpc] writing fire-and-forget outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), distance, addr)
 
 		startTime := time.Now()
 		if err := ms.writeMsg(pmes); err != nil {
@@ -344,12 +352,12 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 
 			if retry {
-				logger.Infof("[outbound rpc] error while writing fire-and-forget, bailing; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f",
-					err, ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis)
+				logger.Infof("[outbound rpc] error while writing fire-and-forget, bailing; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+					err, ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
 				return err
 			}
-			logger.Infof("[outbound rpc] error while writing fire-and-forget, trying again; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f",
-				err, ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis)
+			logger.Infof("[outbound rpc] error while writing fire-and-forget, trying again; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+				err, ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
 
 			retry = true
 			continue
@@ -359,8 +367,8 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 
 		// note: MessageType implements Stringer.
-		logger.Debugf("[outbound rpc] wrote fire-and-forget outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f",
-			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis)
+		logger.Debugf("[outbound rpc] wrote fire-and-forget outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
@@ -383,6 +391,12 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 	c, _ := cid.Cast(pmes.Key)
 	pid, _ := peer.IDFromBytes(pmes.Key)
 
+	distance := keyspace.ZeroPrefixLen(keyspace.XORKeySpace.Key(pmes.Key).Distance(keyspace.XORKeySpace.Key([]byte(ms.p))).Bytes())
+	var addr multiaddr.Multiaddr
+	if ms.s != nil {
+		addr = ms.s.Conn().RemoteMultiaddr()
+	}
+
 	for {
 		if err := ms.prep(ctx); err != nil {
 			return nil, err
@@ -390,8 +404,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 
 		startTime := time.Now()
 		// note: MessageType implements Stringer.
-		logger.Debugf("[outbound rpc] writing request outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d",
-			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers))
+		logger.Debugf("[outbound rpc] writing request outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), distance, addr)
 
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
@@ -409,8 +423,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		elapsedTime := time.Since(startTime)
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 		// note: MessageType implements Stringer.
-		logger.Debugf("[outbound rpc] wrote request outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f",
-			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis)
+		logger.Debugf("[outbound rpc] wrote request outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
 
 		startTime = time.Now()
 
@@ -434,8 +448,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		c, _ = cid.Cast(mes.Key)
 		pid, _ = peer.IDFromBytes(pmes.Key)
 		// note: MessageType implements Stringer.
-		logger.Debugf("[outbound rpc] read response message; from_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f",
-			ms.p, mes.GetType(), c, pid, mes.Key, len(mes.GetCloserPeers()), len(mes.ProviderPeers), latencyMillis)
+		logger.Debugf("[outbound rpc] read response message; from_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, mes.GetType(), c, pid, mes.Key, len(mes.GetCloserPeers()), len(mes.ProviderPeers), latencyMillis, distance, addr)
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 

@@ -41,6 +41,11 @@ var logger = logging.Logger("dht")
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
+const (
+	ModeServer = 1
+	ModeClient = 2
+)
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -66,6 +71,9 @@ type IpfsDHT struct {
 	plk sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+
+	mode   int
+	modeLk sync.Mutex
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -97,8 +105,10 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
+	dht.mode = ModeClient
 
 	if !cfg.Client {
+		dht.mode = ModeServer
 		for _, p := range cfg.Protocols {
 			h.SetStreamHandler(p, dht.handleNewStream)
 		}
@@ -363,6 +373,55 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 	// ok seems like closer nodes
 	return filtered
+}
+
+func (dht *IpfsDHT) SetMode(m int) error {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+
+	if m == dht.mode {
+		return nil
+	}
+
+	switch m {
+	case ModeServer:
+		return dht.moveToServerMode()
+	case ModeClient:
+		return dht.moveToClientMode()
+	default:
+		return fmt.Errorf("unrecognized dht mode: %d", m)
+	}
+}
+
+func (dht *IpfsDHT) moveToServerMode() error {
+	dht.mode = ModeServer
+	for _, p := range dht.protocols {
+		dht.host.SetStreamHandler(p, dht.handleNewStream)
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) moveToClientMode() error {
+	dht.mode = ModeClient
+	for _, p := range dht.protocols {
+		dht.host.RemoveStreamHandler(p)
+	}
+
+	pset := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pset[p] = true
+	}
+
+	// hacky... also closes both inbound and outbound streams
+	for _, c := range dht.host.Network().Conns() {
+		for _, s := range c.GetStreams() {
+			if pset[s.Protocol()] {
+				// is it even safe to call close concurrently with a read/write call?
+				s.Close()
+			}
+		}
+	}
+	return nil
 }
 
 // Context return dht's context

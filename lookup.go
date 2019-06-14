@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 
@@ -93,8 +94,10 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	go func() {
 		defer close(out)
 		defer e.Done()
+		timedCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
 		// run it!
-		res, err := query.Run(ctx, tablepeers)
+		res, err := query.Run(timedCtx, tablepeers)
 		if err != nil {
 			logger.Debugf("closestPeers query run error: %s", err)
 		}

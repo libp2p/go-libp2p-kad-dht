@@ -41,9 +41,11 @@ var logger = logging.Logger("dht")
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
+type DHTMode int
+
 const (
-	ModeServer = 1
-	ModeClient = 2
+	ModeServer = DHTMode(1)
+	ModeClient = DHTMode(2)
 )
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -375,7 +377,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 	return filtered
 }
 
-func (dht *IpfsDHT) SetMode(m int) error {
+func (dht *IpfsDHT) SetMode(m DHTMode) error {
 	dht.modeLk.Lock()
 	defer dht.modeLk.Unlock()
 
@@ -412,12 +414,12 @@ func (dht *IpfsDHT) moveToClientMode() error {
 		pset[p] = true
 	}
 
-	// hacky... also closes both inbound and outbound streams
 	for _, c := range dht.host.Network().Conns() {
 		for _, s := range c.GetStreams() {
 			if pset[s.Protocol()] {
-				// is it even safe to call close concurrently with a read/write call?
-				s.Close()
+				if s.Stat().Direction == network.DirInbound {
+					s.Reset()
+				}
 			}
 		}
 	}

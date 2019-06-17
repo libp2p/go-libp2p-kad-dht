@@ -17,6 +17,7 @@ require (
 	github.com/libp2p/go-libp2p-routing v0.1.0
 	github.com/libp2p/go-libp2p-swarm v0.1.0
 	github.com/libp2p/go-libp2p-testing v0.0.3
+	github.com/libp2p/go-msgio v0.0.2
 	github.com/mr-tron/base58 v1.1.2
 	github.com/multiformats/go-multiaddr v0.0.4
 	github.com/multiformats/go-multiaddr-dns v0.0.2

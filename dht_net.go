@@ -259,7 +259,7 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 
 type messageSender struct {
 	s   network.Stream
-	r   ggio.ReadCloser
+	r   msgio.ReadCloser
 	lk  sync.Mutex
 	p   peer.ID
 	dht *IpfsDHT
@@ -302,7 +302,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 		return err
 	}
 
-	ms.r = ggio.NewDelimitedReader(nstr, network.MessageSizeMax)
+	ms.r = msgio.NewVarintReader(nstr)
 	ms.s = nstr
 
 	return nil
@@ -403,8 +403,13 @@ func (ms *messageSender) writeMsg(pmes *pb.Message) error {
 
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
 	errc := make(chan error, 1)
-	go func(r ggio.ReadCloser) {
-		errc <- r.ReadMsg(mes)
+	go func(r msgio.ReadCloser) {
+		bytes, err := r.ReadMsg()
+		if err != nil {
+			errc <- err
+			return
+		}
+		errc <- mes.Unmarshal(bytes)
 	}(ms.r)
 
 	t := time.NewTimer(dhtReadMessageTimeout)

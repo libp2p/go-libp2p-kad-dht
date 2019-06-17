@@ -17,6 +17,7 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 
+	"github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -71,7 +72,7 @@ func (dht *IpfsDHT) handleNewStream(s network.Stream) {
 // Returns true on orderly completion of writes (so we can Close the stream).
 func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	ctx := dht.ctx
-	r := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+	r := msgio.NewVarintReader(s)
 
 	mPeer := s.Conn().RemotePeer()
 
@@ -80,14 +81,24 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 
 	for {
 		var req pb.Message
-		switch err := r.ReadMsg(&req); err {
+		msgbytes, err := r.ReadMsg()
+		if err != nil {
+			logger.Debugf("error reading message: %#v", err)
+			stats.RecordWithTags(
+				ctx,
+				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
+				metrics.ReceivedMessageErrors.M(1),
+			)
+			return false
+		}
+		switch err := req.Unmarshal(msgbytes); err {
 		case io.EOF:
 			return true
 		default:
 			// This string test is necessary because there isn't a single stream reset error
 			// instance	in use.
 			if err.Error() != "stream reset" {
-				logger.Debugf("error reading message: %#v", err)
+				logger.Debugf("error unmarshalling message: %#v", err)
 			}
 			stats.RecordWithTags(
 				ctx,

@@ -80,6 +80,11 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	defer timer.Stop()
 
 	for {
+		if dht.getMode() != ModeServer {
+			logger.Errorf("responding to dht message while not in server mode")
+			return false
+		}
+
 		var req pb.Message
 		switch err := r.ReadMsg(&req); err {
 		case io.EOF:

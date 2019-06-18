@@ -74,7 +74,7 @@ type IpfsDHT struct {
 
 	protocols []protocol.ID // DHT protocols
 
-	mode   int
+	mode   DHTMode
 	modeLk sync.Mutex
 }
 
@@ -424,6 +424,12 @@ func (dht *IpfsDHT) moveToClientMode() error {
 		}
 	}
 	return nil
+}
+
+func (dht *IpfsDHT) getMode() DHTMode {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+	return dht.mode
 }
 
 // Context return dht's context

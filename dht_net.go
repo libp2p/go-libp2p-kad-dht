@@ -72,7 +72,7 @@ func (dht *IpfsDHT) handleNewStream(s network.Stream) {
 // Returns true on orderly completion of writes (so we can Close the stream).
 func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	ctx := dht.ctx
-	r := msgio.NewVarintReader(s)
+	r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 
 	mPeer := s.Conn().RemotePeer()
 
@@ -83,22 +83,14 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		var req pb.Message
 		msgbytes, err := r.ReadMsg()
 		if err != nil {
-			logger.Debugf("error reading message: %#v", err)
-			stats.RecordWithTags(
-				ctx,
-				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
-				metrics.ReceivedMessageErrors.M(1),
-			)
-			return false
-		}
-		switch err := req.Unmarshal(msgbytes); err {
-		case io.EOF:
-			return true
-		default:
+			defer r.ReleaseMsg(msgbytes)
+			if err == io.EOF {
+				return true
+			}
 			// This string test is necessary because there isn't a single stream reset error
 			// instance	in use.
 			if err.Error() != "stream reset" {
-				logger.Debugf("error unmarshalling message: %#v", err)
+				logger.Debugf("error reading message: %#v", err)
 			}
 			stats.RecordWithTags(
 				ctx,
@@ -106,7 +98,17 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 				metrics.ReceivedMessageErrors.M(1),
 			)
 			return false
-		case nil:
+		}
+		err = req.Unmarshal(msgbytes)
+		r.ReleaseMsg(msgbytes)
+		if err != nil {
+			logger.Debugf("error unmarshalling message: %#v", err)
+			stats.RecordWithTags(
+				ctx,
+				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
+				metrics.ReceivedMessageErrors.M(1),
+			)
+			return false
 		}
 
 		timer.Reset(dhtStreamIdleTimeout)
@@ -302,7 +304,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 		return err
 	}
 
-	ms.r = msgio.NewVarintReader(nstr)
+	ms.r = msgio.NewVarintReaderSize(nstr, network.MessageSizeMax)
 	ms.s = nstr
 
 	return nil
@@ -405,6 +407,7 @@ func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error 
 	errc := make(chan error, 1)
 	go func(r msgio.ReadCloser) {
 		bytes, err := r.ReadMsg()
+		defer r.ReleaseMsg(bytes)
 		if err != nil {
 			errc <- err
 			return

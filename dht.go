@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -98,6 +99,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
+
+	go dht.handleProtocolChanges(ctx, ch, cancel)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
@@ -503,4 +506,50 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 		extraTags...,
 	) // ignoring error as it is unrelated to the actual function of this code.
 	return ctx
+}
+
+func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
+	// register for event bus protocol ID changes
+	ch := make(chan event.EvtPeerProtocolsUpdated, 8)
+	cancel, err := dht.host.EventBus().Subscribe(ch)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+
+	pmap := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pmap[p] = true
+	}
+
+	for {
+		select {
+		case e, ok := <-ch:
+			if !ok {
+				return
+			}
+			var drop, add bool
+			for _, p := range e.Added {
+				if pmap[p] {
+					add = true
+				}
+			}
+			for _, p := range e.Removed {
+				if pmap[p] {
+					drop = true
+				}
+			}
+
+			if add && drop {
+				// TODO: discuss how to handle this case
+				log.Warning("peer adding and dropping dht protocols? odd")
+			} else if add {
+				dht.RoutingTable().Update(e.Peer)
+			} else if drop {
+				dht.RoutingTable().Remove(e.Peer)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }

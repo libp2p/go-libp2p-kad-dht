@@ -3,6 +3,7 @@ package dht
 import (
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/protocol"
 
 	ma "github.com/multiformats/go-multiaddr"
 	mstream "github.com/multiformats/go-multistream"
@@ -23,8 +24,13 @@ func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 	default:
 	}
 
+	rtProtos := dht.protocolStrs()
+	if dht.restrictRoutingToLatestVersion {
+		rtProtos = dht.protocolStrs()[:1]
+	}
+
 	p := v.RemotePeer()
-	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+	protos, err := dht.peerstore.SupportsProtocols(p, rtProtos...)
 	if err == nil && len(protos) != 0 {
 		// We lock here for consistency with the lock in testConnection.
 		// This probably isn't necessary because (dis)connect
@@ -70,7 +76,7 @@ func (nn *netNotifiee) testConnection(v network.Conn) {
 	// event and add the peer to the routing table after removing it.
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
-	if dht.host.Network().Connectedness(p) == network.Connected {
+	if dht.host.Network().Connectedness(p) == network.Connected && dht.shouldIncludeInRoutingTable(protocol.ID(selected)) {
 		dht.Update(dht.Context(), p)
 	}
 }

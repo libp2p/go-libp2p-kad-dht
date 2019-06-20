@@ -77,6 +77,8 @@ type IpfsDHT struct {
 
 	mode   DHTMode
 	modeLk sync.Mutex
+
+	restrictRoutingToLatestVersion bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -100,7 +102,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
 
-	go dht.handleProtocolChanges(ctx, ch, cancel)
+	go dht.handleProtocolChanges(ctx)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
@@ -513,7 +515,7 @@ func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
 	ch := make(chan event.EvtPeerProtocolsUpdated, 8)
 	cancel, err := dht.host.EventBus().Subscribe(ch)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 	defer cancel()
 
@@ -542,7 +544,7 @@ func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
 
 			if add && drop {
 				// TODO: discuss how to handle this case
-				log.Warning("peer adding and dropping dht protocols? odd")
+				logger.Warning("peer adding and dropping dht protocols? odd")
 			} else if add {
 				dht.RoutingTable().Update(e.Peer)
 			} else if drop {

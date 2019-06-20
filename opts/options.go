@@ -14,8 +14,9 @@ import (
 const ProtocolDHTOld protocol.ID = "/ipfs/dht"
 
 var (
-	ProtocolDHT      protocol.ID = "/ipfs/kad/1.0.0"
-	DefaultProtocols             = []protocol.ID{ProtocolDHT}
+	ProtocolDHT100   protocol.ID = "/ipfs/kad/1.0.0"
+	ProtocolDHT      protocol.ID = "/ipfs/kad/1.1.0"
+	DefaultProtocols             = []protocol.ID{ProtocolDHT, ProtocolDHT100}
 )
 
 // Options is a structure containing all the options that can be used when constructing a DHT.

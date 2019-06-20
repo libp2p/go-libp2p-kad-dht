@@ -11,6 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -132,7 +133,9 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			return false
 		}
 
-		dht.updateFromMessage(ctx, mPeer, &req)
+		if dht.shouldIncludeInRoutingTable(s.Protocol()) {
+			dht.updateFromMessage(ctx, mPeer, &req)
+		}
 
 		if resp == nil {
 			continue
@@ -178,7 +181,9 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	}
 
 	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, p, rpmes)
+	if dht.shouldIncludeInRoutingTable(ms.s.Protocol()) {
+		dht.updateFromMessage(ctx, p, rpmes)
+	}
 
 	stats.Record(
 		ctx,
@@ -191,6 +196,10 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	dht.peerstore.RecordLatency(p, time.Since(start))
 	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
 	return rpmes, nil
+}
+
+func (dht *IpfsDHT) shouldIncludeInRoutingTable(pid protocol.ID) bool {
+	return !dht.restrictRoutingToLatestVersion || pid == dht.protocols[0]
 }
 
 // sendMessage sends out a message

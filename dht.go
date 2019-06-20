@@ -58,7 +58,7 @@ type IpfsDHT struct {
 
 	datastore ds.Datastore // Local data
 
-	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
+	routingTable *CompositeRT
 	providers    *providers.ProviderManager
 
 	birth time.Time // When this peer started up
@@ -148,15 +148,16 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
-	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
-
 	cmgr := h.ConnManager()
-	rt.PeerAdded = func(p peer.ID) {
-		cmgr.TagPeer(p, "kbucket", 5)
-	}
-	rt.PeerRemoved = func(p peer.ID) {
-		cmgr.UntagPeer(p, "kbucket")
-	}
+
+	peerAdded := func(p peer.ID) { cmgr.TagPeer(p, "kbucket", 5) }
+	peerRemoved := func(p peer.ID) { cmgr.UntagPeer(p, "kbucket") }
+
+	// TODO: source params from cfg.
+	rt := NewCompositeRT(h.ID(), time.Minute, h.Peerstore(), peerAdded, peerRemoved,
+		CompositeRTConfig{string(opts.ProtocolDHT), 20},
+		CompositeRTConfig{string(opts.ProtocolDHT100), 3}, // residual quota for old peers.
+	)
 
 	dht := &IpfsDHT{
 		datastore:    dstore,
@@ -178,7 +179,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
@@ -202,7 +202,6 @@ var errInvalidRecord = errors.New("received invalid record")
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
 func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
-
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
@@ -449,7 +448,7 @@ func (dht *IpfsDHT) Process() goprocess.Process {
 }
 
 // RoutingTable return dht's routingTable
-func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
+func (dht *IpfsDHT) RoutingTable() RoutingTable {
 	return dht.routingTable
 }
 

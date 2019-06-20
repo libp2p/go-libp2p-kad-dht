@@ -38,6 +38,8 @@ func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 		dht.plk.Lock()
 		defer dht.plk.Unlock()
 		if dht.host.Network().Connectedness(p) == network.Connected {
+			// TODO: track the right protocol here.
+			// dht.routingTable.Track(p, protos[0])
 			dht.Update(dht.Context(), p)
 		}
 		return

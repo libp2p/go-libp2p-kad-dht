@@ -16,7 +16,7 @@ import (
 
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-	queue "github.com/libp2p/go-libp2p-peerstore/queue"
+	queue "github.com/libp2p/go-libp2p-kad-dht/queue"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 

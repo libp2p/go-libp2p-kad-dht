@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
-	queue "github.com/libp2p/go-libp2p-peerstore/queue"
+	queue "github.com/libp2p/go-libp2p-kad-dht/queue"
 )
 
 func TestDialQueueGrowsOnSlowDials(t *testing.T) {

@@ -103,6 +103,12 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 			h.SetStreamHandler(p, dht.handleNewStream)
 		}
 	}
+
+	// register for metrics
+	if err := metrics.Register(metrics.DefaultViews...); err != nil {
+		return nil, err
+	}
+
 	return dht, nil
 }
 

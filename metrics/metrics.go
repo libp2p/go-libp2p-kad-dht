@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"github.com/libp2p/go-libp2p-core/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
@@ -42,54 +43,58 @@ var (
 )
 
 var DefaultViews = []*view.View{
-	&view.View{
+	{
 		Measure:     ReceivedMessages,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	},
-	&view.View{
+	{
 		Measure:     ReceivedMessageErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	},
-	&view.View{
+	{
 		Measure:     ReceivedBytes,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
 	},
-	&view.View{
+	{
 		Measure:     InboundRequestLatency,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
 	},
-	&view.View{
+	{
 		Measure:     OutboundRequestLatency,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
 	},
-	&view.View{
+	{
 		Measure:     SentMessages,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	},
-	&view.View{
+	{
 		Measure:     SentMessageErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	},
-	&view.View{
+	{
 		Measure:     SentRequests,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	},
-	&view.View{
+	{
 		Measure:     SentRequestErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
 	},
-	&view.View{
+	{
 		Measure:     SentBytes,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
 	},
+}
+
+func Register(views ...*view.View) error {
+	return metrics.RegisterViews("dht", views...)
 }

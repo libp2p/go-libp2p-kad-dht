@@ -21,10 +21,11 @@ var (
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore ds.Batching
-	Validator record.Validator
-	Client    bool
-	Protocols []protocol.ID
+	Datastore         ds.Batching
+	Validator         record.Validator
+	Client            bool
+	Protocols         []protocol.ID
+	ConnectToOldNodes bool
 }
 
 // Apply applies the given options to this Option
@@ -105,6 +106,13 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 func Protocols(protocols ...protocol.ID) Option {
 	return func(o *Options) error {
 		o.Protocols = protocols
+		return nil
+	}
+}
+
+func ConnectToOldNodes() Option {
+	return func(o *Options) error {
+		o.ConnectToOldNodes = true
 		return nil
 	}
 }

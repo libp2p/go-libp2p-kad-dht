@@ -113,6 +113,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
 	dht.mode = ModeClient
+	dht.restrictRoutingToLatestVersion = !cfg.ConnectToOldNodes
 
 	if !cfg.Client {
 		dht.mode = ModeServer

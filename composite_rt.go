@@ -99,6 +99,8 @@ func (c *CompositeRT) NearestPeer(id kbucket.ID) peer.ID {
 }
 
 func (c *CompositeRT) NearestPeers(id kbucket.ID, count int) []peer.ID {
+	// TODO: this implementation is a placeholder; we really need to collect data from all routing tables to avoid
+	//  segregating networks.
 	return c.getRoutingTable(string(id)).NearestPeers(id, count)
 }
 

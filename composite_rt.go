@@ -10,7 +10,7 @@ import (
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 )
 
-type CompositeRT struct {
+type CompositeRoutingTable struct {
 	// protos maps protocols to slice indices.
 	protos map[string]int
 
@@ -22,31 +22,39 @@ type CompositeRT struct {
 	rts []*kbucket.RoutingTable
 }
 
-var _ RoutingTable = (*CompositeRT)(nil)
+var _ RoutingTable = (*CompositeRoutingTable)(nil)
 
-type CompositeRTConfig struct {
+type CompositeRoutingTableConfig struct {
+	LocalID     peer.ID
+	Latency     time.Duration
+	Metrics     peerstore.Metrics
+	PeerAdded   func(peer.ID)
+	PeerRemoved func(peer.ID)
+	Partitions  []CompositeRoutingTablePartition
+}
+
+type CompositeRoutingTablePartition struct {
 	Protocol   string
 	BucketSize int
 }
 
 // TODO: collapse all these params into a struct.
-func NewCompositeRT(localID peer.ID, latency time.Duration, metrics peerstore.Metrics,
-	peerAdded func(peer.ID), peerRemoved func(peer.ID), config ...CompositeRTConfig) *CompositeRT {
+func NewCompositeRoutingTable(cfg *CompositeRoutingTableConfig) *CompositeRoutingTable {
 	var (
-		rts    = make([]*kbucket.RoutingTable, 0, len(config))
-		protos = make(map[string]int, len(config))
+		rts    = make([]*kbucket.RoutingTable, 0, len(cfg.Partitions))
+		protos = make(map[string]int, len(cfg.Partitions))
 	)
 
-	for i, c := range config {
-		rt := kbucket.NewRoutingTable(c.BucketSize, kbucket.ConvertPeerID(localID), latency, metrics)
-		rt.PeerAdded = peerAdded
-		rt.PeerRemoved = peerRemoved
+	for i, c := range cfg.Partitions {
+		rt := kbucket.NewRoutingTable(c.BucketSize, kbucket.ConvertPeerID(cfg.LocalID), cfg.Latency, cfg.Metrics)
+		rt.PeerAdded = cfg.PeerAdded
+		rt.PeerRemoved = cfg.PeerRemoved
 
 		rts = append(rts, rt)
 		protos[c.Protocol] = i
 	}
 
-	ret := &CompositeRT{
+	ret := &CompositeRoutingTable{
 		peers:  make(map[string]int),
 		rts:    rts,
 		protos: protos,
@@ -54,57 +62,71 @@ func NewCompositeRT(localID peer.ID, latency time.Duration, metrics peerstore.Me
 	return ret
 }
 
-func (c *CompositeRT) getRoutingTable(p string) *kbucket.RoutingTable {
+func (c *CompositeRoutingTable) getRoutingTable(p string) *kbucket.RoutingTable {
 	c.lk.RLock()
 	defer c.lk.RUnlock()
 
 	if idx, ok := c.peers[p]; ok {
 		return c.rts[idx]
 	}
-
-	panic("tried to get routing table for untracked peer")
+	return nil
 }
 
-func (c *CompositeRT) Track(id peer.ID, proto string) {
+func (c *CompositeRoutingTable) Track(id peer.ID, proto string) {
 	c.lk.Lock()
 	defer c.lk.Unlock()
 
+	// if we don't have a routing table for the protocol, we ignore the peer.
 	if idx, ok := c.protos[proto]; ok {
 		c.peers[string(id)] = idx
 		c.peers[string(kbucket.ConvertPeerID(id))] = idx
-	} else {
-		panic("unrecognized protocol id")
 	}
 }
 
-func (c *CompositeRT) Update(p peer.ID) (evicted peer.ID, err error) {
-	return c.getRoutingTable(string(p)).Update(p)
+func (c *CompositeRoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
+	if rt := c.getRoutingTable(string(p)); rt != nil {
+		return rt.Update(p)
+	} else {
+		return "", nil
+	}
 }
 
-func (c *CompositeRT) Remove(p peer.ID) {
+func (c *CompositeRoutingTable) Remove(p peer.ID) {
+	if rt := c.getRoutingTable(string(p)); rt != nil {
+		rt.Remove(p)
+	} else {
+		return
+	}
+
 	c.lk.Lock()
 	delete(c.peers, string(p))
 	delete(c.peers, string(kbucket.ConvertPeerID(p)))
 	c.lk.Unlock()
-
-	c.getRoutingTable(string(p)).Remove(p)
 }
 
-func (c *CompositeRT) Find(p peer.ID) peer.ID {
-	return c.getRoutingTable(string(p)).Find(p)
+func (c *CompositeRoutingTable) Find(p peer.ID) peer.ID {
+	if rt := c.getRoutingTable(string(p)); rt != nil {
+		return rt.Find(p)
+	} else {
+		return ""
+	}
 }
 
-func (c *CompositeRT) NearestPeer(id kbucket.ID) peer.ID {
-	return c.getRoutingTable(string(id)).NearestPeer(id)
+func (c *CompositeRoutingTable) NearestPeer(id kbucket.ID) peer.ID {
+	if rt := c.getRoutingTable(string(id)); rt != nil {
+		return rt.NearestPeer(id)
+	} else {
+		return ""
+	}
 }
 
-func (c *CompositeRT) NearestPeers(id kbucket.ID, count int) []peer.ID {
-	// TODO: this implementation is a placeholder; we really need to collect data from all routing tables to avoid
+func (c *CompositeRoutingTable) NearestPeers(id kbucket.ID, count int) []peer.ID {
+	// TODO: this implementation is a placeholder; we shoudl collect data from all routing tables to avoid
 	//  segregating networks.
 	return c.getRoutingTable(string(id)).NearestPeers(id, count)
 }
 
-func (c *CompositeRT) ListPeers() []peer.ID {
+func (c *CompositeRoutingTable) ListPeers() []peer.ID {
 	ret := make([]peer.ID, 0, c.Size())
 	for _, rt := range c.rts {
 		ret = append(ret, rt.ListPeers()...)
@@ -112,14 +134,14 @@ func (c *CompositeRT) ListPeers() []peer.ID {
 	return ret
 }
 
-func (c *CompositeRT) Size() (size int) {
+func (c *CompositeRoutingTable) Size() (size int) {
 	for _, rt := range c.rts {
 		size += rt.Size()
 	}
 	return size
 }
 
-func (c *CompositeRT) Print() {
+func (c *CompositeRoutingTable) Print() {
 	fmt.Println("Printing a composite routing table")
 	for proto, idx := range c.protos {
 		fmt.Printf("--- Routing table for protocol %s ---\n", proto)

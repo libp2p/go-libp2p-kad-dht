@@ -58,7 +58,7 @@ type IpfsDHT struct {
 
 	datastore ds.Datastore // Local data
 
-	routingTable *CompositeRT
+	routingTable *CompositeRoutingTable
 	providers    *providers.ProviderManager
 
 	birth time.Time // When this peer started up
@@ -154,10 +154,19 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	peerRemoved := func(p peer.ID) { cmgr.UntagPeer(p, "kbucket") }
 
 	// TODO: source params from cfg.
-	rt := NewCompositeRT(h.ID(), time.Minute, h.Peerstore(), peerAdded, peerRemoved,
-		CompositeRTConfig{string(opts.ProtocolDHT), 20},
-		CompositeRTConfig{string(opts.ProtocolDHT100), 3}, // residual quota for old peers.
-	)
+	cfg := &CompositeRoutingTableConfig{
+		LocalID:     h.ID(),
+		Latency:     time.Minute,
+		Metrics:     h.Peerstore(),
+		PeerAdded:   peerAdded,
+		PeerRemoved: peerRemoved,
+		Partitions: []CompositeRoutingTablePartition{
+			{string(opts.ProtocolDHT), 20},
+			{string(opts.ProtocolDHT100), 3}, // residual quota for old peers.
+		},
+	}
+
+	rt := NewCompositeRoutingTable(cfg)
 
 	dht := &IpfsDHT{
 		datastore:    dstore,

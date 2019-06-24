@@ -509,12 +509,11 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 
 func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
 	// register for event bus protocol ID changes
-	ch := make(chan event.EvtPeerProtocolsUpdated, 8)
-	cancel, err := dht.host.EventBus().Subscribe(ch)
+	sub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated))
 	if err != nil {
 		panic(err)
 	}
-	defer cancel()
+	defer sub.Close()
 
 	pmap := make(map[protocol.ID]bool)
 	for _, p := range dht.protocols {
@@ -523,7 +522,13 @@ func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
 
 	for {
 		select {
-		case e, ok := <-ch:
+		case ie, ok := <-sub.Out():
+			e, ok := ie.(event.EvtPeerProtocolsUpdated)
+			if !ok {
+				logger.Errorf("got wrong type from subscription: %T", ie)
+				return
+			}
+
 			if !ok {
 				return
 			}

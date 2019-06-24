@@ -113,9 +113,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.mode = ModeClient
 
 	if !cfg.Client {
-		dht.mode = ModeServer
-		for _, p := range cfg.Protocols {
-			h.SetStreamHandler(p, dht.handleNewStream)
+		if err := dht.moveToServerMode(); err != nil {
+			return nil, err
 		}
 	}
 	return dht, nil

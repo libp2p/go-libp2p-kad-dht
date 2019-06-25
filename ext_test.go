@@ -33,6 +33,9 @@ func TestGetFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// TODO: replace with identify event bus event
+	time.Sleep(time.Millisecond * 100)
 	d.Update(ctx, hosts[1].ID())
 
 	// Reply with failures to every message
@@ -302,6 +305,8 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// TODO: need to wait for Identify Event from event bus
+	time.Sleep(time.Millisecond * 100)
 	d.Update(ctx, hosts[1].ID())
 
 	// It would be nice to be able to just get a value and succeed but then

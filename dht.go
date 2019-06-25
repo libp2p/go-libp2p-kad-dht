@@ -32,6 +32,7 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	manet "github.com/multiformats/go-multiaddr-net"
 	base32 "github.com/whyrusleeping/base32"
 )
 
@@ -275,7 +276,49 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // on the given peer.
 func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "updatePeer", p)
-	dht.routingTable.Update(p)
+	if dht.shouldAddPeerToRoutingTable(p) {
+		dht.routingTable.Update(p)
+	}
+}
+
+func (dht *IpfsDHT) shouldAddPeerToRoutingTable(p peer.ID) bool {
+	return dht.hasOutboundConnToPeer(p) ||
+		dht.hasSensibleAddressesForPeer(p)
+}
+
+func (dht *IpfsDHT) hasOutboundConnToPeer(p peer.ID) bool {
+	cons := dht.host.Network().ConnsToPeer(p)
+	for _, c := range cons {
+		if c.Stat().Direction == network.DirOutbound {
+			return true
+		}
+	}
+	return false
+}
+
+func (dht *IpfsDHT) hasSensibleAddressesForPeer(p peer.ID) bool {
+	if dht.peerIsOnSameSubnet(p) {
+		// TODO: for now, we can't easily tell if the peer on our subnet
+		// is dialable or not, so don't discriminate.
+		return true
+	}
+
+	for _, a := range dht.host.Peerstore().Addrs(p) {
+		if manet.IsPublicAddr(a) {
+			return true
+		}
+	}
+	return false
+}
+
+func (dht *IpfsDHT) peerIsOnSameSubnet(p peer.ID) bool {
+	cons := dht.host.Network().ConnsToPeer(p)
+	for _, c := range cons {
+		if manet.IsPrivateAddr(c.RemoteMultiaddr()) {
+			return true
+		}
+	}
+	return false
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.

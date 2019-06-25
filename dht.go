@@ -40,7 +40,7 @@ var logger = logging.Logger("dht")
 func init() {
 	// register for metrics
 	if err := metrics.Register(metrics.DefaultViews...); err != nil {
-		panic(err)
+		logger.Error(err)
 	}
 }
 

@@ -37,6 +37,13 @@ import (
 
 var logger = logging.Logger("dht")
 
+func init() {
+	// register for metrics
+	if err := metrics.Register(metrics.DefaultViews...); err != nil {
+		panic(err)
+	}
+}
+
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
 const NumBootstrapQueries = 5
@@ -102,11 +109,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		for _, p := range cfg.Protocols {
 			h.SetStreamHandler(p, dht.handleNewStream)
 		}
-	}
-
-	// register for metrics
-	if err := metrics.Register(metrics.DefaultViews...); err != nil {
-		return nil, err
 	}
 
 	return dht, nil

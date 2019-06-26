@@ -303,19 +303,21 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 		// we established this connection, so they're definitely diallable.
 		return true
 	}
+
+	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
 	if dht.peerIsOnSameSubnet(c) {
 		// TODO: for now, we can't easily tell if the peer on our subnet
 		// is dialable or not, so don't discriminate.
 
 		// We won't return these peers in queries unless the requester's
 		// remote addr is also private.
-		return true
+		return len(ai.Addrs) > 0
 	}
-	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
-	return dht.hasSensibleAddressesForPeer(ai)
+
+	return dht.isPubliclyRoutable(ai)
 }
 
-func (dht *IpfsDHT) hasSensibleAddressesForPeer(ai peer.AddrInfo) bool {
+func (dht *IpfsDHT) isPubliclyRoutable(ai peer.AddrInfo) bool {
 	if len(ai.Addrs) == 0 {
 		return false
 	}
@@ -325,7 +327,6 @@ func (dht *IpfsDHT) hasSensibleAddressesForPeer(ai peer.AddrInfo) bool {
 		if isRelayAddr(a) {
 			return false
 		}
-
 		if manet.IsPublicAddr(a) {
 			hasPublicAddr = true
 		}

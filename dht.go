@@ -174,7 +174,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 
 	var err error
-	evts := []interface{}{new(event.EvtPeerIdentificationCompleted), new(event.EvtPeerIdentificationFailed)}
+	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
 	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
 	if err != nil {
 		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)

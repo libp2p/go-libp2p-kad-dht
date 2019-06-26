@@ -8,8 +8,11 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
+	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
+	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
@@ -24,24 +27,27 @@ func TestGetFailures(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	mn, err := mocknet.FullMeshConnected(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hosts := mn.Hosts()
 
-	os := []opts.Option{opts.DisableAutoRefresh()}
-	d, err := New(ctx, hosts[0], os...)
+	host1 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
+	host2 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
+
+	d, err := New(ctx, host1, opts.DisableAutoRefresh())
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.Update(ctx, hosts[1].ID())
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
+	host2.SetStreamHandler(d.protocols[0], func(s network.Stream) {
 		time.Sleep(400 * time.Millisecond)
 		s.Close()
 	})
+
+	host1.Peerstore().AddAddrs(host2.ID(), host2.Addrs(), peerstore.ConnectedAddrTTL)
+	_, err = host1.Network().DialPeer(ctx, host2.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1 * time.Second)
 
 	// This one should time out
 	ctx1, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -61,7 +67,7 @@ func TestGetFailures(t *testing.T) {
 	t.Log("Timeout test passed.")
 
 	// Reply with failures to every message
-	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
+	host2.SetStreamHandler(d.protocols[0], func(s network.Stream) {
 		defer s.Close()
 
 		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
@@ -113,7 +119,7 @@ func TestGetFailures(t *testing.T) {
 			Record: rec,
 		}
 
-		s, err := hosts[1].NewStream(context.Background(), hosts[0].ID(), d.protocols[0])
+		s, err := host2.NewStream(context.Background(), host1.ID(), d.protocols[0])
 		if err != nil {
 			t.Fatal(err)
 		}

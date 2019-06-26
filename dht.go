@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -84,6 +86,10 @@ type IpfsDHT struct {
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
 	// networks).
 	enableProviders, enableValues bool
+
+	subscriptions struct {
+		evtPeerIdentification event.Subscription
+	}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -114,15 +120,22 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
 
+	subnot := (*subscriberNotifee)(dht)
+
 	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
+	dht.host.Network().Notify(subnot)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
-		dht.host.Network().StopNotify((*netNotifiee)(dht))
+		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
+
+		if dht.subscriptions.evtPeerIdentification != nil {
+			_ = dht.subscriptions.evtPeerIdentification.Close()
+		}
 		return nil
 	})
 
+	dht.proc.AddChild(subnot.Process(ctx))
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
 
@@ -188,6 +201,13 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 		alpha:            cfg.Concurrency,
 		d:                cfg.DisjointPaths,
 		triggerRtRefresh: make(chan chan<- error),
+	}
+
+	var err error
+	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
+	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

@@ -136,15 +136,25 @@ func (dq *dialQueue) Start() {
 
 func (dq *dialQueue) control() {
 	var (
-		dialled             <-chan peer.ID
-		waiting             []waitingCh
-		lastScalingEvt      = time.Now()
-		successes, failures int64
+		dialled        <-chan peer.ID
+		waiting        []waitingCh
+		lastScalingEvt = time.Now()
+
+		successesMu sync.RWMutex
+		successes   int64
+		failuresMu  sync.RWMutex
+		failures    int64
 	)
 
 	defer func() {
+		failuresMu.RLock()
 		stats.Record(dq.ctx, metrics.FailedDialsPerQuery.M(failures))
+		failuresMu.RUnlock()
+
+		successesMu.RLock()
 		stats.Record(dq.ctx, metrics.SuccessfulDialsPerQuery.M(successes))
+		successesMu.RUnlock()
+
 		for _, w := range waiting {
 			close(w.ch)
 		}
@@ -160,9 +170,13 @@ func (dq *dialQueue) control() {
 			case r := <-dq.resultCh:
 				switch r {
 				case ERROR:
+					failuresMu.Lock()
 					failures++
+					failuresMu.Unlock()
 				case SUCCESS:
+					successesMu.Lock()
 					successes++
+					successesMu.Unlock()
 				case UNKNOWN:
 					// don't record stat
 				}

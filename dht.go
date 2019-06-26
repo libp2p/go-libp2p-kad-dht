@@ -135,6 +135,20 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 			return nil, err
 		}
 	}
+
+	// print the routing table every minute.
+	go func() {
+		tick := time.Tick(1 * time.Minute)
+		for {
+			select {
+			case <-tick:
+				dht.routingTable.Print()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	return dht, nil
 }
 

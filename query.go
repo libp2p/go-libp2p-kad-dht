@@ -253,7 +253,15 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 	}
 }
 
-func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
+func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) (err error) {
+	ctx = logger.Start(ctx, "dialPeer")
+	logger.SetTag(ctx, "peerID", p.Pretty())
+	defer func() {
+		if err != nil {
+			logger.SetErr(ctx, err)
+		}
+		logger.Finish(ctx)
+	}()
 	// short-circuit if we're already connected.
 	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
 		return nil

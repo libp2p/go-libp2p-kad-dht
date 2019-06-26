@@ -61,7 +61,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		return nil, kb.ErrLookupFailure
 	}
 
-	out := make(chan peer.ID, KValue)
+	out := make(chan peer.ID, dht.bucketSize)
 
 	// since the query doesnt actually pass our context down
 	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
@@ -101,8 +101,9 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 		if res != nil && res.queriedSet != nil {
 			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
-			if len(sorted) > KValue {
-				sorted = sorted[:KValue]
+			l := len(sorted)
+			if l > dht.bucketSize {
+				sorted = sorted[:dht.bucketSize]
 			}
 
 			for _, p := range sorted {

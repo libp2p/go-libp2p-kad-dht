@@ -21,9 +21,6 @@ import (
 	base32 "github.com/whyrusleeping/base32"
 )
 
-// The number of closer peers to send on requests.
-var CloserPeerCount = KValue
-
 // dhthandler specifies the signature of functions that handle DHT messages.
 type dhtHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, error)
 
@@ -69,7 +66,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	resp.Record = rec
 
 	// Find closest peer on given cluster to desired key and reply with that info
-	closer := dht.betterPeersToQuery(pmes, p, CloserPeerCount)
+	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)
 	if len(closer) > 0 {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 		closerinfos := pstore.PeerInfos(dht.peerstore, closer)
@@ -254,7 +251,7 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
 	} else {
-		closest = dht.betterPeersToQuery(pmes, p, CloserPeerCount)
+		closest = dht.betterPeersToQuery(pmes, p, dht.bucketSize)
 
 		// Never tell a peer about itself.
 		if targetPid != p {
@@ -332,7 +329,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	}
 
 	// Also send closer peers.
-	closer := dht.betterPeersToQuery(pmes, p, CloserPeerCount)
+	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)
 	if closer != nil {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 		infos := pstore.PeerInfos(dht.peerstore, closer)

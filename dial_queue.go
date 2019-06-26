@@ -44,8 +44,8 @@ type dialQueue struct {
 	shrinkCh  chan struct{}
 
 	// stats
-	successes   int64
-	failures    int64
+	successes int64
+	failures  int64
 }
 
 type dqParams struct {

@@ -135,6 +135,20 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 			return nil, err
 		}
 	}
+
+	// print the routing table every minute.
+	go func() {
+		tick := time.Tick(1 * time.Minute)
+		for {
+			select {
+			case <-tick:
+				dht.routingTable.Print()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	return dht, nil
 }
 
@@ -341,7 +355,7 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 	}
 
 	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
-	if dht.isPeerLocallyConnected(c) {
+	if isPeerLocallyConnected(c) {
 		// TODO: for now, we can't easily tell if the peer on our subnet
 		// is dialable or not, so don't discriminate.
 
@@ -350,10 +364,10 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 		return len(ai.Addrs) > 0
 	}
 
-	return dht.isPubliclyRoutable(ai)
+	return isPubliclyRoutable(ai)
 }
 
-func (dht *IpfsDHT) isPubliclyRoutable(ai peer.AddrInfo) bool {
+func isPubliclyRoutable(ai peer.AddrInfo) bool {
 	if len(ai.Addrs) == 0 {
 		return false
 	}
@@ -387,7 +401,7 @@ func isRelayAddr(a ma.Multiaddr) bool {
 	return isRelay
 }
 
-func (dht *IpfsDHT) isPeerLocallyConnected(c network.Conn) bool {
+func isPeerLocallyConnected(c network.Conn) bool {
 	addr := c.RemoteMultiaddr()
 	return manet.IsPrivateAddr(addr) || manet.IsIPLoopback(addr)
 }
@@ -605,6 +619,13 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 		extraTags...,
 	) // ignoring error as it is unrelated to the actual function of this code.
 	return ctx
+}
+
+func (dht *IpfsDHT) connForPeer(p peer.ID) network.Conn {
+	if cs := dht.host.Network().ConnsToPeer(p); len(cs) > 0 {
+		return cs[0]
+	}
+	return nil
 }
 
 func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {

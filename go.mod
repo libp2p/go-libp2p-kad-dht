@@ -10,6 +10,7 @@ require (
 	github.com/ipfs/go-todocounter v0.0.1
 	github.com/jbenet/goprocess v0.1.3
 	github.com/libp2p/go-libp2p v0.1.0
+	github.com/libp2p/go-libp2p-circuit v0.1.0
 	github.com/libp2p/go-libp2p-core v0.0.1
 	github.com/libp2p/go-libp2p-kbucket v0.2.0
 	github.com/libp2p/go-libp2p-peerstore v0.1.0
@@ -21,6 +22,7 @@ require (
 	github.com/mr-tron/base58 v1.1.2
 	github.com/multiformats/go-multiaddr v0.0.4
 	github.com/multiformats/go-multiaddr-dns v0.0.2
+	github.com/multiformats/go-multiaddr-net v0.0.1
 	github.com/multiformats/go-multistream v0.1.0
 	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc

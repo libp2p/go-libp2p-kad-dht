@@ -29,9 +29,12 @@ import (
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
+	circuit "github.com/libp2p/go-libp2p-circuit"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr-net"
 	base32 "github.com/whyrusleeping/base32"
 )
 
@@ -278,8 +281,82 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // Update signals the routingTable to Update its last-seen status
 // on the given peer.
 func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
-	logger.Event(ctx, "updatePeer", p)
-	dht.routingTable.Update(p)
+	conns := dht.host.Network().ConnsToPeer(p)
+	switch len(conns) {
+	default:
+		logger.Warning("unclear if we should add peer with multiple open connections to us to our routing table")
+	case 0:
+		logger.Error("called update on a peer with no connection")
+	case 1:
+		dht.UpdateConn(ctx, conns[0])
+	}
+}
+
+func (dht *IpfsDHT) UpdateConn(ctx context.Context, c network.Conn) {
+	if dht.shouldAddPeerToRoutingTable(c) {
+		logger.Event(ctx, "updatePeer", c.RemotePeer())
+		dht.routingTable.Update(c.RemotePeer())
+	}
+}
+
+func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
+	if isRelayAddr(c.RemoteMultiaddr()) {
+		return false
+	}
+	if c.Stat().Direction == network.DirOutbound {
+		// we established this connection, so they're definitely diallable.
+		return true
+	}
+
+	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
+	if dht.peerIsOnSameSubnet(c) {
+		// TODO: for now, we can't easily tell if the peer on our subnet
+		// is dialable or not, so don't discriminate.
+
+		// We won't return these peers in queries unless the requester's
+		// remote addr is also private.
+		return len(ai.Addrs) > 0
+	}
+
+	return dht.isPubliclyRoutable(ai)
+}
+
+func (dht *IpfsDHT) isPubliclyRoutable(ai peer.AddrInfo) bool {
+	if len(ai.Addrs) == 0 {
+		return false
+	}
+
+	var hasPublicAddr bool
+	for _, a := range ai.Addrs {
+		if isRelayAddr(a) {
+			return false
+		}
+		if manet.IsPublicAddr(a) {
+			hasPublicAddr = true
+		}
+	}
+	return hasPublicAddr
+}
+
+// taken from go-libp2p/p2p/host/relay
+func isRelayAddr(a ma.Multiaddr) bool {
+	isRelay := false
+
+	ma.ForEach(a, func(c ma.Component) bool {
+		switch c.Protocol().Code {
+		case circuit.P_CIRCUIT:
+			isRelay = true
+			return false
+		default:
+			return true
+		}
+	})
+
+	return isRelay
+}
+
+func (dht *IpfsDHT) peerIsOnSameSubnet(c network.Conn) bool {
+	return manet.IsPrivateAddr(c.RemoteMultiaddr())
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.

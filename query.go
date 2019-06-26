@@ -59,7 +59,14 @@ func (dht *IpfsDHT) newQuery(k string, f queryFunc) *dhtQuery {
 type queryFunc func(context.Context, peer.ID) (*dhtQueryResult, error)
 
 // Run runs the query at hand. pass in a list of peers to use first.
-func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
+func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (_ *dhtQueryResult, err error) {
+	ctx = logger.Start(ctx, "dhtQuery.Run")
+	defer func() {
+		if err != nil {
+			logger.SetErr(ctx, err)
+		}
+		logger.Finish(ctx)
+	}()
 	if len(peers) == 0 {
 		logger.Warning("Running query with no peers!")
 		return nil, kb.ErrLookupFailure
@@ -124,7 +131,17 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 	return r
 }
 
-func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
+func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (qResult *dhtQueryResult, reterr error) {
+	ctx = logger.Start(ctx, "dhtQueryRunner.Run")
+	logger.LogKV(ctx, "peers", peers)
+	logger.LogKV(ctx, "numPeers", len(peers))
+	defer func() {
+		if reterr != nil {
+			logger.SetErr(ctx, reterr)
+		}
+		logger.Finish(ctx)
+		logger.SetTag(ctx, "dhtQueryResult", qResult)
+	}()
 	r.log = logger
 	r.runCtx = ctx
 

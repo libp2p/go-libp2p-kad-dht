@@ -405,30 +405,28 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
 func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findPeerSingle",
-		logging.LoggableMap{
-			"peer":   p,
-			"target": id,
-		})
-	defer eip.Done()
+	ctx = logger.Start(ctx, "findPeerSingle")
+	logger.SetTag(ctx, "peer", p.Pretty())
+	logger.SetTag(ctx, "target", id.Pretty())
+	defer logger.Finish(ctx)
 
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
+		logger.SetTag(ctx, "numPeers", len(resp.GetCloserPeers()))
 		return resp, nil
 	case ErrReadTimeout:
 		logger.Warningf("read timeout: %s %s", p.Pretty(), id)
 		fallthrough
 	default:
-		eip.SetError(err)
+		logger.SetErr(ctx, err)
 		return nil, err
 	}
 }
 
 func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findProvidersSingle", p, key)
-	defer eip.Done()
+	ctx = logger.Start(ctx, "findProvidersSingle")
 
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -439,7 +437,7 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.
 		logger.Warningf("read timeout: %s %s", p.Pretty(), key)
 		fallthrough
 	default:
-		eip.SetError(err)
+		logger.SetErr(ctx, err)
 		return nil, err
 	}
 }

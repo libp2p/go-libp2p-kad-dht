@@ -43,10 +43,15 @@ var (
 	SentBytes               = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
 	SuccessfulDialsPerQuery = stats.Int64("libp2p.io/dht/kad/successful_dials_per_query", "Distribution of the number of successful dials per query", stats.UnitDimensionless)
 	FailedDialsPerQuery     = stats.Int64("libp2p.io/dht/kad/failed_dials_per_query", "Distribution of the number of failed dials per query", stats.UnitDimensionless)
+	Queries                 = stats.Int64("libp2p.io/dht/kad/queries", "Total number of queries made", stats.UnitDimensionless)
 )
 
 // DefaultViews provides a default set of views to register.
 var DefaultViews = []*view.View{
+	&view.View{
+		Measure:     Queries,
+		Aggregation: view.Count(),
+	},
 	&view.View{
 		Measure:     SuccessfulDialsPerQuery,
 		Aggregation: defaultDistribution,

@@ -7,6 +7,8 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"go.opencensus.io/stats"
 
 	logging "github.com/ipfs/go-log"
 	todoctr "github.com/ipfs/go-todocounter"
@@ -125,6 +127,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 }
 
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
+	stats.Record(ctx, metrics.Queries.M(1))
 	r.log = logger
 	r.runCtx = ctx
 

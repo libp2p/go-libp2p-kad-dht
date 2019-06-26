@@ -384,7 +384,7 @@ func convertToDsKey(s []byte) ds.Key {
 func filterCandidates(remote network.Conn, candidates []peer.AddrInfo) []peer.AddrInfo {
 	// remote conn can be nil if we dropped the connection before processing this peer set, in which case we
 	// fall back to treating this peer as public.
-	if remote != nil && peerIsOnSameSubnet(remote) {
+	if remote != nil && isPeerLocallyConnected(remote) {
 		// if the peer is in LAN, we offer a raw view of the network.
 		return candidates
 	}
@@ -403,7 +403,7 @@ func filterCandidates(remote network.Conn, candidates []peer.AddrInfo) []peer.Ad
 func filterCandidatesPtr(remote network.Conn, candidates []*peer.AddrInfo) []*peer.AddrInfo {
 	// remote conn can be nil if we dropped the connection before processing this peer set, in which case we
 	// fall back to treating this peer as public.
-	if remote != nil && peerIsOnSameSubnet(remote) {
+	if remote != nil && isPeerLocallyConnected(remote) {
 		// if the peer is in LAN, we offer a raw view of the network.
 		return candidates
 	}

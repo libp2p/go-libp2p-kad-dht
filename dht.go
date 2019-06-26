@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -44,6 +46,13 @@ var logger = logging.Logger("dht")
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
+type DHTMode int
+
+const (
+	ModeServer = DHTMode(1)
+	ModeClient = DHTMode(2)
+)
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -69,6 +78,15 @@ type IpfsDHT struct {
 	plk sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+
+	mode   DHTMode
+	modeLk sync.Mutex
+
+	bucketSize int
+
+	subscriptions struct {
+		evtPeerIdentification event.Subscription
+	}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -84,26 +102,37 @@ var (
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
 	var cfg opts.Options
+	cfg.BucketSize = KValue
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols)
+	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
+
+	subnot := (*subscriberNotifee)(dht)
 
 	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
+	dht.host.Network().Notify(subnot)
+
+	go dht.handleProtocolChanges(ctx)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
-		dht.host.Network().StopNotify((*netNotifiee)(dht))
+		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
+
+		if dht.subscriptions.evtPeerIdentification != nil {
+			_ = dht.subscriptions.evtPeerIdentification.Close()
+		}
 		return nil
 	})
 
+	dht.proc.AddChild(subnot.Process(ctx))
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
+	dht.mode = ModeClient
 
 	if !cfg.Client {
-		for _, p := range cfg.Protocols {
-			h.SetStreamHandler(p, dht.handleNewStream)
+		if err := dht.moveToServerMode(); err != nil {
+			return nil, err
 		}
 	}
 	return dht, nil
@@ -132,8 +161,8 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID) *IpfsDHT {
-	rt := kb.NewRoutingTable(KValue, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
+func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int) *IpfsDHT {
+	rt := kb.NewRoutingTable(bucketSize, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
 	rt.PeerAdded = func(p peer.ID) {
@@ -154,6 +183,14 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		birth:        time.Now(),
 		routingTable: rt,
 		protocols:    protocols,
+		bucketSize:   bucketSize,
+	}
+
+	var err error
+	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
+	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
@@ -163,7 +200,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
@@ -288,10 +324,11 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 }
 
 func (dht *IpfsDHT) UpdateConn(ctx context.Context, c network.Conn) {
-	if dht.shouldAddPeerToRoutingTable(c) {
-		logger.Event(ctx, "updatePeer", c.RemotePeer())
-		dht.routingTable.Update(c.RemotePeer())
+	if !dht.shouldAddPeerToRoutingTable(c) {
+		return
 	}
+	logger.Event(ctx, "updatePeer", c.RemotePeer())
+	dht.routingTable.Update(c.RemotePeer())
 }
 
 func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
@@ -304,7 +341,7 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 	}
 
 	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
-	if peerIsOnSameSubnet(c) {
+	if isPeerLocallyConnected(c) {
 		// TODO: for now, we can't easily tell if the peer on our subnet
 		// is dialable or not, so don't discriminate.
 
@@ -350,8 +387,9 @@ func isRelayAddr(a ma.Multiaddr) bool {
 	return isRelay
 }
 
-func peerIsOnSameSubnet(c network.Conn) bool {
-	return manet.IsPrivateAddr(c.RemoteMultiaddr())
+func isPeerLocallyConnected(c network.Conn) bool {
+	addr := c.RemoteMultiaddr()
+	return manet.IsPrivateAddr(addr) || manet.IsIPLoopback(addr)
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
@@ -441,6 +479,61 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 	return filtered
 }
 
+func (dht *IpfsDHT) SetMode(m DHTMode) error {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+
+	if m == dht.mode {
+		return nil
+	}
+
+	switch m {
+	case ModeServer:
+		return dht.moveToServerMode()
+	case ModeClient:
+		return dht.moveToClientMode()
+	default:
+		return fmt.Errorf("unrecognized dht mode: %d", m)
+	}
+}
+
+func (dht *IpfsDHT) moveToServerMode() error {
+	dht.mode = ModeServer
+	for _, p := range dht.protocols {
+		dht.host.SetStreamHandler(p, dht.handleNewStream)
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) moveToClientMode() error {
+	dht.mode = ModeClient
+	for _, p := range dht.protocols {
+		dht.host.RemoveStreamHandler(p)
+	}
+
+	pset := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pset[p] = true
+	}
+
+	for _, c := range dht.host.Network().Conns() {
+		for _, s := range c.GetStreams() {
+			if pset[s.Protocol()] {
+				if s.Stat().Direction == network.DirInbound {
+					s.Reset()
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) getMode() DHTMode {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+	return dht.mode
+}
+
 // Context return dht's context
 func (dht *IpfsDHT) Context() context.Context {
 	return dht.ctx
@@ -519,4 +612,55 @@ func (dht *IpfsDHT) connForPeer(p peer.ID) network.Conn {
 		return cs[0]
 	}
 	return nil
+}
+
+func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
+	// register for event bus protocol ID changes
+	sub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated))
+	if err != nil {
+		panic(err)
+	}
+	defer sub.Close()
+
+	pmap := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pmap[p] = true
+	}
+
+	for {
+		select {
+		case ie, ok := <-sub.Out():
+			e, ok := ie.(event.EvtPeerProtocolsUpdated)
+			if !ok {
+				logger.Errorf("got wrong type from subscription: %T", ie)
+				return
+			}
+
+			if !ok {
+				return
+			}
+			var drop, add bool
+			for _, p := range e.Added {
+				if pmap[p] {
+					add = true
+				}
+			}
+			for _, p := range e.Removed {
+				if pmap[p] {
+					drop = true
+				}
+			}
+
+			if add && drop {
+				// TODO: discuss how to handle this case
+				logger.Warning("peer adding and dropping dht protocols? odd")
+			} else if add {
+				dht.RoutingTable().Update(e.Peer)
+			} else if drop {
+				dht.RoutingTable().Remove(e.Peer)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }

@@ -157,7 +157,6 @@ func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 }
 
 func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1386,4 +1385,23 @@ func TestClientModeAtInit(t *testing.T) {
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+}
+
+func TestModeChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clientOnly := setupDHT(ctx, t, true)
+	clientToServer := setupDHT(ctx, t, true)
+	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
+	err := clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	err = clientToServer.SetMode(ModeServer)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.Nil(t, err)
+	err = clientToServer.SetMode(ModeClient)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.NotNil(t, err)
 }

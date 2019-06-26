@@ -32,7 +32,7 @@ func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 		dht.plk.Lock()
 		defer dht.plk.Unlock()
 		if dht.host.Network().Connectedness(p) == network.Connected {
-			dht.Update(dht.Context(), p)
+			dht.UpdateConn(dht.Context(), v)
 		}
 		return
 	}
@@ -71,7 +71,7 @@ func (nn *netNotifiee) testConnection(v network.Conn) {
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
 	if dht.host.Network().Connectedness(p) == network.Connected {
-		dht.Update(dht.Context(), p)
+		dht.UpdateConn(dht.Context(), v)
 	}
 }
 

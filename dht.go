@@ -107,6 +107,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
 
+		if dht.subscriptions.evtPeerIdentification != nil {
+			_ = dht.subscriptions.evtPeerIdentification.Close()
+		}
 		return nil
 	})
 
@@ -480,7 +483,6 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
-	_ = dht.subscriptions.evtPeerIdentification.Close()
 	return dht.proc.Close()
 }
 

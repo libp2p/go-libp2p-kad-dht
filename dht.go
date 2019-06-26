@@ -299,18 +299,29 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 	if isRelayAddr(c.RemoteMultiaddr()) {
 		return false
 	}
-	return c.Stat().Direction == network.DirOutbound ||
-		dht.hasSensibleAddressesForPeer(c)
+	if c.Stat().Direction == network.DirOutbound {
+		// we established this connection, so they're definitely diallable.
+		return true
+	}
+	if dht.peerIsOnSameSubnet(c) {
+		// TODO: for now, we can't easily tell if the peer on our subnet
+		// is dialable or not, so don't discriminate.
+
+		// We won't return these peers in queries unless the requester's
+		// remote addr is also private.
+		return true
+	}
+	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
+	return dht.hasSensibleAddressesForPeer(ai)
 }
 
-func (dht *IpfsDHT) hasSensibleAddressesForPeer(c network.Conn) bool {
-	addrs := dht.host.Peerstore().Addrs(c.RemotePeer())
-	if len(addrs) == 0 {
+func (dht *IpfsDHT) hasSensibleAddressesForPeer(ai peer.AddrInfo) bool {
+	if len(ai.Addrs) == 0 {
 		return false
 	}
 
 	var hasPublicAddr bool
-	for _, a := range addrs {
+	for _, a := range ai.Addrs {
 		if isRelayAddr(a) {
 			return false
 		}
@@ -319,19 +330,7 @@ func (dht *IpfsDHT) hasSensibleAddressesForPeer(c network.Conn) bool {
 			hasPublicAddr = true
 		}
 	}
-
-	if dht.peerIsOnSameSubnet(c) && !hasPublicAddr {
-		// TODO: for now, we can't easily tell if the peer on our subnet
-		// is dialable or not, so don't discriminate.
-		// ! It may be okay to not add these to our routing table...
-		return true
-	}
-
-	if !hasPublicAddr {
-		return false
-	}
-
-	return true
+	return hasPublicAddr
 }
 
 // taken from go-libp2p/p2p/host/relay

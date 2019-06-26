@@ -46,6 +46,13 @@ var logger = logging.Logger("dht")
 // collect members of the routing table.
 const NumBootstrapQueries = 5
 
+type DHTMode int
+
+const (
+	ModeServer = DHTMode(1)
+	ModeClient = DHTMode(2)
+)
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -71,6 +78,9 @@ type IpfsDHT struct {
 	plk sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+
+	mode   DHTMode
+	modeLk sync.Mutex
 
 	bucketSize int
 
@@ -103,6 +113,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// register for network notifs.
 	dht.host.Network().Notify(subnot)
 
+	go dht.handleProtocolChanges(ctx)
+
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
@@ -116,10 +128,11 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.proc.AddChild(subnot.Process(ctx))
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
+	dht.mode = ModeClient
 
 	if !cfg.Client {
-		for _, p := range cfg.Protocols {
-			h.SetStreamHandler(p, dht.handleNewStream)
+		if err := dht.moveToServerMode(); err != nil {
+			return nil, err
 		}
 	}
 	return dht, nil
@@ -466,6 +479,61 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 	return filtered
 }
 
+func (dht *IpfsDHT) SetMode(m DHTMode) error {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+
+	if m == dht.mode {
+		return nil
+	}
+
+	switch m {
+	case ModeServer:
+		return dht.moveToServerMode()
+	case ModeClient:
+		return dht.moveToClientMode()
+	default:
+		return fmt.Errorf("unrecognized dht mode: %d", m)
+	}
+}
+
+func (dht *IpfsDHT) moveToServerMode() error {
+	dht.mode = ModeServer
+	for _, p := range dht.protocols {
+		dht.host.SetStreamHandler(p, dht.handleNewStream)
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) moveToClientMode() error {
+	dht.mode = ModeClient
+	for _, p := range dht.protocols {
+		dht.host.RemoveStreamHandler(p)
+	}
+
+	pset := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pset[p] = true
+	}
+
+	for _, c := range dht.host.Network().Conns() {
+		for _, s := range c.GetStreams() {
+			if pset[s.Protocol()] {
+				if s.Stat().Direction == network.DirInbound {
+					s.Reset()
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) getMode() DHTMode {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+	return dht.mode
+}
+
 // Context return dht's context
 func (dht *IpfsDHT) Context() context.Context {
 	return dht.ctx
@@ -537,4 +605,55 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 		extraTags...,
 	) // ignoring error as it is unrelated to the actual function of this code.
 	return ctx
+}
+
+func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
+	// register for event bus protocol ID changes
+	sub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated))
+	if err != nil {
+		panic(err)
+	}
+	defer sub.Close()
+
+	pmap := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pmap[p] = true
+	}
+
+	for {
+		select {
+		case ie, ok := <-sub.Out():
+			e, ok := ie.(event.EvtPeerProtocolsUpdated)
+			if !ok {
+				logger.Errorf("got wrong type from subscription: %T", ie)
+				return
+			}
+
+			if !ok {
+				return
+			}
+			var drop, add bool
+			for _, p := range e.Added {
+				if pmap[p] {
+					add = true
+				}
+			}
+			for _, p := range e.Removed {
+				if pmap[p] {
+					drop = true
+				}
+			}
+
+			if add && drop {
+				// TODO: discuss how to handle this case
+				logger.Warning("peer adding and dropping dht protocols? odd")
+			} else if add {
+				dht.RoutingTable().Update(e.Peer)
+			} else if drop {
+				dht.RoutingTable().Remove(e.Peer)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }

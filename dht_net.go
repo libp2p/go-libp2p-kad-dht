@@ -15,7 +15,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kbucket/keyspace"
 	"github.com/multiformats/go-multiaddr"
-	
+
 	msmux "github.com/multiformats/go-multistream"
 
 	ggio "github.com/gogo/protobuf/io"

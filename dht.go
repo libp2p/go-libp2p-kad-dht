@@ -112,8 +112,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 // NewDHT creates a new DHT object with the given peer as the 'local' host.
 // IpfsDHT's initialized with this function will respond to DHT requests,
 // whereas IpfsDHT's initialized with NewDHTClient will not.
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching, bucketSize int) *IpfsDHT {
-	dht, err := New(ctx, h, opts.Datastore(dstore), opts.BucketSize(bucketSize))
+func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(ctx, h, opts.Datastore(dstore))
 	if err != nil {
 		panic(err)
 	}

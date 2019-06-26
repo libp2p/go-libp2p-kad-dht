@@ -289,8 +289,8 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 }
 
 func (dht *IpfsDHT) UpdateConn(ctx context.Context, c network.Conn) {
-	logger.Event(ctx, "updatePeer", c.RemotePeer())
 	if dht.shouldAddPeerToRoutingTable(c) {
+		logger.Event(ctx, "updatePeer", c.RemotePeer())
 		dht.routingTable.Update(c.RemotePeer())
 	}
 }
@@ -310,7 +310,7 @@ func (dht *IpfsDHT) hasSensibleAddressesForPeer(c network.Conn) bool {
 	}
 
 	var hasPublicAddr bool
-	for _, a := range dht.host.Peerstore().Addrs(c.RemotePeer()) {
+	for _, a := range addrs {
 		if isRelayAddr(a) {
 			return false
 		}
@@ -331,7 +331,7 @@ func (dht *IpfsDHT) hasSensibleAddressesForPeer(c network.Conn) bool {
 		return false
 	}
 
-	return false
+	return true
 }
 
 // taken from go-libp2p/p2p/host/relay

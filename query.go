@@ -281,6 +281,8 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	// finally, run the query against this peer
 	res, err := r.query.qfunc(ctx, p)
 
+	conn := r.query.dht.connForPeer(p)
+
 	r.peersQueried.Add(p)
 
 	if err != nil {
@@ -296,9 +298,10 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		go r.proc.Close() // signal to everyone that we're done.
 		// must be async, as we're one of the children, and Close blocks.
 
-	} else if len(res.closerPeers) > 0 {
-		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(res.closerPeers))
-		for _, next := range res.closerPeers {
+	} else if filtered := filterCandidatesPtr(conn, res.closerPeers); len(filtered) > 0 {
+		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer filtered peers; unfiltered: %d)", p,
+			len(filtered), len(res.closerPeers))
+		for _, next := range filtered {
 			if next.ID == r.query.dht.self { // don't add self.
 				logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 				continue
@@ -310,6 +313,6 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 			logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
 		}
 	} else {
-		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
+		logger.Debugf("QUERY worker for: %v - not found, and no closer (filtered) peers.", p)
 	}
 }

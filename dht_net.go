@@ -132,7 +132,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			return false
 		}
 
-		resp, err := handler(ctx, mPeer, &req)
+		resp, err := handler(ctx, mPeer, &req, s.Conn())
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			logger.Debugf("error handling message: %v", err)

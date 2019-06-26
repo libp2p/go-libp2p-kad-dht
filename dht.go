@@ -187,7 +187,6 @@ var errInvalidRecord = errors.New("received invalid record")
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
 func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
-
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
@@ -305,7 +304,7 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 	}
 
 	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
-	if dht.peerIsOnSameSubnet(c) {
+	if peerIsOnSameSubnet(c) {
 		// TODO: for now, we can't easily tell if the peer on our subnet
 		// is dialable or not, so don't discriminate.
 
@@ -314,10 +313,10 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 		return len(ai.Addrs) > 0
 	}
 
-	return dht.isPubliclyRoutable(ai)
+	return isPubliclyRoutable(ai)
 }
 
-func (dht *IpfsDHT) isPubliclyRoutable(ai peer.AddrInfo) bool {
+func isPubliclyRoutable(ai peer.AddrInfo) bool {
 	if len(ai.Addrs) == 0 {
 		return false
 	}
@@ -351,7 +350,7 @@ func isRelayAddr(a ma.Multiaddr) bool {
 	return isRelay
 }
 
-func (dht *IpfsDHT) peerIsOnSameSubnet(c network.Conn) bool {
+func peerIsOnSameSubnet(c network.Conn) bool {
 	return manet.IsPrivateAddr(c.RemoteMultiaddr())
 }
 
@@ -513,4 +512,11 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 		extraTags...,
 	) // ignoring error as it is unrelated to the actual function of this code.
 	return ctx
+}
+
+func (dht *IpfsDHT) connForPeer(p peer.ID) network.Conn {
+	if cs := dht.host.Network().ConnsToPeer(p); len(cs) > 0 {
+		return cs[0]
+	}
+	return nil
 }

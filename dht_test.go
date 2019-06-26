@@ -1102,7 +1102,7 @@ func TestBadProtoMessages(t *testing.T) {
 	d := setupDHT(ctx, t, false)
 
 	nilrec := new(pb.Message)
-	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
+	if _, err := d.handlePutValue(ctx, "testpeer", nilrec, nil); err == nil {
 		t.Fatal("should have errored on nil record")
 	}
 }

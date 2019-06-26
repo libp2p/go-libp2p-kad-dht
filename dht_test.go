@@ -1387,3 +1387,22 @@ func TestClientModeAtInit(t *testing.T) {
 	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
 }
+
+func TestModeChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clientOnly := setupDHT(ctx, t, true)
+	clientToServer := setupDHT(ctx, t, true)
+	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
+	err := clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	err = clientToServer.SetMode(ModeServer)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.Nil(t, err)
+	err = clientToServer.SetMode(ModeClient)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.NotNil(t, err)
+}

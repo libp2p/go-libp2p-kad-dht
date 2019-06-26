@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
+	"go.opencensus.io/stats"
 )
 
 const (
@@ -39,7 +41,18 @@ type dialQueue struct {
 	dieCh     chan struct{}
 	growCh    chan struct{}
 	shrinkCh  chan struct{}
+
+	resultCh chan result
 }
+
+type result int
+
+// dial results
+const (
+	UNKNOWN result = iota
+	SUCCESS
+	ERROR
+)
 
 type dqParams struct {
 	ctx    context.Context
@@ -108,6 +121,7 @@ func newDialQueue(params *dqParams) (*dialQueue, error) {
 		shrinkCh:  make(chan struct{}, 1),
 		waitingCh: make(chan waitingCh),
 		dieCh:     make(chan struct{}, params.config.maxParallelism),
+		resultCh:  make(chan result, params.config.maxParallelism),
 	}
 
 	return dq, nil
@@ -122,16 +136,38 @@ func (dq *dialQueue) Start() {
 
 func (dq *dialQueue) control() {
 	var (
-		dialled        <-chan peer.ID
-		waiting        []waitingCh
-		lastScalingEvt = time.Now()
+		dialled             <-chan peer.ID
+		waiting             []waitingCh
+		lastScalingEvt      = time.Now()
+		successes, failures int64
 	)
 
 	defer func() {
+		stats.Record(dq.ctx, metrics.FailedDialsPerQuery.M(failures))
+		stats.Record(dq.ctx, metrics.SuccessfulDialsPerQuery.M(successes))
 		for _, w := range waiting {
 			close(w.ch)
 		}
 		waiting = nil
+	}()
+
+	// start result collection routine
+	go func() {
+		for {
+			select {
+			case <-dq.ctx.Done():
+				return
+			case r := <-dq.resultCh:
+				switch r {
+				case ERROR:
+					failures++
+				case SUCCESS:
+					successes++
+				case UNKNOWN:
+					// don't record stat
+				}
+			}
+		}
 	}()
 
 	// start workers
@@ -325,9 +361,11 @@ func (dq *dialQueue) worker() {
 
 			t := time.Now()
 			if err := dq.dialFn(dq.ctx, p); err != nil {
+				dq.resultCh <- ERROR
 				logger.Debugf("discarding dialled peer because of error: %v", err)
 				continue
 			}
+			dq.resultCh <- SUCCESS
 			logger.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Since(t)/time.Millisecond)
 			waiting := len(dq.waitingCh)
 

@@ -10,6 +10,7 @@ import (
 var (
 	defaultBytesDistribution        = view.Distribution(1024, 2048, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456, 1073741824, 4294967296)
 	defaultMillisecondsDistribution = view.Distribution(0.01, 0.05, 0.1, 0.3, 0.6, 0.8, 1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 25, 30, 40, 50, 65, 80, 100, 130, 160, 200, 250, 300, 400, 500, 650, 800, 1000, 2000, 5000, 10000, 20000, 50000, 100000)
+	defaultDistribution             = view.Distribution(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536)
 )
 
 // Keys
@@ -19,6 +20,7 @@ var (
 	// KeyInstanceID identifies a dht instance by the pointer address.
 	// Useful for differentiating between different dhts that have the same peer id.
 	KeyInstanceID, _ = tag.NewKey("instance_id")
+	KeyErrorType, _  = tag.NewKey("error_type")
 )
 
 // UpsertMessageType is a convenience upserts the message type
@@ -29,19 +31,30 @@ func UpsertMessageType(m *pb.Message) tag.Mutator {
 
 // Measures
 var (
-	ReceivedMessages       = stats.Int64("libp2p.io/dht/kad/received_messages", "Total number of messages received per RPC", stats.UnitDimensionless)
-	ReceivedMessageErrors  = stats.Int64("libp2p.io/dht/kad/received_message_errors", "Total number of errors for messages received per RPC", stats.UnitDimensionless)
-	ReceivedBytes          = stats.Int64("libp2p.io/dht/kad/received_bytes", "Total received bytes per RPC", stats.UnitBytes)
-	InboundRequestLatency  = stats.Float64("libp2p.io/dht/kad/inbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
-	OutboundRequestLatency = stats.Float64("libp2p.io/dht/kad/outbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
-	SentMessages           = stats.Int64("libp2p.io/dht/kad/sent_messages", "Total number of messages sent per RPC", stats.UnitDimensionless)
-	SentMessageErrors      = stats.Int64("libp2p.io/dht/kad/sent_message_errors", "Total number of errors for messages sent per RPC", stats.UnitDimensionless)
-	SentRequests           = stats.Int64("libp2p.io/dht/kad/sent_requests", "Total number of requests sent per RPC", stats.UnitDimensionless)
-	SentRequestErrors      = stats.Int64("libp2p.io/dht/kad/sent_request_errors", "Total number of errors for requests sent per RPC", stats.UnitDimensionless)
-	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
+	ReceivedMessages        = stats.Int64("libp2p.io/dht/kad/received_messages", "Total number of messages received per RPC", stats.UnitDimensionless)
+	ReceivedMessageErrors   = stats.Int64("libp2p.io/dht/kad/received_message_errors", "Total number of errors for messages received per RPC", stats.UnitDimensionless)
+	ReceivedBytes           = stats.Int64("libp2p.io/dht/kad/received_bytes", "Total received bytes per RPC", stats.UnitBytes)
+	InboundRequestLatency   = stats.Float64("libp2p.io/dht/kad/inbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
+	OutboundRequestLatency  = stats.Float64("libp2p.io/dht/kad/outbound_request_latency", "Latency per RPC", stats.UnitMilliseconds)
+	SentMessages            = stats.Int64("libp2p.io/dht/kad/sent_messages", "Total number of messages sent per RPC", stats.UnitDimensionless)
+	SentMessageErrors       = stats.Int64("libp2p.io/dht/kad/sent_message_errors", "Total number of errors for messages sent per RPC", stats.UnitDimensionless)
+	SentRequests            = stats.Int64("libp2p.io/dht/kad/sent_requests", "Total number of requests sent per RPC", stats.UnitDimensionless)
+	SentRequestErrors       = stats.Int64("libp2p.io/dht/kad/sent_request_errors", "Total number of errors for requests sent per RPC", stats.UnitDimensionless)
+	SentBytes               = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
+	SuccessfulDialsPerQuery = stats.Int64("libp2p.io/dht/kad/successful_dials_per_query", "Distribution of the number of successful dials per query", stats.UnitDimensionless)
+	FailedDialsPerQuery     = stats.Int64("libp2p.io/dht/kad/failed_dials_per_query", "Distribution of the number of failed dials per query", stats.UnitDimensionless)
 )
 
+// DefaultViews provides a default set of views to register.
 var DefaultViews = []*view.View{
+	&view.View{
+		Measure:     SuccessfulDialsPerQuery,
+		Aggregation: defaultDistribution,
+	},
+	&view.View{
+		Measure:     FailedDialsPerQuery,
+		Aggregation: defaultDistribution,
+	},
 	&view.View{
 		Measure:     ReceivedMessages,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},

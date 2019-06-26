@@ -157,7 +157,6 @@ func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 }
 
 func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

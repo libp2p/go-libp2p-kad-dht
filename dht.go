@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -71,6 +73,10 @@ type IpfsDHT struct {
 	protocols []protocol.ID // DHT protocols
 
 	bucketSize int
+
+	subscriptions struct {
+		evtPeerIdentification event.Subscription
+	}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -92,15 +98,19 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
 
+	subnot := (*subscriberNotifee)(dht)
+
 	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
+	dht.host.Network().Notify(subnot)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
-		dht.host.Network().StopNotify((*netNotifiee)(dht))
+		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
+
 		return nil
 	})
 
+	dht.proc.AddChild(subnot.Process(ctx))
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
 
@@ -160,6 +170,13 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		bucketSize:   bucketSize,
 	}
 
+	var err error
+	evts := []interface{}{new(event.EvtPeerIdentificationCompleted), new(event.EvtPeerIdentificationFailed)}
+	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
+	}
+
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
 	return dht
@@ -167,7 +184,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
@@ -191,7 +207,6 @@ var errInvalidRecord = errors.New("received invalid record")
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
 func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
-
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
@@ -293,10 +308,11 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 }
 
 func (dht *IpfsDHT) UpdateConn(ctx context.Context, c network.Conn) {
-	if dht.shouldAddPeerToRoutingTable(c) {
-		logger.Event(ctx, "updatePeer", c.RemotePeer())
-		dht.routingTable.Update(c.RemotePeer())
+	if !dht.shouldAddPeerToRoutingTable(c) {
+		return
 	}
+	logger.Event(ctx, "updatePeer", c.RemotePeer())
+	dht.routingTable.Update(c.RemotePeer())
 }
 
 func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
@@ -309,7 +325,7 @@ func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
 	}
 
 	ai := dht.host.Peerstore().PeerInfo(c.RemotePeer())
-	if dht.peerIsOnSameSubnet(c) {
+	if dht.isPeerLocallyConnected(c) {
 		// TODO: for now, we can't easily tell if the peer on our subnet
 		// is dialable or not, so don't discriminate.
 
@@ -355,8 +371,9 @@ func isRelayAddr(a ma.Multiaddr) bool {
 	return isRelay
 }
 
-func (dht *IpfsDHT) peerIsOnSameSubnet(c network.Conn) bool {
-	return manet.IsPrivateAddr(c.RemoteMultiaddr())
+func (dht *IpfsDHT) isPeerLocallyConnected(c network.Conn) bool {
+	addr := c.RemoteMultiaddr()
+	return manet.IsPrivateAddr(addr) || manet.IsIPLoopback(addr)
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
@@ -463,6 +480,7 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
+	_ = dht.subscriptions.evtPeerIdentification.Close()
 	return dht.proc.Close()
 }
 

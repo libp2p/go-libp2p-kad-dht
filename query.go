@@ -254,13 +254,13 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 }
 
 func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) (err error) {
-	ctx = logger.Start(ctx, "dialPeer")
-	logger.SetTag(ctx, "peerID", p.Pretty())
+	r.runCtx = logger.Start(r.runCtx, "dialPeer")
+	logger.SetTag(r.runCtx, "peerID", p.Pretty())
 	defer func() {
 		if err != nil {
-			logger.SetErr(ctx, err)
+			logger.SetErr(r.runCtx, err)
 		}
-		logger.Finish(ctx)
+		logger.Finish(r.runCtx)
 	}()
 	// short-circuit if we're already connected.
 	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
@@ -291,6 +291,9 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) (err error) {
 }
 
 func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
+	r.runCtx = logger.Start(r.runCtx, "queryPeer")
+	logger.SetTag(r.runCtx, "peerID", p.Pretty())
+	defer logger.Finish(r.runCtx)
 	// ok let's do this!
 
 	// create a context from our proc.

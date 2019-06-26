@@ -574,12 +574,13 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
-	eip := logger.EventBegin(ctx, "FindPeer", id)
+	ctx = logger.Start(ctx, "FindPeer")
+	logger.SetTag(ctx, "peerID", id.Pretty())
 	defer func() {
 		if err != nil {
-			eip.SetError(err)
+			logger.SetErr(ctx, err)
 		}
-		eip.Done()
+		logger.Finish(ctx)
 	}()
 
 	// Check if were already connected to them

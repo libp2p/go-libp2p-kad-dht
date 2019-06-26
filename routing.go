@@ -603,6 +603,12 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	// setup the Query
 	parent := ctx
 	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+		ctx = logger.Start(ctx, "FindPeer.Query")
+		defer logger.Finish(ctx)
+		logger.SetTags(ctx, map[string]interface{}{
+			"ID":     string(id),
+			"peerID": p.Pretty(),
+		})
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
 			ID:   p,

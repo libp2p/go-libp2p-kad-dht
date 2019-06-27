@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"go.opencensus.io/tag"
+	"go.opencensus.io/trace"
 	"golang.org/x/xerrors"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
@@ -257,14 +258,16 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 }
 
 // getValueSingle simply performs the get value RPC with the given parameters
-func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (*pb.Message, error) {
-	meta := logging.LoggableMap{
-		"key":  key,
-		"peer": p,
-	}
-
-	eip := logger.EventBegin(ctx, "getValueSingle", meta)
-	defer eip.Done()
+func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (pbResp *pb.Message, err error) {
+	ctx, span := trace.StartSpan(ctx, "getValueSingle")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	span.AddAttributes(trace.StringAttribute("key", key))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
 
 	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -275,7 +278,6 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 		logger.Warningf("getValueSingle: read timeout %s %s", p.Pretty(), key)
 		fallthrough
 	default:
-		eip.SetError(err)
 		return nil, err
 	}
 }
@@ -404,29 +406,40 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
 }
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
-func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	ctx = logger.Start(ctx, "findPeerSingle")
-	logger.SetTag(ctx, "peer", p.Pretty())
-	logger.SetTag(ctx, "target", id.Pretty())
-	defer logger.Finish(ctx)
+func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (pbResp *pb.Message, err error) {
+	ctx, span := trace.StartSpan(ctx, "findPeerSingle")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	span.AddAttributes(trace.StringAttribute("target", id.Pretty()))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
 
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
-		logger.SetTag(ctx, "numPeers", len(resp.GetCloserPeers()))
 		return resp, nil
 	case ErrReadTimeout:
 		logger.Warningf("read timeout: %s %s", p.Pretty(), id)
 		fallthrough
 	default:
-		logger.SetErr(ctx, err)
 		return nil, err
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	ctx = logger.Start(ctx, "findProvidersSingle")
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (pbResp *pb.Message, err error) {
+	ctx, span := trace.StartSpan(ctx, "findProvidersSingle")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	span.AddAttributes(trace.StringAttribute("key", key.KeyString()))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
 
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -437,7 +450,6 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.
 		logger.Warningf("read timeout: %s %s", p.Pretty(), key)
 		fallthrough
 	default:
-		logger.SetErr(ctx, err)
 		return nil, err
 	}
 }

@@ -13,6 +13,7 @@ import (
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"go.opencensus.io/trace"
 
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -60,12 +61,15 @@ type queryFunc func(context.Context, peer.ID) (*dhtQueryResult, error)
 
 // Run runs the query at hand. pass in a list of peers to use first.
 func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (_ *dhtQueryResult, err error) {
-	ctx = logger.Start(ctx, "dhtQuery.Run")
+	ctx, span := trace.StartSpan(ctx, "dhtQuery.Run")
+	for _, p := range peers {
+		span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	}
 	defer func() {
 		if err != nil {
-			logger.SetErr(ctx, err)
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
 		}
-		logger.Finish(ctx)
+		span.End()
 	}()
 	if len(peers) == 0 {
 		logger.Warning("Running query with no peers!")
@@ -132,16 +136,17 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 }
 
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (qResult *dhtQueryResult, reterr error) {
-	ctx = logger.Start(ctx, "dhtQueryRunner.Run")
-	logger.LogKV(ctx, "peers", peers)
-	logger.LogKV(ctx, "numPeers", len(peers))
+	ctx, span := trace.StartSpan(ctx, "dhtQueryRunner.Run")
+	for _, p := range peers {
+		span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	}
 	defer func() {
 		if reterr != nil {
-			logger.SetErr(ctx, reterr)
+			span.AddAttributes(trace.StringAttribute("error", reterr.Error()))
 		}
-		logger.Finish(ctx)
-		logger.SetTag(ctx, "dhtQueryResult", qResult)
+		span.End()
 	}()
+
 	r.log = logger
 	r.runCtx = ctx
 
@@ -254,13 +259,14 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 }
 
 func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) (err error) {
-	r.runCtx = logger.Start(r.runCtx, "dialPeer")
-	logger.SetTag(r.runCtx, "peerID", p.Pretty())
+	var span *trace.Span
+	r.runCtx, span = trace.StartSpan(r.runCtx, "dhtQueryRunner.dialPeer")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
 	defer func() {
 		if err != nil {
-			logger.SetErr(r.runCtx, err)
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
 		}
-		logger.Finish(r.runCtx)
+		span.End()
 	}()
 	// short-circuit if we're already connected.
 	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
@@ -291,9 +297,10 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) (err error) {
 }
 
 func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
-	r.runCtx = logger.Start(r.runCtx, "queryPeer")
-	logger.SetTag(r.runCtx, "peerID", p.Pretty())
-	defer logger.Finish(r.runCtx)
+	var span *trace.Span
+	r.runCtx, span = trace.StartSpan(r.runCtx, "queryPeer")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	defer span.End()
 	// ok let's do this!
 
 	// create a context from our proc.

@@ -15,10 +15,10 @@ import (
 
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
+	"go.opencensus.io/trace"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This
@@ -34,13 +34,13 @@ var asyncQueryBuffer = 10
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
-	eip := logger.EventBegin(ctx, "PutValue")
+	ctx, span := trace.StartSpan(ctx, "PutValue")
+	span.AddAttributes(trace.StringAttribute("key", key))
 	defer func() {
-		eip.Append(loggableKey(key))
 		if err != nil {
-			eip.SetError(err)
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
 		}
-		eip.Done()
+		span.End()
 	}()
 	logger.Debugf("PutValue %s", key)
 
@@ -109,13 +109,13 @@ type RecvdVal struct {
 
 // GetValue searches for the value corresponding to given Key.
 func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) (_ []byte, err error) {
-	eip := logger.EventBegin(ctx, "GetValue")
+	ctx, span := trace.StartSpan(ctx, "GetValue")
+	span.AddAttributes(trace.StringAttribute("key", key))
 	defer func() {
-		eip.Append(loggableKey(key))
 		if err != nil {
-			eip.SetError(err)
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
 		}
-		eip.Done()
+		span.End()
 	}()
 
 	// apply defaultQuorum if relevant
@@ -249,14 +249,18 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 // GetValues gets nvals values corresponding to the given key.
 func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
-	eip := logger.EventBegin(ctx, "GetValues")
-
-	eip.Append(loggableKey(key))
-	defer eip.Done()
+	ctx, span := trace.StartSpan(ctx, "GetValues")
+	span.AddAttributes(trace.StringAttribute("key", key))
+	span.AddAttributes(trace.Int64Attribute("nvals", int64(nvals)))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
 
 	valCh, err := dht.getValues(ctx, key, nvals)
 	if err != nil {
-		eip.SetError(err)
 		return nil, err
 	}
 
@@ -394,12 +398,14 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
-	eip := logger.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
+	ctx, span := trace.StartSpan(ctx, "Provide")
+	span.AddAttributes(trace.StringAttribute("key", key.String()))
+	span.AddAttributes(trace.BoolAttribute("brdcst", brdcst))
 	defer func() {
 		if err != nil {
-			eip.SetError(err)
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
 		}
-		eip.Done()
+		span.End()
 	}()
 
 	// add self locally
@@ -470,7 +476,12 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 }
 
 func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, count int, peerOut chan peer.AddrInfo) {
-	defer logger.EventBegin(ctx, "findProvidersAsync", key).Done()
+	ctx, span := trace.StartSpan(ctx, "findProviderAsyncRoutine")
+	span.AddAttributes(trace.StringAttribute("key", key.String()))
+	span.AddAttributes(trace.Int64Attribute("count", int64(count)))
+	defer func() {
+		span.End()
+	}()
 	defer close(peerOut)
 
 	ps := peer.NewLimitedSet(count)
@@ -574,13 +585,13 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
-	ctx = logger.Start(ctx, "FindPeer")
-	logger.SetTag(ctx, "peerID", id.Pretty())
+	ctx, span := trace.StartSpan(ctx, "FindPeer")
+	span.AddAttributes(trace.StringAttribute("peer", id.Pretty()))
 	defer func() {
 		if err != nil {
-			logger.SetErr(ctx, err)
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
 		}
-		logger.Finish(ctx)
+		span.End()
 	}()
 
 	// Check if were already connected to them
@@ -604,12 +615,6 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	// setup the Query
 	parent := ctx
 	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		ctx = logger.Start(ctx, "FindPeer.Query")
-		defer logger.Finish(ctx)
-		logger.SetTags(ctx, map[string]interface{}{
-			"ID":     string(id),
-			"peerID": p.Pretty(),
-		})
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
 			ID:   p,

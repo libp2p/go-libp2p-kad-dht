@@ -12,6 +12,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
+	"go.opencensus.io/trace"
 )
 
 func tryFormatLoggableKey(k string) (string, error) {
@@ -54,12 +55,13 @@ func loggableKey(k string) logging.LoggableMap {
 
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
-func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
-	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
+func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (_ <-chan peer.ID, err error) {
 	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
 	if len(tablepeers) == 0 {
 		return nil, kb.ErrLookupFailure
 	}
+	ctx, span := trace.StartSpan(ctx, "getClosestPeers")
+	span.AddAttributes(trace.StringAttribute("key", key))
 
 	out := make(chan peer.ID, KValue)
 
@@ -92,7 +94,12 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 	go func() {
 		defer close(out)
-		defer e.Done()
+		defer func() {
+			if err != nil {
+				span.AddAttributes(trace.StringAttribute("error", err.Error()))
+			}
+			span.End()
+		}()
 		// run it!
 		res, err := query.Run(ctx, tablepeers)
 		if err != nil {

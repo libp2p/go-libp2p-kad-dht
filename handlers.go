@@ -18,6 +18,8 @@ import (
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/whyrusleeping/base32"
+
+	"go.opencensus.io/trace"
 )
 
 // The number of closer peers to send on requests.
@@ -46,9 +48,15 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 }
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, err error) {
-	ctx = logger.Start(ctx, "handleGetValue")
-	logger.SetTag(ctx, "peer", p)
-	defer func() { logger.FinishWithErr(ctx, err) }()
+	ctx, span := trace.StartSpan(ctx, "handleGetValue")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
+
 	logger.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
 
 	// setup response
@@ -148,9 +156,14 @@ func cleanRecord(rec *recpb.Record) {
 
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message, _ network.Conn) (_ *pb.Message, err error) {
-	ctx = logger.Start(ctx, "handlePutValue")
-	logger.SetTag(ctx, "peer", p)
-	defer func() { logger.FinishWithErr(ctx, err) }()
+	ctx, span := trace.StartSpan(ctx, "handlePutValue")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
 
 	rec := pmes.GetRecord()
 	if rec == nil {
@@ -242,9 +255,15 @@ func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message, _
 }
 
 func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, _err error) {
-	ctx = logger.Start(ctx, "handleFindPeer")
-	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
+	ctx, span := trace.StartSpan(ctx, "handleFindPeer")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	defer func() {
+		if _err != nil {
+			span.AddAttributes(trace.StringAttribute("error", _err.Error()))
+		}
+		span.End()
+	}()
+
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -286,9 +305,14 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 }
 
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, _err error) {
-	ctx = logger.Start(ctx, "handleGetProviders")
-	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
+	ctx, span := trace.StartSpan(ctx, "handleGetProviders")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	defer func() {
+		if _err != nil {
+			span.AddAttributes(trace.StringAttribute("error", _err.Error()))
+		}
+		span.End()
+	}()
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	c, err := cid.Cast([]byte(pmes.GetKey()))
@@ -337,9 +361,14 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 }
 
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message, _ network.Conn) (_ *pb.Message, _err error) {
-	ctx = logger.Start(ctx, "handleAddProvider")
-	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
+	ctx, span := trace.StartSpan(ctx, "handleAddProvider")
+	span.AddAttributes(trace.StringAttribute("peer", p.Pretty()))
+	defer func() {
+		if _err != nil {
+			span.AddAttributes(trace.StringAttribute("error", _err.Error()))
+		}
+		span.End()
+	}()
 
 	c, err := cid.Cast([]byte(pmes.GetKey()))
 	if err != nil {

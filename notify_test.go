@@ -16,8 +16,8 @@ func TestNotifieeMultipleConn(t *testing.T) {
 	d1 := setupDHT(ctx, t, false)
 	d2 := setupDHT(ctx, t, false)
 
-	nn1 := (*netNotifiee)(d1)
-	nn2 := (*netNotifiee)(d2)
+	nn1 := (*subscriberNotifee)(d1)
+	nn2 := (*subscriberNotifee)(d2)
 
 	connect(t, ctx, d1, d2)
 	c12 := d1.host.Network().ConnsToPeer(d2.self)[0]

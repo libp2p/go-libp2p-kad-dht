@@ -10,14 +10,14 @@ import (
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	kpeerset "github.com/libp2p/go-libp2p-kad-dht/kpeerset"
+	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 
 	logging "github.com/ipfs/go-log"
 	todoctr "github.com/ipfs/go-todocounter"
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	queue "github.com/libp2p/go-libp2p-peerstore/queue"
+	"github.com/libp2p/go-libp2p-peerstore/queue"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
@@ -284,6 +284,8 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		return
 	}
 
+	conn := r.query.dht.connForPeer(p)
+
 	r.peersQueried.Add(p)
 
 	// finally, run the query against this peer
@@ -297,9 +299,10 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	if err != nil {
 		logger.Debugf("ERROR worker for: %v %v", p, err)
-	} else if len(closerPeers) > 0 {
-		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer peers)", p, len(closerPeers))
-		for _, next := range closerPeers {
+	} else if filtered := filterCandidatesPtr(conn, closerPeers); len(filtered) > 0 {
+		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer filtered peers; unfiltered: %d)", p,
+			len(filtered), len(closerPeers))
+		for _, next := range filtered {
 			if next.ID == r.query.dht.self { // don't add self.
 				logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 				continue
@@ -308,10 +311,10 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 			// add their addresses to the dialer's peerstore
 			r.query.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
 			r.addPeerToQuery(next.ID)
-			logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
+			// logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
 		}
 	} else {
-		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
+		logger.Debugf("QUERY worker for: %v - not found, and no closer (filtered) peers.", p)
 	}
 }
 

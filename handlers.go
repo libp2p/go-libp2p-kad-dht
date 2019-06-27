@@ -15,17 +15,18 @@ import (
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
+
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	base32 "github.com/whyrusleeping/base32"
+	"github.com/whyrusleeping/base32"
 )
 
 // The number of closer peers to send on requests.
 var CloserPeerCount = KValue
 
 // dhthandler specifies the signature of functions that handle DHT messages.
-type dhtHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, error)
+type dhtHandler func(context.Context, peer.ID, *pb.Message, network.Conn) (*pb.Message, error)
 
 func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 	switch t {
@@ -46,7 +47,7 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 	}
 }
 
-func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, err error) {
 	ctx = logger.Start(ctx, "handleGetValue")
 	logger.SetTag(ctx, "peer", p)
 	defer func() { logger.FinishWithErr(ctx, err) }()
@@ -82,7 +83,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 					[remote:%s]`, dht.self, pi.ID, p)
 			}
 		}
-
+		closerinfos = filterCandidates(remote, closerinfos)
 		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), closerinfos)
 	}
 
@@ -148,7 +149,7 @@ func cleanRecord(rec *recpb.Record) {
 }
 
 // Store a value in this peer local storage
-func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message, _ network.Conn) (_ *pb.Message, err error) {
 	ctx = logger.Start(ctx, "handlePutValue")
 	logger.SetTag(ctx, "peer", p)
 	defer func() { logger.FinishWithErr(ctx, err) }()
@@ -237,12 +238,12 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 	return rec, nil
 }
 
-func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message, _ network.Conn) (*pb.Message, error) {
 	logger.Debugf("%s Responding to ping from %s!\n", dht.self, p)
 	return pmes, nil
 }
 
-func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, _err error) {
 	ctx = logger.Start(ctx, "handleFindPeer")
 	defer func() { logger.FinishWithErr(ctx, _err) }()
 	logger.SetTag(ctx, "peer", p)
@@ -281,19 +282,12 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 	// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 	closestinfos := pstore.PeerInfos(dht.peerstore, closest)
-	// possibly an over-allocation but this array is temporary anyways.
-	withAddresses := make([]peer.AddrInfo, 0, len(closestinfos))
-	for _, pi := range closestinfos {
-		if len(pi.Addrs) > 0 {
-			withAddresses = append(withAddresses, pi)
-		}
-	}
-
-	resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), withAddresses)
+	closestinfos = filterCandidates(remote, closestinfos)
+	resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), closestinfos)
 	return resp, nil
 }
 
-func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, _err error) {
 	ctx = logger.Start(ctx, "handleGetProviders")
 	defer func() { logger.FinishWithErr(ctx, _err) }()
 	logger.SetTag(ctx, "peer", p)
@@ -336,6 +330,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	if closer != nil {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 		infos := pstore.PeerInfos(dht.peerstore, closer)
+		infos = filterCandidates(remote, infos)
 		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
 		logger.Debugf("%s have %d closer peers: %s", reqDesc, len(closer), infos)
 	}
@@ -343,7 +338,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	return resp, nil
 }
 
-func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message, _ network.Conn) (_ *pb.Message, _err error) {
 	ctx = logger.Start(ctx, "handleAddProvider")
 	defer func() { logger.FinishWithErr(ctx, _err) }()
 	logger.SetTag(ctx, "peer", p)
@@ -384,4 +379,43 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 
 func convertToDsKey(s []byte) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString(s))
+}
+
+// filterCandidates contextualises a set of incoming or outgoing candidates we're about to
+// process/send as closer peers, and prunes undesirable peers.
+func filterCandidates(remote network.Conn, candidates []peer.AddrInfo) []peer.AddrInfo {
+	// remote conn can be nil if we dropped the connection before processing this peer set, in which case we
+	// fall back to treating this peer as public.
+	if remote != nil && isPeerLocallyConnected(remote) {
+		// if the peer is in LAN, we offer a raw view of the network.
+		return candidates
+	}
+	// otherwise we prune peers that are not publicly routable.
+	ret := make([]peer.AddrInfo, 0, len(candidates))
+	for _, c := range candidates {
+		if !isPubliclyRoutable(c) {
+			continue
+		}
+		ret = append(ret, c)
+	}
+	return ret
+}
+
+// same as filterCandidates but dealing with slices of pointers to avoid allocs.
+func filterCandidatesPtr(remote network.Conn, candidates []*peer.AddrInfo) []*peer.AddrInfo {
+	// remote conn can be nil if we dropped the connection before processing this peer set, in which case we
+	// fall back to treating this peer as public.
+	if remote != nil && isPeerLocallyConnected(remote) {
+		// if the peer is in LAN, we offer a raw view of the network.
+		return candidates
+	}
+	// otherwise we prune peers that are not publicly routable.
+	ret := make([]*peer.AddrInfo, 0, len(candidates))
+	for _, c := range candidates {
+		if !isPubliclyRoutable(*c) {
+			continue
+		}
+		ret = append(ret, c)
+	}
+	return ret
 }

@@ -11,12 +11,17 @@ import (
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kbucket/keyspace"
+	"github.com/multiformats/go-multiaddr"
+
+	msmux "github.com/multiformats/go-multistream"
 
 	ggio "github.com/gogo/protobuf/io"
+	"github.com/ipfs/go-cid"
 
+	"github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -71,19 +76,27 @@ func (dht *IpfsDHT) handleNewStream(s network.Stream) {
 // Returns true on orderly completion of writes (so we can Close the stream).
 func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	ctx := dht.ctx
-	r := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+	r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 
 	mPeer := s.Conn().RemotePeer()
+	addr := s.Conn().RemoteMultiaddr()
 
 	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { s.Reset() })
 	defer timer.Stop()
 
 	for {
+		if dht.getMode() != ModeServer {
+			logger.Errorf("ignoring incoming dht message while not in server mode")
+			return false
+		}
+
 		var req pb.Message
-		switch err := r.ReadMsg(&req); err {
-		case io.EOF:
-			return true
-		default:
+		msgbytes, err := r.ReadMsg()
+		if err != nil {
+			defer r.ReleaseMsg(msgbytes)
+			if err == io.EOF {
+				return true
+			}
 			// This string test is necessary because there isn't a single stream reset error
 			// instance	in use.
 			if err.Error() != "stream reset" {
@@ -95,7 +108,17 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 				metrics.ReceivedMessageErrors.M(1),
 			)
 			return false
-		case nil:
+		}
+		err = req.Unmarshal(msgbytes)
+		r.ReleaseMsg(msgbytes)
+		if err != nil {
+			logger.Debugf("error unmarshalling message: %#v", err)
+			stats.RecordWithTags(
+				ctx,
+				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
+				metrics.ReceivedMessageErrors.M(1),
+			)
+			return false
 		}
 
 		timer.Reset(dhtStreamIdleTimeout)
@@ -112,6 +135,13 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			metrics.ReceivedBytes.M(int64(req.Size())),
 		)
 
+		c, _ := cid.Cast(req.Key)
+		pid, _ := peer.IDFromBytes(req.Key)
+
+		// note: MessageType implements Stringer.
+		logger.Debugf("[inbound rpc] handling incoming message; from_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, remote_addr=%s",
+			mPeer, req.GetType(), c, pid, req.Key, len(req.GetCloserPeers()), len(req.ProviderPeers), addr)
+
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
@@ -119,18 +149,21 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			return false
 		}
 
-		resp, err := handler(ctx, mPeer, &req)
+		resp, err := handler(ctx, mPeer, &req, s.Conn())
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			logger.Debugf("error handling message: %v", err)
 			return false
 		}
 
-		dht.updateFromMessage(ctx, mPeer, &req)
+		dht.updateFromMessage(ctx, s.Conn(), &req)
 
 		if resp == nil {
 			continue
 		}
+
+		logger.Debugf("[inbound rpc] writing response message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, remote_addr=%s",
+			mPeer, resp.GetType(), c, pid, req.Key, len(resp.GetCloserPeers()), len(resp.ProviderPeers), addr)
 
 		// send out response msg
 		err = writeMsg(s, resp)
@@ -142,6 +175,11 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 
 		elapsedTime := time.Since(startTime)
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
+
+		// note: MessageType implements Stringer.
+		logger.Debugf("[inbound rpc] wrote response message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, remote_addr=%s",
+			mPeer, resp.GetType(), c, pid, req.Key, len(resp.GetCloserPeers()), len(resp.ProviderPeers), latencyMillis, addr)
+
 		stats.Record(ctx, metrics.InboundRequestLatency.M(latencyMillis))
 	}
 }
@@ -153,6 +191,9 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx, metrics.SentRequestErrors.M(1))
 		return nil, err
 	}
@@ -161,12 +202,15 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx, metrics.SentRequestErrors.M(1))
 		return nil, err
 	}
 
 	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, p, rpmes)
+	dht.updateFromMessage(ctx, ms.s.Conn(), rpmes)
 
 	stats.Record(
 		ctx,
@@ -187,11 +231,17 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx, metrics.SentMessageErrors.M(1))
 		return err
 	}
 
 	if err := ms.SendMessage(ctx, pmes); err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx, metrics.SentMessageErrors.M(1))
 		return err
 	}
@@ -205,11 +255,11 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	return nil
 }
 
-func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
+func (dht *IpfsDHT) updateFromMessage(ctx context.Context, c network.Conn, mes *pb.Message) error {
 	// Make sure that this node is actually a DHT server, not just a client.
-	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+	protos, err := dht.peerstore.SupportsProtocols(c.RemotePeer(), dht.protocolStrs()...)
 	if err == nil && len(protos) > 0 {
-		dht.Update(ctx, p)
+		dht.UpdateConn(ctx, c)
 	}
 	return nil
 }
@@ -248,7 +298,7 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 
 type messageSender struct {
 	s   network.Stream
-	r   ggio.ReadCloser
+	r   msgio.ReadCloser
 	lk  sync.Mutex
 	p   peer.ID
 	dht *IpfsDHT
@@ -291,7 +341,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 		return err
 	}
 
-	ms.r = ggio.NewDelimitedReader(nstr, network.MessageSizeMax)
+	ms.r = msgio.NewVarintReaderSize(nstr, network.MessageSizeMax)
 	ms.s = nstr
 
 	return nil
@@ -306,23 +356,51 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
+
+	c, _ := cid.Cast(pmes.Key)
+	pid, _ := peer.IDFromBytes(pmes.Key)
+
+	distance := keyspace.ZeroPrefixLen(keyspace.XORKeySpace.Key(pmes.Key).Distance(keyspace.XORKeySpace.Key([]byte(ms.p))).Bytes())
+	var addr multiaddr.Multiaddr
+	if ms.s != nil {
+		addr = ms.s.Conn().RemoteMultiaddr()
+	}
+
 	for {
 		if err := ms.prep(ctx); err != nil {
 			return err
 		}
 
+		// note: MessageType implements Stringer.
+		logger.Debugf("[outbound rpc] writing fire-and-forget outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), distance, addr)
+
+		startTime := time.Now()
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
 			ms.s = nil
 
+			elapsedTime := time.Since(startTime)
+			latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
+
 			if retry {
-				logger.Info("error writing message, bailing: ", err)
+				logger.Infof("[outbound rpc] error while writing fire-and-forget, bailing; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+					err, ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
 				return err
 			}
-			logger.Info("error writing message, trying again: ", err)
+			logger.Infof("[outbound rpc] error while writing fire-and-forget, trying again; err=%s, to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+				err, ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
+
 			retry = true
 			continue
 		}
+
+		elapsedTime := time.Since(startTime)
+		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
+
+		// note: MessageType implements Stringer.
+		logger.Debugf("[outbound rpc] wrote fire-and-forget outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
@@ -341,10 +419,25 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 	ms.lk.Lock()
 	defer ms.lk.Unlock()
 	retry := false
+
+	c, _ := cid.Cast(pmes.Key)
+	pid, _ := peer.IDFromBytes(pmes.Key)
+
+	distance := keyspace.ZeroPrefixLen(keyspace.XORKeySpace.Key(pmes.Key).Distance(keyspace.XORKeySpace.Key([]byte(ms.p))).Bytes())
+	var addr multiaddr.Multiaddr
+	if ms.s != nil {
+		addr = ms.s.Conn().RemoteMultiaddr()
+	}
+
 	for {
 		if err := ms.prep(ctx); err != nil {
 			return nil, err
 		}
+
+		startTime := time.Now()
+		// note: MessageType implements Stringer.
+		logger.Debugf("[outbound rpc] writing request outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), distance, addr)
 
 		if err := ms.writeMsg(pmes); err != nil {
 			ms.s.Reset()
@@ -359,6 +452,14 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			continue
 		}
 
+		elapsedTime := time.Since(startTime)
+		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
+		// note: MessageType implements Stringer.
+		logger.Debugf("[outbound rpc] wrote request outbound message; to_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, pmes.GetType(), c, pid, pmes.Key, len(pmes.GetCloserPeers()), len(pmes.ProviderPeers), latencyMillis, distance, addr)
+
+		startTime = time.Now()
+
 		mes := new(pb.Message)
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
 			ms.s.Reset()
@@ -372,6 +473,15 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			retry = true
 			continue
 		}
+
+		elapsedTime = time.Since(startTime)
+		latencyMillis = float64(elapsedTime) / float64(time.Millisecond)
+
+		c, _ = cid.Cast(mes.Key)
+		pid, _ = peer.IDFromBytes(pmes.Key)
+		// note: MessageType implements Stringer.
+		logger.Debugf("[outbound rpc] read response message; from_peer=%s, type=%s, cid_key=%s, peer_key=%s, raw_key=%x, closer=%d, providers=%d, elapsed_ms=%f, xor_common_zeros=%d, remote_addr=%s",
+			ms.p, mes.GetType(), c, pid, mes.Key, len(mes.GetCloserPeers()), len(mes.ProviderPeers), latencyMillis, distance, addr)
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
@@ -392,8 +502,14 @@ func (ms *messageSender) writeMsg(pmes *pb.Message) error {
 
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
 	errc := make(chan error, 1)
-	go func(r ggio.ReadCloser) {
-		errc <- r.ReadMsg(mes)
+	go func(r msgio.ReadCloser) {
+		bytes, err := r.ReadMsg()
+		defer r.ReleaseMsg(bytes)
+		if err != nil {
+			errc <- err
+			return
+		}
+		errc <- mes.Unmarshal(bytes)
 	}(ms.r)
 
 	t := time.NewTimer(dhtReadMessageTimeout)

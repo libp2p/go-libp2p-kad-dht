@@ -8,11 +8,13 @@ import (
 	"sync"
 	"time"
 
+	util "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/keyspace"
 	"github.com/multiformats/go-multiaddr"
 
@@ -360,7 +362,8 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 	c, _ := cid.Cast(pmes.Key)
 	pid, _ := peer.IDFromBytes(pmes.Key)
 
-	distance := keyspace.ZeroPrefixLen(keyspace.XORKeySpace.Key(pmes.Key).Distance(keyspace.XORKeySpace.Key([]byte(ms.p))).Bytes())
+	distb := xor(keyspace.XORKeySpace.Key(pmes.Key).Bytes, keyspace.XORKeySpace.Key([]byte(ms.p)).Bytes)
+	distance := keyspace.ZeroPrefixLen(distb)
 	var addr multiaddr.Multiaddr
 	if ms.s != nil {
 		addr = ms.s.Conn().RemoteMultiaddr()
@@ -423,7 +426,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 	c, _ := cid.Cast(pmes.Key)
 	pid, _ := peer.IDFromBytes(pmes.Key)
 
-	distance := keyspace.ZeroPrefixLen(keyspace.XORKeySpace.Key(pmes.Key).Distance(keyspace.XORKeySpace.Key([]byte(ms.p))).Bytes())
+	distb := xor(keyspace.XORKeySpace.Key(pmes.Key).Bytes, keyspace.XORKeySpace.Key([]byte(ms.p)).Bytes)
+	distance := keyspace.ZeroPrefixLen(distb)
 	var addr multiaddr.Multiaddr
 	if ms.s != nil {
 		addr = ms.s.Conn().RemoteMultiaddr()
@@ -523,4 +527,8 @@ func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error 
 	case <-t.C:
 		return ErrReadTimeout
 	}
+}
+
+func xor(a, b kbucket.ID) kbucket.ID {
+	return kbucket.ID(util.XOR(a, b))
 }

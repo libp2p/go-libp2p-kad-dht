@@ -16,9 +16,12 @@ import (
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
+
+	"go.opencensus.io/stats"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This
@@ -408,6 +411,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return nil
 	}
 
+	startTime := time.Now()
 	peers, err := dht.GetClosestPeers(ctx, key.KeyString())
 	if err != nil {
 		return err
@@ -418,9 +422,15 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
+	firstPeer := true
 	wg := sync.WaitGroup{}
 	for p := range peers {
 		wg.Add(1)
+		if firstPeer {
+			firstPeer = false
+			elapsed := float64(time.Since(startTime)) / float64(time.Millisecond)
+			stats.Record(ctx, metrics.TimeToFirstProvider.M(elapsed))
+		}
 		go func(p peer.ID) {
 			defer wg.Done()
 			logger.Debugf("putProvider(%s, %s)", key, p)

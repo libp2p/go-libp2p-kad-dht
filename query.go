@@ -13,10 +13,12 @@ import (
 	process "github.com/jbenet/goprocess"
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"go.opencensus.io/stats"
 	"go.opencensus.io/trace"
 
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
@@ -198,6 +200,10 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (qResult *dht
 		return r.result, nil
 	}
 
+	stats.Record(ctx,
+		metrics.PeersSeen.M(int64(r.peersSeen.Size())),
+		metrics.PeersQueried.M(int64(r.peersQueried.Size())),
+	)
 	return &dhtQueryResult{
 		finalSet:   r.peersSeen,
 		queriedSet: r.peersQueried,

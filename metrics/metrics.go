@@ -41,6 +41,24 @@ var (
 	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
 )
 
+// Measures of the Query Runner
+var (
+	PeersSeen    = stats.Int64("libp2p.io/dht/kad/queryRunner/peers_seen", "Total number of peers seen per query", stats.UnitDimensionless)
+	PeersQueried = stats.Int64("libp2p.io/dht/kad/queryRunner/peers_queried", "Total number of peers queried per query", stats.UnitDimensionless)
+)
+
+// TODO (frrist) add a UUID tag to these for each query
+var QueryRunnerViews = []*view.View{
+	&view.View{
+		Measure:     PeersSeen,
+		Aggregation: view.Count(),
+	},
+	&view.View{
+		Measure:     PeersQueried,
+		Aggregation: view.Count(),
+	},
+}
+
 var DefaultViews = []*view.View{
 	&view.View{
 		Measure:     ReceivedMessages,

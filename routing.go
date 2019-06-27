@@ -457,7 +457,19 @@ func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {
 }
 
 // FindProviders searches until the context expires.
-func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) (addrInfos []peer.AddrInfo, err error) {
+	ctx, span := trace.StartSpan(ctx, "FindProviders")
+	span.AddAttributes(trace.StringAttribute("cid", c.String()))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		} else {
+			for _, ai := range addrInfos {
+				span.AddAttributes(trace.StringAttribute("addrInfo", ai.String()))
+			}
+		}
+		span.End()
+	}()
 	var providers []peer.AddrInfo
 	for p := range dht.FindProvidersAsync(ctx, c, KValue) {
 		providers = append(providers, p)
@@ -662,7 +674,15 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 }
 
 // FindPeersConnectedToPeer searches for peers directly connected to a given peer.
-func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<-chan *peer.AddrInfo, error) {
+func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (_ <-chan *peer.AddrInfo, err error) {
+	ctx, span := trace.StartSpan(ctx, "FindPeersConnectedToPeer")
+	span.AddAttributes(trace.StringAttribute("peer", id.Pretty()))
+	defer func() {
+		if err != nil {
+			span.AddAttributes(trace.StringAttribute("error", err.Error()))
+		}
+		span.End()
+	}()
 
 	peerchan := make(chan *peer.AddrInfo, asyncQueryBuffer)
 	peersSeen := make(map[peer.ID]struct{})

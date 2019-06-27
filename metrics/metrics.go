@@ -41,55 +41,70 @@ var (
 	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
 )
 
-var DefaultViews = []*view.View{
-	&view.View{
+// Views
+var (
+	ReceivedMessagesView = &view.View{
 		Measure:     ReceivedMessages,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
-	},
-	&view.View{
+	}
+	ReceivedMessageErrorsView = &view.View{
 		Measure:     ReceivedMessageErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
-	},
-	&view.View{
+	}
+	ReceivedBytesView = &view.View{
 		Measure:     ReceivedBytes,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
-	},
-	&view.View{
+	}
+	InboundRequestLatencyView = &view.View{
 		Measure:     InboundRequestLatency,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
-	},
-	&view.View{
+	}
+	OutboundRequestLatencyView = &view.View{
 		Measure:     OutboundRequestLatency,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
-	},
-	&view.View{
+	}
+	SentMessagesView = &view.View{
 		Measure:     SentMessages,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
-	},
-	&view.View{
+	}
+	SentMessageErrorsView = &view.View{
 		Measure:     SentMessageErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
-	},
-	&view.View{
+	}
+	SentRequestsView = &view.View{
 		Measure:     SentRequests,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
-	},
-	&view.View{
+	}
+	SentRequestErrorsView = &view.View{
 		Measure:     SentRequestErrors,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: view.Count(),
-	},
-	&view.View{
+	}
+	SentBytesView = &view.View{
 		Measure:     SentBytes,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
-	},
+	}
+)
+
+// DefaultViews with all views in it.
+var DefaultViews = []*view.View{
+	ReceivedMessagesView,
+	ReceivedMessageErrorsView,
+	ReceivedBytesView,
+	InboundRequestLatencyView,
+	OutboundRequestLatencyView,
+	SentMessagesView,
+	SentMessageErrorsView,
+	SentRequestsView,
+	SentRequestErrorsView,
+	SentBytesView,
 }

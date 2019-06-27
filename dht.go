@@ -86,6 +86,7 @@ type IpfsDHT struct {
 
 	subscriptions struct {
 		evtPeerIdentification event.Subscription
+		evtLocalRoutability   event.Subscription
 	}
 }
 
@@ -119,14 +120,20 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		// remove ourselves from network notifs.
 		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
 
-		if dht.subscriptions.evtPeerIdentification != nil {
-			_ = dht.subscriptions.evtPeerIdentification.Close()
+		for _, sub := range []event.Subscription{
+			dht.subscriptions.evtPeerIdentification,
+			dht.subscriptions.evtLocalRoutability,
+		} {
+			if sub != nil {
+				_ = sub.Close()
+			}
 		}
 		return nil
 	})
 
 	dht.proc.AddChild(subnot.Process(ctx))
 	dht.proc.AddChild(dht.providers.Process())
+	dht.proc.AddChild(dht.dynamicModeSwitching(ctx))
 	dht.Validator = cfg.Validator
 	dht.mode = ModeClient
 
@@ -187,16 +194,33 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		bucketSize:   bucketSize,
 	}
 
-	var err error
-	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
-	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
-	if err != nil {
-		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
-	}
+	dht.setupEventSubscribers()
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
 	return dht
+}
+
+func (dht *IpfsDHT) setupEventSubscribers() {
+	var err error
+	evts := []interface{}{
+		&event.EvtPeerIdentificationCompleted{},
+		&event.EvtPeerIdentificationFailed{},
+	}
+	dht.subscriptions.evtPeerIdentification, err = dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
+	}
+
+	evts = []interface{}{
+		&event.EvtLocalRoutabilityPublic{},
+		&event.EvtLocalRoutabilityPrivate{},
+		&event.EvtLocalRoutabilityUnknown{},
+	}
+	dht.subscriptions.evtLocalRoutability, err = dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to local routability events; dynamic mode switching will not work; err: %s", err)
+	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
@@ -496,6 +520,33 @@ func (dht *IpfsDHT) SetMode(m DHTMode) error {
 	default:
 		return fmt.Errorf("unrecognized dht mode: %d", m)
 	}
+}
+
+func (dht *IpfsDHT) dynamicModeSwitching(ctx context.Context) goprocess.Process {
+	proc := goprocessctx.WithContext(ctx)
+	watch := func(proc goprocess.Process) {
+		for {
+			select {
+			case ev := <-dht.subscriptions.evtLocalRoutability.Out():
+				var err error
+				switch ev.(type) {
+				case event.EvtLocalRoutabilityPrivate, event.EvtLocalRoutabilityUnknown:
+					err = dht.SetMode(ModeClient)
+				case event.EvtLocalRoutabilityPublic:
+					err = dht.SetMode(ModeServer)
+				}
+				if err == nil {
+					logger.Infof("processed event %T, switched DHT mode successfully", ev)
+				} else {
+					logger.Infof("processed event %T, switching DHT mode failed; err: %s", ev, err)
+				}
+			case <-proc.Closing():
+				return
+			}
+		}
+	}
+	proc.Go(watch)
+	return proc
 }
 
 func (dht *IpfsDHT) moveToServerMode() error {

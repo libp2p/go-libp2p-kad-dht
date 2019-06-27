@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	multistream "github.com/multiformats/go-multistream"
+	"github.com/multiformats/go-multistream"
 
 	"golang.org/x/xerrors"
 
@@ -26,12 +27,12 @@ import (
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
-	ci "github.com/libp2p/go-libp2p-testing/ci"
+	"github.com/libp2p/go-libp2p-testing/ci"
 	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
@@ -1404,4 +1405,63 @@ func TestModeChange(t *testing.T) {
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
 	assert.NotNil(t, err)
+}
+
+func TestDynamicModeSwitching(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prober := setupDHT(ctx, t, true) // our test harness
+	node := setupDHT(ctx, t, true)   // the node under test
+	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
+	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
+		t.Fatal(err)
+	}
+
+	var err error
+	var emitters struct {
+		evtLocalRoutabilityPrivate event.Emitter
+		evtLocalRoutabilityPublic  event.Emitter
+		evtLocalRoutabilityUnknown event.Emitter
+	}
+
+	emitters.evtLocalRoutabilityPublic, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityPublic))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitters.evtLocalRoutabilityPrivate, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityPrivate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitters.evtLocalRoutabilityUnknown, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityUnknown))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	emitters.evtLocalRoutabilityPrivate.Emit(event.EvtLocalRoutabilityPrivate{})
+	time.Sleep(500 * time.Millisecond)
+
+	err = prober.Ping(ctx, node.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+		t.Errorf("expected routing table length to be 0; instead is %d", l)
+	}
+
+	emitters.evtLocalRoutabilityPublic.Emit(event.EvtLocalRoutabilityPublic{})
+	time.Sleep(500 * time.Millisecond)
+
+	err = prober.Ping(ctx, node.PeerID())
+	assert.Nil(t, err)
+	if l := len(prober.RoutingTable().ListPeers()); l != 1 {
+		t.Errorf("expected routing table length to be 1; instead is %d", l)
+	}
+
+	emitters.evtLocalRoutabilityUnknown.Emit(event.EvtLocalRoutabilityUnknown{})
+	time.Sleep(500 * time.Millisecond)
+
+	err = prober.Ping(ctx, node.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+		t.Errorf("expected routing table length to be 0; instead is %d", l)
+	}
 }

@@ -14,6 +14,7 @@ import (
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
+	tracerev "github.com/libp2p/dht-tracer1/datafmts/trace"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
@@ -93,8 +94,51 @@ type dhtQueryRunner struct {
 
 	runCtx context.Context
 
+	startTime time.Time
+	endTime   time.Time
+
 	proc process.Process
 	sync.RWMutex
+}
+
+func (r *dhtQueryRunner) Loggable() map[string]interface{} {
+	tv := r.TraceValue()
+	v, _ := json.Marshal(tv)
+	return v.(map[string]interface{})
+}
+
+func (r *dhtQueryRunner) TraceValue() *tracerev.QueryRunnerState {
+
+	r.Lock()
+	qrs := &tracerev.QueryRunnerState{}
+	qrs.Query.Key = r.query.key
+	qrs.PeersSeen = r.peersSeen.Peers()
+	qrs.PeersQueried = r.peersQueried.Peers()
+	// qrs.PeersDialed = r.peersDialed // todo
+	// qrs.PeersToQuery = r.peersToQuery.Peers() // todo
+	qrs.PeersToQueryLen = r.peersToQuery.Len()
+	// qrs.PeersRemaining = r.peersRemaining // todo
+
+	if r.result {
+		qrs.Result = tracerev.QueryResult{
+			Success:     r.result.success,
+			FoundPeer:   r.result.peer,
+			CloserPeers: r.result.closerPeers,
+			FinalSet:    r.result.finalSet.Peers(),
+			QueriedSet:  r.result.queriedSet.Peers(),
+		}
+	}
+
+	qrs.RateLimit.Capacity = r.query.concurrency
+	qrs.RateLimit.Length = len(r.rateLimit)
+
+	qrs.StartTime = r.startTime
+	qrs.CurrTime = time.Now()
+	qrs.EndTime = r.endTime
+
+	r.Unlock()
+
+	return qrs
 }
 
 func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
@@ -125,6 +169,18 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 }
 
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
+	r.Lock()
+	r.startTime = time.Now()
+	r.Unlock()
+
+	meta := logging.LoggableMap{
+		"key":         key,
+		"peer":        p,
+		"QueryRunner": r,
+	}
+	eip := logger.Event(ctx, "dhtQueryRunner.Run", meta)
+	defer eip.Done()
+
 	r.log = logger
 	r.runCtx = ctx
 
@@ -168,6 +224,10 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	case <-r.proc.Closed():
 		err = r.runCtx.Err()
 	}
+
+	r.Lock()
+	r.endTime = time.Now()
+	r.Unlock()
 
 	r.RLock()
 	defer r.RUnlock()

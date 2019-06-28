@@ -113,17 +113,19 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
 
-	subnot := (*subscriberNotifee)(dht)
+	dht.Validator = cfg.Validator
+	dht.mode = ModeClient
 
-	// register for network notifs.
-	dht.host.Network().Notify(subnot)
+	if !cfg.Client {
+		if err := dht.moveToServerMode(); err != nil {
+			return nil, err
+		}
+	}
 
-	go dht.handleProtocolChanges(ctx)
+	// set up event subscribers.
+	dht.setupEventSubscribers()
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
-		// remove ourselves from network notifs.
-		dht.host.Network().StopNotify((*subscriberNotifee)(dht))
-
 		for _, sub := range []event.Subscription{
 			dht.subscriptions.evtPeerIdentification,
 			dht.subscriptions.evtLocalRoutability,
@@ -135,17 +137,17 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil
 	})
 
-	dht.proc.AddChild(subnot.Process(ctx))
-	dht.proc.AddChild(dht.providers.Process())
-	dht.proc.AddChild(dht.dynamicModeSwitching(ctx))
-	dht.Validator = cfg.Validator
-	dht.mode = ModeClient
+	// register for network notifs.
+	dht.proc.AddChild((*subscriberNotifee)(dht).Process())
 
-	if !cfg.Client {
-		if err := dht.moveToServerMode(); err != nil {
-			return nil, err
-		}
-	}
+	// switch modes dynamically based on local routability changes.
+	dht.proc.AddChild(dht.dynamicModeSwitching(ctx))
+
+	// handle protocol changes
+	dht.proc.Go(dht.handleProtocolChanges)
+
+	// handle providers
+	dht.proc.AddChild(dht.providers.Process())
 
 	return dht, nil
 }
@@ -197,8 +199,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		protocols:    protocols,
 		bucketSize:   bucketSize,
 	}
-
-	dht.setupEventSubscribers()
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
@@ -696,7 +696,7 @@ func (dht *IpfsDHT) connForPeer(p peer.ID) network.Conn {
 	return nil
 }
 
-func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
+func (dht *IpfsDHT) handleProtocolChanges(proc goprocess.Process) {
 	// register for event bus protocol ID changes
 	sub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated))
 	if err != nil {
@@ -741,7 +741,7 @@ func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
 			} else if drop {
 				dht.RoutingTable().Remove(e.Peer)
 			}
-		case <-ctx.Done():
+		case <-proc.Closing():
 			return
 		}
 	}

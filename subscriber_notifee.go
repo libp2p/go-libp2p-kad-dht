@@ -1,10 +1,7 @@
 package dht
 
 import (
-	"context"
-
 	"github.com/jbenet/goprocess"
-	goprocessctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
 	ma "github.com/multiformats/go-multiaddr"
@@ -19,9 +16,15 @@ func (nn *subscriberNotifee) DHT() *IpfsDHT {
 	return (*IpfsDHT)(nn)
 }
 
-func (nn *subscriberNotifee) Process(ctx context.Context) goprocess.Process {
-	proc := goprocessctx.WithContext(ctx)
-	proc.Go(nn.subscribe)
+func (nn *subscriberNotifee) Process() goprocess.Process {
+	dht := nn.DHT()
+
+	proc := goprocess.Go(nn.subscribe)
+	dht.host.Network().Notify(nn)
+	proc.SetTeardown(func() error {
+		dht.host.Network().StopNotify(nn)
+		return nil
+	})
 	return proc
 }
 

@@ -2,6 +2,7 @@ package dht
 
 import (
 	"github.com/jbenet/goprocess"
+	"github.com/libp2p/go-eventbus"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
 	ma "github.com/multiformats/go-multiaddr"
@@ -16,23 +17,27 @@ func (nn *subscriberNotifee) DHT() *IpfsDHT {
 	return (*IpfsDHT)(nn)
 }
 
-func (nn *subscriberNotifee) Process() goprocess.Process {
-	dht := nn.DHT()
-
-	proc := goprocess.Go(nn.subscribe)
-	dht.host.Network().Notify(nn)
-	proc.SetTeardown(func() error {
-		dht.host.Network().StopNotify(nn)
-		return nil
-	})
-	return proc
-}
-
 func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	dht := nn.DHT()
+
+	dht.host.Network().Notify(nn)
+	defer dht.host.Network().StopNotify(nn)
+
+	var err error
+	evts := []interface{}{
+		&event.EvtPeerIdentificationCompleted{},
+		&event.EvtPeerIdentificationFailed{},
+	}
+
+	sub, err := dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
+	}
+	defer sub.Close()
+
 	for {
 		select {
-		case evt, more := <-dht.subscriptions.evtPeerIdentification.Out():
+		case evt, more := <-sub.Out():
 			if !more {
 				return
 			}

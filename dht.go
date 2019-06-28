@@ -87,11 +87,6 @@ type IpfsDHT struct {
 	modeLk sync.Mutex
 
 	bucketSize int
-
-	subscriptions struct {
-		evtPeerIdentification event.Subscription
-		evtLocalRoutability   event.Subscription
-	}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -122,26 +117,13 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		}
 	}
 
-	// set up event subscribers.
-	dht.setupEventSubscribers()
-
-	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
-		for _, sub := range []event.Subscription{
-			dht.subscriptions.evtPeerIdentification,
-			dht.subscriptions.evtLocalRoutability,
-		} {
-			if sub != nil {
-				_ = sub.Close()
-			}
-		}
-		return nil
-	})
+	dht.proc = goprocessctx.WithContext(ctx)
 
 	// register for network notifs.
-	dht.proc.AddChild((*subscriberNotifee)(dht).Process())
+	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
 
 	// switch modes dynamically based on local routability changes.
-	dht.proc.AddChild(dht.dynamicModeSwitching(ctx))
+	dht.proc.Go(dht.dynamicModeSwitching)
 
 	// handle protocol changes
 	dht.proc.Go(dht.handleProtocolChanges)
@@ -203,28 +185,6 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
 	return dht
-}
-
-func (dht *IpfsDHT) setupEventSubscribers() {
-	var err error
-	evts := []interface{}{
-		&event.EvtPeerIdentificationCompleted{},
-		&event.EvtPeerIdentificationFailed{},
-	}
-	dht.subscriptions.evtPeerIdentification, err = dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
-	if err != nil {
-		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
-	}
-
-	evts = []interface{}{
-		&event.EvtLocalRoutabilityPublic{},
-		&event.EvtLocalRoutabilityPrivate{},
-		&event.EvtLocalRoutabilityUnknown{},
-	}
-	dht.subscriptions.evtLocalRoutability, err = dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
-	if err != nil {
-		logger.Errorf("dht not subscribed to local routability events; dynamic mode switching will not work; err: %s", err)
-	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
@@ -526,57 +486,64 @@ func (dht *IpfsDHT) SetMode(m DHTMode) error {
 	}
 }
 
-func (dht *IpfsDHT) dynamicModeSwitching(ctx context.Context) goprocess.Process {
-	proc := goprocessctx.WithContext(ctx)
-	watch := func(proc goprocess.Process) {
-		var (
-			debouncer = time.NewTimer(0)
-			target    DHTMode
-		)
-		defer debouncer.Stop()
+func (dht *IpfsDHT) dynamicModeSwitching(proc goprocess.Process) {
+	evts := []interface{}{
+		&event.EvtLocalRoutabilityPublic{},
+		&event.EvtLocalRoutabilityPrivate{},
+		&event.EvtLocalRoutabilityUnknown{},
+	}
 
-		stopTimer := func() {
-			if debouncer.Stop() {
-				return
-			}
-			select {
-			case <-debouncer.C:
-			default:
-			}
+	sub, err := dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to local routability events; dynamic mode switching will not work; err: %s", err)
+	}
+	defer sub.Close()
+
+	var (
+		debouncer = time.NewTimer(0)
+		target    DHTMode
+	)
+	defer debouncer.Stop()
+
+	stopTimer := func() {
+		if debouncer.Stop() {
+			return
 		}
-
-		stopTimer()
-
-		for {
-			select {
-			case ev := <-dht.subscriptions.evtLocalRoutability.Out():
-				switch ev.(type) {
-				case event.EvtLocalRoutabilityPrivate, event.EvtLocalRoutabilityUnknown:
-					target = ModeClient
-				case event.EvtLocalRoutabilityPublic:
-					target = ModeServer
-				}
-				stopTimer()
-				debouncer.Reset(DynamicModeSwitchDebouncePeriod)
-				logger.Infof("processed event %T; scheduled dht mode switch", ev)
-
-			case <-debouncer.C:
-				err := dht.SetMode(target)
-				// NOTE: the mode will be printed out as a decimal.
-				if err == nil {
-					logger.Infof("switched DHT mode successfully; new mode: %d", target)
-				} else {
-					logger.Warningf("switching DHT mode failed; new mode: %d, err: %s", target, err)
-				}
-				target = 0
-
-			case <-proc.Closing():
-				return
-			}
+		select {
+		case <-debouncer.C:
+		default:
 		}
 	}
-	proc.Go(watch)
-	return proc
+
+	stopTimer()
+
+	for {
+		select {
+		case ev := <-sub.Out():
+			switch ev.(type) {
+			case event.EvtLocalRoutabilityPrivate, event.EvtLocalRoutabilityUnknown:
+				target = ModeClient
+			case event.EvtLocalRoutabilityPublic:
+				target = ModeServer
+			}
+			stopTimer()
+			debouncer.Reset(DynamicModeSwitchDebouncePeriod)
+			logger.Infof("processed event %T; scheduled dht mode switch", ev)
+
+		case <-debouncer.C:
+			err := dht.SetMode(target)
+			// NOTE: the mode will be printed out as a decimal.
+			if err == nil {
+				logger.Infof("switched DHT mode successfully; new mode: %d", target)
+			} else {
+				logger.Warningf("switching DHT mode failed; new mode: %d, err: %s", target, err)
+			}
+			target = 0
+
+		case <-proc.Closing():
+			return
+		}
+	}
 }
 
 func (dht *IpfsDHT) moveToServerMode() error {

@@ -108,12 +108,14 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
 
-	subnot := (*subscriberNotifee)(dht)
+	dht.Validator = cfg.Validator
+	dht.mode = ModeClient
 
-	// register for network notifs.
-	dht.host.Network().Notify(subnot)
-
-	go dht.handleProtocolChanges(ctx)
+	if !cfg.Client {
+		if err := dht.moveToServerMode(); err != nil {
+			return nil, err
+		}
+	}
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
@@ -125,16 +127,15 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil
 	})
 
+	subnot := (*subscriberNotifee)(dht)
+
+	// register for network notifs.
+	dht.host.Network().Notify(subnot)
+
+	go dht.handleProtocolChanges(ctx)
+
 	dht.proc.AddChild(subnot.Process(ctx))
 	dht.proc.AddChild(dht.providers.Process())
-	dht.Validator = cfg.Validator
-	dht.mode = ModeClient
-
-	if !cfg.Client {
-		if err := dht.moveToServerMode(); err != nil {
-			return nil, err
-		}
-	}
 
 	return dht, nil
 }

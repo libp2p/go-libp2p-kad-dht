@@ -42,6 +42,10 @@ import (
 
 var logger = logging.Logger("dht")
 
+// DynamicModeSwitchDebouncePeriod is the amount of time to wait before making a dynamic dht mode switch effective.
+// It helps mitigate flapping from routability events.
+var DynamicModeSwitchDebouncePeriod = 1 * time.Minute
+
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
 const NumBootstrapQueries = 5
@@ -525,21 +529,34 @@ func (dht *IpfsDHT) SetMode(m DHTMode) error {
 func (dht *IpfsDHT) dynamicModeSwitching(ctx context.Context) goprocess.Process {
 	proc := goprocessctx.WithContext(ctx)
 	watch := func(proc goprocess.Process) {
+		var (
+			target   DHTMode
+			debounce <-chan time.Time
+		)
 		for {
 			select {
 			case ev := <-dht.subscriptions.evtLocalRoutability.Out():
-				var err error
 				switch ev.(type) {
 				case event.EvtLocalRoutabilityPrivate, event.EvtLocalRoutabilityUnknown:
-					err = dht.SetMode(ModeClient)
+					target = ModeClient
 				case event.EvtLocalRoutabilityPublic:
-					err = dht.SetMode(ModeServer)
+					target = ModeServer
 				}
+				if debounce == nil {
+					debounce = time.After(DynamicModeSwitchDebouncePeriod)
+				}
+				logger.Infof("processed event %T; scheduled dht mode switch", ev)
+
+			case <-debounce:
+				err := dht.SetMode(target)
+				// NOTE: the mode will be printed out as a decimal.
 				if err == nil {
-					logger.Infof("processed event %T, switched DHT mode successfully", ev)
+					logger.Infof("switched DHT mode successfully; new mode: %d", target)
 				} else {
-					logger.Infof("processed event %T, switching DHT mode failed; err: %s", ev, err)
+					logger.Warningf("switching DHT mode failed; new mode: %d, err: %s", target, err)
 				}
+				debounce, target = nil, 0
+
 			case <-proc.Closing():
 				return
 			}

@@ -1408,6 +1408,9 @@ func TestModeChange(t *testing.T) {
 }
 
 func TestDynamicModeSwitching(t *testing.T) {
+	// remove the debounce period.
+	DynamicModeSwitchDebouncePeriod = 0
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1457,6 +1460,20 @@ func TestDynamicModeSwitching(t *testing.T) {
 	}
 
 	emitters.evtLocalRoutabilityUnknown.Emit(event.EvtLocalRoutabilityUnknown{})
+	time.Sleep(500 * time.Millisecond)
+
+	err = prober.Ping(ctx, node.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+		t.Errorf("expected routing table length to be 0; instead is %d", l)
+	}
+
+	//////////////////////////////////////////////////////////////
+	// let's activate the debounce, to check we do not flap.
+	// receiving a "routability public" event should have no immediate effect now.
+	DynamicModeSwitchDebouncePeriod = 1 * time.Minute
+
+	emitters.evtLocalRoutabilityPublic.Emit(event.EvtLocalRoutabilityPublic{})
 	time.Sleep(500 * time.Millisecond)
 
 	err = prober.Ping(ctx, node.PeerID())

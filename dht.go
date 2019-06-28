@@ -530,9 +530,23 @@ func (dht *IpfsDHT) dynamicModeSwitching(ctx context.Context) goprocess.Process 
 	proc := goprocessctx.WithContext(ctx)
 	watch := func(proc goprocess.Process) {
 		var (
-			target   DHTMode
-			debounce <-chan time.Time
+			debouncer = time.NewTimer(0)
+			target    DHTMode
 		)
+		defer debouncer.Stop()
+
+		stopTimer := func() {
+			if debouncer.Stop() {
+				return
+			}
+			select {
+			case <-debouncer.C:
+			default:
+			}
+		}
+
+		stopTimer()
+
 		for {
 			select {
 			case ev := <-dht.subscriptions.evtLocalRoutability.Out():
@@ -542,12 +556,11 @@ func (dht *IpfsDHT) dynamicModeSwitching(ctx context.Context) goprocess.Process 
 				case event.EvtLocalRoutabilityPublic:
 					target = ModeServer
 				}
-				if debounce == nil {
-					debounce = time.After(DynamicModeSwitchDebouncePeriod)
-				}
+				stopTimer()
+				debouncer.Reset(DynamicModeSwitchDebouncePeriod)
 				logger.Infof("processed event %T; scheduled dht mode switch", ev)
 
-			case <-debounce:
+			case <-debouncer.C:
 				err := dht.SetMode(target)
 				// NOTE: the mode will be printed out as a decimal.
 				if err == nil {
@@ -555,7 +568,7 @@ func (dht *IpfsDHT) dynamicModeSwitching(ctx context.Context) goprocess.Process 
 				} else {
 					logger.Warningf("switching DHT mode failed; new mode: %d, err: %s", target, err)
 				}
-				debounce, target = nil, 0
+				target = 0
 
 			case <-proc.Closing():
 				return

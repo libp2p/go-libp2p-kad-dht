@@ -1441,44 +1441,51 @@ func TestDynamicModeSwitching(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	assertDHTClient := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+			t.Errorf("expected routing table length to be 0; instead is %d", l)
+		}
+	}
+
+	assertDHTServer := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.Nil(t, err)
+		if l := len(prober.RoutingTable().ListPeers()); l != 1 {
+			t.Errorf("expected routing table length to be 1; instead is %d", l)
+		}
+	}
+
 	emitters.evtLocalRoutabilityPrivate.Emit(event.EvtLocalRoutabilityPrivate{})
 	time.Sleep(500 * time.Millisecond)
 
-	err = prober.Ping(ctx, node.PeerID())
-	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
-	if l := len(prober.RoutingTable().ListPeers()); l != 0 {
-		t.Errorf("expected routing table length to be 0; instead is %d", l)
-	}
+	assertDHTClient()
 
 	emitters.evtLocalRoutabilityPublic.Emit(event.EvtLocalRoutabilityPublic{})
 	time.Sleep(500 * time.Millisecond)
 
-	err = prober.Ping(ctx, node.PeerID())
-	assert.Nil(t, err)
-	if l := len(prober.RoutingTable().ListPeers()); l != 1 {
-		t.Errorf("expected routing table length to be 1; instead is %d", l)
-	}
+	assertDHTServer()
 
 	emitters.evtLocalRoutabilityUnknown.Emit(event.EvtLocalRoutabilityUnknown{})
 	time.Sleep(500 * time.Millisecond)
 
-	err = prober.Ping(ctx, node.PeerID())
-	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
-	if l := len(prober.RoutingTable().ListPeers()); l != 0 {
-		t.Errorf("expected routing table length to be 0; instead is %d", l)
-	}
+	assertDHTClient()
 
 	//////////////////////////////////////////////////////////////
 	// let's activate the debounce, to check we do not flap.
 	// receiving a "routability public" event should have no immediate effect now.
-	DynamicModeSwitchDebouncePeriod = 1 * time.Minute
+	DynamicModeSwitchDebouncePeriod = 2 * time.Second
 
 	emitters.evtLocalRoutabilityPublic.Emit(event.EvtLocalRoutabilityPublic{})
 	time.Sleep(500 * time.Millisecond)
 
-	err = prober.Ping(ctx, node.PeerID())
-	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
-	if l := len(prober.RoutingTable().ListPeers()); l != 0 {
-		t.Errorf("expected routing table length to be 0; instead is %d", l)
-	}
+	// the debounce has prevented us from switching modes too soon.
+	assertDHTClient()
+
+	// wait so that the debounce fires.
+	time.Sleep(1750 * time.Millisecond)
+
+	// after the debounce period elapses, we will have switched modes.
+	assertDHTServer()
 }

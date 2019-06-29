@@ -120,11 +120,15 @@ func TestProvidersSerialization(t *testing.T) {
 func TestProvidesExpire(t *testing.T) {
 	pval := ProvideValidity
 	cleanup := defaultCleanupInterval
+	deviation := cleanupIntervalDeviation
 	ProvideValidity = time.Second / 2
 	defaultCleanupInterval = time.Second / 2
+	cleanupIntervalDeviation = time.Duration(0)
+
 	defer func() {
 		ProvideValidity = pval
 		defaultCleanupInterval = cleanup
+		cleanupIntervalDeviation = deviation
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())

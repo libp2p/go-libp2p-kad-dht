@@ -9,12 +9,14 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/peer"
 
-	lru "github.com/hashicorp/golang-lru/simplelru"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	autobatch "github.com/ipfs/go-datastore/autobatch"
 	dsq "github.com/ipfs/go-datastore/query"
 	logging "github.com/ipfs/go-log"
+
+	timers "github.com/Kubuxu/go-more-timers"
+	lru "github.com/hashicorp/golang-lru/simplelru"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
 	base32 "github.com/whyrusleeping/base32"
@@ -27,6 +29,7 @@ var log = logging.Logger("providers")
 var lruCacheSize = 256
 var ProvideValidity = time.Hour * 24
 var defaultCleanupInterval = time.Hour
+var cleanupIntervalDeviation = 10 * time.Minute
 
 type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
@@ -202,7 +205,7 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 		gcQueryRes <-chan dsq.Result
 		gcSkip     map[string]struct{}
 		gcTime     time.Time
-		gcTimer    = time.NewTimer(pm.cleanupInterval)
+		gcTimer    = timers.NewGaussian(pm.cleanupInterval, cleanupIntervalDeviation)
 	)
 
 	defer func() {
@@ -242,7 +245,7 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 				if err := gcQuery.Close(); err != nil {
 					log.Error("failed to close provider GC query: ", err)
 				}
-				gcTimer.Reset(pm.cleanupInterval)
+				gcTimer.ResetLast()
 
 				// cleanup GC round
 				gcQueryRes = nil

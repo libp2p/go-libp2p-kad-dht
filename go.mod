@@ -1,7 +1,7 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
 require (
-	github.com/Kubuxu/go-more-timers v0.0.1
+	github.com/Kubuxu/go-more-timers v0.0.2
 	github.com/gogo/protobuf v1.2.1
 	github.com/hashicorp/golang-lru v0.5.1
 	github.com/ipfs/go-cid v0.0.2

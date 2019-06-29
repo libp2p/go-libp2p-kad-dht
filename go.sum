@@ -5,6 +5,8 @@ github.com/Kubuxu/go-more-timers v0.0.0-20190629125339-5a3dab24aaac h1:EKPF+1nZY
 github.com/Kubuxu/go-more-timers v0.0.0-20190629125339-5a3dab24aaac/go.mod h1:dtBio+tdzhJCqphlKGXXwP8ykW87aRXJMIurME30E3c=
 github.com/Kubuxu/go-more-timers v0.0.1 h1:sJUdCSKKwZ6TjvCQPmc24tqczvKbYu0QbLnCM3LS9d4=
 github.com/Kubuxu/go-more-timers v0.0.1/go.mod h1:dtBio+tdzhJCqphlKGXXwP8ykW87aRXJMIurME30E3c=
+github.com/Kubuxu/go-more-timers v0.0.2 h1:crCnqFrHgX0V5LlCUGN9Z1EpoiOkgukTUSvnP9PA0CA=
+github.com/Kubuxu/go-more-timers v0.0.2/go.mod h1:dtBio+tdzhJCqphlKGXXwP8ykW87aRXJMIurME30E3c=
 github.com/Kubuxu/go-os-helper v0.0.1/go.mod h1:N8B+I7vPCT80IcP58r50u4+gEEcsZETFUpAzWW2ep1Y=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
 github.com/btcsuite/btcd v0.0.0-20190213025234-306aecffea32/go.mod h1:DrZx5ec/dmnfpw9KyYoQyYo7d0KEvTkk/5M/vbZjAr8=

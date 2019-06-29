@@ -2,10 +2,19 @@ package dht
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"math/rand"
 	"testing"
+	"time"
 
 	proto "github.com/gogo/protobuf/proto"
+	"github.com/libp2p/go-libp2p"
+	crypto "github.com/libp2p/go-libp2p-core/crypto"
+	peer "github.com/libp2p/go-libp2p-core/peer"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 func TestCleanRecordSigned(t *testing.T) {
@@ -56,4 +65,52 @@ func TestCleanRecord(t *testing.T) {
 	if !bytes.Equal(actualBytes, expectedBytes) {
 		t.Error("failed to clean record")
 	}
+}
+
+func BenchmarkHandleFindPeer(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h, err := libp2p.New(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	d, err := New(ctx, h)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	rng := rand.New(rand.NewSource(150))
+	var peers []peer.ID
+	for i := 0; i < 1000; i++ {
+		_, pubk, _ := crypto.GenerateEd25519Key(rng)
+		id, err := peer.IDFromPublicKey(pubk)
+		if err != nil {
+			panic(err)
+		}
+
+		d.routingTable.Update(id)
+
+		peers = append(peers, id)
+		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
+		if err != nil {
+			panic(err)
+		}
+
+		d.host.Peerstore().AddAddr(id, a, time.Minute*50)
+	}
+
+	var reqs []*pb.Message
+	for i := 0; i < b.N; i++ {
+		reqs = append(reqs, &pb.Message{
+			Key: []byte("asdasdasd"),
+		})
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		d.handleFindPeer(ctx, peers[0], reqs[i])
+	}
+
 }

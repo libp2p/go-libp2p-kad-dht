@@ -70,12 +70,26 @@ func TestCleanRecord(t *testing.T) {
 func BenchmarkHandleFindPeer(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h, err := libp2p.New(ctx)
+	h1, err := libp2p.New(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer h1.Close()
+
+	h2, err := libp2p.New(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer h2.Close()
+
+	err = h1.Connect(ctx, h2.Peerstore().PeerInfo(h2.ID()))
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	d, err := New(ctx, h)
+	conn := h1.Network().ConnsToPeer(h2.ID())[0]
+
+	d, err := New(ctx, h1)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -108,9 +122,8 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-
 	for i := 0; i < b.N; i++ {
-		d.handleFindPeer(ctx, peers[0], reqs[i])
+		d.handleFindPeer(ctx, peers[0], reqs[i], conn)
 	}
-
+	b.StopTimer()
 }

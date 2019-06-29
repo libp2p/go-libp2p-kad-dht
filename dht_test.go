@@ -1405,3 +1405,14 @@ func TestModeChange(t *testing.T) {
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
 	assert.NotNil(t, err)
 }
+
+func TestDetectRelayAddress(t *testing.T) {
+	a, err := ma.NewMultiaddr("/ip4/2.3.4.5/tcp/4001/ipfs/QmdGQoGuK3pao6bRDqGSDvux5SFHa4kC2XNFfHFcvcbydY/p2p-circuit")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !isRelayAddr(a) {
+		t.Fatal("failed to detect relay address")
+	}
+}

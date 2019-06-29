@@ -408,7 +408,28 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return nil
 	}
 
-	peers, err := dht.GetClosestPeers(ctx, key.KeyString())
+	closerCtx := ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		now := time.Now()
+		timeout := deadline.Sub(now)
+
+		if timeout < 0 {
+			// timed out
+			return context.DeadlineExceeded
+		} else if timeout < 10*time.Second {
+			// Reserve 10% for the final put.
+			deadline = deadline.Add(timeout / 10)
+		} else {
+			// Otherwise, reserve a second (we'll already be
+			// connected so this should be fast).
+			deadline = deadline.Add(-time.Second)
+		}
+		var cancel context.CancelFunc
+		closerCtx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+
+	peers, err := dht.GetClosestPeers(closerCtx, key.KeyString())
 	if err != nil {
 		return err
 	}

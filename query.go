@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -14,9 +15,9 @@ import (
 	ctxproc "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
-	tracerev "github.com/libp2p/dht-tracer1/datafmts/trace"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/routing"
+	routing "github.com/libp2p/go-libp2p-core/routing"
+	tracefmt "github.com/libp2p/go-libp2p-kad-dht/tracefmt"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
@@ -102,28 +103,34 @@ type dhtQueryRunner struct {
 }
 
 func (r *dhtQueryRunner) Loggable() map[string]interface{} {
-	tv := r.TraceValue()
-	v, _ := json.Marshal(tv)
-	return v.(map[string]interface{})
+	return r.TraceValue().Loggable()
 }
 
-func (r *dhtQueryRunner) TraceValue() *tracerev.QueryRunnerState {
+func PeerIDsFromPeerAddrs(l1 []*peer.AddrInfo) []peer.ID {
+	l2 := make([]peer.ID, len(l1))
+	for i := 0; i < len(l1); i++ {
+		l2[i] = l1[i].ID
+	}
+	return l2
+}
+
+func (r *dhtQueryRunner) TraceValue() *tracefmt.QueryRunnerState {
 
 	r.Lock()
-	qrs := &tracerev.QueryRunnerState{}
+	qrs := &tracefmt.QueryRunnerState{}
 	qrs.Query.Key = r.query.key
 	qrs.PeersSeen = r.peersSeen.Peers()
 	qrs.PeersQueried = r.peersQueried.Peers()
 	// qrs.PeersDialed = r.peersDialed // todo
 	// qrs.PeersToQuery = r.peersToQuery.Peers() // todo
-	qrs.PeersToQueryLen = r.peersToQuery.Len()
+	qrs.PeersToQueryLen = r.peersToQuery.Queue.Len()
 	// qrs.PeersRemaining = r.peersRemaining // todo
 
-	if r.result {
-		qrs.Result = tracerev.QueryResult{
+	if r.result != nil {
+		qrs.Result = tracefmt.QueryResult{
 			Success:     r.result.success,
-			FoundPeer:   r.result.peer,
-			CloserPeers: r.result.closerPeers,
+			FoundPeer:   r.result.peer.ID,
+			CloserPeers: PeerIDsFromPeerAddrs(r.result.closerPeers),
 			FinalSet:    r.result.finalSet.Peers(),
 			QueriedSet:  r.result.queriedSet.Peers(),
 		}
@@ -173,13 +180,7 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	r.startTime = time.Now()
 	r.Unlock()
 
-	meta := logging.LoggableMap{
-		"key":         key,
-		"peer":        p,
-		"QueryRunner": r,
-	}
-	eip := logger.Event(ctx, "dhtQueryRunner.Run", meta)
-	defer eip.Done()
+	defer logger.EventBegin(ctx, "dhtQueryRunner.Run", r).Done()
 
 	r.log = logger
 	r.runCtx = ctx

@@ -37,13 +37,6 @@ import (
 
 var logger = logging.Logger("dht")
 
-func init() {
-	// register for metrics
-	if err := metrics.Register(metrics.DefaultViews...); err != nil {
-		logger.Error(err)
-	}
-}
-
 // NumBootstrapQueries defines the number of random dht queries to do to
 // collect members of the routing table.
 const NumBootstrapQueries = 5

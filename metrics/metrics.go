@@ -96,7 +96,7 @@ var (
 	}
 	TimeToFirstProviderView = &view.View{
 		Measure:     TimeToFirstProvider,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyPeerID, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
 	}
 )

@@ -1146,6 +1146,13 @@ func TestAtomicPut(t *testing.T) {
 	wg.Wait()
 
 	// get should return the 'newer value'
+	val, err := d.GetValue(ctx, key)
+	if err != nil {
+		t.Fatal("should not have errored on final get")
+	}
+	if string(val) != "newer" {
+		t.Fatalf("Expected 'newer' got '%s'", string(val))
+	}
 }
 
 func TestClientModeConnect(t *testing.T) {

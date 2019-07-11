@@ -1136,7 +1136,7 @@ func TestAtomicPut(t *testing.T) {
 			defer wg.Done()
 			if rand.Intn(2) == 0 {
 				if err := putRecord([]byte("newer")); err != nil {
-					t.Fatalf("should not have errored on newer record for %d th thread", i)
+					t.Fatalf("should not have errored on newer record for %d th thread, but got %+v", i, err)
 				}
 			} else {
 				putRecord([]byte("valid"))
@@ -1148,7 +1148,7 @@ func TestAtomicPut(t *testing.T) {
 	// get should return the 'newer value'
 	val, err := d.GetValue(ctx, key)
 	if err != nil {
-		t.Fatal("should not have errored on final get")
+		t.Fatal("should not have errored on final get, but got %+v", err)
 	}
 	if string(val) != "newer" {
 		t.Fatalf("Expected 'newer' got '%s'", string(val))

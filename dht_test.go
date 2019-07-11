@@ -15,8 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-
-	multistream "github.com/multiformats/go-multistream"
+	"github.com/multiformats/go-multistream"
 
 	"golang.org/x/xerrors"
 
@@ -26,12 +25,12 @@ import (
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
-	ci "github.com/libp2p/go-libp2p-testing/ci"
+	"github.com/libp2p/go-libp2p-testing/ci"
 	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
@@ -1105,6 +1104,48 @@ func TestBadProtoMessages(t *testing.T) {
 	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
 		t.Fatal("should have errored on nil record")
 	}
+}
+
+func TestAtomicPut(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := setupDHT(ctx, t, false)
+	d.Validator = testValidator{}
+
+	// fnc to put record
+	key := "testkey"
+	putRecord := func(value []byte) error {
+		rec := record.MakePutRecord(key, value)
+		pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
+		pmes.Record = rec
+		_, err := d.handlePutValue(ctx, "testpeer", pmes)
+		return err
+	}
+
+	// put a valid record
+	if err := putRecord([]byte("valid")); err != nil {
+		t.Fatal("should not have errored on valid record")
+	}
+
+	// start 30 threads to put `old` & `new` records
+	var wg sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if rand.Intn(2) == 0 {
+				if err := putRecord([]byte("newer")); err != nil {
+					t.Fatalf("should not have errored on newer record for %d th thread", i)
+				}
+			} else {
+				putRecord([]byte("valid"))
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// get should return the 'newer value'
 }
 
 func TestClientModeConnect(t *testing.T) {

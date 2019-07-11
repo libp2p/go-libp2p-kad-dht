@@ -12,13 +12,13 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 
-	proto "github.com/gogo/protobuf/proto"
-	cid "github.com/ipfs/go-cid"
+	"github.com/gogo/protobuf/proto"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	base32 "github.com/whyrusleeping/base32"
+	"github.com/whyrusleeping/base32"
 )
 
 // The number of closer peers to send on requests.
@@ -178,9 +178,9 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	if len(rec.GetKey()) == 0 {
 		indexForLock = 0
 	} else {
-		indexForLock = rec.GetKey()[0]
+		indexForLock = rec.GetKey()[len(rec.GetKey())-1]
 	}
-	lk := dht.stripedPutLocks[indexForLock]
+	lk := &dht.stripedPutLocks[indexForLock]
 	lk.Lock()
 	defer lk.Unlock()
 

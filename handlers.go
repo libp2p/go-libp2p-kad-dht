@@ -173,6 +173,17 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 	dskey := convertToDsKey(rec.GetKey())
 
+	// fetch the striped lock for this key
+	var indexForLock byte
+	if len(rec.GetKey()) == 0 {
+		indexForLock = 0
+	} else {
+		indexForLock = rec.GetKey()[0]
+	}
+	lk := dht.stripedPutLocks[indexForLock]
+	lk.Lock()
+	defer lk.Unlock()
+
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from
 	// overwriting a record with a higher sequence number.
@@ -180,9 +191,6 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	if err != nil {
 		return nil, err
 	}
-
-	dht.putLock.Lock()
-	defer dht.putLock.Unlock()
 
 	if existing != nil {
 		recs := [][]byte{rec.GetValue(), existing.GetValue()}

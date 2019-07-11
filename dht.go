@@ -63,8 +63,8 @@ type IpfsDHT struct {
 	strmap map[peer.ID]*messageSender
 	smlk   sync.Mutex
 
-	plk     sync.Mutex
-	putLock sync.Mutex
+	plk             sync.Mutex
+	stripedPutLocks [256]sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
 }

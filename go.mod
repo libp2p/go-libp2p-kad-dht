@@ -1,4 +1,4 @@
-module github.com/libp2p/go-libp2p-kad-dht
+module github.com/aarshkshah1992/go-libp2p-kad-dht
 
 require (
 	github.com/gogo/protobuf v1.2.1

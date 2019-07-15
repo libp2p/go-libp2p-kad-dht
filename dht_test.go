@@ -15,7 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-	"github.com/multiformats/go-multistream"
+	multistream"github.com/multiformats/go-multistream"
 
 	"golang.org/x/xerrors"
 
@@ -25,12 +25,12 @@ import (
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	"github.com/ipfs/go-cid"
+	cid"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
-	"github.com/libp2p/go-libp2p-testing/ci"
+	ci"github.com/libp2p/go-libp2p-testing/ci"
 	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
@@ -75,6 +75,36 @@ func (testValidator) Validate(_ string, b []byte) error {
 		return errors.New("expired")
 	}
 	return nil
+}
+
+type testAtomicPutValidator struct {
+	testValidator
+}
+
+// selects the entry with the 'highest' last byte
+func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
+	index := -1
+	max := uint8(0)
+	for i, b := range bs {
+		if bytes.Equal(b, []byte("valid")) {
+			if index == -1 {
+				index = i
+			}
+			continue
+		}
+
+		str := string(b)
+		n := str[len(str)-1]
+		if (n > max) {
+			max = n
+			index = i
+		}
+
+	}
+	if index == -1 {
+		return -1, errors.New("no rec found")
+	}
+	return index, nil
 }
 
 func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
@@ -1111,9 +1141,9 @@ func TestAtomicPut(t *testing.T) {
 	defer cancel()
 
 	d := setupDHT(ctx, t, false)
-	d.Validator = testValidator{}
+	d.Validator = testAtomicPutValidator{}
 
-	// fnc to put record
+	// fnc to put a record
 	key := "testkey"
 	putRecord := func(value []byte) error {
 		rec := record.MakePutRecord(key, value)
@@ -1125,33 +1155,29 @@ func TestAtomicPut(t *testing.T) {
 
 	// put a valid record
 	if err := putRecord([]byte("valid")); err != nil {
-		t.Fatal("should not have errored on valid record")
+		t.Fatal("should not have errored on a valid record")
 	}
 
-	// start 30 threads to put `old` & `new` records
+	// simultaneous puts for old & new values
+	values := [][]byte{[]byte("newer1"), []byte("newer7"), []byte("newer3"), []byte("newer5")}
 	var wg sync.WaitGroup
-	for i := 0; i < 30; i++ {
+	for _, v := range values {
 		wg.Add(1)
-		go func(i int) {
+		go func(v []byte) {
 			defer wg.Done()
-			if rand.Intn(2) == 0 {
-				if err := putRecord([]byte("newer")); err != nil {
-					t.Fatalf("should not have errored on newer record for %d th thread, but got %+v", i, err)
-				}
-			} else {
-				putRecord([]byte("valid"))
-			}
-		}(i)
+			putRecord(v)
+		}(v)
 	}
 	wg.Wait()
 
-	// get should return the 'newer value'
-	val, err := d.GetValue(ctx, key)
+	// get should return the newest value
+	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
+	msg, err := d.handleGetValue(ctx, "testkey", pmes)
 	if err != nil {
-		t.Fatal("should not have errored on final get, but got %+v", err)
+		t.Fatalf("should not have errored on final get, but got %+v", err)
 	}
-	if string(val) != "newer" {
-		t.Fatalf("Expected 'newer' got '%s'", string(val))
+	if string(msg.GetRecord().Value) != "newer7" {
+		t.Fatalf("Expected 'newer7' got '%s'", string(msg.GetRecord().Value))
 	}
 }
 
@@ -1242,7 +1268,7 @@ func TestFindPeerQuery(t *testing.T) {
 
 func testFindPeerQuery(t *testing.T,
 	bootstrappers, // Number of nodes connected to the querying node
-	leafs, // Number of nodes that might be connected to from the bootstrappers
+	leafs,         // Number of nodes that might be connected to from the bootstrappers
 	bootstrapperLeafConns int, // Number of connections each bootstrapper has to the leaf nodes
 ) {
 	ctx, cancel := context.WithCancel(context.Background())

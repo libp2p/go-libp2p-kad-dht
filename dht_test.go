@@ -95,7 +95,7 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 
 		str := string(b)
 		n := str[len(str)-1]
-		if (n > max) {
+		if n > max {
 			max = n
 			index = i
 		}
@@ -1268,7 +1268,7 @@ func TestFindPeerQuery(t *testing.T) {
 
 func testFindPeerQuery(t *testing.T,
 	bootstrappers, // Number of nodes connected to the querying node
-	leafs,         // Number of nodes that might be connected to from the bootstrappers
+	leafs, // Number of nodes that might be connected to from the bootstrappers
 	bootstrapperLeafConns int, // Number of connections each bootstrapper has to the leaf nodes
 ) {
 	ctx, cancel := context.WithCancel(context.Background())

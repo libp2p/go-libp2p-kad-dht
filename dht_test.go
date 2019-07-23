@@ -15,8 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-
-	multistream "github.com/multiformats/go-multistream"
+	"github.com/multiformats/go-multistream"
 
 	"golang.org/x/xerrors"
 
@@ -26,12 +25,12 @@ import (
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
-	ci "github.com/libp2p/go-libp2p-testing/ci"
+	"github.com/libp2p/go-libp2p-testing/ci"
 	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
@@ -76,6 +75,36 @@ func (testValidator) Validate(_ string, b []byte) error {
 		return errors.New("expired")
 	}
 	return nil
+}
+
+type testAtomicPutValidator struct {
+	testValidator
+}
+
+// selects the entry with the 'highest' last byte
+func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
+	index := -1
+	max := uint8(0)
+	for i, b := range bs {
+		if bytes.Equal(b, []byte("valid")) {
+			if index == -1 {
+				index = i
+			}
+			continue
+		}
+
+		str := string(b)
+		n := str[len(str)-1]
+		if n > max {
+			max = n
+			index = i
+		}
+
+	}
+	if index == -1 {
+		return -1, errors.New("no rec found")
+	}
+	return index, nil
 }
 
 func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
@@ -1104,6 +1133,51 @@ func TestBadProtoMessages(t *testing.T) {
 	nilrec := new(pb.Message)
 	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
 		t.Fatal("should have errored on nil record")
+	}
+}
+
+func TestAtomicPut(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := setupDHT(ctx, t, false)
+	d.Validator = testAtomicPutValidator{}
+
+	// fnc to put a record
+	key := "testkey"
+	putRecord := func(value []byte) error {
+		rec := record.MakePutRecord(key, value)
+		pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
+		pmes.Record = rec
+		_, err := d.handlePutValue(ctx, "testpeer", pmes)
+		return err
+	}
+
+	// put a valid record
+	if err := putRecord([]byte("valid")); err != nil {
+		t.Fatal("should not have errored on a valid record")
+	}
+
+	// simultaneous puts for old & new values
+	values := [][]byte{[]byte("newer1"), []byte("newer7"), []byte("newer3"), []byte("newer5")}
+	var wg sync.WaitGroup
+	for _, v := range values {
+		wg.Add(1)
+		go func(v []byte) {
+			defer wg.Done()
+			putRecord(v)
+		}(v)
+	}
+	wg.Wait()
+
+	// get should return the newest value
+	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
+	msg, err := d.handleGetValue(ctx, "testkey", pmes)
+	if err != nil {
+		t.Fatalf("should not have errored on final get, but got %+v", err)
+	}
+	if string(msg.GetRecord().Value) != "newer7" {
+		t.Fatalf("Expected 'newer7' got '%s'", string(msg.GetRecord().Value))
 	}
 }
 

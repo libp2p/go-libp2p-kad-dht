@@ -418,7 +418,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 			return context.DeadlineExceeded
 		} else if timeout < 10*time.Second {
 			// Reserve 10% for the final put.
-			deadline = deadline.Add(timeout / 10)
+			deadline = deadline.Add(-timeout / 10)
 		} else {
 			// Otherwise, reserve a second (we'll already be
 			// connected so this should be fast).

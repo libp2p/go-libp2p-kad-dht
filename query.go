@@ -173,7 +173,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersSeen:      peer.NewSet(),
 		peersQueried:   peer.NewSet(),
 		peersDialedNew: peer.NewSet(),
-		hopCount:				make(map[peer.ID]int),
+		hopCount:       make(map[peer.ID]int),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		peersToQuery:   peersToQuery,
 		proc:           proc,
@@ -295,7 +295,7 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID, hops int) {
 		return
 	}
 
-	//todo move this, just logging here for now to see xors
+	//should maybe log this elsewhere or extract from peerqueue
 	distb := kb.ID(u.XOR(keyspace.XORKeySpace.Key([]byte(next)).Bytes, keyspace.XORKeySpace.Key([]byte(r.query.key)).Bytes))
 	dist := keyspace.ZeroPrefixLen(distb)
 
@@ -398,9 +398,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	ctx := ctxproc.OnClosingContext(proc)
 
 	// mark events for logging
-	
 	logger.Event(ctx, "dhtQueryRunner.queryPeer.Start", r, p)
-	
 	defer logger.Event(ctx, "dhtQueryRunner.queryPeer.End", r, p)
 
 	// make sure we do this when we exit

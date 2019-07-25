@@ -192,17 +192,6 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 	return r
 }
 
-// func calcPeerXORS(target []byte, peers []peer.ID) ([]int) {
-// 	peerXORS := make([]int, len(peers))
-// 	t := keyspace.XORKeySpace.Key(target)
-// 	for _, p := range peers {
-// 			distb := kb.ID(u.XOR(keyspace.XORKeySpace.Key([]byte(p)).Bytes, t.Bytes))
-// 			dist := keyspace.ZeroPrefixLen(distb)
-// 			peerXORS = append(peerXORS, dist)
-// 	}
-// 	return peerXORS
-// }
-
 func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, error) {
 	r.Lock()
 	r.startTime = time.Now()

@@ -87,6 +87,7 @@ type dhtQueryRunner struct {
 	peersSeen      *peer.Set        // all peers queried. prevent querying same peer 2x
 	peersQueried   *peer.Set        // peers successfully connected to and queried
 	peersDialed    *dialQueue       // peers we have dialed to
+	peersDialedNew *peer.Set
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
 
@@ -119,16 +120,20 @@ func PeerIDsFromPeerAddrs(l1 []*peer.AddrInfo) []peer.ID {
 }
 
 func (r *dhtQueryRunner) TraceValue() *tracefmt.QueryRunnerState {
-
 	r.Lock()
+	newKey, err := tryFormatLoggableKey(r.query.key)
+	if err != nil {
+		logger.Debug(err)
+		newKey = r.query.key
+	}
 	qrs := &tracefmt.QueryRunnerState{}
-	qrs.Query.Key = r.query.key
+	qrs.Query.Key = newKey
 	qrs.PeersSeen = r.peersSeen.Peers()
 	qrs.PeersQueried = r.peersQueried.Peers()
-	// qrs.PeersDialed = r.peersDialed // todo
-	// qrs.PeersToQuery = r.peersToQuery // todo
+	qrs.PeersDialedNew = r.peersDialedNew.Peers()
+	qrs.PeersDialQueueLen = r.peersDialed.out.Queue.Len()
 	qrs.PeersToQueryLen = r.peersToQuery.Queue.Len()
-	// qrs.PeersRemaining = r.peersRemaining // todo
+	qrs.PeersRemainingLen = r.peersRemaining.Remaining()
 
 	if r.result != nil {
 		qrs.Result = tracefmt.QueryResult{
@@ -167,6 +172,7 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      peer.NewSet(),
 		peersQueried:   peer.NewSet(),
+		peersDialedNew: peer.NewSet(),
 		hopCount:				make(map[peer.ID]int),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		peersToQuery:   peersToQuery,
@@ -358,6 +364,7 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 	}
 
 	logger.Debug("not connected. dialing.")
+	r.peersDialedNew.Add(p)
 	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
 		Type: notif.DialingPeer,
 		ID:   p,
@@ -429,7 +436,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	} else if filtered := filterCandidatesPtr(conn, res.closerPeers); len(filtered) > 0 {
 		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer filtered peers; unfiltered: %d)", p,
 			len(filtered), len(res.closerPeers))
-
+			// could also set the r.result here to access the closer peers (but would need to add filtered)
 			logger.Event(ctx, "dhtQueryRunner.queryPeer.Result", r, p, logging.LoggableMap{
 				"success": res.success,
 				"closerPeers": PeerIDsFromPeerAddrs(res.closerPeers),

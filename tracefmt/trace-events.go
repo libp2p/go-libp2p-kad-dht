@@ -30,9 +30,10 @@ type QueryRunnerState struct {
   PeersSeen       []peer.ID
   PeersQueried    []peer.ID
   PeersDialed     []peer.ID
-  PeersToQuery    []peer.ID
+  PeersDialedNew  []peer.ID
+  PeersDialQueueLen int
   PeersToQueryLen int
-  PeersRemaining  []peer.ID
+  PeersRemainingLen int32
   Result          QueryResult
   RateLimit       RateLimitState
   StartTime       time.Time

@@ -129,10 +129,16 @@ func (r *dhtQueryRunner) TraceValue() *tracefmt.QueryRunnerState {
 	if r.result != nil {
 		qrs.Result = tracefmt.QueryResult{
 			Success:     r.result.success,
-			FoundPeer:   r.result.peer.ID,
 			CloserPeers: PeerIDsFromPeerAddrs(r.result.closerPeers),
-			FinalSet:    r.result.finalSet.Peers(),
-			QueriedSet:  r.result.queriedSet.Peers(),
+		}
+		if r.result.peer != nil {
+			qrs.Result.FoundPeer = r.result.peer.ID
+		}
+		if r.result.finalSet != nil {
+			qrs.Result.FinalSet = r.result.finalSet.Peers()
+		}
+		if r.result.queriedSet != nil {
+			qrs.Result.QueriedSet = r.result.queriedSet.Peers()
 		}
 	}
 
@@ -180,7 +186,9 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	r.startTime = time.Now()
 	r.Unlock()
 
-	defer logger.EventBegin(ctx, "dhtQueryRunner.Run", r).Done()
+	// ideally should be an EventBegin/Done pair, but atm having trouble w/ the trace format
+	logger.Event(ctx, "dhtQueryRunner.Run.Start", r)
+	defer logger.Event(ctx, "dhtQueryRunner.Run.End", r)
 
 	r.log = logger
 	r.runCtx = ctx
@@ -259,6 +267,9 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
 		ID:   next,
 	})
 
+	// this event marks when we start considering a peer for a query
+	logger.Event(r.runCtx, "dhtQueryRunner.addPeerToQuery", r, next)
+
 	r.peersRemaining.Increment(1)
 	select {
 	case r.peersToQuery.EnqChan <- next:
@@ -298,8 +309,11 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 }
 
 func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
+	// this event marks when we start considering a peer for a query
+
 	// short-circuit if we're already connected.
 	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
+		logger.Event(ctx, "dhtQueryRunner.dialPeer.AlreadyConnected", r, p)
 		return nil
 	}
 
@@ -308,6 +322,8 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 		Type: notif.DialingPeer,
 		ID:   p,
 	})
+
+	logger.Event(ctx, "dhtQueryRunner.dialPeer.Dialing", r, p)
 
 	pi := peer.AddrInfo{ID: p}
 	if err := r.query.dht.host.Connect(ctx, pi); err != nil {
@@ -320,9 +336,11 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 
 		// This peer is dropping out of the race.
 		r.peersRemaining.Decrement(1)
+		logger.Event(ctx, "dhtQueryRunner.dialPeer.DialFailure", r, p)
 		return err
 	}
 	logger.Debugf("connected. dial success.")
+	logger.Event(ctx, "dhtQueryRunner.dialPeer.DialSuccess", r, p)
 	return nil
 }
 
@@ -331,6 +349,10 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 	// create a context from our proc.
 	ctx := ctxproc.OnClosingContext(proc)
+
+	// mark events for logging
+	logger.Event(ctx, "dhtQueryRunner.queryPeer.Start", r, p)
+	defer logger.Event(ctx, "dhtQueryRunner.queryPeer.End", r, p)
 
 	// make sure we do this when we exit
 	defer func() {

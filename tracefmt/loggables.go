@@ -9,15 +9,19 @@ var marshalErr = map[string]interface{}{
 }
 
 func (r *QueryRunnerState) Loggable() map[string]interface{} {
+  m1 := map[string]interface{}{
+    "QueryRunner": r,
+  }
+
   // TODO: fix this nasty hack...
-  s, err := json.Marshal(r)
+  s, err := json.Marshal(m1)
   if err != nil {
     return marshalErr
   }
-  var m map[string]interface{}
-  err = json.Unmarshal(s, &m)
+  var m2 map[string]interface{}
+  err = json.Unmarshal(s, &m2)
   if err != nil {
     return marshalErr
   }
-  return m
+  return m2
 }

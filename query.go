@@ -21,7 +21,7 @@ import (
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 	keyspace "github.com/libp2p/go-libp2p-kbucket/keyspace"
-	u "github.com/ipfs/go-ipfs-util"
+	util "github.com/ipfs/go-ipfs-util"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
@@ -285,7 +285,7 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID, hops int) {
 	}
 
 	//should maybe log this elsewhere or extract from peerqueue
-	distb := kb.ID(u.XOR(keyspace.XORKeySpace.Key([]byte(next)).Bytes, keyspace.XORKeySpace.Key([]byte(r.query.key)).Bytes))
+	distb := kb.ID(util.XOR(keyspace.XORKeySpace.Key([]byte(next)).Bytes, keyspace.XORKeySpace.Key([]byte(r.query.key)).Bytes))
 	dist := keyspace.ZeroPrefixLen(distb)
 
 	// update hop counts, only if not there.

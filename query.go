@@ -20,6 +20,8 @@ import (
 	tracefmt "github.com/libp2p/go-libp2p-kad-dht/tracefmt"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
+	keyspace "github.com/libp2p/go-libp2p-kbucket/keyspace"
+	util "github.com/ipfs/go-ipfs-util"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
@@ -85,8 +87,11 @@ type dhtQueryRunner struct {
 	peersSeen      *peer.Set        // all peers queried. prevent querying same peer 2x
 	peersQueried   *peer.Set        // peers successfully connected to and queried
 	peersDialed    *dialQueue       // peers we have dialed to
+	peersDialedNew *peer.Set
 	peersToQuery   *queue.ChanQueue // peers remaining to be queried
 	peersRemaining todoctr.Counter  // peersToQuery + currently processing
+
+	hopCount			map[peer.ID]int						
 
 	result *dhtQueryResult // query result
 
@@ -115,16 +120,20 @@ func PeerIDsFromPeerAddrs(l1 []*peer.AddrInfo) []peer.ID {
 }
 
 func (r *dhtQueryRunner) TraceValue() *tracefmt.QueryRunnerState {
-
 	r.Lock()
+	newKey, err := tryFormatLoggableKey(r.query.key)
+	if err != nil {
+		logger.Debug(err)
+		newKey = r.query.key
+	}
 	qrs := &tracefmt.QueryRunnerState{}
-	qrs.Query.Key = r.query.key
+	qrs.Query.Key = newKey
 	qrs.PeersSeen = r.peersSeen.Peers()
 	qrs.PeersQueried = r.peersQueried.Peers()
-	// qrs.PeersDialed = r.peersDialed // todo
-	// qrs.PeersToQuery = r.peersToQuery.Peers() // todo
+	qrs.PeersDialedNew = r.peersDialedNew.Peers()
+	qrs.PeersDialQueueLen = r.peersDialed.out.Queue.Len()
 	qrs.PeersToQueryLen = r.peersToQuery.Queue.Len()
-	// qrs.PeersRemaining = r.peersRemaining // todo
+	qrs.PeersRemainingLen = r.peersRemaining.Remaining()
 
 	if r.result != nil {
 		qrs.Result = tracefmt.QueryResult{
@@ -163,6 +172,8 @@ func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
 		peersRemaining: todoctr.NewSyncCounter(),
 		peersSeen:      peer.NewSet(),
 		peersQueried:   peer.NewSet(),
+		peersDialedNew: peer.NewSet(),
+		hopCount:       make(map[peer.ID]int),
 		rateLimit:      make(chan struct{}, q.concurrency),
 		peersToQuery:   peersToQuery,
 		proc:           proc,
@@ -200,7 +211,7 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 
 	// add all the peers we got first.
 	for _, p := range peers {
-		r.addPeerToQuery(p)
+		r.addPeerToQuery(p, 0)
 	}
 
 	// start the dial queue only after we've added the initial set of peers.
@@ -251,7 +262,18 @@ func (r *dhtQueryRunner) Run(ctx context.Context, peers []peer.ID) (*dhtQueryRes
 	}, err
 }
 
-func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
+func (r *dhtQueryRunner) hopsForPeerID(p peer.ID) int {
+	r.Lock()
+	h, found := r.hopCount[p]
+	r.Unlock()
+
+	if !found {
+		return 0
+	}
+	return h
+}
+
+func (r *dhtQueryRunner) addPeerToQuery(next peer.ID, hops int) {
 	// if new peer is ourselves...
 	if next == r.query.dht.self {
 		r.log.Debug("addPeerToQuery skip self")
@@ -262,13 +284,25 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
 		return
 	}
 
+	//should maybe log this elsewhere or extract from peerqueue
+	distb := kb.ID(util.XOR(keyspace.XORKeySpace.Key([]byte(next)).Bytes, keyspace.XORKeySpace.Key([]byte(r.query.key)).Bytes))
+	dist := keyspace.ZeroPrefixLen(distb)
+
+	// update hop counts, only if not there.
+	r.Lock()
+	_, found := r.hopCount[next]
+	if !found {
+		r.hopCount[next] = hops
+	} 
+	r.Unlock()
+
 	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
 		Type: notif.AddingPeer,
 		ID:   next,
 	})
 
 	// this event marks when we start considering a peer for a query
-	logger.Event(r.runCtx, "dhtQueryRunner.addPeerToQuery", r, next)
+	logger.Event(r.runCtx, "dhtQueryRunner.addPeerToQuery", r, next, logging.LoggableMap{"Hops": hops, "XOR": dist})
 
 	r.peersRemaining.Increment(1)
 	select {
@@ -309,8 +343,9 @@ func (r *dhtQueryRunner) spawnWorkers(proc process.Process) {
 }
 
 func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
-	// this event marks when we start considering a peer for a query
 
+	// this event marks when we start considering a peer for a query
+	
 	// short-circuit if we're already connected.
 	if r.query.dht.host.Network().Connectedness(p) == network.Connected {
 		logger.Event(ctx, "dhtQueryRunner.dialPeer.AlreadyConnected", r, p)
@@ -318,6 +353,7 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 	}
 
 	logger.Debug("not connected. dialing.")
+	r.peersDialedNew.Add(p)
 	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
 		Type: notif.DialingPeer,
 		ID:   p,
@@ -375,6 +411,9 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 		r.Lock()
 		r.result = res
 		r.Unlock()
+		logger.Event(ctx, "dhtQueryRunner.queryPeer.Result", r, p, logging.LoggableMap{
+			"success": res.success,
+		})
 		if res.peer != nil {
 			r.query.dht.peerstore.AddAddrs(res.peer.ID, res.peer.Addrs, pstore.TempAddrTTL)
 		}
@@ -384,6 +423,13 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 	} else if filtered := filterCandidatesPtr(conn, res.closerPeers); len(filtered) > 0 {
 		logger.Debugf("PEERS CLOSER -- worker for: %v (%d closer filtered peers; unfiltered: %d)", p,
 			len(filtered), len(res.closerPeers))
+			// could also set the r.result here to access the closer peers (but would need to add filtered)
+			logger.Event(ctx, "dhtQueryRunner.queryPeer.Result", r, p, logging.LoggableMap{
+				"success": res.success,
+				"closerPeers": PeerIDsFromPeerAddrs(res.closerPeers),
+				"filteredPeers": PeerIDsFromPeerAddrs(filtered),
+			})
+			hops := r.hopsForPeerID(p)
 		for _, next := range filtered {
 			if next.ID == r.query.dht.self { // don't add self.
 				logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
@@ -392,7 +438,7 @@ func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
 
 			// add their addresses to the dialer's peerstore
 			r.query.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-			r.addPeerToQuery(next.ID)
+			r.addPeerToQuery(next.ID, hops + 1)
 			// logger.Debugf("PEERS CLOSER -- worker for: %v added %v (%v)", p, next.ID, next.Addrs)
 		}
 	} else {

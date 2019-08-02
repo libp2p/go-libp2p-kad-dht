@@ -10,7 +10,6 @@ env:
   global:
     - GOTFLAGS="-race"
     - IPFS_REUSEPORT=false
-    - LIBP2P_ALLOW_WEAK_RSA_KEYS=1
   matrix:
     - BUILD_DEPTYPE=gomod
 

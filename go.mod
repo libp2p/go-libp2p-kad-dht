@@ -10,13 +10,13 @@ require (
 	github.com/ipfs/go-todocounter v0.0.1
 	github.com/jbenet/goprocess v0.1.3
 	github.com/libp2p/go-libp2p v0.1.0
-	github.com/libp2p/go-libp2p-core v0.0.1
+	github.com/libp2p/go-libp2p-core v0.2.0
 	github.com/libp2p/go-libp2p-kbucket v0.2.0
-	github.com/libp2p/go-libp2p-peerstore v0.1.0
-	github.com/libp2p/go-libp2p-record v0.1.0
+	github.com/libp2p/go-libp2p-peerstore v0.1.3
+	github.com/libp2p/go-libp2p-record v0.1.1
 	github.com/libp2p/go-libp2p-routing v0.1.0
-	github.com/libp2p/go-libp2p-swarm v0.1.0
-	github.com/libp2p/go-libp2p-testing v0.0.3
+	github.com/libp2p/go-libp2p-swarm v0.1.1
+	github.com/libp2p/go-libp2p-testing v0.0.4
 	github.com/libp2p/go-msgio v0.0.4
 	github.com/mr-tron/base58 v1.1.2
 	github.com/multiformats/go-multiaddr v0.0.4
@@ -27,3 +27,9 @@ require (
 	go.opencensus.io v0.21.0
 	golang.org/x/xerrors v0.0.0-20190513163551-3ee3066db522
 )
+
+replace github.com/libp2p/go-libp2p-testing => ../../go-libp2p-testing
+
+replace github.com/libp2p/go-libp2p => ../go-libp2p
+
+replace github.com/libp2p/go-libp2p-swarm => ../go-libp2p-swarm

@@ -3,15 +3,16 @@ package dht
 import (
 	"context"
 	"crypto/rand"
+	"github.com/libp2p/go-libp2p-core/test"
 	"testing"
 	"time"
 
+	u "github.com/ipfs/go-ipfs-util"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
-
-	u "github.com/ipfs/go-ipfs-util"
 	record "github.com/libp2p/go-libp2p-record"
+	tnet "github.com/libp2p/go-libp2p-testing/net"
 )
 
 // Check that GetPublicKey() correctly extracts a public key
@@ -46,26 +47,18 @@ func TestPubkeyPeerstore(t *testing.T) {
 	ctx := context.Background()
 	dht := setupDHT(ctx, t, false)
 
-	r := u.NewSeededRand(15) // generate deterministic keypair
-	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id, err := peer.IDFromPublicKey(pubk)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = dht.peerstore.AddPubKey(id, pubk)
+	identity := tnet.RandIdentityOrFatal(t)
+	err := dht.peerstore.AddPubKey(identity.ID(), identity.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rpubk, err := dht.GetPublicKey(context.Background(), id)
+	rpubk, err := dht.GetPublicKey(context.Background(), identity.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !pubk.Equals(rpubk) {
+	if !identity.PublicKey().Equals(rpubk) {
 		t.Fatal("got incorrect public key")
 	}
 }
@@ -115,15 +108,9 @@ func TestPubkeyFromDHT(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	r := u.NewSeededRand(15) // generate deterministic keypair
-	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id, err := peer.IDFromPublicKey(pubk)
-	if err != nil {
-		t.Fatal(err)
-	}
+	identity := tnet.RandIdentityOrFatal(t)
+	pubk := identity.PublicKey()
+	id := identity.ID()
 	pkkey := routing.KeyForPublicKey(id)
 	pkbytes, err := pubk.Bytes()
 	if err != nil {
@@ -163,7 +150,7 @@ func TestPubkeyNotFound(t *testing.T) {
 	connect(t, ctx, dhtA, dhtB)
 
 	r := u.NewSeededRand(15) // generate deterministic keypair
-	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
+	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 512, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,25 +181,21 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	r := u.NewSeededRand(15) // generate deterministic keypair
-	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
+	_, pk, err := test.RandTestKeyPair(ci.RSA, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := peer.IDFromPublicKey(pubk)
+	id, err := peer.IDFromPublicKey(pk)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pkkey := routing.KeyForPublicKey(id)
 
-	_, wrongpubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pubk == wrongpubk {
+	peer2 := tnet.RandIdentityOrFatal(t)
+	if pk == peer2.PublicKey() {
 		t.Fatal("Public keys shouldn't match here")
 	}
-	wrongbytes, err := wrongpubk.Bytes()
+	wrongbytes, err := peer2.PublicKey().Bytes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,14 +231,10 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	r := u.NewSeededRand(15) // generate deterministic keypair
+	wrong := tnet.RandIdentityOrFatal(t)
 	pkkey := routing.KeyForPublicKey(dhtB.self)
 
-	_, wrongpubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 1024, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrongbytes, err := wrongpubk.Bytes()
+	wrongbytes, err := wrong.PublicKey().Bytes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +260,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 
 	// The incorrect public key retrieved from the DHT
 	// should be ignored in favour of the correct public
-	// key retieved from the node directly
+	// key retrieved from the node directly
 	if id != dhtB.self {
 		t.Fatal("got incorrect public key")
 	}

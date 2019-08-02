@@ -22,6 +22,17 @@
 go get github.com/libp2p/go-libp2p-kad-dht
 ```
 
+## Running Tests
+
+This package depends on tests that require crypto keys too large to inline into
+a peer ID. These tests generate 512bit RSA keys for speed purposes. To run
+these tests successfully, you must set the environment variable
+`LIBP2P_ALLOW_WEAK_RSA_KEYS` to any non-empty value, e.g. `1`.
+
+```bash
+$ LIBP2P_ALLOW_WEAK_RSA_KEYS=1 go test
+```
+
 ## Usage
 
 Go to https://godoc.org/github.com/libp2p/go-libp2p-kad-dht.

@@ -150,7 +150,7 @@ func TestPubkeyNotFound(t *testing.T) {
 	connect(t, ctx, dhtA, dhtB)
 
 	r := u.NewSeededRand(15) // generate deterministic keypair
-	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 512, r)
+	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 2048, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	_, pk, err := test.RandTestKeyPair(ci.RSA, 512)
+	_, pk, err := test.RandTestKeyPair(ci.RSA, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}

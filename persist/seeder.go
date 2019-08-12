@@ -18,13 +18,14 @@ import (
 var SeedDialGracePeriod = 5 * time.Second
 
 // TotalSeedDialGracePeriod is the total grace period for a group of dial attempts
-// TODO Make this configurable so it's easy to run tests
 var TotalSeedDialGracePeriod = 30 * time.Second
 
 // NSimultaneousDial is the number of peers we will dial simultaneously
 var NSimultaneousDial = 50
 
 var ErrPartialSeed = errors.New("routing table seeded partially")
+
+var DefaultRndSeederTarget = 35
 
 type randomSeeder struct {
 	host   host.Host

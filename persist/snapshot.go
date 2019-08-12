@@ -15,6 +15,8 @@ var (
 	dsSnapshotKey = ds.NewKey("routing_table")
 )
 
+var DefaultSnapshotNS = "/kad-dht/snapshot"
+
 type dsSnapshotter struct {
 	ds.Datastore
 }

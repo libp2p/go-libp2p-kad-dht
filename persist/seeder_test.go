@@ -13,24 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-/*
-func TestSeedBasic(t *testing.T) {
-	local := test.RandPeerIDFatal(t)
-	rt := kb.NewRoutingTable(10, kb.ConvertPeerID(local), time.Hour, peerstore.NewMetrics())
-
-	// partial error
-	TotalSeedDialGracePeriod = 1 * time.Second
-	rs := NewRandomSeeder(bhost.New(swarmt.GenSwarm(t, context.Background(), swarmt.OptDisableReuseport)), 1)
-	assert.Equal(t, ErrPartialSeed, rs.Seed(rt, nil, nil))
-	assert.Empty(t, rt.ListPeers())
-
-	// no partial error
-	rs = NewRandomSeeder(bhost.New(swarmt.GenSwarm(t, context.Background(), swarmt.OptDisableReuseport)), 0)
-	assert.NoError(t, rs.Seed(rt, nil, nil))
-	assert.Empty(t, rt.ListPeers())
-}*/
-
-func TestSeed(t *testing.T) {
+func TestRandomeSeeder(t *testing.T) {
 	testCases := map[string]struct {
 		nTotalCandidates               int   // snapshotted candidate list
 		nCandidatesNotInPeerStore      int   // candidates that are absent in the peer store

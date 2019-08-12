@@ -99,6 +99,11 @@ func (rs *randomSeeder) Seed(into *kbucket.RoutingTable, candidates []peer.ID, f
 
 	// attempt to seed the RT with the given peers
 	attemptSeedWithPeers := func(peers []peer.ID) error {
+		if len(peers) == 0 {
+			logSeed.Warning("empty peer set has been passed for seed attempt")
+			return ErrPartialSeed
+		}
+
 		resCh := make(chan result) // dial results.
 		ctx, cancel := context.WithTimeout(context.Background(), TotalSeedDialGracePeriod)
 		defer cancel()

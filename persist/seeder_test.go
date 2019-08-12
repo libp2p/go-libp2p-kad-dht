@@ -31,30 +31,41 @@ func TestSeedBasic(t *testing.T) {
 }*/
 
 func TestSeed(t *testing.T) {
-	/*
-			Target, Available Candidates, Dead Candidates, Fallbacks, Result
-		1)	10		10						0				0			Success -> 10 peers in RT
-		2)	10		6						2				5			Success -> 10 peers in RT
-		3)  10		0						0				10			Success -> 10 peers in RT
-		4)  10		6						0				4           Success -> 10 peers in RT
-		5)  10		7						0				2			Partial Failure -> 9 peers in RT
-		6)	10		3						7				6			Partial Failure -> 9 peers in RT
-	*/
-	self := bhost.New(swarmt.GenSwarm(t, context.Background(), swarmt.OptDisableReuseport))
-	target := 10
-
-	testCases := []struct {
-		nTotalCandidates               int
-		nCandidatesNotInPeerStore      int
-		nCandidatesNotAlive            int
-		nFallbacks                     int
-		expectedNumPeersInRoutingTable int
-		expectedErr                    error
+	testCases := map[string]struct {
+		nTotalCandidates               int   // main list of candidates
+		nCandidatesNotInPeerStore      int   // candidates from the main list that are absent in the peer store
+		nCandidatesNotAlive            int   // candidates from the main list that are "not-diallable"/not alive
+		nFallbacks                     int   // fallback list
+		expectedNumPeersInRoutingTable int   // number of peers we expect in the routing table after seeding is complete
+		expectedErr                    error // error we expect from call to the random seeder
 	}{
-		{10, 0, 0, 0, 10, nil},
+		"Success -> Only Candidates": {10, 0, 0, 0,
+			10, nil},
+
+		"Success -> (Candidates + Fallbacks)": {10, 3, 4, 7,
+			10, nil},
+
+		"Success -> Only Fallbacks": {10, 2, 8, 10,
+			10, nil},
+
+		"Success -> Empty Candidates": {0, 0, 0, 10,
+			10, nil},
+
+		"Partial -> Only Candidates": {10, 3, 2, 0, 5,
+			ErrPartialSeed},
+
+		"Partial -> (Candidates + Fallbacks)": {10, 0, 3, 1,
+			8, ErrPartialSeed},
+
+		"Partial -> Only Fallbacks": {10, 3, 7, 9, 9,
+			ErrPartialSeed},
 	}
 
-	for index, testcase := range testCases {
+	for name, testcase := range testCases {
+		// create host for self
+		self := bhost.New(swarmt.GenSwarm(t, context.Background(), swarmt.OptDisableReuseport))
+		target := 10
+
 		// create candidate hosts & add them to the peer store
 		candidateHosts := make([]bhost.BasicHost, testcase.nTotalCandidates)
 		candidatePids := make([]peer.ID, testcase.nTotalCandidates)
@@ -79,9 +90,11 @@ func TestSeed(t *testing.T) {
 		}
 
 		// create fallback hosts & add them to the peerstore
+		fallbackHosts := make([]bhost.BasicHost, testcase.nFallbacks)
 		fallbackPids := make([]peer.ID, testcase.nFallbacks)
 		for i := 0; i < testcase.nFallbacks; i++ {
 			h := *bhost.New(swarmt.GenSwarm(t, context.Background(), swarmt.OptDisableReuseport))
+			fallbackHosts[i] = h
 			fallbackPids[i] = h.ID()
 			self.Peerstore().AddAddrs(fallbackPids[i], h.Addrs(), 5*time.Minute)
 		}
@@ -91,11 +104,18 @@ func TestSeed(t *testing.T) {
 		rs := NewRandomSeeder(self, target)
 
 		// assert we got the required error
-		assert.Equalf(t, testcase.expectedErr, rs.Seed(rt, candidatePids, nil), "test case %d failed, did not get "+
-			"expected error value", index)
+		assert.Equalf(t, testcase.expectedErr, rs.Seed(rt, candidatePids, fallbackPids), "test case %s failed, did not get "+
+			"expected error value", name)
 
 		// assert routing table has been seeded with the expected number of peers
-		assert.Equalf(t, testcase.expectedNumPeersInRoutingTable, len(rt.ListPeers()), "for test case %d, rt should have %d peers, but has %d",
-			index, testcase.expectedNumPeersInRoutingTable, len(rt.ListPeers()))
+		assert.Equalf(t, testcase.expectedNumPeersInRoutingTable, len(rt.ListPeers()), "for test case %s, rt should have %d peers, but has %d",
+			name, testcase.expectedNumPeersInRoutingTable, len(rt.ListPeers()))
+
+		// cleanup
+		assert.NoError(t, self.Close())
+		allHosts := append(fallbackHosts, candidateHosts...)
+		for _, h := range allHosts {
+			assert.NoError(t, h.Close())
+		}
 	}
 }

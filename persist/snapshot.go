@@ -6,15 +6,14 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	nsds "github.com/ipfs/go-datastore/namespace"
-	dht_pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	peer "github.com/libp2p/go-libp2p-peer"
+	"github.com/libp2p/go-libp2p-peer"
 )
 
 var (
 	dsSnapshotKey = ds.NewKey("routing_table")
 )
-
 
 type dsSnapshotter struct {
 	ds.Datastore
@@ -57,7 +56,7 @@ func (dsp *dsSnapshotter) Load() (result []peer.ID, err error) {
 		}
 		result = append(result, pid)
 	}
-	return result, nil
+	return result, err
 }
 
 func (dsp *dsSnapshotter) Store(rt *kb.RoutingTable) error {
@@ -65,7 +64,7 @@ func (dsp *dsSnapshotter) Store(rt *kb.RoutingTable) error {
 	for _, p := range rt.ListPeers() {
 		id, err := p.MarshalBinary()
 		if err != nil {
-			logSnapshot.Warningf("encountered error with adding peer to routing table snapshot; skipping; err: %s", p, err)
+			logSnapshot.Warningf("encountered error while adding peer to routing table snapshot; skipping; err: %s", p, err)
 			continue
 		}
 		data = append(data, id)

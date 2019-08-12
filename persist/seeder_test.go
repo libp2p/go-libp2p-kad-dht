@@ -32,9 +32,9 @@ func TestSeedBasic(t *testing.T) {
 
 func TestSeed(t *testing.T) {
 	testCases := map[string]struct {
-		nTotalCandidates               int   // main list of candidates
-		nCandidatesNotInPeerStore      int   // candidates from the main list that are absent in the peer store
-		nCandidatesNotAlive            int   // candidates from the main list that are "not-diallable"/not alive
+		nTotalCandidates               int   // snapshotted candidate list
+		nCandidatesNotInPeerStore      int   // candidates that are absent in the peer store
+		nCandidatesNotAlive            int   // candidates that are "not-diallable"/not alive
 		nFallbacks                     int   // fallback list
 		expectedNumPeersInRoutingTable int   // number of peers we expect in the routing table after seeding is complete
 		expectedErr                    error // error we expect from call to the random seeder
@@ -48,9 +48,6 @@ func TestSeed(t *testing.T) {
 		"Success -> Only Fallbacks": {10, 2, 8, 10,
 			10, nil},
 
-		"Success -> Empty Candidates": {0, 0, 0, 10,
-			10, nil},
-
 		"Partial -> Only Candidates": {10, 3, 2, 0, 5,
 			ErrPartialSeed},
 
@@ -59,6 +56,9 @@ func TestSeed(t *testing.T) {
 
 		"Partial -> Only Fallbacks": {10, 3, 7, 9, 9,
 			ErrPartialSeed},
+
+		"Success -> Empty Candidates": {0, 0, 0, 10,
+			10, nil},
 	}
 
 	for name, testcase := range testCases {

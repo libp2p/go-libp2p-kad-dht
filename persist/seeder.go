@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/ipfs/go-todocounter"
@@ -15,16 +14,16 @@ import (
 	"github.com/libp2p/go-libp2p-peer"
 )
 
-var ErrPartialSeed = errors.New("routing table seeded partially")
-
-// SeedDialGracePeriod is the time we will wait before giving up on a single dial attempt
+// SeedDialGracePeriod is the grace period for one dial attempt
 var SeedDialGracePeriod = 5 * time.Second
 
-// NumDialSimultaneous is  the number of peers we will dial simultaneously to verify availability
-var NumDialSimultaneous = 50
+// TotalSeedDialGracePeriod is the total grace period for a group of dial attempts
+var TotalSeedDialGracePeriod = 30 * time.Second
 
-// TotalDialGracePeriod is the total time we will wait before giving up on dialling to the current candidates
-var TotalDialGracePeriod = 30 * time.Second
+// NSimultaneousDial is the number of peers we will dial simultaneously
+var NSimultaneousDial = 50
+
+var ErrPartialSeed = errors.New("routing table seeded partially")
 
 type randomSeeder struct {
 	host   host.Host
@@ -42,27 +41,35 @@ func NewRandomSeeder(host host.Host, target int) Seeder {
 }
 
 func (rs *randomSeeder) Seed(into *kbucket.RoutingTable, candidates []peer.ID, fallback []peer.ID) error {
-	// copy & shuffle the candidates
+	// copy the candidates & shuffle to randomize seeding
 	cpy := make([]peer.ID, len(candidates))
 	copy(cpy, candidates)
 	rand.Shuffle(len(cpy), func(i, j int) {
 		cpy[i], cpy[j] = cpy[j], cpy[i]
 	})
 
-	// number of peers we have yet to add to the RT
-	var mu sync.Mutex
 	left := rs.target
+	addPeer := func(p peer.ID) { // adds a peer to the routing table and decrements the left counter if successful.
+		evicted, err := into.Update(p)
+		if err == nil && evicted == "" {
+			left-- // if we evict a peer, do not decrement the counter.
+		} else if err != nil {
+			logSeed.Warningf("error while adding candidate to routing table: %s", err)
+		}
+	}
 
-	// create a list of peers we need to dial to verify if they are available
+	// make a list of the candidates we need to dial to to ensure they are available
 	var todial []peer.ID
 	for _, p := range cpy {
 		if left == 0 {
 			return nil // lucky case: we were already connected to all our candidates.
 		}
 		if rs.host.Network().Connectedness(p) == inet.Connected {
-			// if we are already connected to a peer, it is already in the routing table
-			// we should not add the peer to the RT here as it will move it to front of the bucket considering it to be more active
-			left--
+			// Note: initial seeding MUST be done before dht registers for connection notifications
+			// this is because once we register for notifs, peers will get added to the RT upon connection itself
+			// we don't want that as it will wrongly mark the peer as more active in the k-bucket & move it to the front of the bucket
+			// take a look at notif.go
+			addPeer(p)
 			continue
 		}
 		if addrs := rs.host.Peerstore().Addrs(p); len(addrs) == 0 {
@@ -72,97 +79,74 @@ func (rs *randomSeeder) Seed(into *kbucket.RoutingTable, candidates []peer.ID, f
 		todial = append(todial, p)
 	}
 
-	todo := todocounter.NewSyncCounter()
-	todo.Increment(uint32(left))
+	type result struct {
+		p   peer.ID
+		err error
+	}
 
-	attemptSeedWithPeers := func(peers []peer.ID) error {
-		ctx, cancel := context.WithTimeout(context.Background(), TotalDialGracePeriod)
+	// attempts to dial to a given peer to verify it's available
+	dialFn := func(ctx context.Context, p peer.ID, res chan<- result) {
+		childCtx, cancel := context.WithTimeout(ctx, SeedDialGracePeriod)
 		defer cancel()
-		semaphore := make(chan struct{}, NumDialSimultaneous)
+		_, err := rs.host.Network().DialPeer(childCtx, p)
+		select {
+		case <-ctx.Done(): // caller has already hung up & gone away
+		case res <- result{p, err}:
+		}
+	}
 
-		isSeeded := func() error {
+	// attempt to seed the RT with the given peers
+	attemptSeedWithPeers := func(peers []peer.ID) error {
+		resCh := make(chan result) // dial results.
+		ctx, cancel := context.WithTimeout(context.Background(), TotalSeedDialGracePeriod)
+		defer cancel()
+
+		// start dialing
+		sempahore := make(chan struct{}, NSimultaneousDial)
+		go func(peers []peer.ID) {
+			for _, p := range peers {
+				sempahore <- struct{}{}
+				go func(p peer.ID, res chan<- result) {
+					dialFn(ctx, p, resCh)
+					<-sempahore
+				}(p, resCh)
+			}
+		}(peers)
+
+		// number of results we expect on the result channel
+		todo := todocounter.NewSyncCounter()
+		todo.Increment(uint32(len(peers)))
+
+		for left > 0 {
 			select {
+			case res := <-resCh:
+				todo.Decrement(1)
+				if res.err != nil {
+					logSeed.Infof("discarded routing table candidate due to dial error; peer ID: %s, err: %s", res.p, res.err)
+				} else {
+					addPeer(res.p)
+				}
+
 			case <-todo.Done():
-				return nil
-			default:
+				logSeed.Warningf("unable to seed routing table to target due to failed dials, still missing: %d", left)
+				return ErrPartialSeed
+
+			case <-ctx.Done():
+				logSeed.Warningf("unable to seed routing table to target due to slow dials, still missing: %d", left)
 				return ErrPartialSeed
 			}
 		}
 
-		for _, p := range peers {
-			select {
-			case <-todo.Done():
-				return nil
-			case <-ctx.Done():
-				logSeed.Warningf("unable to seed routing table to target due to slow dials, still missing: %d", left)
-				// sanity check
-				return isSeeded()
-			case semaphore <- struct{}{}:
-				go func(p peer.ID) {
-					if rs.addPeerIfAvailable(ctx, into, p) {
-						todo.Decrement(1)
-						mu.Lock()
-						left-- // need to do this to be able to log the number of remaining peers as todocounter dosen't have a Get
-						mu.Unlock()
-					}
-					<-semaphore
-				}(p)
-			}
-		}
-
-		return isSeeded()
+		return nil
 	}
 
-	// dial the candidates & add them to RT if applicable
+	// attempt to seed with candidates
 	if err := attemptSeedWithPeers(todial); err != nil {
 		// fallback
-		logSeed.Warningf("unable to completely seed RT with candidates, resorting to fallback peers to fill %d routing table members", left)
+		logSeed.Warningf("resorting to fallback peers to fill %d routing table members", left)
 		return attemptSeedWithPeers(fallback)
 	}
 
 	// There is a God after all
 	return nil
 }
-
-// tries to add a peer to the RT if dial to it is successful & returns true if number of peers in RT increased
-func (rs *randomSeeder) addPeerIfAvailable(ctx context.Context, into *kbucket.RoutingTable, p peer.ID) bool {
-	// dial peer
-	childCtx, cancel := context.WithTimeout(ctx, SeedDialGracePeriod)
-	defer cancel()
-	_, err := rs.host.Network().DialPeer(childCtx, p)
-	if err != nil {
-		logSeed.Infof("discarded routing table candidate due to dial error; peer ID: %s, err: %+v", p, err)
-		return false
-	}
-
-	// peer is available, try to add it to RT
-	evicted, err := into.Update(p)
-	if err == nil && evicted == "" {
-		return true
-	} else if err != nil {
-		logSeed.Warningf("error while adding candidate to routing table; peer ID: %s, err: %s", p, err)
-	}
-	return false
-}
-
-/*Changes
-1) Dont add a connected peer to the rt, just decrement counter
-
-
-*/
-
-/* Questions
-1) Should we seed periodically if the RT is empty
-2) target as aparam to func rather than struct member
-3 ""
-f rs.host.Network().Connectedness(p) == inet.Connected {
-			// if we are already connected to a peer, it is already in the routing table
-			// we should not add the peer to the RT here as it will move it to front of the bucket considering it to be more active
-			left--
-			continue
-		}
-""
-should we guard every add peer call with this ?
-
-
-*/

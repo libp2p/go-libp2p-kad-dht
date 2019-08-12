@@ -18,6 +18,7 @@ import (
 var SeedDialGracePeriod = 5 * time.Second
 
 // TotalSeedDialGracePeriod is the total grace period for a group of dial attempts
+// TODO Make this configurable so it's easy to run tests
 var TotalSeedDialGracePeriod = 30 * time.Second
 
 // NSimultaneousDial is the number of peers we will dial simultaneously
@@ -69,6 +70,7 @@ func (rs *randomSeeder) Seed(into *kbucket.RoutingTable, candidates []peer.ID, f
 			// this is because once we register for notifs, peers will get added to the RT upon connection itself
 			// we don't want that as it will wrongly mark the peer as more active in the k-bucket & move it to the front of the bucket
 			// take a look at notif.go
+			// the long term solution to this problem is being discussed at https://github.com/libp2p/go-libp2p-kad-dht/issues/283
 			addPeer(p)
 			continue
 		}

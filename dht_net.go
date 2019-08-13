@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	cid "github.com/ipfs/go-cid"
 	util "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -16,14 +17,13 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/keyspace"
-	"github.com/multiformats/go-multiaddr"
+	multiaddr "github.com/multiformats/go-multiaddr"
 
 	msmux "github.com/multiformats/go-multistream"
 
 	ggio "github.com/gogo/protobuf/io"
-	"github.com/ipfs/go-cid"
 
-	"github.com/libp2p/go-msgio"
+	msgio "github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -212,6 +212,11 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	}
 
 	// update the peer (on valid msgs only)
+	if ms.s == nil {
+		if err = ms.prepOrInvalidate(ctx); err != nil {
+			return nil, err
+		}
+	}
 	dht.updateFromMessage(ctx, ms.s.Conn(), rpmes)
 
 	stats.Record(

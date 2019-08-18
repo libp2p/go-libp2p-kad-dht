@@ -4,14 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
+	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
-
-	u "github.com/ipfs/go-ipfs-util"
 	"github.com/multiformats/go-multiaddr"
 	_ "github.com/multiformats/go-multiaddr-dns"
+	"github.com/pkg/errors"
 )
 
 var DefaultBootstrapPeers []multiaddr.Multiaddr
@@ -40,30 +42,24 @@ func init() {
 	}
 }
 
-// BootstrapConfig specifies parameters used bootstrapping the DHT.
-//
-// Note there is a tradeoff between the bootstrap period and the
-// number of queries. We could support a higher period with less
-// queries.
+// BootstrapConfig specifies parameters used for bootstrapping the DHT.
 type BootstrapConfig struct {
-	Queries int           // how many queries to run per period
-	Period  time.Duration // how often to run periodic bootstrap.
-	Timeout time.Duration // how long to wait for a bootstrap query to run
+	BucketPeriod             time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
+	Timeout                  time.Duration // how long to wait for a bootstrap query to run
+	RoutingTableScanInterval time.Duration // how often to scan the RT for k-buckets that haven't been queried since the given period
+	SelfQueryInterval        time.Duration // how often to query for self
 }
 
 var DefaultBootstrapConfig = BootstrapConfig{
-	// For now, this is set to 1 query.
-	// We are currently more interested in ensuring we have a properly formed
-	// DHT than making sure our dht minimizes traffic. Once we are more certain
-	// of our implementation's robustness, we should lower this down to 8 or 4.
-	Queries: 1,
+	// same as that mentioned in the kad dht paper
+	BucketPeriod: 1 * time.Hour,
 
-	// For now, this is set to 5 minutes, which is a medium period. We are
-	// We are currently more interested in ensuring we have a properly formed
-	// DHT than making sure our dht minimizes traffic.
-	Period: time.Duration(5 * time.Minute),
+	// since the default bucket period is 1 hour, a scan interval of 30 minutes sounds reasonable
+	RoutingTableScanInterval: 30 * time.Minute,
 
-	Timeout: time.Duration(10 * time.Second),
+	Timeout: 10 * time.Second,
+
+	SelfQueryInterval: 1 * time.Hour,
 }
 
 // A method in the IpfsRouting interface. It calls BootstrapWithConfig with
@@ -72,13 +68,24 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 	return dht.BootstrapWithConfig(ctx, DefaultBootstrapConfig)
 }
 
-// Runs cfg.Queries bootstrap queries every cfg.Period.
+// Runs cfg.Queries bootstrap queries every cfg.BucketPeriod.
 func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig) error {
-	// Because this method is not synchronous, we have to duplicate sanity
-	// checks on the config so that callers aren't oblivious.
-	if cfg.Queries <= 0 {
-		return fmt.Errorf("invalid number of queries: %d", cfg.Queries)
-	}
+	// we should query for self periodically so we can discover closer peers
+	go func() {
+		for {
+			err := dht.BootstrapSelf(ctx)
+			if err != nil {
+				logger.Warningf("error bootstrapping while querying for self: %s", err)
+			}
+			select {
+			case <-time.After(cfg.SelfQueryInterval):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
 	go func() {
 		for {
 			err := dht.runBootstrap(ctx, cfg)
@@ -86,22 +93,13 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 				logger.Warningf("error bootstrapping: %s", err)
 			}
 			select {
-			case <-time.After(cfg.Period):
+			case <-time.After(cfg.RoutingTableScanInterval):
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 	return nil
-}
-
-// This is a synchronous bootstrap. cfg.Queries queries will run each with a
-// timeout of cfg.Timeout. cfg.Period is not used.
-func (dht *IpfsDHT) BootstrapOnce(ctx context.Context, cfg BootstrapConfig) error {
-	if cfg.Queries <= 0 {
-		return fmt.Errorf("invalid number of queries: %d", cfg.Queries)
-	}
-	return dht.runBootstrap(ctx, cfg)
 }
 
 func newRandomPeerId() peer.ID {
@@ -145,14 +143,14 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 	return err
 }
 
-// runBootstrap builds up list of peers by requesting random peer IDs
+//scan the RT,& do a random walk on k-buckets that haven't been queried since the given bucket period
 func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error {
 	doQuery := func(n int, target string, f func(context.Context) error) error {
-		logger.Infof("starting bootstrap query (%d/%d) to %s (routing table size was %d)",
-			n, cfg.Queries, target, dht.routingTable.Size())
+		logger.Infof("starting bootstrap query for bucket %d to %s (routing table size was %d)",
+			n, target, dht.routingTable.Size())
 		defer func() {
-			logger.Infof("finished bootstrap query (%d/%d) to %s (routing table size is now %d)",
-				n, cfg.Queries, target, dht.routingTable.Size())
+			logger.Infof("finished bootstrap query for bucket %d to %s (routing table size is now %d)",
+				n, target, dht.routingTable.Size())
 		}()
 		queryCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
@@ -163,16 +161,63 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 		return err
 	}
 
-	// Do all but one of the bootstrap queries as random walks.
-	for i := 0; i < cfg.Queries; i++ {
-		err := doQuery(i, "random ID", dht.randomWalk)
-		if err != nil {
-			return err
+	buckets := dht.routingTable.GetAllBuckets()
+	var wg sync.WaitGroup
+	errChan := make(chan error)
+
+	for bucketID, bucket := range buckets {
+		if time.Since(bucket.LastQueriedAt()) > cfg.BucketPeriod {
+			wg.Add(1)
+			go func(bucketID int, errChan chan<- error) {
+				defer wg.Done()
+				// gen rand peer in the bucket
+				randPeerInBucket, err := dht.routingTable.GenRandPeerID(bucketID)
+				if err != nil {
+					errChan <- errors.Wrapf(err, "failed to generate random peer ID in bucket %d", bucketID)
+					return
+				}
+
+				// walk to the generated peer
+				walkFnc := func(c context.Context) error {
+					_, err := dht.walk(ctx, randPeerInBucket)
+					if err == routing.ErrNotFound {
+						return nil
+					}
+					return err
+				}
+
+				if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
+					errChan <- errors.Wrapf(err, "failed to do a random walk on bucket %d", bucketID)
+				}
+			}(bucketID, errChan)
 		}
 	}
 
-	// Find self to distribute peer info to our neighbors.
-	return doQuery(cfg.Queries, fmt.Sprintf("self: %s", dht.self), dht.selfWalk)
+	// wait for all walks to finish & close the error channel
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	// accumulate errors from all go-routines
+	var errStrings []string
+	for err := range errChan {
+		errStrings = append(errStrings, err.Error())
+	}
+	if len(errStrings) == 0 {
+		return nil
+	} else {
+		return fmt.Errorf("errors encountered while running bootstrap on RT: %s", strings.Join(errStrings, "\n"))
+	}
+}
+
+// This is a synchronous bootstrap.
+func (dht *IpfsDHT) BootstrapOnce(ctx context.Context, cfg BootstrapConfig) error {
+	if err := dht.BootstrapSelf(ctx); err != nil {
+		return errors.Wrap(err, "failed bootstrap while searching for self")
+	} else {
+		return dht.runBootstrap(ctx, cfg)
+	}
 }
 
 func (dht *IpfsDHT) BootstrapRandom(ctx context.Context) error {

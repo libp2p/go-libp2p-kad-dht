@@ -198,12 +198,11 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	// probably because results compound
 
 	cfg := DefaultBootstrapConfig
-	cfg.Queries = 3
 
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
-		dht.runBootstrap(ctx, cfg)
+		dht.BootstrapOnce(ctx, cfg)
 	}
 }
 
@@ -712,7 +711,6 @@ func TestPeriodicBootstrap(t *testing.T) {
 	}()
 
 	cfg := DefaultBootstrapConfig
-	cfg.Queries = 5
 
 	t.Logf("dhts are not connected. %d", nDHTs)
 	for _, dht := range dhts {

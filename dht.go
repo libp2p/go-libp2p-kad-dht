@@ -21,18 +21,18 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
-	proto "github.com/gogo/protobuf/proto"
-	cid "github.com/ipfs/go-cid"
+	"github.com/gogo/protobuf/proto"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
-	goprocess "github.com/jbenet/goprocess"
-	goprocessctx "github.com/jbenet/goprocess/context"
+	"github.com/jbenet/goprocess"
+	"github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	base32 "github.com/whyrusleeping/base32"
+	"github.com/whyrusleeping/base32"
 )
 
 var logger = logging.Logger("dht")
@@ -307,6 +307,10 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
+		// reset the timer for the k-bucket we just searched in ONLY if there was no error
+		// so that we can retry during the next bootstrap
+		bucket := dht.routingTable.BucketForPeer(id)
+		bucket.ResetLastQueriedAt(time.Now())
 		return resp, nil
 	case ErrReadTimeout:
 		logger.Warningf("read timeout: %s %s", p.Pretty(), id)

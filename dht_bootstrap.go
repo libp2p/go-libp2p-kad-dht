@@ -75,7 +75,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 		for {
 			err := dht.BootstrapSelf(ctx)
 			if err != nil {
-				logger.Warningf("error bootstrapping while querying for self: %s", err)
+				logger.Warningf("error bootstrapping while searching for my self (I'm Too Shallow ?): %s", err)
 			}
 			select {
 			case <-time.After(cfg.SelfQueryInterval):

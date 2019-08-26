@@ -303,10 +303,6 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
-		// reset the timer for the k-bucket we just searched in ONLY if there was no error
-		// so that we can retry during the next bootstrap
-		bucket := dht.routingTable.BucketForPeer(id)
-		bucket.ResetLastQueriedAt(time.Now())
 		return resp, nil
 	case ErrReadTimeout:
 		logger.Warningf("read timeout: %s %s", p.Pretty(), id)

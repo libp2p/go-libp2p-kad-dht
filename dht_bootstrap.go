@@ -166,16 +166,12 @@ func (dht *IpfsDHT) runBootstrap(ctx context.Context, cfg BootstrapConfig) error
 	errChan := make(chan error)
 
 	for bucketID, bucket := range buckets {
-		if time.Since(bucket.LastQueriedAt()) > cfg.BucketPeriod {
+		if time.Since(bucket.RefreshedAt()) > cfg.BucketPeriod {
 			wg.Add(1)
 			go func(bucketID int, errChan chan<- error) {
 				defer wg.Done()
 				// gen rand peer in the bucket
-				randPeerInBucket, err := dht.routingTable.GenRandPeerID(bucketID)
-				if err != nil {
-					errChan <- errors.Wrapf(err, "failed to generate random peer ID in bucket %d", bucketID)
-					return
-				}
+				randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
 
 				// walk to the generated peer
 				walkFnc := func(c context.Context) error {

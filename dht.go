@@ -21,18 +21,18 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/ipfs/go-cid"
+	proto "github.com/gogo/protobuf/proto"
+	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
-	"github.com/jbenet/goprocess"
-	"github.com/jbenet/goprocess/context"
+	goprocess "github.com/jbenet/goprocess"
+	goprocessctx "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p-record"
+	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/whyrusleeping/base32"
+	base32 "github.com/whyrusleeping/base32"
 )
 
 var logger = logging.Logger("dht")

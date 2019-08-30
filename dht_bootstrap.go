@@ -73,6 +73,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 	// we should query for self periodically so we can discover closer peers
 	go func() {
 		for {
+			dht.logBuckets("before self bootstrap")
 			err := dht.BootstrapSelf(ctx)
 			if err != nil {
 				logger.Warningf("error bootstrapping while searching for my self (I'm Too Shallow ?): %s", err)
@@ -82,12 +83,14 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 			case <-ctx.Done():
 				return
 			}
+			dht.logBuckets("after self bootstrap")
 		}
 	}()
 
 	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
 	go func() {
 		for {
+			dht.logBuckets("before bootstrap")
 			err := dht.runBootstrap(ctx, cfg)
 			if err != nil {
 				logger.Warningf("error bootstrapping: %s", err)
@@ -97,6 +100,7 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 			case <-ctx.Done():
 				return
 			}
+			dht.logBuckets("after bootstrap")
 		}
 	}()
 	return nil
@@ -141,6 +145,14 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+func (dht *IpfsDHT) logBuckets(when string) {
+	fmt.Printf("checking buckets: %s (%s)\n", when, time.Now())
+	for i, b := range dht.routingTable.GetAllBuckets() {
+		fmt.Printf("  bucket %d has %d peers\n", i, b.Len())
+	}
+	fmt.Println("")
 }
 
 //scan the RT,& do a random walk on k-buckets that haven't been queried since the given bucket period

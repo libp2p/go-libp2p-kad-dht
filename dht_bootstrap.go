@@ -55,11 +55,11 @@ var DefaultBootstrapConfig = BootstrapConfig{
 	BucketPeriod: 1 * time.Hour,
 
 	// since the default bucket period is 1 hour, a scan interval of 30 minutes sounds reasonable
-	RoutingTableScanInterval: 30 * time.Minute,
+	RoutingTableScanInterval: 5 * time.Minute,
 
 	Timeout: 10 * time.Second,
 
-	SelfQueryInterval: 1 * time.Hour,
+	SelfQueryInterval: 5 * time.Hour,
 }
 
 // A method in the IpfsRouting interface. It calls BootstrapWithConfig with

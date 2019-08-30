@@ -97,6 +97,10 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 			}
 			select {
 			case <-time.After(cfg.RoutingTableScanInterval):
+			case <-dht.triggerBootstrap:
+				dht.logBuckets("before self bootstrap")
+				dht.BootstrapSelf(ctx)
+				dht.logBuckets("after self bootstrap")
 			case <-ctx.Done():
 				return
 			}

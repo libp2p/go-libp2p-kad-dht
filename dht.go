@@ -68,6 +68,8 @@ type IpfsDHT struct {
 	stripedPutLocks [256]sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+
+	triggerBootstrap chan struct{}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -143,16 +145,17 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 
 	dht := &IpfsDHT{
-		datastore:    dstore,
-		self:         h.ID(),
-		peerstore:    h.Peerstore(),
-		host:         h,
-		strmap:       make(map[peer.ID]*messageSender),
-		ctx:          ctx,
-		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
-		birth:        time.Now(),
-		routingTable: rt,
-		protocols:    protocols,
+		triggerBootstrap: make(chan struct{}),
+		datastore:        dstore,
+		self:             h.ID(),
+		peerstore:        h.Peerstore(),
+		host:             h,
+		strmap:           make(map[peer.ID]*messageSender),
+		ctx:              ctx,
+		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
+		birth:            time.Now(),
+		routingTable:     rt,
+		protocols:        protocols,
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

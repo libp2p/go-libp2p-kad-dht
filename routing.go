@@ -74,11 +74,6 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
-	}()
-
 	pchan, err := dht.GetClosestPeers(ctx, key)
 	if err != nil {
 		return err
@@ -162,11 +157,6 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	if !cfg.Offline {
 		responsesNeeded = getQuorum(&cfg, -1)
 	}
-
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
-	}()
 
 	valCh, err := dht.getValues(ctx, key, responsesNeeded)
 	if err != nil {
@@ -264,11 +254,6 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 
 	eip.Append(loggableKey(key))
 	defer eip.Done()
-
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
-	}()
 
 	valCh, err := dht.getValues(ctx, key, nvals)
 	if err != nil {
@@ -396,6 +381,9 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 		//
 		// We'll just call this a success.
 		if got > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
+			// refresh the k-bucket containing this key as the query was successful
+			dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
+
 			err = nil
 		}
 		done(err)
@@ -444,11 +432,6 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		closerCtx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
-
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertKey(key.KeyString())).ResetRefreshedAt(time.Now())
-	}()
 
 	peers, err := dht.GetClosestPeers(closerCtx, key.KeyString())
 	if err != nil {
@@ -507,11 +490,6 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
 	logger.Event(ctx, "findProviders", key)
 	peerOut := make(chan peer.AddrInfo, count)
-
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertKey(key.KeyString())).ResetRefreshedAt(time.Now())
-	}()
 
 	go dht.findProvidersAsyncRoutine(ctx, key, count, peerOut)
 	return peerOut
@@ -618,6 +596,9 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 			Extra: err.Error(),
 		})
 	}
+
+	// refresh the k-bucket containing this key after the query is run
+	dht.routingTable.BucketForID(kb.ConvertKey(key.KeyString())).ResetRefreshedAt(time.Now())
 }
 
 // FindPeer searches for a peer with given ID.
@@ -647,11 +628,6 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 			return dht.peerstore.PeerInfo(p), nil
 		}
 	}
-
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
-	}()
 
 	// setup the Query
 	parent := ctx
@@ -694,6 +670,9 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
+	// refresh the k-bucket containing this key since the lookup was successful
+	dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
+
 	logger.Debugf("FindPeer %v %v", id, result.success)
 	if result.peer.ID == "" {
 		return peer.AddrInfo{}, routing.ErrNotFound
@@ -713,11 +692,6 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 	if len(peers) == 0 {
 		return nil, kb.ErrLookupFailure
 	}
-
-	// refresh the k-bucket containing this key
-	defer func() {
-		dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
-	}()
 
 	// setup the Query
 	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
@@ -766,6 +740,9 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 		if _, err := query.Run(ctx, peers); err != nil {
 			logger.Debug(err)
 		}
+
+		// refresh the k-bucket containing this key
+		dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
 
 		// close the peerchan channel when done.
 		close(peerchan)

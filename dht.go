@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -36,10 +37,6 @@ import (
 )
 
 var logger = logging.Logger("dht")
-
-// NumBootstrapQueries defines the number of random dht queries to do to
-// collect members of the routing table.
-const NumBootstrapQueries = 5
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
@@ -70,6 +67,10 @@ type IpfsDHT struct {
 	protocols []protocol.ID // DHT protocols
 
 	bucketSize int
+
+	bootstrapCfg opts.BootstrapConfig
+
+	rtRecoveryChan chan *rtRecoveryReq
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -82,6 +83,15 @@ var (
 	_ routing.ValueStore     = (*IpfsDHT)(nil)
 )
 
+type rtRecoveryReq struct {
+	id        string
+	errorChan chan error
+}
+
+func mkRtRecoveryReq() *rtRecoveryReq {
+	return &rtRecoveryReq{uuid.New().String(), make(chan error, 1)}
+}
+
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
 	var cfg opts.Options
@@ -90,6 +100,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
+	dht.bootstrapCfg = cfg.BootstrapConfig
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -102,6 +113,11 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
+
+	// RT recovery proc
+	rtRecoveryProc := goprocessctx.WithContext(ctx)
+	rtRecoveryProc.Go(dht.rtRecovery)
+	dht.proc.AddChild(rtRecoveryProc)
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {
@@ -136,32 +152,85 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int) *IpfsDHT {
 	rt := kb.NewRoutingTable(bucketSize, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
+	rtRecoveryChan := make(chan *rtRecoveryReq)
 
 	cmgr := h.ConnManager()
+
 	rt.PeerAdded = func(p peer.ID) {
 		cmgr.TagPeer(p, "kbucket", 5)
 	}
+
 	rt.PeerRemoved = func(p peer.ID) {
 		cmgr.UntagPeer(p, "kbucket")
+		go func(rtRecoveryChan chan *rtRecoveryReq) {
+			if rt.Size() == 0 {
+				req := mkRtRecoveryReq()
+				logger.Warningf("rt peer removed notification: RT is empty, will attempt to initiate recovery, reqID=%s", req.id)
+				select {
+				case <-ctx.Done():
+					return
+				case rtRecoveryChan <- req:
+					select {
+					case <-ctx.Done():
+						return
+					case <-req.errorChan:
+						// TODO Do we need to do anything here ?
+					}
+				}
+			}
+		}(rtRecoveryChan)
 	}
 
 	dht := &IpfsDHT{
-		datastore:    dstore,
-		self:         h.ID(),
-		peerstore:    h.Peerstore(),
-		host:         h,
-		strmap:       make(map[peer.ID]*messageSender),
-		ctx:          ctx,
-		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
-		birth:        time.Now(),
-		routingTable: rt,
-		protocols:    protocols,
-		bucketSize:   bucketSize,
+		datastore:      dstore,
+		self:           h.ID(),
+		peerstore:      h.Peerstore(),
+		host:           h,
+		strmap:         make(map[peer.ID]*messageSender),
+		ctx:            ctx,
+		providers:      providers.NewProviderManager(ctx, h.ID(), dstore),
+		birth:          time.Now(),
+		routingTable:   rt,
+		protocols:      protocols,
+		bucketSize:     bucketSize,
+		rtRecoveryChan: rtRecoveryChan,
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
 	return dht
+}
+
+func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
+	writeResp := func(errorChan chan error, err error) {
+		select {
+		case <-proc.Closing():
+		case errorChan <- err:
+		}
+		close(errorChan)
+	}
+
+	for {
+		select {
+		case req := <-dht.rtRecoveryChan:
+			if dht.routingTable.Size() == 0 {
+				logger.Infof("rt recovery proc: received request with reqID=%s, RT is empty. initiating recovery", req.id)
+				// TODO Call Seeder with default bootstrap peers here once #383 is merged
+				if dht.routingTable.Size() > 0 {
+					logger.Infof("rt recovery proc: successfully recovered RT for reqID=%s, RT size is now %d", req.id, dht.routingTable.Size())
+					go writeResp(req.errorChan, nil)
+				} else {
+					logger.Errorf("rt recovery proc: failed to recover RT for reqID=%s, RT is still empty", req.id)
+					go writeResp(req.errorChan, errors.New("RT empty after seed attempt"))
+				}
+			} else {
+				logger.Infof("rt recovery proc: RT is not empty, no need to act on request with reqID=%s", req.id)
+				go writeResp(req.errorChan, nil)
+			}
+		case <-proc.Closing():
+			return
+		}
+	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'

@@ -197,12 +197,10 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	// 100 sync https://gist.github.com/jbenet/6c59e7c15426e48aaedd
 	// probably because results compound
 
-	cfg := DefaultBootstrapConfig
-
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
-		dht.BootstrapOnce(ctx, cfg)
+		dht.bootstrapOnce(ctx)
 	}
 }
 
@@ -710,8 +708,6 @@ func TestPeriodicBootstrap(t *testing.T) {
 		}
 	}()
 
-	cfg := DefaultBootstrapConfig
-
 	t.Logf("dhts are not connected. %d", nDHTs)
 	for _, dht := range dhts {
 		rtlen := dht.routingTable.Size()
@@ -738,7 +734,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
 	for _, dht := range dhts {
-		go dht.BootstrapOnce(ctx, cfg)
+		go dht.bootstrapOnce(ctx)
 	}
 
 	// this is async, and we dont know when it's finished with one cycle, so keep checking

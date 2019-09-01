@@ -2,11 +2,12 @@ package dhtopts
 
 import (
 	"fmt"
+	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	protocol "github.com/libp2p/go-libp2p-core/protocol"
-	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p-record"
 )
 
 // Deprecated: The old format did not support more than one message per stream, and is not supported
@@ -18,13 +19,22 @@ var (
 	DefaultProtocols             = []protocol.ID{ProtocolDHT}
 )
 
+// BootstrapConfig specifies parameters used for bootstrapping the DHT.
+type BootstrapConfig struct {
+	BucketPeriod             time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
+	Timeout                  time.Duration // how long to wait for a bootstrap query to run
+	RoutingTableScanInterval time.Duration // how often to scan the RT for k-buckets that haven't been queried since the given period
+	SelfQueryInterval        time.Duration // how often to query for self
+}
+
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore  ds.Batching
-	Validator  record.Validator
-	Client     bool
-	Protocols  []protocol.ID
-	BucketSize int
+	Datastore       ds.Batching
+	Validator       record.Validator
+	Client          bool
+	Protocols       []protocol.ID
+	BucketSize      int
+	BootstrapConfig BootstrapConfig
 }
 
 // Apply applies the given options to this Option
@@ -48,7 +58,28 @@ var Defaults = func(o *Options) error {
 	}
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
+
+	o.BootstrapConfig = BootstrapConfig{
+		// same as that mentioned in the kad dht paper
+		BucketPeriod: 1 * time.Hour,
+
+		// since the default bucket period is 1 hour, a scan interval of 30 minutes sounds reasonable
+		RoutingTableScanInterval: 30 * time.Minute,
+
+		Timeout: 10 * time.Second,
+
+		SelfQueryInterval: 1 * time.Hour,
+	}
+
 	return nil
+}
+
+// Bootstrap configures the dht bootstrapping process
+func Bootstrap(b BootstrapConfig) Option {
+	return func(o *Options) error {
+		o.BootstrapConfig = b
+		return nil
+	}
 }
 
 // Datastore configures the DHT to use the specified datastore.

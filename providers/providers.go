@@ -74,10 +74,11 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 	return pm
 }
 
-const providersKeyPrefix = "/providers/"
+// prefix to be used for all provider record keys
+const ProvidersKeyPrefix = "/providers/"
 
 func mkProvKey(k cid.Cid) string {
-	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
+	return ProvidersKeyPrefix + base32.RawStdEncoding.EncodeToString(k.Bytes())
 }
 
 func (pm *ProviderManager) Process() goprocess.Process {
@@ -284,7 +285,7 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 
 			// Now, kick off a GC of the datastore.
 			q, err := pm.dstore.Query(dsq.Query{
-				Prefix: providersKeyPrefix,
+				Prefix: ProvidersKeyPrefix,
 			})
 			if err != nil {
 				log.Error("provider record GC query failed: ", err)

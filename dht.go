@@ -53,6 +53,8 @@ type IpfsDHT struct {
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
 	providers    *providers.ProviderManager
 
+	nonProvRecordsManager *NonProvRecordsManager
+
 	birth time.Time // When this peer started up
 
 	Validator record.Validator
@@ -98,6 +100,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	})
 
 	dht.proc.AddChild(dht.providers.Process())
+	dht.proc.AddChild(dht.nonProvRecordsManager.Process())
 	dht.Validator = cfg.Validator
 
 	if !cfg.Client {
@@ -105,6 +108,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 			h.SetStreamHandler(p, dht.handleNewStream)
 		}
 	}
+
 	return dht, nil
 }
 
@@ -156,6 +160,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
+	dht.nonProvRecordsManager = NewNonProvRecordsManager(ctx, dht, dstore)
 
 	return dht
 }

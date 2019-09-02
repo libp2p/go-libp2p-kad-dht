@@ -121,7 +121,7 @@ func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 		recordIsBad = true
 	}
 
-	if time.Since(recvtime) > MaxRecordAge {
+	if time.Since(recvtime) > maxNonProvRecordAge {
 		logger.Debug("old record found, tossing.")
 		recordIsBad = true
 	}
@@ -395,4 +395,8 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 
 func convertToDsKey(s []byte) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString(s))
+}
+
+func convertToOriginalKey(k string) ([]byte, error) {
+	return base32.RawStdEncoding.DecodeString(k)
 }

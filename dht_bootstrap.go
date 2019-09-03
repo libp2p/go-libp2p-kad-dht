@@ -73,17 +73,25 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 	// we should query for self periodically so we can discover closer peers
 	go func() {
 		for {
-			dht.logBuckets("before self bootstrap")
-			err := dht.BootstrapSelf(ctx)
-			if err != nil {
-				logger.Warningf("error bootstrapping while searching for my self (I'm Too Shallow ?): %s", err)
+			{
+				ctx := ctx
+				dht.logBuckets("before self bootstrap")
+				cancel := func() {}
+				if cfg.Timeout > 0 {
+					ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+				}
+				err := dht.BootstrapSelf(ctx)
+				if err != nil {
+					logger.Warningf("error bootstrapping while searching for my self (I'm Too Shallow ?): %s", err)
+				}
+				dht.logBuckets("after self bootstrap")
+				cancel()
 			}
 			select {
 			case <-time.After(cfg.SelfQueryInterval):
 			case <-ctx.Done():
 				return
 			}
-			dht.logBuckets("after self bootstrap")
 		}
 	}()
 
@@ -95,16 +103,27 @@ func (dht *IpfsDHT) BootstrapWithConfig(ctx context.Context, cfg BootstrapConfig
 			if err != nil {
 				logger.Warningf("error bootstrapping: %s", err)
 			}
+			dht.logBuckets("after bootstrap")
 			select {
 			case <-time.After(cfg.RoutingTableScanInterval):
 			case <-dht.triggerBootstrap:
-				dht.logBuckets("before self bootstrap")
-				dht.BootstrapSelf(ctx)
-				dht.logBuckets("after self bootstrap")
+				{
+					ctx := ctx
+					dht.logBuckets("before self bootstrap")
+					cancel := func() {}
+					if cfg.Timeout > 0 {
+						ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+					}
+					err := dht.BootstrapSelf(ctx)
+					if err != nil {
+						logger.Warningf("error bootstrapping while searching for my self (I'm Too Shallow ?): %s", err)
+					}
+					dht.logBuckets("after self bootstrap")
+					cancel()
+				}
 			case <-ctx.Done():
 				return
 			}
-			dht.logBuckets("after bootstrap")
 		}
 	}()
 	return nil

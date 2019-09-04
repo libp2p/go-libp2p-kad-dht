@@ -114,7 +114,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		timer.Reset(dhtStreamIdleTimeout)
 
 		startTime := time.Now()
-		ctx, _ = tag.New(
+		ctx, _ := tag.New(
 			ctx,
 			tag.Upsert(metrics.KeyMessageType, req.GetType().String()),
 		)

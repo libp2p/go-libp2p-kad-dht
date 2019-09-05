@@ -688,6 +688,55 @@ func TestBootstrap(t *testing.T) {
 	}
 }
 
+func TestBootstrapBelowMinRTThreshold(t *testing.T) {
+	ctx := context.Background()
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+	dhtC := setupDHT(ctx, t, false)
+
+	defer func() {
+		dhtA.Close()
+		dhtA.host.Close()
+
+		dhtB.Close()
+		dhtB.host.Close()
+
+		dhtC.Close()
+		dhtC.host.Close()
+	}()
+
+	connect(t, ctx, dhtA, dhtB)
+	connect(t, ctx, dhtB, dhtC)
+
+	// we ONLY init bootstrap on A
+	dhtA.Bootstrap(ctx)
+	// and wait for one round to complete i.e. A should be connected to both B & C
+	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 2, 2, 20*time.Second)
+
+	// now we create two new peers
+	dhtD := setupDHT(ctx, t, false)
+	dhtE := setupDHT(ctx, t, false)
+
+	// connect them to each other
+	connect(t, ctx, dhtD, dhtE)
+	defer func() {
+		dhtD.Close()
+		dhtD.host.Close()
+
+		dhtE.Close()
+		dhtE.host.Close()
+	}()
+
+	// and then, on connecting the peer D to A, the min RT threshold gets triggered on A which leads to a bootstrap.
+	// since the default bootstrap scan interval is 30 mins - 1 hour, we can be sure that if bootstrap happens,
+	// it is because of the min RT threshold getting triggered (since default min value is 4 & we only have 2 peers in the RT when D gets connected)
+	connect(t, ctx, dhtA, dhtD)
+
+	// and because of the above bootstrap, A also discovers E !
+	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
+	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
+}
+
 func TestPeriodicBootstrap(t *testing.T) {
 	if ci.IsRunning() {
 		t.Skip("skipping on CI. highly timing dependent")

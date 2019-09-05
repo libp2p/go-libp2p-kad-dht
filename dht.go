@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -22,18 +21,18 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
-	proto "github.com/gogo/protobuf/proto"
-	cid "github.com/ipfs/go-cid"
+	"github.com/gogo/protobuf/proto"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
-	goprocess "github.com/jbenet/goprocess"
-	goprocessctx "github.com/jbenet/goprocess/context"
+	"github.com/jbenet/goprocess"
+	"github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	base32 "github.com/whyrusleeping/base32"
+	"github.com/whyrusleeping/base32"
 )
 
 var logger = logging.Logger("dht")
@@ -70,7 +69,7 @@ type IpfsDHT struct {
 
 	bootstrapCfg opts.BootstrapConfig
 
-	rtRecoveryChan chan *rtRecoveryReq
+	triggerBootstrap chan struct{}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -82,15 +81,6 @@ var (
 	_ routing.PubKeyFetcher  = (*IpfsDHT)(nil)
 	_ routing.ValueStore     = (*IpfsDHT)(nil)
 )
-
-type rtRecoveryReq struct {
-	id        string
-	errorChan chan error
-}
-
-func mkRtRecoveryReq() *rtRecoveryReq {
-	return &rtRecoveryReq{uuid.New().String(), make(chan error, 1)}
-}
 
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
@@ -113,11 +103,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
-
-	// RT recovery proc
-	rtRecoveryProc := goprocessctx.WithContext(ctx)
-	rtRecoveryProc.Go(dht.rtRecovery)
-	dht.proc.AddChild(rtRecoveryProc)
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {
@@ -152,8 +137,6 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int) *IpfsDHT {
 	rt := kb.NewRoutingTable(bucketSize, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
-	rtRecoveryChan := make(chan *rtRecoveryReq)
-
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -162,38 +145,21 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 	rt.PeerRemoved = func(p peer.ID) {
 		cmgr.UntagPeer(p, "kbucket")
-		go func(rtRecoveryChan chan *rtRecoveryReq) {
-			if rt.Size() == 0 {
-				req := mkRtRecoveryReq()
-				logger.Warningf("rt peer removed notification: RT is empty, will attempt to initiate recovery, reqID=%s", req.id)
-				select {
-				case <-ctx.Done():
-					return
-				case rtRecoveryChan <- req:
-					select {
-					case <-ctx.Done():
-						return
-					case <-req.errorChan:
-						// TODO Do we need to do anything here ?
-					}
-				}
-			}
-		}(rtRecoveryChan)
 	}
 
 	dht := &IpfsDHT{
-		datastore:      dstore,
-		self:           h.ID(),
-		peerstore:      h.Peerstore(),
-		host:           h,
-		strmap:         make(map[peer.ID]*messageSender),
-		ctx:            ctx,
-		providers:      providers.NewProviderManager(ctx, h.ID(), dstore),
-		birth:          time.Now(),
-		routingTable:   rt,
-		protocols:      protocols,
-		bucketSize:     bucketSize,
-		rtRecoveryChan: rtRecoveryChan,
+		datastore:        dstore,
+		self:             h.ID(),
+		peerstore:        h.Peerstore(),
+		host:             h,
+		strmap:           make(map[peer.ID]*messageSender),
+		ctx:              ctx,
+		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
+		birth:            time.Now(),
+		routingTable:     rt,
+		protocols:        protocols,
+		bucketSize:       bucketSize,
+		triggerBootstrap: make(chan struct{}),
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
@@ -201,7 +167,10 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	return dht
 }
 
-func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
+// TODO Implement RT seeding as described in https://github.com/libp2p/go-libp2p-kad-dht/pull/384#discussion_r320994340 OR
+// come up with an alternative solution.
+// issue is being tracked at https://github.com/libp2p/go-libp2p-kad-dht/issues/387
+/*func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
 	writeResp := func(errorChan chan error, err error) {
 		select {
 		case <-proc.Closing():
@@ -231,7 +200,7 @@ func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
 			return
 		}
 	}
-}
+}*/
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {

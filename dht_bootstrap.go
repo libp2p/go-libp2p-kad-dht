@@ -15,6 +15,8 @@ import (
 
 var DefaultBootstrapPeers []multiaddr.Multiaddr
 
+var minRTBootstrapThreshold = 4
+
 func init() {
 	for _, s := range []string{
 		"/dnsaddr/bootstrap.libp2p.io/ipfs/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -39,33 +41,27 @@ func init() {
 	}
 }
 
-// Runs cfg.Queries bootstrap queries every cfg.BucketPeriod.
+// BootstrapConfig runs cfg.Queries bootstrap queries every cfg.BucketPeriod.
 func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
-	seedRTIfEmpty := func(tag string) {
-		if dht.routingTable.Size() == 0 {
-			req := mkRtRecoveryReq()
-			logger.Warningf("dht bootstrap: %s: RT is empty, will attempt to initiate recovery, reqID=%s", tag, req.id)
-			select {
-			case <-ctx.Done():
-				return
-			case dht.rtRecoveryChan <- req:
-				select {
-				case <-ctx.Done():
-					return
-				case <-req.errorChan:
-					// TODO Should we abort the ONGOING bootstrap attempt if seeder returns an error on the channel ?
-				}
-			}
+	triggerBootstrapFnc := func() {
+		logger.Infof("triggerBootstrapFnc: RT only has %d peers which is less than the min threshold of %d, triggering self & bucket bootstrap",
+			dht.routingTable.Size(), minRTBootstrapThreshold)
+
+		if err := dht.selfWalk(ctx); err != nil {
+			logger.Warningf("triggerBootstrapFnc: self walk: error: %s", err)
+		}
+
+		if err := dht.bootstrapBuckets(ctx); err != nil {
+			logger.Warningf("triggerBootstrapFnc: bootstrap buckets: error bootstrapping: %s", err)
 		}
 	}
 
 	// we should query for self periodically so we can discover closer peers
 	go func() {
 		for {
-			seedRTIfEmpty("self walk")
 			err := dht.selfWalk(ctx)
 			if err != nil {
-				logger.Warningf("error bootstrapping while searching for my self (I'm Too Shallow ?): %s", err)
+				logger.Warningf("self walk: error: %s", err)
 			}
 			select {
 			case <-time.After(dht.bootstrapCfg.SelfQueryInterval):
@@ -78,29 +74,31 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
 	go func() {
 		for {
-			seedRTIfEmpty("buckets")
 			err := dht.bootstrapBuckets(ctx)
 			if err != nil {
-				logger.Warningf("error bootstrapping: %s", err)
+				logger.Warningf("bootstrap buckets: error bootstrapping: %s", err)
 			}
 			select {
 			case <-time.After(dht.bootstrapCfg.RoutingTableScanInterval):
+			case <-dht.triggerBootstrap:
+				triggerBootstrapFnc()
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
+
 	return nil
 }
 
-//scan the RT,& do a random walk on k-buckets that haven't been queried since the given bucket period
+// bootstrapBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
 func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) error {
-	doQuery := func(n int, target string, f func(context.Context) error) error {
+	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
 		logger.Infof("starting bootstrap query for bucket %d to %s (routing table size was %d)",
-			n, target, dht.routingTable.Size())
+			bucketId, target, dht.routingTable.Size())
 		defer func() {
 			logger.Infof("finished bootstrap query for bucket %d to %s (routing table size is now %d)",
-				n, target, dht.routingTable.Size())
+				bucketId, target, dht.routingTable.Size())
 		}()
 		queryCtx, cancel := context.WithTimeout(ctx, dht.bootstrapCfg.Timeout)
 		defer cancel()
@@ -145,7 +143,7 @@ func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) error {
 		close(errChan)
 	}()
 
-	// accumulate errors from all go-routines
+	// accumulate errors from all go-routines. ensures wait group is completed by reading errChan until closure.
 	var errStrings []string
 	for err := range errChan {
 		errStrings = append(errStrings, err.Error())
@@ -153,8 +151,19 @@ func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) error {
 	if len(errStrings) == 0 {
 		return nil
 	} else {
-		return fmt.Errorf("errors encountered while running bootstrap on RT: %s", strings.Join(errStrings, "\n"))
+		return fmt.Errorf("errors encountered while running bootstrap on RT:\n%s", strings.Join(errStrings, "\n"))
 	}
+}
+
+// Traverse the DHT toward the self ID
+func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
+	queryCtx, cancel := context.WithTimeout(ctx, dht.bootstrapCfg.Timeout)
+	defer cancel()
+	_, err := dht.FindPeer(queryCtx, dht.self)
+	if err == routing.ErrNotFound {
+		return nil
+	}
+	return err
 }
 
 // synchronous bootstrap.
@@ -164,13 +173,4 @@ func (dht *IpfsDHT) bootstrapOnce(ctx context.Context) error {
 	} else {
 		return dht.bootstrapBuckets(ctx)
 	}
-}
-
-// Traverse the DHT toward the self ID
-func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
-	_, err := dht.FindPeer(ctx, dht.self)
-	if err == routing.ErrNotFound {
-		return nil
-	}
-	return err
 }

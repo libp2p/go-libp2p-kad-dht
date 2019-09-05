@@ -27,3 +27,5 @@ require (
 	go.opencensus.io v0.21.0
 	golang.org/x/xerrors v0.0.0-20190513163551-3ee3066db522
 )
+
+go 1.12

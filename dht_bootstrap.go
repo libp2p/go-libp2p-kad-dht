@@ -52,10 +52,8 @@ type BootstrapConfig struct {
 }
 
 var DefaultBootstrapConfig = BootstrapConfig{
-	// For now, this is set to 1 query.
-	// We are currently more interested in ensuring we have a properly formed
-	// DHT than making sure our dht minimizes traffic. Once we are more certain
-	// of our implementation's robustness, we should lower this down to 8 or 4.
+	// This is set to 1 query.
+	// A higher value may increase robustness.
 	Queries: 1,
 
 	// For now, this is set to 5 minutes, which is a medium period. We are

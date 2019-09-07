@@ -25,7 +25,7 @@ require (
 	github.com/stretchr/testify v1.3.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
 	go.opencensus.io v0.21.0
-	golang.org/x/xerrors v0.0.0-20190513163551-3ee3066db522
+	golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7
 )
 
 go 1.12

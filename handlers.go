@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
-	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+
+	proto "github.com/gogo/protobuf/proto"
+	cid "github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -171,6 +172,17 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	}
 
 	dskey := convertToDsKey(rec.GetKey())
+
+	// fetch the striped lock for this key
+	var indexForLock byte
+	if len(rec.GetKey()) == 0 {
+		indexForLock = 0
+	} else {
+		indexForLock = rec.GetKey()[len(rec.GetKey())-1]
+	}
+	lk := &dht.stripedPutLocks[indexForLock]
+	lk.Lock()
+	defer lk.Unlock()
 
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from

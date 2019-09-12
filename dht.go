@@ -77,6 +77,8 @@ type IpfsDHT struct {
 
 	plk sync.Mutex
 
+	stripedPutLocks [256]sync.Mutex
+
 	protocols []protocol.ID // DHT protocols
 
 	mode   DHTMode

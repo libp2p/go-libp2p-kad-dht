@@ -70,7 +70,7 @@ message Message {
 	repeated Peer providerPeers = 9;
 }
 
-// Encapsulates a routing table snapshot for persistence.
+// Encapsulates a routing table snapshot for persistence. Not to be transmitted over the wire.
 message RoutingTableSnapshot {
 	// The peers that were members of the routing table.
 	repeated bytes peers = 1;

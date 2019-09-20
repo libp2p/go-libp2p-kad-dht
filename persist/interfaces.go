@@ -1,8 +1,8 @@
 package persist
 
 import (
+	peer "github.com/libp2p/go-libp2p-core/peer"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
-	peer "github.com/libp2p/go-libp2p-peer"
 
 	log "github.com/ipfs/go-log"
 )

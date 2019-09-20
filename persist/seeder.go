@@ -8,10 +8,10 @@ import (
 
 	"github.com/ipfs/go-todocounter"
 
-	"github.com/libp2p/go-libp2p-host"
+	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-kbucket"
 	inet "github.com/libp2p/go-libp2p-net"
-	"github.com/libp2p/go-libp2p-peer"
 )
 
 // SeedDialGracePeriod is the grace period for one dial attempt
@@ -110,13 +110,13 @@ func (rs *randomSeeder) Seed(into *kbucket.RoutingTable, candidates []peer.ID, f
 		defer cancel()
 
 		// start dialing
-		sempahore := make(chan struct{}, NSimultaneousDial)
+		semaphore := make(chan struct{}, NSimultaneousDial)
 		go func(peers []peer.ID) {
 			for _, p := range peers {
-				sempahore <- struct{}{}
+				semaphore <- struct{}{}
 				go func(p peer.ID, res chan<- result) {
 					dialFn(ctx, p, resCh)
-					<-sempahore
+					<-semaphore
 				}(p, resCh)
 			}
 		}(peers)

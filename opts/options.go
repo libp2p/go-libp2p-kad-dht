@@ -44,6 +44,12 @@ type Options struct {
 	Validator       record.Validator
 	Client          bool
 	Protocols       []protocol.ID
+	Persistence     PersistConfig
+	BucketSize      int
+	Datastore       ds.Batching
+	Validator       record.Validator
+	Client          bool
+	Protocols       []protocol.ID
 	BucketSize      int
 	MaxRecordAge    time.Duration
 	EnableProviders bool

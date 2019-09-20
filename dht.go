@@ -8,14 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jbenet/goprocess/periodic"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
-
-	periodicproc "github.com/jbenet/goprocess/periodic"
+	"github.com/libp2p/go-libp2p-kad-dht/persist"
 	"go.opencensus.io/tag"
 	"golang.org/x/xerrors"
 
@@ -106,6 +106,25 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 
+	// set seeder, snapshotter & fallback peers if not set
+	if cfg.Persistence.Seeder == nil {
+		cfg.Persistence.Seeder = persist.NewRandomSeeder(h, persist.DefaultRndSeederTarget)
+	}
+	if cfg.Persistence.Snapshotter == nil {
+		s, err := persist.NewDatastoreSnapshotter(cfg.Datastore, persist.DefaultSnapshotNS)
+		// should never happen
+		if err != nil {
+			logger.Error("failed to initialize the default datastore backed snapshotter")
+			panic(err)
+		}
+		cfg.Persistence.Snapshotter = s
+	}
+	if len(cfg.Persistence.FallbackPeers) == 0 {
+		cfg.Persistence.FallbackPeers = DefaultBootstrapPeerIDs
+	}
+
+	dht := makeDHT(ctx, h, &cfg, cfg.BucketSize)
+
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
@@ -122,29 +141,23 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil
 	})
 
-	var (
-		candidates []peer.ID
-		err        error
-	)
+	// fetch the last snapshot & feed it to the seeder
+	candidates, err := cfg.Persistence.Snapshotter.Load()
+	if err != nil {
+		logger.Warningf("error while loading snapshot of DHT routing table: %s, cannot seed dht", err)
+	} else if err := cfg.Persistence.Seeder.Seed(dht.routingTable, candidates, cfg.Persistence.FallbackPeers); err != nil {
+		logger.Warningf("error while seeding candidates to the routing table: %s", err)
+	}
 
-	if cfg.Persistence.Snapshotter != nil {
-		candidates, err = cfg.Persistence.Snapshotter.Load()
+	// schedule periodic snapshots
+	sproc := periodicproc.Tick(cfg.Persistence.SnapshotInterval, func(proc goprocess.Process) {
+		logger.Debugf("storing snapshot of DHT routing table")
+		err := cfg.Persistence.Snapshotter.Store(dht.routingTable)
 		if err != nil {
-			logger.Warningf("error while loading snapshot of DHT routing table: %s", err)
+			logger.Warningf("error while storing snapshot of DHT routing table snapshot: %s", err)
 		}
-		sproc := periodicproc.Tick(cfg.Persistence.SnapshotInterval, func(proc goprocess.Process) {
-			logger.Debugf("storing snapshot of DHT routing table")
-			err := cfg.Persistence.Snapshotter.Store(dht.routingTable)
-			if err != nil {
-				logger.Warningf("error while storing snapshot of DHT routing table snapshot: %s", err)
-			}
-		})
-		dht.proc.AddChild(sproc)
-	}
-
-	if err := cfg.Persistence.Seeder.Seed(dht.routingTable, candidates, cfg.Persistence.FallbackPeers); err != nil {
-		logger.Warningf("error while seedindg candidates to the routing table: %s", err)
-	}
+	})
+	dht.proc.AddChild(sproc)
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))

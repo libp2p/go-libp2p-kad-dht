@@ -474,7 +474,7 @@ func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
 	var providers []peer.AddrInfo
-	for p := range dht.FindProvidersAsync(ctx, c, KValue) {
+	for p := range dht.FindProvidersAsync(ctx, c, dht.bucketSize) {
 		providers = append(providers, p)
 	}
 	return providers, nil

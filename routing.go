@@ -27,6 +27,8 @@ import (
 // results will wait for the channel to drain.
 var asyncQueryBuffer = 10
 
+var putValueRepublishInterval = 24 * time.Hour
+
 // This file implements the Routing interface for the IpfsDHT struct.
 
 // Basic Put/Get
@@ -98,6 +100,28 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		}(p)
 	}
 	wg.Wait()
+
+	// original publisher should keep re-publishing the record because the network isn't `steady`/`stable`
+	// and the K closet peers we just published to can become unavailable / no longer be the K closet
+	go func() {
+		for {
+			select {
+			case <-dht.proc.Closing():
+				return
+			case <-time.After(putValueRepublishInterval):
+				// TODO:We can not re-use the original context here as it may have expired
+				// But, is it fair to use this one ?
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				if err := dht.PutValue(ctx, key, value, opts...); err != nil {
+					logger.Errorf("putValue republish proc: failed to republish key %s, error is %+v", key, err)
+				} else {
+					logger.Debugf("putValue republish proc: successfully republished key %s", key)
+				}
+				cancel()
+			}
+		}
+	}()
+
 	return nil
 }
 

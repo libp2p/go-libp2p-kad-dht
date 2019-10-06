@@ -185,7 +185,7 @@ func TestProvidesExpire(t *testing.T) {
 		t.Fatal("providers map not cleaned up")
 	}
 
-	res, err := ds.Query(dsq.Query{Prefix: providersKeyPrefix})
+	res, err := ds.Query(dsq.Query{Prefix: ProvidersKeyPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}

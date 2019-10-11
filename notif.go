@@ -32,7 +32,14 @@ func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 		dht.plk.Lock()
 		defer dht.plk.Unlock()
 		if dht.host.Network().Connectedness(p) == network.Connected {
+			bootstrap := dht.routingTable.Size() <= minRTBootstrapThreshold
 			dht.Update(dht.Context(), p)
+			if bootstrap {
+				select {
+				case dht.triggerBootstrap <- struct{}{}:
+				default:
+				}
+			}
 		}
 		return
 	}
@@ -71,7 +78,14 @@ func (nn *netNotifiee) testConnection(v network.Conn) {
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
 	if dht.host.Network().Connectedness(p) == network.Connected {
+		bootstrap := dht.routingTable.Size() <= minRTBootstrapThreshold
 		dht.Update(dht.Context(), p)
+		if bootstrap {
+			select {
+			case dht.triggerBootstrap <- struct{}{}:
+			default:
+			}
+		}
 	}
 }
 

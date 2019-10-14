@@ -31,7 +31,7 @@ type BootstrapConfig struct {
 
 type PersistConfig struct {
 	Snapshotter      persist.Snapshotter
-	Seeder           persist.Seeder
+	SeedsProposer    persist.SeedsProposer
 	SnapshotInterval time.Duration
 	FallbackPeers    []peer.ID
 }
@@ -44,7 +44,7 @@ type Options struct {
 	Validator       record.Validator
 	Client          bool
 	Protocols       []protocol.ID
-	Persistence     PersistConfig
+	Persistence     *PersistConfig
 	BucketSize      int
 	Datastore       ds.Batching
 	Validator       record.Validator
@@ -121,9 +121,9 @@ func RoutingTableRefreshPeriod(period time.Duration) Option {
 	}
 }
 
-func Seeder(seeder persist.Seeder) Option {
+func SeedsProposer(sp persist.SeedsProposer) Option {
 	return func(o *Options) error {
-		o.Persistence.Seeder = seeder
+		o.Persistence.SeedsProposer = sp
 		return nil
 	}
 }

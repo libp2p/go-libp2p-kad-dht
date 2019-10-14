@@ -80,7 +80,10 @@ type IpfsDHT struct {
 	bootstrapCfg          opts.BootstrapConfig
 	triggerRtRefresh      chan chan<- error
 
-	maxRecordAge time.Duration
+	triggerBootstrap chan struct{}
+
+	seedsProposer persist.SeedsProposer
+	maxRecordAge  time.Duration
 
 	// Allows disabling dht subsystems. These should _only_ be set on
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
@@ -106,21 +109,24 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 
-	// set seeder, snapshotter & fallback peers if not set
-	if cfg.Persistence.Seeder == nil {
-		cfg.Persistence.Seeder = persist.NewRandomSeeder(h, persist.DefaultRndSeederTarget)
+	// set seedsProposer, snapshotter & fallback peers if not set
+	seedsProposer := cfg.Persistence.SeedsProposer
+	if seedsProposer == nil {
+		seedsProposer = persist.NewRandomSeedsProposer(h, persist.DefaultRndSeederTarget)
 	}
-	if cfg.Persistence.Snapshotter == nil {
+	snapshotter := cfg.Persistence.Snapshotter
+	if snapshotter == nil {
 		s, err := persist.NewDatastoreSnapshotter(cfg.Datastore, persist.DefaultSnapshotNS)
 		// should never happen
 		if err != nil {
 			logger.Error("failed to initialize the default datastore backed snapshotter")
 			panic(err)
 		}
-		cfg.Persistence.Snapshotter = s
+		snapshotter = s
 	}
+
 	if len(cfg.Persistence.FallbackPeers) == 0 {
-		cfg.Persistence.FallbackPeers = DefaultBootstrapPeerIDs
+		cfg.Persistence.FallbackPeers = getDefaultBootstrapPeerIDs()
 	}
 
 	dht := makeDHT(ctx, h, &cfg, cfg.BucketSize)
@@ -134,6 +140,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
 	dht.bootstrapCfg = cfg.BootstrapConfig
+	dht.seedsProposer = seedsProposer
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
@@ -141,18 +148,18 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil
 	})
 
-	// fetch the last snapshot & feed it to the seeder
-	candidates, err := cfg.Persistence.Snapshotter.Load()
+	// fetch the last snapshot & try to seed RT
+	candidates, err := snapshotter.Load()
 	if err != nil {
 		logger.Warningf("error while loading snapshot of DHT routing table: %s, cannot seed dht", err)
-	} else if err := cfg.Persistence.Seeder.Seed(dht.routingTable, candidates, cfg.Persistence.FallbackPeers); err != nil {
+	} else if err := dht.seedRoutingTable(candidates, cfg.Persistence.FallbackPeers); err != nil {
 		logger.Warningf("error while seeding candidates to the routing table: %s", err)
 	}
 
 	// schedule periodic snapshots
 	sproc := periodicproc.Tick(cfg.Persistence.SnapshotInterval, func(proc goprocess.Process) {
 		logger.Debugf("storing snapshot of DHT routing table")
-		err := cfg.Persistence.Snapshotter.Store(dht.routingTable)
+		err := snapshotter.Store(dht.routingTable)
 		if err != nil {
 			logger.Warningf("error while storing snapshot of DHT routing table snapshot: %s", err)
 		}
@@ -262,7 +269,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		case req := <-dht.rtRecoveryChan:
 			if dht.routingTable.Size() == 0 {
 				logger.Infof("rt recovery proc: received request with reqID=%s, RT is empty. initiating recovery", req.id)
-				// TODO Call Seeder with default bootstrap peers here once #383 is merged
+				// TODO Call SeedsProposer with default bootstrap peers here once #383 is merged
 				if dht.routingTable.Size() > 0 {
 					logger.Infof("rt recovery proc: successfully recovered RT for reqID=%s, RT size is now %d", req.id, dht.routingTable.Size())
 					go writeResp(req.errorChan, nil)

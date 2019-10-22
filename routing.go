@@ -13,7 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
@@ -101,6 +101,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		}(p)
 	}
 	wg.Wait()
+
 	return nil
 }
 
@@ -383,6 +384,9 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 		//
 		// We'll just call this a success.
 		if got > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
+			// refresh the k-bucket containing this key as the query was successful
+			dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
+
 			err = nil
 		}
 		done(err)
@@ -484,7 +488,7 @@ func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
 	var providers []peer.AddrInfo
-	for p := range dht.FindProvidersAsync(ctx, c, KValue) {
+	for p := range dht.FindProvidersAsync(ctx, c, dht.bucketSize) {
 		providers = append(providers, p)
 	}
 	return providers, nil
@@ -496,6 +500,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
 	logger.Event(ctx, "findProviders", key)
 	peerOut := make(chan peer.AddrInfo, count)
+
 	go dht.findProvidersAsyncRoutine(ctx, key, count, peerOut)
 	return peerOut
 }
@@ -601,6 +606,9 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 			Extra: err.Error(),
 		})
 	}
+
+	// refresh the k-bucket containing this key after the query is run
+	dht.routingTable.BucketForID(kb.ConvertKey(key.KeyString())).ResetRefreshedAt(time.Now())
 }
 
 // FindPeer searches for a peer with given ID.
@@ -672,6 +680,9 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
+	// refresh the k-bucket containing this key since the lookup was successful
+	dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
+
 	logger.Debugf("FindPeer %v %v", id, result.success)
 	if result.peer.ID == "" {
 		return peer.AddrInfo{}, routing.ErrNotFound
@@ -739,6 +750,9 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 		if _, err := query.Run(ctx, peers); err != nil {
 			logger.Debug(err)
 		}
+
+		// refresh the k-bucket containing this key
+		dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
 
 		// close the peerchan channel when done.
 		close(peerchan)

@@ -23,17 +23,17 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	providers "github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
-	proto "github.com/gogo/protobuf/proto"
-	cid "github.com/ipfs/go-cid"
+	"github.com/gogo/protobuf/proto"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
 	circuit "github.com/libp2p/go-libp2p-circuit"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr-net"
@@ -41,10 +41,6 @@ import (
 )
 
 var logger = logging.Logger("dht")
-
-// NumBootstrapQueries defines the number of random dht queries to do to
-// collect members of the routing table.
-const NumBootstrapQueries = 5
 
 type DHTMode int
 
@@ -89,6 +85,10 @@ type IpfsDHT struct {
 	subscriptions struct {
 		evtPeerIdentification event.Subscription
 	}
+
+	bootstrapCfg opts.BootstrapConfig
+
+	triggerBootstrap chan struct{}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -109,6 +109,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
+	dht.bootstrapCfg = cfg.BootstrapConfig
 
 	dht.Validator = cfg.Validator
 	dht.mode = ModeClient
@@ -165,25 +166,28 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	rt := kb.NewRoutingTable(bucketSize, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
 
 	cmgr := h.ConnManager()
+
 	rt.PeerAdded = func(p peer.ID) {
 		cmgr.TagPeer(p, "kbucket", 5)
 	}
+
 	rt.PeerRemoved = func(p peer.ID) {
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
 	dht := &IpfsDHT{
-		datastore:    dstore,
-		self:         h.ID(),
-		peerstore:    h.Peerstore(),
-		host:         h,
-		strmap:       make(map[peer.ID]*messageSender),
-		ctx:          ctx,
-		providers:    providers.NewProviderManager(ctx, h.ID(), dstore),
-		birth:        time.Now(),
-		routingTable: rt,
-		protocols:    protocols,
-		bucketSize:   bucketSize,
+		datastore:        dstore,
+		self:             h.ID(),
+		peerstore:        h.Peerstore(),
+		host:             h,
+		strmap:           make(map[peer.ID]*messageSender),
+		ctx:              ctx,
+		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
+		birth:            time.Now(),
+		routingTable:     rt,
+		protocols:        protocols,
+		bucketSize:       bucketSize,
+		triggerBootstrap: make(chan struct{}),
 	}
 
 	var err error
@@ -197,6 +201,41 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 	return dht
 }
+
+// TODO Implement RT seeding as described in https://github.com/libp2p/go-libp2p-kad-dht/pull/384#discussion_r320994340 OR
+// come up with an alternative solution.
+// issue is being tracked at https://github.com/libp2p/go-libp2p-kad-dht/issues/387
+/*func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
+	writeResp := func(errorChan chan error, err error) {
+		select {
+		case <-proc.Closing():
+		case errorChan <- err:
+		}
+		close(errorChan)
+	}
+
+	for {
+		select {
+		case req := <-dht.rtRecoveryChan:
+			if dht.routingTable.Size() == 0 {
+				logger.Infof("rt recovery proc: received request with reqID=%s, RT is empty. initiating recovery", req.id)
+				// TODO Call Seeder with default bootstrap peers here once #383 is merged
+				if dht.routingTable.Size() > 0 {
+					logger.Infof("rt recovery proc: successfully recovered RT for reqID=%s, RT size is now %d", req.id, dht.routingTable.Size())
+					go writeResp(req.errorChan, nil)
+				} else {
+					logger.Errorf("rt recovery proc: failed to recover RT for reqID=%s, RT is still empty", req.id)
+					go writeResp(req.errorChan, errors.New("RT empty after seed attempt"))
+				}
+			} else {
+				logger.Infof("rt recovery proc: RT is not empty, no need to act on request with reqID=%s", req.id)
+				go writeResp(req.errorChan, nil)
+			}
+		case <-proc.Closing():
+			return
+		}
+	}
+}*/
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {

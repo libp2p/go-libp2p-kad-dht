@@ -8,7 +8,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/peer"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -62,7 +62,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		return nil, kb.ErrLookupFailure
 	}
 
-	out := make(chan peer.ID, KValue)
+	out := make(chan peer.ID, dht.bucketSize)
 
 	// since the query doesnt actually pass our context down
 	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
@@ -103,9 +103,13 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		}
 
 		if res != nil && res.queriedSet != nil {
+			// refresh the k-bucket containing this key as the query was successful
+			dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
+
 			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
-			if len(sorted) > KValue {
-				sorted = sorted[:KValue]
+			l := len(sorted)
+			if l > dht.bucketSize {
+				sorted = sorted[:dht.bucketSize]
 			}
 
 			for _, p := range sorted {

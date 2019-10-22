@@ -40,7 +40,14 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 			case event.EvtPeerIdentificationCompleted:
 				protos, err := dht.peerstore.SupportsProtocols(ev.Peer, dht.protocolStrs()...)
 				if err == nil && len(protos) != 0 {
+					bootstrap := dht.routingTable.Size() <= minRTBootstrapThreshold
 					dht.Update(dht.ctx, ev.Peer)
+					if bootstrap {
+						select {
+						case dht.triggerBootstrap <- struct{}{}:
+						default:
+						}
+					}
 				}
 			}
 		case <-proc.Closing():

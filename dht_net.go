@@ -211,9 +211,6 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 		return nil, err
 	}
 
-	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, ms.s.Conn(), rpmes)
-
 	stats.Record(
 		ctx,
 		metrics.SentRequests.M(1),
@@ -488,6 +485,8 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.p, mes.GetType(), c, pid, mes.Key, len(mes.GetCloserPeers()), len(mes.ProviderPeers), latencyMillis, distance, addr)
 
 		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+
+		ms.dht.updateFromMessage(ctx, ms.s.Conn(), mes)
 
 		if ms.singleMes > streamReuseTries {
 			go helpers.FullClose(ms.s)

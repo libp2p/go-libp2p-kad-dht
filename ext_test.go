@@ -241,12 +241,8 @@ func TestLessThanKResponses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 1; i < 5; i++ {
-		d.Update(ctx, hosts[i].ID())
-	}
-
 	// Reply with random peers to every message
-	for _, host := range hosts {
+	for _, host := range hosts[1:] {
 		host := host // shadow loop var
 		host.SetStreamHandler(d.protocols[0], func(s network.Stream) {
 			defer s.Close()
@@ -275,6 +271,11 @@ func TestLessThanKResponses(t *testing.T) {
 			}
 
 		})
+	}
+
+	// Wait for the routing table to fill up.
+	for i := 0; d.RoutingTable().Size() < 5 && i < 100; i++ {
+		time.Sleep(time.Millisecond)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*30)

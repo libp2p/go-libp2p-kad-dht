@@ -351,14 +351,12 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // Update signals the routingTable to Update its last-seen status
 // on the given peer.
 func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
-	conns := dht.host.Network().ConnsToPeer(p)
-	switch len(conns) {
-	default:
-		logger.Warning("unclear if we should add peer with multiple open connections to us to our routing table")
-	case 0:
-		logger.Error("called update on a peer with no connection")
-	case 1:
-		dht.UpdateConn(ctx, conns[0])
+	logger.Event(ctx, "updatePeer", p)
+	for _, c := range dht.host.Network().ConnsToPeer(p) {
+		if dht.shouldAddPeerToRoutingTable(c) {
+			dht.routingTable.Update(c.RemotePeer())
+			return
+		}
 	}
 }
 

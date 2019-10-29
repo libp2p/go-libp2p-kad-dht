@@ -9,7 +9,7 @@ require (
 	github.com/ipfs/go-cid v0.0.3
 	github.com/ipfs/go-datastore v0.1.0
 	github.com/ipfs/go-ipfs-util v0.0.1
-	github.com/ipfs/go-log v0.0.1
+	github.com/ipfs/go-log v0.0.2-0.20190920042044-a609c1ae5144
 	github.com/ipfs/go-todocounter v0.0.1
 	github.com/jbenet/goprocess v0.1.3
 	github.com/libp2p/go-libp2p v0.3.1
@@ -26,7 +26,7 @@ require (
 	github.com/multiformats/go-multiaddr-dns v0.0.3
 	github.com/multiformats/go-multistream v0.1.0
 	github.com/pkg/errors v0.8.1
-	github.com/stretchr/testify v1.3.0
+	github.com/stretchr/testify v1.4.0
 	github.com/whyrusleeping/base32 v0.0.0-20170828182744-c30ac30633cc
 	go.opencensus.io v0.22.1
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898

@@ -134,13 +134,13 @@ func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 		switch {
 		case err != nil:
 			// couldn't parse the time
-			log.Warning("parsing providers record from disk: ", err)
+			log.Warn("parsing providers record from disk: ", err)
 			fallthrough
 		case now.Sub(t) > ProvideValidity:
 			// or just expired
 			err = dstore.Delete(ds.RawKey(e.Key))
 			if err != nil && err != ds.ErrNotFound {
-				log.Warning("failed to remove provider record from disk: ", err)
+				log.Warn("failed to remove provider record from disk: ", err)
 			}
 			continue
 		}
@@ -152,7 +152,7 @@ func loadProvSet(dstore ds.Datastore, k cid.Cid) (*providerSet, error) {
 			log.Error("base32 decoding error: ", err)
 			err = dstore.Delete(ds.RawKey(e.Key))
 			if err != nil && err != ds.ErrNotFound {
-				log.Warning("failed to remove provider record from disk: ", err)
+				log.Warn("failed to remove provider record from disk: ", err)
 			}
 			continue
 		}
@@ -265,13 +265,13 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 			switch {
 			case err != nil:
 				// couldn't parse the time
-				log.Warning("parsing providers record from disk: ", err)
+				log.Warn("parsing providers record from disk: ", err)
 				fallthrough
 			case gcTime.Sub(t) > ProvideValidity:
 				// or expired
 				err = pm.dstore.Delete(ds.RawKey(res.Key))
 				if err != nil && err != ds.ErrNotFound {
-					log.Warning("failed to remove provider record from disk: ", err)
+					log.Warn("failed to remove provider record from disk: ", err)
 				}
 			}
 

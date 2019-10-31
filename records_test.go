@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"github.com/libp2p/go-libp2p-core/test"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
+
+	dhtopt "github.com/libp2p/go-libp2p-kad-dht/opts"
 )
 
 // Check that GetPublicKey() correctly extracts a public key
@@ -303,5 +306,67 @@ func TestPubkeyGoodKeyFromDHTGoodKeyDirect(t *testing.T) {
 
 	if !pubk.Equals(rpubk) {
 		t.Fatal("got incorrect public key")
+	}
+}
+
+func TestValuesDisabled(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		enabledA := (i & 0x1) > 0
+		enabledB := (i & 0x2) > 0
+		t.Run(fmt.Sprintf("a=%v/b=%v", enabledA, enabledB), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			dhtA := setupDHT(ctx, t, false, dhtopt.EnableValues(enabledA))
+			dhtB := setupDHT(ctx, t, false, dhtopt.EnableValues(enabledB))
+
+			defer dhtA.Close()
+			defer dhtB.Close()
+			defer dhtA.host.Close()
+			defer dhtB.host.Close()
+
+			connect(t, ctx, dhtA, dhtB)
+
+			pubk := dhtB.peerstore.PubKey(dhtB.self)
+			pkbytes, err := pubk.Bytes()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			pkkey := routing.KeyForPublicKey(dhtB.self)
+			err = dhtB.PutValue(ctx, pkkey, pkbytes)
+			if enabledB {
+				if err != nil {
+					t.Fatal("put should have succeeded on node B", err)
+				}
+			} else {
+				if err != routing.ErrNotSupported {
+					t.Fatal("should not have put the value to node B", err)
+				}
+				_, err = dhtB.GetValue(ctx, pkkey)
+				if err != routing.ErrNotSupported {
+					t.Fatal("get should have failed on node B")
+				}
+				rec, _ := dhtB.getLocal(pkkey)
+				if rec != nil {
+					t.Fatal("node B should not have found the value locally")
+				}
+			}
+
+			_, err = dhtA.GetValue(ctx, pkkey)
+			if enabledA {
+				if err != routing.ErrNotFound {
+					t.Fatal("node A should not have found the value")
+				}
+			} else {
+				if err != routing.ErrNotSupported {
+					t.Fatal("node A should not have found the value")
+				}
+			}
+			rec, _ := dhtA.getLocal(pkkey)
+			if rec != nil {
+				t.Fatal("node A should not have found the value locally")
+			}
+		})
 	}
 }

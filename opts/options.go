@@ -21,12 +21,14 @@ var (
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore    ds.Batching
-	Validator    record.Validator
-	Client       bool
-	Protocols    []protocol.ID
-	BucketSize   int
-	MaxRecordAge time.Duration
+	Datastore       ds.Batching
+	Validator       record.Validator
+	Client          bool
+	Protocols       []protocol.ID
+	BucketSize      int
+	MaxRecordAge    time.Duration
+	EnableProviders bool
+	EnableValues    bool
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
@@ -56,6 +58,8 @@ var Defaults = func(o *Options) error {
 	}
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
+	o.EnableProviders = true
+	o.EnableValues = true
 
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
 	o.RoutingTable.RefreshPeriod = 1 * time.Hour
@@ -174,6 +178,26 @@ func MaxRecordAge(maxAge time.Duration) Option {
 func DisableAutoRefresh() Option {
 	return func(o *Options) error {
 		o.RoutingTable.AutoRefresh = false
+		return nil
+	}
+}
+
+// EnableProviders enables storing and retrieving provider records.
+//
+// Defaults to true.
+func EnableProviders(enable bool) Option {
+	return func(o *Options) error {
+		o.EnableProviders = enable
+		return nil
+	}
+}
+
+// EnableValues enables storing and retrieving value records.
+//
+// Defaults to true.
+func EnableValues(enable bool) Option {
+	return func(o *Options) error {
+		o.EnableValues = enable
 		return nil
 	}
 }

@@ -34,6 +34,10 @@ var asyncQueryBuffer = 10
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
+	if !dht.enableValues {
+		return routing.ErrNotSupported
+	}
+
 	eip := logger.EventBegin(ctx, "PutValue")
 	defer func() {
 		eip.Append(loggableKey(key))
@@ -110,6 +114,10 @@ type RecvdVal struct {
 
 // GetValue searches for the value corresponding to given Key.
 func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) (_ []byte, err error) {
+	if !dht.enableValues {
+		return nil, routing.ErrNotSupported
+	}
+
 	eip := logger.EventBegin(ctx, "GetValue")
 	defer func() {
 		eip.Append(loggableKey(key))
@@ -148,6 +156,10 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 }
 
 func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
+	if !dht.enableValues {
+		return nil, routing.ErrNotSupported
+	}
+
 	var cfg routing.Options
 	if err := cfg.Apply(opts...); err != nil {
 		return nil, err
@@ -250,8 +262,11 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 // GetValues gets nvals values corresponding to the given key.
 func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
-	eip := logger.EventBegin(ctx, "GetValues")
+	if !dht.enableValues {
+		return nil, routing.ErrNotSupported
+	}
 
+	eip := logger.EventBegin(ctx, "GetValues")
 	eip.Append(loggableKey(key))
 	defer eip.Done()
 
@@ -398,6 +413,9 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	if !dht.enableProviders {
+		return routing.ErrNotSupported
+	}
 	eip := logger.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
 	defer func() {
 		if err != nil {
@@ -477,6 +495,9 @@ func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+	if !dht.enableProviders {
+		return nil, routing.ErrNotSupported
+	}
 	var providers []peer.AddrInfo
 	for p := range dht.FindProvidersAsync(ctx, c, dht.bucketSize) {
 		providers = append(providers, p)
@@ -488,6 +509,10 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // Peers will be returned on the channel as soon as they are found, even before
 // the search query completes.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+	if !dht.enableProviders {
+		return nil
+	}
+
 	logger.Event(ctx, "findProviders", key)
 	peerOut := make(chan peer.AddrInfo, count)
 

@@ -73,6 +73,8 @@ type IpfsDHT struct {
 	triggerRtRefresh      chan struct{}
 
 	maxRecordAge time.Duration
+
+	enableProviders, enableValues bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -98,6 +100,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
 	dht.maxRecordAge = cfg.MaxRecordAge
+	dht.enableProviders = cfg.EnableProviders
+	dht.enableValues = cfg.EnableValues
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))

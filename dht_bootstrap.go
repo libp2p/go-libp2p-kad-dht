@@ -91,6 +91,15 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
+// synchronous bootstrap.
+func (dht *IpfsDHT) BootstrapOnce(ctx context.Context) error {
+	if err := dht.selfWalk(ctx); err != nil {
+		return errors.Wrap(err, "failed bootstrap while searching for self")
+	} else {
+		return dht.bootstrapBuckets(ctx)
+	}
+}
+
 // bootstrapBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
 func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) error {
 	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
@@ -164,13 +173,4 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 		return nil
 	}
 	return err
-}
-
-// synchronous bootstrap.
-func (dht *IpfsDHT) bootstrapOnce(ctx context.Context) error {
-	if err := dht.selfWalk(ctx); err != nil {
-		return errors.Wrap(err, "failed bootstrap while searching for self")
-	} else {
-		return dht.bootstrapBuckets(ctx)
-	}
 }

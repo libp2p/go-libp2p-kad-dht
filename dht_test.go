@@ -200,7 +200,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
-		dht.bootstrapOnce(ctx)
+		dht.BootstrapOnce(ctx)
 	}
 }
 
@@ -783,7 +783,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
 	for _, dht := range dhts {
-		go dht.bootstrapOnce(ctx)
+		go dht.BootstrapOnce(ctx)
 	}
 
 	// this is async, and we dont know when it's finished with one cycle, so keep checking

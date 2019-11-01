@@ -69,7 +69,8 @@ type IpfsDHT struct {
 
 	bootstrapCfg opts.BootstrapConfig
 
-	triggerBootstrap chan struct{}
+	triggerAutoBootstrap bool
+	triggerBootstrap     chan *bootstrapReq
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -103,6 +104,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
+	dht.triggerAutoBootstrap = cfg.TriggerAutoBootstrap
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {
@@ -160,7 +162,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTable:     rt,
 		protocols:        protocols,
 		bucketSize:       bucketSize,
-		triggerBootstrap: make(chan struct{}),
+		triggerBootstrap: make(chan *bootstrapReq),
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
@@ -172,10 +174,10 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 // come up with an alternative solution.
 // issue is being tracked at https://github.com/libp2p/go-libp2p-kad-dht/issues/387
 /*func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
-	writeResp := func(errorChan chan error, err error) {
+	writeResp := func(errorChan chan error, errChan error) {
 		select {
 		case <-proc.Closing():
-		case errorChan <- err:
+		case errorChan <- errChan:
 		}
 		close(errorChan)
 	}

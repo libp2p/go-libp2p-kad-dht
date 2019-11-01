@@ -43,47 +43,71 @@ func init() {
 	}
 }
 
+type bootstrapReq struct {
+	errChan chan error
+}
+
+func makeBootstrapReq() *bootstrapReq {
+	errChan := make(chan error, 1)
+	return &bootstrapReq{errChan}
+}
+
 // Bootstrap  i
 func (dht *IpfsDHT) startBootstrapping() error {
 	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
-		scanInterval := time.NewTicker(dht.bootstrapCfg.RoutingTableScanInterval)
+
+		scanInterval := time.NewTicker(dht.bootstrapCfg.BucketPeriod)
 		defer scanInterval.Stop()
 
 		var (
 			lastSelfWalk time.Time
-			walkSelf     = true
 		)
 
+		// run bootstrap if option is set
+		if dht.triggerAutoBootstrap {
+			if err := dht.doBootstrap(ctx, true, &lastSelfWalk); err != nil {
+				logger.Warningf("bootstrap error: %s", err)
+			}
+		}
+
 		for {
-			if walkSelf {
-				walkSelf = false
-				err := dht.selfWalk(ctx)
-				if err != nil {
-					logger.Warningf("self walk: error: %s", err)
-				} else {
-					lastSelfWalk = time.Now()
-				}
-			}
-
-			err := dht.bootstrapBuckets(ctx)
-			if err != nil {
-				logger.Warningf("bootstrap buckets: error bootstrapping: %s", err)
-			}
-
 			select {
 			case now := <-scanInterval.C:
-				// It doesn't make sense to query for self unless we're _also_ going to fill out the routing table.
-				walkSelf = now.After(lastSelfWalk.Add(dht.bootstrapCfg.SelfQueryInterval))
-			case <-dht.triggerBootstrap:
-				walkSelf = true
+				walkSelf := now.After(lastSelfWalk.Add(dht.bootstrapCfg.SelfQueryInterval))
+				if err := dht.doBootstrap(ctx, walkSelf, &lastSelfWalk); err != nil {
+					logger.Warning("bootstrap error: %s", err)
+				}
+			case req := <-dht.triggerBootstrap:
 				logger.Infof("triggering a bootstrap: RT has %d peers", dht.routingTable.Size())
+				err := dht.doBootstrap(ctx, true, &lastSelfWalk)
+				select {
+				case req.errChan <- err:
+					close(req.errChan)
+				default:
+				}
 			case <-ctx.Done():
 				return
 			}
 		}
 	})
+
+	return nil
+}
+
+func (dht *IpfsDHT) doBootstrap(ctx context.Context, walkSelf bool, latestSelfWalk *time.Time) error {
+	if walkSelf {
+		if err := dht.selfWalk(ctx); err != nil {
+			return fmt.Errorf("self walk: error: %s", err)
+		} else {
+			*latestSelfWalk = time.Now()
+		}
+	}
+
+	if err := dht.bootstrapBuckets(ctx); err != nil {
+		return fmt.Errorf("bootstrap buckets: error bootstrapping: %s", err)
+	}
 
 	return nil
 }
@@ -167,9 +191,10 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 //
 // Note: the context is ignored.
 func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
-	// Returns an error just in case we want to do that in the future.
+	req := makeBootstrapReq()
 	select {
-	case dht.triggerBootstrap <- struct{}{}:
+	case dht.triggerBootstrap <- req:
+		return <-req.errChan
 	default:
 	}
 	return nil

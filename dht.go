@@ -71,6 +71,7 @@ type IpfsDHT struct {
 
 	triggerAutoBootstrap bool
 	triggerBootstrap     chan *bootstrapReq
+	latestSelfWalk       time.Time // the last time we looked-up our own peerID in the network
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -174,7 +175,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 // come up with an alternative solution.
 // issue is being tracked at https://github.com/libp2p/go-libp2p-kad-dht/issues/387
 /*func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
-	writeResp := func(errorChan chan error, errChan error) {
+	writeResp := func(errorChan chan error, err error) {
 		select {
 		case <-proc.Closing():
 		case errorChan <- errChan:

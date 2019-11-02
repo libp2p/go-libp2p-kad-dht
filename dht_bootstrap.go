@@ -61,13 +61,9 @@ func (dht *IpfsDHT) startBootstrapping() error {
 		scanInterval := time.NewTicker(dht.bootstrapCfg.BucketPeriod)
 		defer scanInterval.Stop()
 
-		var (
-			lastSelfWalk time.Time
-		)
-
 		// run bootstrap if option is set
 		if dht.triggerAutoBootstrap {
-			if err := dht.doBootstrap(ctx, true, &lastSelfWalk); err != nil {
+			if err := dht.doBootstrap(ctx, true); err != nil {
 				logger.Warningf("bootstrap error: %s", err)
 			}
 		}
@@ -75,13 +71,13 @@ func (dht *IpfsDHT) startBootstrapping() error {
 		for {
 			select {
 			case now := <-scanInterval.C:
-				walkSelf := now.After(lastSelfWalk.Add(dht.bootstrapCfg.SelfQueryInterval))
-				if err := dht.doBootstrap(ctx, walkSelf, &lastSelfWalk); err != nil {
+				walkSelf := now.After(dht.latestSelfWalk.Add(dht.bootstrapCfg.SelfQueryInterval))
+				if err := dht.doBootstrap(ctx, walkSelf); err != nil {
 					logger.Warning("bootstrap error: %s", err)
 				}
 			case req := <-dht.triggerBootstrap:
 				logger.Infof("triggering a bootstrap: RT has %d peers", dht.routingTable.Size())
-				err := dht.doBootstrap(ctx, true, &lastSelfWalk)
+				err := dht.doBootstrap(ctx, true)
 				select {
 				case req.errChan <- err:
 					close(req.errChan)
@@ -96,12 +92,12 @@ func (dht *IpfsDHT) startBootstrapping() error {
 	return nil
 }
 
-func (dht *IpfsDHT) doBootstrap(ctx context.Context, walkSelf bool, latestSelfWalk *time.Time) error {
+func (dht *IpfsDHT) doBootstrap(ctx context.Context, walkSelf bool) error {
 	if walkSelf {
 		if err := dht.selfWalk(ctx); err != nil {
 			return fmt.Errorf("self walk: error: %s", err)
 		} else {
-			*latestSelfWalk = time.Now()
+			dht.latestSelfWalk = time.Now()
 		}
 	}
 
@@ -191,10 +187,8 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 //
 // Note: the context is ignored.
 func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
-	req := makeBootstrapReq()
 	select {
-	case dht.triggerBootstrap <- req:
-		return <-req.errChan
+	case dht.triggerBootstrap <- makeBootstrapReq():
 	default:
 	}
 	return nil

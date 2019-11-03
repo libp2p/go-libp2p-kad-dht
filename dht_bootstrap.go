@@ -66,6 +66,9 @@ func (dht *IpfsDHT) startBootstrapping() error {
 			if err := dht.doBootstrap(ctx, true); err != nil {
 				logger.Warningf("bootstrap error: %s", err)
 			}
+		} else {
+			// disable the "auto-bootstrap" ticker so that no more ticks are sent to his channel
+			scanInterval.Stop()
 		}
 
 		for {
@@ -96,9 +99,8 @@ func (dht *IpfsDHT) doBootstrap(ctx context.Context, walkSelf bool) error {
 	if walkSelf {
 		if err := dht.selfWalk(ctx); err != nil {
 			return fmt.Errorf("self walk: error: %s", err)
-		} else {
-			dht.latestSelfWalk = time.Now()
 		}
+		dht.latestSelfWalk = time.Now()
 	}
 
 	if err := dht.bootstrapBuckets(ctx); err != nil {

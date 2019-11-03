@@ -149,7 +149,9 @@ func BucketSize(bucketSize int) Option {
 	}
 }
 
-// DisableAutoBootstrap disables auto bootstrap on the dht
+// DisableAutoBootstrap completely disables 'auto-bootstrap' on the Dht
+// This means that neither will we do periodic bootstrap nor will we
+// bootstrap the Dht even if the Routing Table size goes below the minimum threshold
 func DisableAutoBootstrap() Option {
 	return func(o *Options) error {
 		o.TriggerAutoBootstrap = false

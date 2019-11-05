@@ -45,20 +45,20 @@ func (dht *IpfsDHT) startRefreshing() error {
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
 
-		scanInterval := time.NewTicker(dht.rtRefreshPeriod)
-		defer scanInterval.Stop()
+		refreshTicker := time.NewTicker(dht.rtRefreshPeriod)
+		defer refreshTicker.Stop()
 
 		// refresh if option is set
 		if dht.autoRefresh {
 			dht.doRefresh(ctx)
 		} else {
 			// disable the "auto-refresh" ticker so that no more ticks are sent to this channel
-			scanInterval.Stop()
+			refreshTicker.Stop()
 		}
 
 		for {
 			select {
-			case <-scanInterval.C:
+			case <-refreshTicker.C:
 			case <-dht.triggerRtRefresh:
 				logger.Infof("triggering a refresh: RT has %d peers", dht.routingTable.Size())
 			case <-ctx.Done():

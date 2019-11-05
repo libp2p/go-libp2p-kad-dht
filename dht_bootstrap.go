@@ -118,7 +118,7 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
 		}
 
 		if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
-			logger.Warningf("failed to do a random walk on bucket %d", bucketID)
+			logger.Warningf("failed to do a random walk on bucket %d: %s", bucketID, err)
 		}
 	}
 }

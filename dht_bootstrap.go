@@ -13,7 +13,7 @@ import (
 
 var DefaultBootstrapPeers []multiaddr.Multiaddr
 
-var minRTBootstrapThreshold = 4
+var minRTRefreshThreshold = 4
 
 func init() {
 	for _, s := range []string{
@@ -39,53 +39,53 @@ func init() {
 	}
 }
 
-// Start the bootstrap worker.
-func (dht *IpfsDHT) startBootstrapping() error {
+// Start the refresh worker.
+func (dht *IpfsDHT) startRefreshing() error {
 	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
 
-		scanInterval := time.NewTicker(dht.bootstrapPeriod)
+		scanInterval := time.NewTicker(dht.rtRefreshPeriod)
 		defer scanInterval.Stop()
 
-		// run bootstrap if option is set
-		if dht.autoBootstrap {
-			dht.doBootstrap(ctx)
+		// refresh if option is set
+		if dht.autoRefresh {
+			dht.doRefresh(ctx)
 		} else {
-			// disable the "auto-bootstrap" ticker so that no more ticks are sent to this channel
+			// disable the "auto-refresh" ticker so that no more ticks are sent to this channel
 			scanInterval.Stop()
 		}
 
 		for {
 			select {
 			case <-scanInterval.C:
-			case <-dht.triggerBootstrap:
-				logger.Infof("triggering a bootstrap: RT has %d peers", dht.routingTable.Size())
+			case <-dht.triggerRtRefresh:
+				logger.Infof("triggering a refresh: RT has %d peers", dht.routingTable.Size())
 			case <-ctx.Done():
 				return
 			}
-			dht.doBootstrap(ctx)
+			dht.doRefresh(ctx)
 		}
 	})
 
 	return nil
 }
 
-func (dht *IpfsDHT) doBootstrap(ctx context.Context) {
+func (dht *IpfsDHT) doRefresh(ctx context.Context) {
 	dht.selfWalk(ctx)
-	dht.bootstrapBuckets(ctx)
+	dht.refreshBuckets(ctx)
 }
 
-// bootstrapBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
-func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) {
+// refreshBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
+func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
 	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
-		logger.Infof("starting bootstrap query for bucket %d to %s (routing table size was %d)",
+		logger.Infof("starting refreshing bucket %d to %s (routing table size was %d)",
 			bucketId, target, dht.routingTable.Size())
 		defer func() {
-			logger.Infof("finished bootstrap query for bucket %d to %s (routing table size is now %d)",
+			logger.Infof("finished refreshing bucket %d to %s (routing table size is now %d)",
 				bucketId, target, dht.routingTable.Size())
 		}()
-		queryCtx, cancel := context.WithTimeout(ctx, dht.bootstrapTimeout)
+		queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 		defer cancel()
 		err := f(queryCtx)
 		if err == context.DeadlineExceeded && queryCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
@@ -102,7 +102,7 @@ func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) {
 		buckets = buckets[:16]
 	}
 	for bucketID, bucket := range buckets {
-		if time.Since(bucket.RefreshedAt()) > dht.bootstrapPeriod {
+		if time.Since(bucket.RefreshedAt()) > dht.rtRefreshPeriod {
 			// gen rand peer in the bucket
 			randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
 
@@ -124,22 +124,28 @@ func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) {
 
 // Traverse the DHT toward the self ID
 func (dht *IpfsDHT) selfWalk(ctx context.Context) {
-	queryCtx, cancel := context.WithTimeout(ctx, dht.bootstrapTimeout)
+	queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 	defer cancel()
 	_, err := dht.FindPeer(queryCtx, dht.self)
 	if err == routing.ErrNotFound {
 		return
 	}
-	logger.Warningf("failed to bootstrap self: %s", err)
+	logger.Warningf("failed to query self during routing table refresh: %s", err)
 }
 
-// Bootstrap tells the DHT to get into a bootstrapped state.
+// Bootstrap tells the DHT to get into a bootstrapped state satisfying the
+// IpfsRouter interface.
 //
-// Note: the context is ignored.
+// This just calls `RefreshRoutingTable`.
 func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
+	dht.RefreshRoutingTable()
+	return nil
+}
+
+// RefreshRoutingTable tells the DHT to refresh it's routing tables.
+func (dht *IpfsDHT) RefreshRoutingTable() {
 	select {
-	case dht.triggerBootstrap <- struct{}{}:
+	case dht.triggerRtRefresh <- struct{}{}:
 	default:
 	}
-	return nil
 }

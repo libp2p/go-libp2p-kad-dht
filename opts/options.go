@@ -27,9 +27,9 @@ type Options struct {
 	Protocols  []protocol.ID
 	BucketSize int
 
-	BootstrapTimeout time.Duration
-	BootstrapPeriod  time.Duration
-	AutoBootstrap    bool
+	RoutingTableRefreshQueryTimeout time.Duration
+	RoutingTableRefreshPeriod       time.Duration
+	AutoRefresh                     bool
 }
 
 // Apply applies the given options to this Option
@@ -54,30 +54,31 @@ var Defaults = func(o *Options) error {
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
 
-	o.BootstrapTimeout = 10 * time.Second
-	o.BootstrapPeriod = 1 * time.Hour
-	o.AutoBootstrap = true
+	o.RoutingTableRefreshQueryTimeout = 10 * time.Second
+	o.RoutingTableRefreshPeriod = 1 * time.Hour
+	o.AutoRefresh = true
 
 	return nil
 }
 
-// BootstrapTimeout sets the timeout for bootstrap queries.
-func BootstrapTimeout(timeout time.Duration) Option {
+// RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh
+// queries.
+func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 	return func(o *Options) error {
-		o.BootstrapTimeout = timeout
+		o.RoutingTableRefreshQueryTimeout = timeout
 		return nil
 	}
 }
 
-// BootstrapPeriod sets the period for bootstrapping. The DHT will bootstrap
-// every bootstrap period by:
+// RoutingTableRefreshPeriod sets the period for refreshing buckets in the
+// routing table. The DHT will refresh buckets every period by:
 //
 // 1. First searching for nearby peers to figure out how many buckets we should try to fill.
 // 1. Then searching for a random key in each bucket that hasn't been queried in
-//    the last bootstrap period.
-func BootstrapPeriod(period time.Duration) Option {
+//    the last refresh period.
+func RoutingTableRefreshPeriod(period time.Duration) Option {
 	return func(o *Options) error {
-		o.BootstrapPeriod = period
+		o.RoutingTableRefreshPeriod = period
 		return nil
 	}
 }
@@ -150,12 +151,12 @@ func BucketSize(bucketSize int) Option {
 	}
 }
 
-// DisableAutoBootstrap completely disables 'auto-bootstrap' on the Dht
-// This means that neither will we do periodic bootstrap nor will we
-// bootstrap the Dht even if the Routing Table size goes below the minimum threshold
-func DisableAutoBootstrap() Option {
+// DisableAutoRefresh completely disables 'auto-refresh' on the DHT routing
+// table. This means that we will neither refresh the routing table periodically
+// nor when the routing table size goes below the minimum threshold.
+func DisableAutoRefresh() Option {
 	return func(o *Options) error {
-		o.AutoBootstrap = false
+		o.AutoRefresh = false
 		return nil
 	}
 }

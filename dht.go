@@ -67,11 +67,10 @@ type IpfsDHT struct {
 
 	bucketSize int
 
-	bootstrapCfg opts.BootstrapConfig
-
-	triggerAutoBootstrap bool
-	triggerBootstrap     chan struct{}
-	latestSelfWalk       time.Time // the last time we looked-up our own peerID in the network
+	autoBootstrap    bool
+	bootstrapTimeout time.Duration
+	bootstrapPeriod  time.Duration
+	triggerBootstrap chan struct{}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -92,7 +91,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
-	dht.bootstrapCfg = cfg.BootstrapConfig
+	dht.autoBootstrap = cfg.AutoBootstrap
+	dht.bootstrapPeriod = cfg.BootstrapPeriod
+	dht.bootstrapTimeout = cfg.BootstrapTimeout
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -105,7 +106,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
-	dht.triggerAutoBootstrap = cfg.TriggerAutoBootstrap
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {

@@ -19,22 +19,17 @@ var (
 	DefaultProtocols             = []protocol.ID{ProtocolDHT}
 )
 
-// BootstrapConfig specifies parameters used for bootstrapping the DHT.
-type BootstrapConfig struct {
-	BucketPeriod      time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
-	Timeout           time.Duration // how long to wait for a bootstrap query to run
-	SelfQueryInterval time.Duration // how often to query for self
-}
-
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore            ds.Batching
-	Validator            record.Validator
-	Client               bool
-	Protocols            []protocol.ID
-	BucketSize           int
-	BootstrapConfig      BootstrapConfig
-	TriggerAutoBootstrap bool
+	Datastore  ds.Batching
+	Validator  record.Validator
+	Client     bool
+	Protocols  []protocol.ID
+	BucketSize int
+
+	BootstrapTimeout time.Duration
+	BootstrapPeriod  time.Duration
+	AutoBootstrap    bool
 }
 
 // Apply applies the given options to this Option
@@ -59,24 +54,30 @@ var Defaults = func(o *Options) error {
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
 
-	o.BootstrapConfig = BootstrapConfig{
-		// same as that mentioned in the kad dht paper
-		BucketPeriod: 1 * time.Hour,
-
-		Timeout: 10 * time.Second,
-
-		SelfQueryInterval: 1 * time.Hour,
-	}
-
-	o.TriggerAutoBootstrap = true
+	o.BootstrapTimeout = 10 * time.Second
+	o.BootstrapPeriod = 1 * time.Hour
+	o.AutoBootstrap = true
 
 	return nil
 }
 
-// Bootstrap configures the dht bootstrapping process
-func Bootstrap(b BootstrapConfig) Option {
+// BootstrapTimeout sets the timeout for bootstrap queries.
+func BootstrapTimeout(timeout time.Duration) Option {
 	return func(o *Options) error {
-		o.BootstrapConfig = b
+		o.BootstrapTimeout = timeout
+		return nil
+	}
+}
+
+// BootstrapPeriod sets the period for bootstrapping. The DHT will bootstrap
+// every bootstrap period by:
+//
+// 1. First searching for nearby peers to figure out how many buckets we should try to fill.
+// 1. Then searching for a random key in each bucket that hasn't been queried in
+//    the last bootstrap period.
+func BootstrapPeriod(period time.Duration) Option {
+	return func(o *Options) error {
+		o.BootstrapPeriod = period
 		return nil
 	}
 }
@@ -154,7 +155,7 @@ func BucketSize(bucketSize int) Option {
 // bootstrap the Dht even if the Routing Table size goes below the minimum threshold
 func DisableAutoBootstrap() Option {
 	return func(o *Options) error {
-		o.TriggerAutoBootstrap = false
+		o.AutoBootstrap = false
 		return nil
 	}
 }

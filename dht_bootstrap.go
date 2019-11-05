@@ -95,6 +95,12 @@ func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) {
 	}
 
 	buckets := dht.routingTable.GetAllBuckets()
+	if len(buckets) > 16 {
+		// Don't bother bootstrapping more than 16 buckets.
+		// GenRandPeerID can't generate target peer IDs with more than
+		// 16 bits specified anyways.
+		buckets = buckets[:16]
+	}
 	for bucketID, bucket := range buckets {
 		if time.Since(bucket.RefreshedAt()) > dht.bootstrapPeriod {
 			// gen rand peer in the bucket

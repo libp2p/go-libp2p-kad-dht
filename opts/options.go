@@ -21,20 +21,20 @@ var (
 
 // BootstrapConfig specifies parameters used for bootstrapping the DHT.
 type BootstrapConfig struct {
-	BucketPeriod             time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
-	Timeout                  time.Duration // how long to wait for a bootstrap query to run
-	RoutingTableScanInterval time.Duration // how often to scan the RT for k-buckets that haven't been queried since the given period
-	SelfQueryInterval        time.Duration // how often to query for self
+	BucketPeriod      time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
+	Timeout           time.Duration // how long to wait for a bootstrap query to run
+	SelfQueryInterval time.Duration // how often to query for self
 }
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore       ds.Batching
-	Validator       record.Validator
-	Client          bool
-	Protocols       []protocol.ID
-	BucketSize      int
-	BootstrapConfig BootstrapConfig
+	Datastore            ds.Batching
+	Validator            record.Validator
+	Client               bool
+	Protocols            []protocol.ID
+	BucketSize           int
+	BootstrapConfig      BootstrapConfig
+	TriggerAutoBootstrap bool
 }
 
 // Apply applies the given options to this Option
@@ -63,13 +63,12 @@ var Defaults = func(o *Options) error {
 		// same as that mentioned in the kad dht paper
 		BucketPeriod: 1 * time.Hour,
 
-		// since the default bucket period is 1 hour, a scan interval of 30 minutes sounds reasonable
-		RoutingTableScanInterval: 30 * time.Minute,
-
 		Timeout: 10 * time.Second,
 
 		SelfQueryInterval: 1 * time.Hour,
 	}
+
+	o.TriggerAutoBootstrap = true
 
 	return nil
 }
@@ -146,6 +145,16 @@ func Protocols(protocols ...protocol.ID) Option {
 func BucketSize(bucketSize int) Option {
 	return func(o *Options) error {
 		o.BucketSize = bucketSize
+		return nil
+	}
+}
+
+// DisableAutoBootstrap completely disables 'auto-bootstrap' on the Dht
+// This means that neither will we do periodic bootstrap nor will we
+// bootstrap the Dht even if the Routing Table size goes below the minimum threshold
+func DisableAutoBootstrap() Option {
+	return func(o *Options) error {
+		o.TriggerAutoBootstrap = false
 		return nil
 	}
 }

@@ -69,7 +69,9 @@ type IpfsDHT struct {
 
 	bootstrapCfg opts.BootstrapConfig
 
-	triggerBootstrap chan struct{}
+	triggerAutoBootstrap bool
+	triggerBootstrap     chan struct{}
+	latestSelfWalk       time.Time // the last time we looked-up our own peerID in the network
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -103,12 +105,14 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
+	dht.triggerAutoBootstrap = cfg.TriggerAutoBootstrap
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {
 			h.SetStreamHandler(p, dht.handleNewStream)
 		}
 	}
+	dht.startBootstrapping()
 	return dht, nil
 }
 
@@ -174,7 +178,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	writeResp := func(errorChan chan error, err error) {
 		select {
 		case <-proc.Closing():
-		case errorChan <- err:
+		case errorChan <- errChan:
 		}
 		close(errorChan)
 	}

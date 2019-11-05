@@ -113,6 +113,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
 		opts.Client(client),
 		opts.NamespacedValidator("v", blankValidator{}),
+		opts.DisableAutoBootstrap(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +201,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
-		dht.bootstrapOnce(ctx)
+		dht.Bootstrap(ctx)
 	}
 }
 
@@ -690,7 +691,18 @@ func TestBootstrap(t *testing.T) {
 
 func TestBootstrapBelowMinRTThreshold(t *testing.T) {
 	ctx := context.Background()
-	dhtA := setupDHT(ctx, t, false)
+
+	// enable auto bootstrap on A
+	dhtA, err := New(
+		ctx,
+		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		opts.Client(false),
+		opts.NamespacedValidator("v", blankValidator{}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	dhtB := setupDHT(ctx, t, false)
 	dhtC := setupDHT(ctx, t, false)
 
@@ -783,7 +795,7 @@ func TestPeriodicBootstrap(t *testing.T) {
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
 	for _, dht := range dhts {
-		go dht.bootstrapOnce(ctx)
+		go dht.Bootstrap(ctx)
 	}
 
 	// this is async, and we dont know when it's finished with one cycle, so keep checking
@@ -1416,6 +1428,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			opts.Protocols("/esh/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),
+			opts.DisableAutoBootstrap(),
 		}
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
@@ -1454,6 +1467,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			opts.Protocols("/esh/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),
+			opts.DisableAutoBootstrap(),
 		}...)
 		if err != nil {
 			t.Fatal(err)
@@ -1463,6 +1477,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			opts.Protocols("/lsr/dht"),
 			opts.Client(false),
 			opts.NamespacedValidator("v", blankValidator{}),
+			opts.DisableAutoBootstrap(),
 		}...)
 		if err != nil {
 			t.Fatal(err)

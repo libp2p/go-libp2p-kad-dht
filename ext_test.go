@@ -9,6 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
+	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
@@ -29,7 +30,8 @@ func TestGetFailures(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	d, err := New(ctx, hosts[0])
+	os := []opts.Option{opts.DisableAutoBootstrap()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +151,9 @@ func TestNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	d, err := New(ctx, hosts[0])
+
+	os := []opts.Option{opts.DisableAutoBootstrap()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +232,8 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	d, err := New(ctx, hosts[0])
+	os := []opts.Option{opts.DisableAutoBootstrap()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +302,8 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	d, err := New(ctx, hosts[0])
+	os := []opts.Option{opts.DisableAutoBootstrap()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}

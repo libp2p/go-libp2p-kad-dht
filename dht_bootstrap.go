@@ -102,22 +102,23 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
 		buckets = buckets[:16]
 	}
 	for bucketID, bucket := range buckets {
-		if time.Since(bucket.RefreshedAt()) > dht.rtRefreshPeriod {
-			// gen rand peer in the bucket
-			randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
+		if time.Since(bucket.RefreshedAt()) <= dht.rtRefreshPeriod {
+			continue
+		}
+		// gen rand peer in the bucket
+		randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
 
-			// walk to the generated peer
-			walkFnc := func(c context.Context) error {
-				_, err := dht.FindPeer(c, randPeerInBucket)
-				if err == routing.ErrNotFound {
-					return nil
-				}
-				return err
+		// walk to the generated peer
+		walkFnc := func(c context.Context) error {
+			_, err := dht.FindPeer(c, randPeerInBucket)
+			if err == routing.ErrNotFound {
+				return nil
 			}
+			return err
+		}
 
-			if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
-				logger.Warningf("failed to do a random walk on bucket %d", bucketID)
-			}
+		if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
+			logger.Warningf("failed to do a random walk on bucket %d", bucketID)
 		}
 	}
 }

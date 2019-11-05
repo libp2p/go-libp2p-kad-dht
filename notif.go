@@ -36,7 +36,7 @@ func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 			dht.Update(dht.Context(), p)
 			if bootstrap && dht.triggerAutoBootstrap {
 				select {
-				case dht.triggerBootstrap <- makeBootstrapReq():
+				case dht.triggerBootstrap <- struct{}{}:
 				default:
 				}
 			}
@@ -82,7 +82,7 @@ func (nn *netNotifiee) testConnection(v network.Conn) {
 		dht.Update(dht.Context(), p)
 		if bootstrap && dht.triggerAutoBootstrap {
 			select {
-			case dht.triggerBootstrap <- makeBootstrapReq():
+			case dht.triggerBootstrap <- struct{}{}:
 			default:
 			}
 		}

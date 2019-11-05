@@ -70,7 +70,7 @@ type IpfsDHT struct {
 	bootstrapCfg opts.BootstrapConfig
 
 	triggerAutoBootstrap bool
-	triggerBootstrap     chan *bootstrapReq
+	triggerBootstrap     chan struct{}
 	latestSelfWalk       time.Time // the last time we looked-up our own peerID in the network
 }
 
@@ -163,7 +163,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTable:     rt,
 		protocols:        protocols,
 		bucketSize:       bucketSize,
-		triggerBootstrap: make(chan *bootstrapReq),
+		triggerBootstrap: make(chan struct{}),
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

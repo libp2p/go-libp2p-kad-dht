@@ -43,15 +43,6 @@ func init() {
 	}
 }
 
-type bootstrapReq struct {
-	errChan chan error
-}
-
-func makeBootstrapReq() *bootstrapReq {
-	errChan := make(chan error, 1)
-	return &bootstrapReq{errChan}
-}
-
 // Bootstrap  i
 func (dht *IpfsDHT) startBootstrapping() error {
 	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
@@ -78,13 +69,10 @@ func (dht *IpfsDHT) startBootstrapping() error {
 				if err := dht.doBootstrap(ctx, walkSelf); err != nil {
 					logger.Warning("bootstrap error: %s", err)
 				}
-			case req := <-dht.triggerBootstrap:
+			case <-dht.triggerBootstrap:
 				logger.Infof("triggering a bootstrap: RT has %d peers", dht.routingTable.Size())
-				err := dht.doBootstrap(ctx, true)
-				select {
-				case req.errChan <- err:
-					close(req.errChan)
-				default:
+				if err := dht.doBootstrap(ctx, true); err != nil {
+					logger.Warning("bootstrap error: %s", err)
 				}
 			case <-ctx.Done():
 				return
@@ -190,7 +178,7 @@ func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 // Note: the context is ignored.
 func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 	select {
-	case dht.triggerBootstrap <- makeBootstrapReq():
+	case dht.triggerBootstrap <- struct{}{}:
 	default:
 	}
 	return nil

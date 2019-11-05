@@ -43,7 +43,7 @@ func init() {
 	}
 }
 
-// Bootstrap  i
+// Start the bootstrap worker.
 func (dht *IpfsDHT) startBootstrapping() error {
 	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
 	dht.proc.Go(func(proc process.Process) {
@@ -58,7 +58,7 @@ func (dht *IpfsDHT) startBootstrapping() error {
 				logger.Warningf("bootstrap error: %s", err)
 			}
 		} else {
-			// disable the "auto-bootstrap" ticker so that no more ticks are sent to his channel
+			// disable the "auto-bootstrap" ticker so that no more ticks are sent to this channel
 			scanInterval.Stop()
 		}
 

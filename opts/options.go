@@ -27,9 +27,11 @@ type Options struct {
 	Protocols  []protocol.ID
 	BucketSize int
 
-	RoutingTableRefreshQueryTimeout time.Duration
-	RoutingTableRefreshPeriod       time.Duration
-	AutoRefresh                     bool
+	RoutingTable struct {
+		RefreshQueryTimeout time.Duration
+		RefreshPeriod       time.Duration
+		AutoRefresh         bool
+	}
 }
 
 // Apply applies the given options to this Option
@@ -54,9 +56,9 @@ var Defaults = func(o *Options) error {
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
 
-	o.RoutingTableRefreshQueryTimeout = 10 * time.Second
-	o.RoutingTableRefreshPeriod = 1 * time.Hour
-	o.AutoRefresh = true
+	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
+	o.RoutingTable.RefreshPeriod = 1 * time.Hour
+	o.RoutingTable.AutoRefresh = true
 
 	return nil
 }
@@ -65,7 +67,7 @@ var Defaults = func(o *Options) error {
 // queries.
 func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 	return func(o *Options) error {
-		o.RoutingTableRefreshQueryTimeout = timeout
+		o.RoutingTable.RefreshQueryTimeout = timeout
 		return nil
 	}
 }
@@ -78,7 +80,7 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 //    the last refresh period.
 func RoutingTableRefreshPeriod(period time.Duration) Option {
 	return func(o *Options) error {
-		o.RoutingTableRefreshPeriod = period
+		o.RoutingTable.RefreshPeriod = period
 		return nil
 	}
 }
@@ -156,7 +158,7 @@ func BucketSize(bucketSize int) Option {
 // nor when the routing table size goes below the minimum threshold.
 func DisableAutoRefresh() Option {
 	return func(o *Options) error {
-		o.AutoRefresh = false
+		o.RoutingTable.AutoRefresh = false
 		return nil
 	}
 }

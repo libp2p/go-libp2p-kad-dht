@@ -91,9 +91,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
-	dht.autoRefresh = cfg.AutoRefresh
-	dht.rtRefreshPeriod = cfg.RoutingTableRefreshPeriod
-	dht.rtRefreshQueryTimeout = cfg.RoutingTableRefreshQueryTimeout
+	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
+	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
+	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))

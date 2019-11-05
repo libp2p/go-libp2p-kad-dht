@@ -108,7 +108,7 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
 
 			// walk to the generated peer
 			walkFnc := func(c context.Context) error {
-				_, err := dht.FindPeer(ctx, randPeerInBucket)
+				_, err := dht.FindPeer(c, randPeerInBucket)
 				if err == routing.ErrNotFound {
 					return nil
 				}

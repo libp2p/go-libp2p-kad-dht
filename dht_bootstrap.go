@@ -2,9 +2,6 @@ package dht
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"sync"
 	"time"
 
 	process "github.com/jbenet/goprocess"
@@ -12,7 +9,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multiaddr"
 	_ "github.com/multiformats/go-multiaddr-dns"
-	"github.com/pkg/errors"
 )
 
 var DefaultBootstrapPeers []multiaddr.Multiaddr
@@ -76,16 +72,12 @@ func (dht *IpfsDHT) startBootstrapping() error {
 }
 
 func (dht *IpfsDHT) doBootstrap(ctx context.Context) {
-	if err := dht.selfWalk(ctx); err != nil {
-		logger.Warningf("error while bootstrapping self: %s", err)
-	}
-	if err := dht.bootstrapBuckets(ctx); err != nil {
-		logger.Warningf("error while bootstrapping buckets: %s", err)
-	}
+	dht.selfWalk(ctx)
+	dht.bootstrapBuckets(ctx)
 }
 
 // bootstrapBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
-func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) error {
+func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) {
 	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
 		logger.Infof("starting bootstrap query for bucket %d to %s (routing table size was %d)",
 			bucketId, target, dht.routingTable.Size())
@@ -103,60 +95,36 @@ func (dht *IpfsDHT) bootstrapBuckets(ctx context.Context) error {
 	}
 
 	buckets := dht.routingTable.GetAllBuckets()
-	var wg sync.WaitGroup
-	errChan := make(chan error)
-
 	for bucketID, bucket := range buckets {
 		if time.Since(bucket.RefreshedAt()) > dht.bootstrapPeriod {
-			wg.Add(1)
-			go func(bucketID int, errChan chan<- error) {
-				defer wg.Done()
-				// gen rand peer in the bucket
-				randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
+			// gen rand peer in the bucket
+			randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
 
-				// walk to the generated peer
-				walkFnc := func(c context.Context) error {
-					_, err := dht.FindPeer(ctx, randPeerInBucket)
-					if err == routing.ErrNotFound {
-						return nil
-					}
-					return err
+			// walk to the generated peer
+			walkFnc := func(c context.Context) error {
+				_, err := dht.FindPeer(ctx, randPeerInBucket)
+				if err == routing.ErrNotFound {
+					return nil
 				}
+				return err
+			}
 
-				if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
-					errChan <- errors.Wrapf(err, "failed to do a random walk on bucket %d", bucketID)
-				}
-			}(bucketID, errChan)
+			if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
+				logger.Warningf("failed to do a random walk on bucket %d", bucketID)
+			}
 		}
-	}
-
-	// wait for all walks to finish & close the error channel
-	go func() {
-		wg.Wait()
-		close(errChan)
-	}()
-
-	// accumulate errors from all go-routines. ensures wait group is completed by reading errChan until closure.
-	var errStrings []string
-	for err := range errChan {
-		errStrings = append(errStrings, err.Error())
-	}
-	if len(errStrings) == 0 {
-		return nil
-	} else {
-		return fmt.Errorf("errors encountered while running bootstrap on RT:\n%s", strings.Join(errStrings, "\n"))
 	}
 }
 
 // Traverse the DHT toward the self ID
-func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
+func (dht *IpfsDHT) selfWalk(ctx context.Context) {
 	queryCtx, cancel := context.WithTimeout(ctx, dht.bootstrapTimeout)
 	defer cancel()
 	_, err := dht.FindPeer(queryCtx, dht.self)
 	if err == routing.ErrNotFound {
-		return nil
+		return
 	}
-	return err
+	logger.Warningf("failed to bootstrap self: %s", err)
 }
 
 // Bootstrap tells the DHT to get into a bootstrapped state.

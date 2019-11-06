@@ -19,22 +19,19 @@ var (
 	DefaultProtocols             = []protocol.ID{ProtocolDHT}
 )
 
-// BootstrapConfig specifies parameters used for bootstrapping the DHT.
-type BootstrapConfig struct {
-	BucketPeriod      time.Duration // how long to wait for a k-bucket to be queried before doing a random walk on it
-	Timeout           time.Duration // how long to wait for a bootstrap query to run
-	SelfQueryInterval time.Duration // how often to query for self
-}
-
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore            ds.Batching
-	Validator            record.Validator
-	Client               bool
-	Protocols            []protocol.ID
-	BucketSize           int
-	BootstrapConfig      BootstrapConfig
-	TriggerAutoBootstrap bool
+	Datastore  ds.Batching
+	Validator  record.Validator
+	Client     bool
+	Protocols  []protocol.ID
+	BucketSize int
+
+	RoutingTable struct {
+		RefreshQueryTimeout time.Duration
+		RefreshPeriod       time.Duration
+		AutoRefresh         bool
+	}
 }
 
 // Apply applies the given options to this Option
@@ -59,24 +56,31 @@ var Defaults = func(o *Options) error {
 	o.Datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.Protocols = DefaultProtocols
 
-	o.BootstrapConfig = BootstrapConfig{
-		// same as that mentioned in the kad dht paper
-		BucketPeriod: 1 * time.Hour,
-
-		Timeout: 10 * time.Second,
-
-		SelfQueryInterval: 1 * time.Hour,
-	}
-
-	o.TriggerAutoBootstrap = true
+	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
+	o.RoutingTable.RefreshPeriod = 1 * time.Hour
+	o.RoutingTable.AutoRefresh = true
 
 	return nil
 }
 
-// Bootstrap configures the dht bootstrapping process
-func Bootstrap(b BootstrapConfig) Option {
+// RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh
+// queries.
+func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 	return func(o *Options) error {
-		o.BootstrapConfig = b
+		o.RoutingTable.RefreshQueryTimeout = timeout
+		return nil
+	}
+}
+
+// RoutingTableRefreshPeriod sets the period for refreshing buckets in the
+// routing table. The DHT will refresh buckets every period by:
+//
+// 1. First searching for nearby peers to figure out how many buckets we should try to fill.
+// 1. Then searching for a random key in each bucket that hasn't been queried in
+//    the last refresh period.
+func RoutingTableRefreshPeriod(period time.Duration) Option {
+	return func(o *Options) error {
+		o.RoutingTable.RefreshPeriod = period
 		return nil
 	}
 }
@@ -149,12 +153,12 @@ func BucketSize(bucketSize int) Option {
 	}
 }
 
-// DisableAutoBootstrap completely disables 'auto-bootstrap' on the Dht
-// This means that neither will we do periodic bootstrap nor will we
-// bootstrap the Dht even if the Routing Table size goes below the minimum threshold
-func DisableAutoBootstrap() Option {
+// DisableAutoRefresh completely disables 'auto-refresh' on the DHT routing
+// table. This means that we will neither refresh the routing table periodically
+// nor when the routing table size goes below the minimum threshold.
+func DisableAutoRefresh() Option {
 	return func(o *Options) error {
-		o.TriggerAutoBootstrap = false
+		o.RoutingTable.AutoRefresh = false
 		return nil
 	}
 }

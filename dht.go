@@ -67,11 +67,10 @@ type IpfsDHT struct {
 
 	bucketSize int
 
-	bootstrapCfg opts.BootstrapConfig
-
-	triggerAutoBootstrap bool
-	triggerBootstrap     chan struct{}
-	latestSelfWalk       time.Time // the last time we looked-up our own peerID in the network
+	autoRefresh           bool
+	rtRefreshQueryTimeout time.Duration
+	rtRefreshPeriod       time.Duration
+	triggerRtRefresh      chan struct{}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -92,7 +91,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
-	dht.bootstrapCfg = cfg.BootstrapConfig
+	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
+	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
+	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
@@ -105,14 +106,13 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
-	dht.triggerAutoBootstrap = cfg.TriggerAutoBootstrap
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {
 			h.SetStreamHandler(p, dht.handleNewStream)
 		}
 	}
-	dht.startBootstrapping()
+	dht.startRefreshing()
 	return dht, nil
 }
 
@@ -163,7 +163,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTable:     rt,
 		protocols:        protocols,
 		bucketSize:       bucketSize,
-		triggerBootstrap: make(chan struct{}),
+		triggerRtRefresh: make(chan struct{}),
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

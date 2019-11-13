@@ -17,7 +17,7 @@ import (
 // For example, a record may contain an ipns entry with an EOL saying its valid
 // until the year 2020 (a great time in the future). For that record to stick around
 // it must be rebroadcasted more frequently than once every 'MaxRecordAge'
-const MaxRecordAge = time.Hour * 36
+var MaxRecordAge = time.Hour * 36
 
 type pubkrs struct {
 	pubk ci.PubKey

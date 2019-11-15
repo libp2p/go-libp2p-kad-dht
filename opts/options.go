@@ -21,11 +21,12 @@ var (
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
-	Datastore  ds.Batching
-	Validator  record.Validator
-	Client     bool
-	Protocols  []protocol.ID
-	BucketSize int
+	Datastore    ds.Batching
+	Validator    record.Validator
+	Client       bool
+	Protocols    []protocol.ID
+	BucketSize   int
+	MaxRecordAge time.Duration
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
@@ -59,6 +60,7 @@ var Defaults = func(o *Options) error {
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
 	o.RoutingTable.RefreshPeriod = 1 * time.Hour
 	o.RoutingTable.AutoRefresh = true
+	o.MaxRecordAge = time.Hour * 36
 
 	return nil
 }
@@ -149,6 +151,19 @@ func Protocols(protocols ...protocol.ID) Option {
 func BucketSize(bucketSize int) Option {
 	return func(o *Options) error {
 		o.BucketSize = bucketSize
+		return nil
+	}
+}
+
+// MaxRecordAge specifies the maximum time that any node will hold onto a record ("PutValue record")
+// from the time its received. This does not apply to any other forms of validity that
+// the record may contain.
+// For example, a record may contain an ipns entry with an EOL saying its valid
+// until the year 2020 (a great time in the future). For that record to stick around
+// it must be rebroadcasted more frequently than once every 'MaxRecordAge'
+func MaxRecordAge(maxAge time.Duration) Option {
+	return func(o *Options) error {
+		o.MaxRecordAge = maxAge
 		return nil
 	}
 }

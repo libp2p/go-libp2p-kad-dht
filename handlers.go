@@ -118,7 +118,7 @@ func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 		recordIsBad = true
 	}
 
-	if time.Since(recvtime) > MaxRecordAge {
+	if time.Since(recvtime) > dht.maxRecordAge {
 		logger.Debug("old record found, tossing.")
 		recordIsBad = true
 	}

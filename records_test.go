@@ -317,8 +317,18 @@ func TestValuesDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			dhtA := setupDHT(ctx, t, false, dhtopt.EnableValues(enabledA))
-			dhtB := setupDHT(ctx, t, false, dhtopt.EnableValues(enabledB))
+			var (
+				optsA, optsB []dhtopt.Option
+			)
+			if !enabledA {
+				optsA = append(optsA, dhtopt.DisableValues())
+			}
+			if !enabledB {
+				optsB = append(optsB, dhtopt.DisableValues())
+			}
+
+			dhtA := setupDHT(ctx, t, false, optsA...)
+			dhtB := setupDHT(ctx, t, false, optsB...)
 
 			defer dhtA.Close()
 			defer dhtB.Close()

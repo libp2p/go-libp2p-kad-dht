@@ -1430,8 +1430,18 @@ func TestProvideDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			dhtA := setupDHT(ctx, t, false, opts.EnableProviders(enabledA))
-			dhtB := setupDHT(ctx, t, false, opts.EnableProviders(enabledB))
+			var (
+				optsA, optsB []opts.Option
+			)
+			if !enabledA {
+				optsA = append(optsA, opts.DisableProviders())
+			}
+			if !enabledB {
+				optsB = append(optsB, opts.DisableProviders())
+			}
+
+			dhtA := setupDHT(ctx, t, false, optsA...)
+			dhtB := setupDHT(ctx, t, false, optsB...)
 
 			defer dhtA.Close()
 			defer dhtB.Close()

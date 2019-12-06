@@ -182,28 +182,28 @@ func DisableAutoRefresh() Option {
 	}
 }
 
-// EnableProviders enables storing and retrieving provider records.
+// DisableProviders disables storing and retrieving provider records.
 //
-// Defaults to true.
+// Defaults to enabled.
 //
 // WARNING: do not change this unless you're using a forked DHT (i.e., a private
 // network and/or distinct DHT protocols with the `Protocols` option).
-func EnableProviders(enable bool) Option {
+func DisableProviders() Option {
 	return func(o *Options) error {
-		o.EnableProviders = enable
+		o.EnableProviders = false
 		return nil
 	}
 }
 
-// EnableValues enables storing and retrieving value records.
+// DisableProviders disables storing and retrieving value records.
 //
-// Defaults to true.
+// Defaults to enabled.
 //
 // WARNING: do not change this unless you're using a forked DHT (i.e., a private
 // network and/or distinct DHT protocols with the `Protocols` option).
-func EnableValues(enable bool) Option {
+func DisableValues() Option {
 	return func(o *Options) error {
-		o.EnableValues = enable
+		o.EnableValues = false
 		return nil
 	}
 }

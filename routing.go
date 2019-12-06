@@ -509,12 +509,13 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // Peers will be returned on the channel as soon as they are found, even before
 // the search query completes.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+	peerOut := make(chan peer.AddrInfo, count)
 	if !dht.enableProviders {
-		return nil
+		close(peerOut)
+		return peerOut
 	}
 
 	logger.Event(ctx, "findProviders", key)
-	peerOut := make(chan peer.AddrInfo, count)
 
 	go dht.findProvidersAsyncRoutine(ctx, key, count, peerOut)
 	return peerOut

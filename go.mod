@@ -6,7 +6,7 @@ require (
 	github.com/gogo/protobuf v1.3.1
 	github.com/hashicorp/golang-lru v0.5.3
 	github.com/ipfs/go-cid v0.0.3
-	github.com/ipfs/go-datastore v0.1.1
+	github.com/ipfs/go-datastore v0.3.1
 	github.com/ipfs/go-ipfs-util v0.0.1
 	github.com/ipfs/go-log v0.0.1
 	github.com/ipfs/go-todocounter v0.0.2

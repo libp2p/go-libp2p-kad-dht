@@ -74,6 +74,9 @@ type IpfsDHT struct {
 
 	maxRecordAge time.Duration
 
+	// Allows disabling dht subsystems. These should _only_ be set on
+	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
+	// networks).
 	enableProviders, enableValues bool
 }
 

@@ -195,7 +195,8 @@ func DisableProviders() Option {
 	}
 }
 
-// DisableProviders disables storing and retrieving value records.
+// DisableProviders disables storing and retrieving value records (including
+// public keys).
 //
 // Defaults to enabled.
 //

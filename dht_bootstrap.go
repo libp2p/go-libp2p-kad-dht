@@ -2,8 +2,10 @@ package dht
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -59,27 +61,54 @@ func (dht *IpfsDHT) startRefreshing() error {
 		}
 
 		for {
+			var waiting []chan<- error
 			select {
 			case <-refreshTicker.C:
-			case <-dht.triggerRtRefresh:
-				logger.Infof("triggering a refresh: RT has %d peers", dht.routingTable.Size())
+			case res := <-dht.triggerRtRefresh:
+				if res != nil {
+					waiting = append(waiting, res)
+				}
 			case <-ctx.Done():
 				return
 			}
-			dht.doRefresh(ctx)
+
+		collectWaiting:
+			for {
+				select {
+				case res := <-dht.triggerRtRefresh:
+					if res != nil {
+						waiting = append(waiting, res)
+					}
+				default:
+					break collectWaiting
+				}
+			}
+			err := dht.doRefresh(ctx)
+			for _, w := range waiting {
+				w <- err
+			}
+			if err != nil {
+				logger.Warning(err)
+			}
 		}
 	})
 
 	return nil
 }
 
-func (dht *IpfsDHT) doRefresh(ctx context.Context) {
-	dht.selfWalk(ctx)
-	dht.refreshBuckets(ctx)
+func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
+	var merr error
+	if err := dht.selfWalk(ctx); err != nil {
+		merr = multierror.Append(merr, err)
+	}
+	if err := dht.refreshBuckets(ctx); err != nil {
+		merr = multierror.Append(merr, err)
+	}
+	return merr
 }
 
 // refreshBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
-func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
+func (dht *IpfsDHT) refreshBuckets(ctx context.Context) error {
 	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
 		logger.Infof("starting refreshing bucket %d to %s (routing table size was %d)",
 			bucketId, target, dht.routingTable.Size())
@@ -103,6 +132,8 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
 		// 16 bits specified anyways.
 		buckets = buckets[:16]
 	}
+
+	var merr error
 	for bucketID, bucket := range buckets {
 		if time.Since(bucket.RefreshedAt()) <= dht.rtRefreshPeriod {
 			continue
@@ -120,20 +151,24 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) {
 		}
 
 		if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
-			logger.Warningf("failed to do a random walk on bucket %d: %s", bucketID, err)
+			merr = multierror.Append(
+				merr,
+				fmt.Errorf("failed to do a random walk on bucket %d: %s", bucketID, err),
+			)
 		}
 	}
+	return merr
 }
 
 // Traverse the DHT toward the self ID
-func (dht *IpfsDHT) selfWalk(ctx context.Context) {
+func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
 	queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 	defer cancel()
 	_, err := dht.FindPeer(queryCtx, dht.self)
 	if err == routing.ErrNotFound {
-		return
+		return nil
 	}
-	logger.Warningf("failed to query self during routing table refresh: %s", err)
+	return fmt.Errorf("failed to query self during routing table refresh: %s", err)
 }
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the
@@ -148,7 +183,25 @@ func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 // RefreshRoutingTable tells the DHT to refresh it's routing tables.
 func (dht *IpfsDHT) RefreshRoutingTable() {
 	select {
-	case dht.triggerRtRefresh <- struct{}{}:
+	case dht.triggerRtRefresh <- nil:
 	default:
+	}
+}
+
+// RefreshRoutingTableWait tells the DHT to refresh it's routing tables and
+// waits for it to finish.
+func (dht *IpfsDHT) RefreshRoutingTableWait(ctx context.Context) error {
+	res := make(chan error, 1)
+	select {
+	case dht.triggerRtRefresh <- res:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	select {
+	case err := <-res:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

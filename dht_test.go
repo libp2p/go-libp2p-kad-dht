@@ -201,7 +201,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
-		dht.RefreshRoutingTable()
+		dht.RefreshRoutingTableWait(ctx)
 	}
 }
 
@@ -663,25 +663,26 @@ func TestRefresh(t *testing.T) {
 
 	<-time.After(100 * time.Millisecond)
 	// bootstrap a few times until we get good tables.
-	stop := make(chan struct{})
+	t.Logf("bootstrapping them so they find each other %d", nDHTs)
+	ctxT, cancelT := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelT()
+
 	go func() {
-		for {
-			t.Logf("bootstrapping them so they find each other %d", nDHTs)
-			ctxT, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
+		for ctxT.Err() == nil {
 			bootstrap(t, ctxT, dhts)
 
+			// wait a bit.
 			select {
 			case <-time.After(50 * time.Millisecond):
 				continue // being explicit
-			case <-stop:
+			case <-ctxT.Done():
 				return
 			}
 		}
 	}()
 
 	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
-	close(stop)
+	cancelT()
 
 	if u.Debug {
 		// the routing tables should be full now. let's inspect them.

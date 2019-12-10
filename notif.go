@@ -36,7 +36,7 @@ func (nn *netNotifiee) Connected(n network.Network, v network.Conn) {
 			dht.Update(dht.Context(), p)
 			if refresh && dht.autoRefresh {
 				select {
-				case dht.triggerRtRefresh <- struct{}{}:
+				case dht.triggerRtRefresh <- nil:
 				default:
 				}
 			}
@@ -82,7 +82,7 @@ func (nn *netNotifiee) testConnection(v network.Conn) {
 		dht.Update(dht.Context(), p)
 		if refresh && dht.autoRefresh {
 			select {
-			case dht.triggerRtRefresh <- struct{}{}:
+			case dht.triggerRtRefresh <- nil:
 			default:
 			}
 		}

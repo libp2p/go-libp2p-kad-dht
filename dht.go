@@ -70,7 +70,7 @@ type IpfsDHT struct {
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
-	triggerRtRefresh      chan struct{}
+	triggerRtRefresh      chan chan<- error
 
 	maxRecordAge time.Duration
 }
@@ -167,7 +167,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTable:     rt,
 		protocols:        protocols,
 		bucketSize:       bucketSize,
-		triggerRtRefresh: make(chan struct{}),
+		triggerRtRefresh: make(chan chan<- error),
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

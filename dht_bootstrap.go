@@ -72,6 +72,7 @@ func (dht *IpfsDHT) startRefreshing() error {
 				return
 			}
 
+			// Batch multiple refresh requests if they're all waiting at the same time.
 		collectWaiting:
 			for {
 				select {
@@ -83,9 +84,11 @@ func (dht *IpfsDHT) startRefreshing() error {
 					break collectWaiting
 				}
 			}
+
 			err := dht.doRefresh(ctx)
 			for _, w := range waiting {
 				w <- err
+				close(w)
 			}
 			if err != nil {
 				logger.Warning(err)
@@ -181,27 +184,14 @@ func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 }
 
 // RefreshRoutingTable tells the DHT to refresh it's routing tables.
-func (dht *IpfsDHT) RefreshRoutingTable() {
-	select {
-	case dht.triggerRtRefresh <- nil:
-	default:
-	}
-}
-
-// RefreshRoutingTableWait tells the DHT to refresh it's routing tables and
-// waits for it to finish.
-func (dht *IpfsDHT) RefreshRoutingTableWait(ctx context.Context) error {
+//
+// The returned channel will block until the refresh finishes, then yield the
+// error and close. The channel is buffered and safe to ignore.
+func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 	res := make(chan error, 1)
 	select {
 	case dht.triggerRtRefresh <- res:
-	case <-ctx.Done():
-		return ctx.Err()
+	default:
 	}
-
-	select {
-	case err := <-res:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return res
 }

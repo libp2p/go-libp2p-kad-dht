@@ -201,7 +201,14 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	start := rand.Intn(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
-		dht.RefreshRoutingTableWait(ctx)
+		select {
+		case err := <-dht.RefreshRoutingTable():
+			if err != nil {
+				t.Error(err)
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

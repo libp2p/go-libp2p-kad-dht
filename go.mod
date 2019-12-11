@@ -23,7 +23,7 @@ require (
 	github.com/libp2p/go-msgio v0.0.4
 	github.com/mr-tron/base58 v1.1.3
 	github.com/multiformats/go-base32 v0.0.3
-	github.com/multiformats/go-multiaddr v0.1.2
+	github.com/multiformats/go-multiaddr v0.2.0
 	github.com/multiformats/go-multiaddr-dns v0.2.0
 	github.com/multiformats/go-multistream v0.1.0
 	github.com/stretchr/testify v1.4.0

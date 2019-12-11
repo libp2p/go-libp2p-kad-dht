@@ -374,11 +374,12 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findProvidersSingle", p, key)
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, keyCid cid.Cid) (*pb.Message, error) {
+	eip := logger.EventBegin(ctx, "findProvidersSingle", p, keyCid)
 	defer eip.Done()
 
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
+	key := keyCid.Hash()
+	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:

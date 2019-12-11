@@ -3,6 +3,7 @@ package dht
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -15,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
 
 	"golang.org/x/xerrors"
@@ -42,8 +44,26 @@ func init() {
 	for i := 0; i < 100; i++ {
 		v := fmt.Sprintf("%d -- value", i)
 
-		mhv := u.Hash([]byte(v))
-		testCaseCids = append(testCaseCids, cid.NewCidV0(mhv))
+		var newCid cid.Cid
+		switch i % 3 {
+		case 0:
+			mhv := u.Hash([]byte(v))
+			newCid = cid.NewCidV0(mhv)
+		case 1:
+			mhv := u.Hash([]byte(v))
+			newCid = cid.NewCidV1(cid.DagCBOR, mhv)
+		case 2:
+			rawMh := make([]byte, 12)
+			binary.PutUvarint(rawMh, cid.Raw)
+			binary.PutUvarint(rawMh[1:], 10)
+			copy(rawMh[2:], []byte(v)[:10])
+			_, mhv, err := multihash.MHFromBytes(rawMh)
+			if err != nil {
+				panic(err)
+			}
+			newCid = cid.NewCidV1(cid.Raw, mhv)
+		}
+		testCaseCids = append(testCaseCids, newCid)
 	}
 }
 
@@ -633,7 +653,7 @@ func TestLocalProvides(t *testing.T) {
 
 	for _, c := range testCaseCids {
 		for i := 0; i < 3; i++ {
-			provs := dhts[i].providers.GetProviders(ctx, c)
+			provs := dhts[i].providers.GetProviders(ctx, c.Hash())
 			if len(provs) > 0 {
 				t.Fatal("shouldnt know this")
 			}
@@ -1370,7 +1390,7 @@ func TestClientModeConnect(t *testing.T) {
 
 	c := testCaseCids[0]
 	p := peer.ID("TestPeer")
-	a.providers.AddProvider(ctx, c, p)
+	a.providers.AddProvider(ctx, c.Hash(), p)
 	time.Sleep(time.Millisecond * 5) // just in case...
 
 	provs, err := b.FindProviders(ctx, c)
@@ -1544,6 +1564,7 @@ func TestFindClosestPeers(t *testing.T) {
 
 func TestProvideDisabled(t *testing.T) {
 	k := testCaseCids[0]
+	kHash := k.Hash()
 	for i := 0; i < 3; i++ {
 		enabledA := (i & 0x1) > 0
 		enabledB := (i & 0x2) > 0
@@ -1584,7 +1605,7 @@ func TestProvideDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				provs := dhtB.providers.GetProviders(ctx, k)
+				provs := dhtB.providers.GetProviders(ctx, kHash)
 				if len(provs) != 0 {
 					t.Fatal("node B should not have found local providers")
 				}
@@ -1600,7 +1621,7 @@ func TestProvideDisabled(t *testing.T) {
 					t.Fatal("node A should not have found providers")
 				}
 			}
-			provAddrs := dhtA.providers.GetProviders(ctx, k)
+			provAddrs := dhtA.providers.GetProviders(ctx, kHash)
 			if len(provAddrs) != 0 {
 				t.Fatal("node A should not have found local providers")
 			}

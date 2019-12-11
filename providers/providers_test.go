@@ -10,7 +10,8 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/peer"
 
-	cid "github.com/ipfs/go-cid"
+	mh "github.com/multiformats/go-multihash"
+
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -26,7 +27,7 @@ func TestProviderManager(t *testing.T) {
 
 	mid := peer.ID("testing")
 	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
-	a := cid.NewCidV0(u.Hash([]byte("test")))
+	a := u.Hash([]byte("test"))
 	p.AddProvider(ctx, a, peer.ID("testingprovider"))
 
 	// Not cached
@@ -56,14 +57,14 @@ func TestProvidersDatastore(t *testing.T) {
 	defer p.proc.Close()
 
 	friend := peer.ID("friend")
-	var cids []cid.Cid
+	var mhs []mh.Multihash
 	for i := 0; i < 100; i++ {
-		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
-		cids = append(cids, c)
-		p.AddProvider(ctx, c, friend)
+		h := u.Hash([]byte(fmt.Sprint(i)))
+		mhs = append(mhs, h)
+		p.AddProvider(ctx, h, friend)
 	}
 
-	for _, c := range cids {
+	for _, c := range mhs {
 		resp := p.GetProviders(ctx, c)
 		if len(resp) != 1 {
 			t.Fatal("Could not retrieve provider.")
@@ -77,7 +78,7 @@ func TestProvidersDatastore(t *testing.T) {
 func TestProvidersSerialization(t *testing.T) {
 	dstore := dssync.MutexWrap(ds.NewMapDatastore())
 
-	k := cid.NewCidV0(u.Hash(([]byte("my key!"))))
+	k := u.Hash(([]byte("my key!")))
 	p1 := peer.ID("peer one")
 	p2 := peer.ID("peer two")
 	pt1 := time.Now()
@@ -135,26 +136,26 @@ func TestProvidesExpire(t *testing.T) {
 	p := NewProviderManager(ctx, mid, ds)
 
 	peers := []peer.ID{"a", "b"}
-	var cids []cid.Cid
+	var mhs []mh.Multihash
 	for i := 0; i < 10; i++ {
-		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
-		cids = append(cids, c)
+		h := u.Hash([]byte(fmt.Sprint(i)))
+		mhs = append(mhs, h)
 	}
 
-	for _, c := range cids[:5] {
-		p.AddProvider(ctx, c, peers[0])
-		p.AddProvider(ctx, c, peers[1])
+	for _, h := range mhs[:5] {
+		p.AddProvider(ctx, h, peers[0])
+		p.AddProvider(ctx, h, peers[1])
 	}
 
 	time.Sleep(time.Second / 4)
 
-	for _, c := range cids[5:] {
-		p.AddProvider(ctx, c, peers[0])
-		p.AddProvider(ctx, c, peers[1])
+	for _, h := range mhs[5:] {
+		p.AddProvider(ctx, h, peers[0])
+		p.AddProvider(ctx, h, peers[1])
 	}
 
-	for _, c := range cids {
-		out := p.GetProviders(ctx, c)
+	for _, h := range mhs {
+		out := p.GetProviders(ctx, h)
 		if len(out) != 2 {
 			t.Fatal("expected providers to still be there")
 		}
@@ -162,15 +163,15 @@ func TestProvidesExpire(t *testing.T) {
 
 	time.Sleep(3 * time.Second / 8)
 
-	for _, c := range cids[:5] {
-		out := p.GetProviders(ctx, c)
+	for _, h := range mhs[:5] {
+		out := p.GetProviders(ctx, h)
 		if len(out) > 0 {
 			t.Fatal("expected providers to be cleaned up, got: ", out)
 		}
 	}
 
-	for _, c := range cids[5:] {
-		out := p.GetProviders(ctx, c)
+	for _, h := range mhs[5:] {
+		out := p.GetProviders(ctx, h)
 		if len(out) != 2 {
 			t.Fatal("expected providers to still be there")
 		}
@@ -201,30 +202,34 @@ func TestProvidesExpire(t *testing.T) {
 var _ = ioutil.NopCloser
 var _ = os.DevNull
 
-/* This can be used for profiling. Keeping it commented out for now to avoid incurring extra CI time
+// TestLargeProvidersSet can be used for profiling.
+// The datastore can be switched to levelDB by uncommenting the section below and the import above
 func TestLargeProvidersSet(t *testing.T) {
+	t.Skip("This can be used for profiling. Skipping it for now to avoid incurring extra CI time")
 	old := lruCacheSize
 	lruCacheSize = 10
 	defer func() { lruCacheSize = old }()
 
-	dirn, err := ioutil.TempDir("", "provtest")
-	if err != nil {
-		t.Fatal(err)
-	}
+	dstore := ds.NewMapDatastore()
 
-	opts := &lds.Options{
-		NoSync:      true,
-		Compression: 1,
-	}
-	lds, err := lds.NewDatastore(dirn, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = lds
-
-	defer func() {
-		os.RemoveAll(dirn)
-	}()
+	//dirn, err := ioutil.TempDir("", "provtest")
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//
+	//opts := &lds.Options{
+	//	NoSync:      true,
+	//	Compression: 1,
+	//}
+	//lds, err := lds.NewDatastore(dirn, opts)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//dstore = lds
+	//
+	//defer func() {
+	//	os.RemoveAll(dirn)
+	//}()
 
 	ctx := context.Background()
 	var peers []peer.ID
@@ -233,28 +238,27 @@ func TestLargeProvidersSet(t *testing.T) {
 	}
 
 	mid := peer.ID("myself")
-	p := NewProviderManager(ctx, mid, lds)
+	p := NewProviderManager(ctx, mid, dstore)
 	defer p.proc.Close()
 
-	var cids []cid.Cid
+	var mhs []mh.Multihash
 	for i := 0; i < 1000; i++ {
-		c := cid.NewCidV0(u.Hash([]byte(fmt.Sprint(i))))
-		cids = append(cids, c)
+		h := u.Hash([]byte(fmt.Sprint(i)))
+		mhs = append(mhs, h)
 		for _, pid := range peers {
-			p.AddProvider(ctx, c, pid)
+			p.AddProvider(ctx, h, pid)
 		}
 	}
 
 	for i := 0; i < 5; i++ {
 		start := time.Now()
-		for _, c := range cids {
-			_ = p.GetProviders(ctx, c)
+		for _, h := range mhs {
+			_ = p.GetProviders(ctx, h)
 		}
 		elapsed := time.Since(start)
 		fmt.Printf("query %f ms\n", elapsed.Seconds()*1000)
 	}
 }
-*/
 
 func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	old := lruCacheSize
@@ -264,20 +268,20 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	defer cancel()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
-	c1 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("1")))
-	c2 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("2")))
+	h1 := u.Hash([]byte("1"))
+	h2 := u.Hash([]byte("2"))
 	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
 
 	// add provider
-	pm.AddProvider(ctx, c1, p1)
-	// make the cached provider for c1 go to datastore
-	pm.AddProvider(ctx, c2, p1)
+	pm.AddProvider(ctx, h1, p1)
+	// make the cached provider for h1 go to datastore
+	pm.AddProvider(ctx, h2, p1)
 	// now just offloaded record should be brought back and joined with p2
-	pm.AddProvider(ctx, c1, p2)
+	pm.AddProvider(ctx, h1, p2)
 
-	c1Provs := pm.GetProviders(ctx, c1)
-	if len(c1Provs) != 2 {
-		t.Fatalf("expected c1 to be provided by 2 peers, is by %d", len(c1Provs))
+	h1Provs := pm.GetProviders(ctx, h1)
+	if len(h1Provs) != 2 {
+		t.Fatalf("expected h1 to be provided by 2 peers, is by %d", len(h1Provs))
 	}
 }
 
@@ -286,18 +290,18 @@ func TestWriteUpdatesCache(t *testing.T) {
 	defer cancel()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
-	c1 := cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("1")))
+	h1 := u.Hash([]byte("1"))
 	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
 
 	// add provider
-	pm.AddProvider(ctx, c1, p1)
+	pm.AddProvider(ctx, h1, p1)
 	// force into the cache
-	pm.GetProviders(ctx, c1)
+	pm.GetProviders(ctx, h1)
 	// add a second provider
-	pm.AddProvider(ctx, c1, p2)
+	pm.AddProvider(ctx, h1, p2)
 
-	c1Provs := pm.GetProviders(ctx, c1)
+	c1Provs := pm.GetProviders(ctx, h1)
 	if len(c1Provs) != 2 {
-		t.Fatalf("expected c1 to be provided by 2 peers, is by %d", len(c1Provs))
+		t.Fatalf("expected h1 to be provided by 2 peers, is by %d", len(c1Provs))
 	}
 }

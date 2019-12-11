@@ -757,6 +757,79 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }
 
+// Check to make sure we re-fill the routing table from connected peers when it
+// completely empties.
+func TestEmptyTable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nDHTs := 50 // needs more than 40 peers so we don't add all of them to our routing table.
+	dhts := setupDHTS(t, ctx, nDHTs)
+	defer func() {
+		for _, dht := range dhts {
+			dht.Close()
+			defer dht.host.Close()
+		}
+	}()
+
+	t.Logf("dhts are not connected. %d", nDHTs)
+	for _, dht := range dhts {
+		rtlen := dht.routingTable.Size()
+		if rtlen > 0 {
+			t.Errorf("routing table for %s should have 0 peers. has %d", dht.self, rtlen)
+		}
+	}
+
+	for i := 1; i < nDHTs; i++ {
+		connectNoSync(t, ctx, dhts[0], dhts[i])
+	}
+
+	// Wait till the routing table stabilizes.
+	oldSize := dhts[0].routingTable.Size()
+	for {
+		time.Sleep(time.Millisecond)
+		newSize := dhts[0].routingTable.Size()
+		if oldSize == newSize {
+			break
+		}
+		oldSize = newSize
+	}
+
+	if u.Debug {
+		printRoutingTables(dhts[:1])
+	}
+
+	// Disconnect from all peers that _were_ in the routing table.
+	routingTablePeers := make(map[peer.ID]bool, nDHTs)
+	for _, p := range dhts[0].RoutingTable().ListPeers() {
+		routingTablePeers[p] = true
+	}
+
+	oldDHTs := dhts[1:]
+	dhts = dhts[:1]
+	for _, dht := range oldDHTs {
+		if routingTablePeers[dht.Host().ID()] {
+			dhts[0].Host().Network().ClosePeer(dht.host.ID())
+			dht.Close()
+			dht.host.Close()
+		} else {
+			dhts = append(dhts, dht)
+		}
+	}
+
+	// we should now _re-add_ some peers to the routing table
+	for i := 0; i < 100; i++ {
+		if dhts[0].routingTable.Size() > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if u.Debug {
+		printRoutingTables(dhts[:1])
+	}
+	t.Fatal("routing table shouldn't have been empty")
+}
+
 func TestPeriodicRefresh(t *testing.T) {
 	if ci.IsRunning() {
 		t.Skip("skipping on CI. highly timing dependent")

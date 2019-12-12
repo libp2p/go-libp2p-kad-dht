@@ -75,6 +75,11 @@ type IpfsDHT struct {
 	triggerRtRefresh      chan chan<- error
 
 	maxRecordAge time.Duration
+
+	// Allows disabling dht subsystems. These should _only_ be set on
+	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
+	// networks).
+	enableProviders, enableValues bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -100,6 +105,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
 	dht.maxRecordAge = cfg.MaxRecordAge
+	dht.enableProviders = cfg.EnableProviders
+	dht.enableValues = cfg.EnableValues
 
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))

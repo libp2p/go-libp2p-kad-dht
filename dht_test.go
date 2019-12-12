@@ -107,13 +107,15 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 
-func setupDHT(ctx context.Context, t *testing.T, client bool) *IpfsDHT {
+func setupDHT(ctx context.Context, t *testing.T, client bool, options ...opts.Option) *IpfsDHT {
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		opts.Client(client),
-		opts.NamespacedValidator("v", blankValidator{}),
-		opts.DisableAutoRefresh(),
+		append([]opts.Option{
+			opts.Client(client),
+			opts.NamespacedValidator("v", blankValidator{}),
+			opts.DisableAutoRefresh(),
+		}, options...)...,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1497,6 +1499,72 @@ func TestFindClosestPeers(t *testing.T) {
 
 	if len(out) != KValue {
 		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
+	}
+}
+
+func TestProvideDisabled(t *testing.T) {
+	k := testCaseCids[0]
+	for i := 0; i < 3; i++ {
+		enabledA := (i & 0x1) > 0
+		enabledB := (i & 0x2) > 0
+		t.Run(fmt.Sprintf("a=%v/b=%v", enabledA, enabledB), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			var (
+				optsA, optsB []opts.Option
+			)
+			if !enabledA {
+				optsA = append(optsA, opts.DisableProviders())
+			}
+			if !enabledB {
+				optsB = append(optsB, opts.DisableProviders())
+			}
+
+			dhtA := setupDHT(ctx, t, false, optsA...)
+			dhtB := setupDHT(ctx, t, false, optsB...)
+
+			defer dhtA.Close()
+			defer dhtB.Close()
+			defer dhtA.host.Close()
+			defer dhtB.host.Close()
+
+			connect(t, ctx, dhtA, dhtB)
+
+			err := dhtB.Provide(ctx, k, true)
+			if enabledB {
+				if err != nil {
+					t.Fatal("put should have succeeded on node B", err)
+				}
+			} else {
+				if err != routing.ErrNotSupported {
+					t.Fatal("should not have put the value to node B", err)
+				}
+				_, err = dhtB.FindProviders(ctx, k)
+				if err != routing.ErrNotSupported {
+					t.Fatal("get should have failed on node B")
+				}
+				provs := dhtB.providers.GetProviders(ctx, k)
+				if len(provs) != 0 {
+					t.Fatal("node B should not have found local providers")
+				}
+			}
+
+			provs, err := dhtA.FindProviders(ctx, k)
+			if enabledA {
+				if len(provs) != 0 {
+					t.Fatal("node A should not have found providers")
+				}
+			} else {
+				if err != routing.ErrNotSupported {
+					t.Fatal("node A should not have found providers")
+				}
+			}
+			provAddrs := dhtA.providers.GetProviders(ctx, k)
+			if len(provAddrs) != 0 {
+				t.Fatal("node A should not have found local providers")
+			}
+		})
 	}
 }
 

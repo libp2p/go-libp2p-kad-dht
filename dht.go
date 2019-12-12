@@ -149,8 +149,8 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
-		dist := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))
-		cmgr.TagPeer(p, "kbucket", 5+dist)
+		commonPrefixLen := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))
+		cmgr.TagPeer(p, "kbucket", 5+commonPrefixLen)
 	}
 
 	rt.PeerRemoved = func(p peer.ID) {

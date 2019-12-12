@@ -374,18 +374,18 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, keyCid cid.Cid) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findProvidersSingle", p, keyCid)
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
+	eip := logger.EventBegin(ctx, "findProvidersSingle", p, key)
 	defer eip.Done()
 
-	key := keyCid.Hash()
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
+	keyMH := key.Hash()
+	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, keyMH, 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
 		return resp, nil
 	case ErrReadTimeout:
-		logger.Warningf("read timeout: %s %s", p.Pretty(), key)
+		logger.Warningf("read timeout: %s %s", p.Pretty(), keyMH)
 		fallthrough
 	default:
 		eip.SetError(err)

@@ -37,6 +37,8 @@ import (
 
 var logger = logging.Logger("dht")
 
+const BaseConnMgrScore = 5
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -150,7 +152,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 	rt.PeerAdded = func(p peer.ID) {
 		commonPrefixLen := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))
-		cmgr.TagPeer(p, "kbucket", 5+commonPrefixLen)
+		cmgr.TagPeer(p, "kbucket", BaseConnMgrScore+commonPrefixLen)
 	}
 
 	rt.PeerRemoved = func(p peer.ID) {

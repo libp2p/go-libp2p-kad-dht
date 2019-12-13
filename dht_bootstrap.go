@@ -189,9 +189,6 @@ func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 // error and close. The channel is buffered and safe to ignore.
 func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 	res := make(chan error, 1)
-	select {
-	case dht.triggerRtRefresh <- res:
-	default:
-	}
+	dht.triggerRtRefresh <- res
 	return res
 }

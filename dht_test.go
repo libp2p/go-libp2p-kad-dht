@@ -189,7 +189,6 @@ func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 }
 
 func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -211,6 +210,47 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// Check to make sure we always signal the RefreshRoutingTable channel.
+func TestRefreshMultiple(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	dhts := setupDHTS(t, ctx, 5)
+	defer func() {
+		for _, dht := range dhts {
+			dht.Close()
+			defer dht.host.Close()
+		}
+	}()
+
+	for _, dht := range dhts[1:] {
+		connect(t, ctx, dhts[0], dht)
+	}
+
+	a := dhts[0].RefreshRoutingTable()
+	time.Sleep(time.Nanosecond)
+	b := dhts[0].RefreshRoutingTable()
+	time.Sleep(time.Nanosecond)
+	c := dhts[0].RefreshRoutingTable()
+
+	// make sure that all of these eventually return
+	select {
+	case <-a:
+	case <-ctx.Done():
+		t.Fatal("first channel didn't signal")
+	}
+	select {
+	case <-b:
+	case <-ctx.Done():
+		t.Fatal("second channel didn't signal")
+	}
+	select {
+	case <-c:
+	case <-ctx.Done():
+		t.Fatal("third channel didn't signal")
 	}
 }
 

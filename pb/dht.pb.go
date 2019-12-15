@@ -260,7 +260,7 @@ func (m *Message_Peer) GetConnection() Message_ConnectionType {
 	return Message_NOT_CONNECTED
 }
 
-// Encapsulates a routing table snapshot for persistence.
+// Encapsulates a routing table snapshot for persistence. Not to be transmitted over the wire.
 type RoutingTableSnapshot struct {
 	// The peers that were members of the routing table.
 	Peers [][]byte `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
@@ -285,7 +285,7 @@ func (m *RoutingTableSnapshot) XXX_Marshal(b []byte, deterministic bool) ([]byte
 		return xxx_messageInfo_RoutingTableSnapshot.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
-		n, err := m.MarshalTo(b)
+		n, err := m.MarshalToSizedBuffer(b)
 		if err != nil {
 			return nil, err
 		}
@@ -497,7 +497,7 @@ func (m *Message_Peer) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 func (m *RoutingTableSnapshot) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
 	if err != nil {
 		return nil, err
 	}
@@ -505,27 +505,34 @@ func (m *RoutingTableSnapshot) Marshal() (dAtA []byte, err error) {
 }
 
 func (m *RoutingTableSnapshot) MarshalTo(dAtA []byte) (int, error) {
-	var i int
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *RoutingTableSnapshot) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
 	_ = i
 	var l int
 	_ = l
-	if len(m.Peers) > 0 {
-		for _, b := range m.Peers {
-			dAtA[i] = 0xa
-			i++
-			i = encodeVarintDht(dAtA, i, uint64(len(b)))
-			i += copy(dAtA[i:], b)
-		}
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
 	}
 	if m.Timestamp != 0 {
-		dAtA[i] = 0x10
-		i++
 		i = encodeVarintDht(dAtA, i, uint64(m.Timestamp))
+		i--
+		dAtA[i] = 0x10
 	}
-	if m.XXX_unrecognized != nil {
-		i += copy(dAtA[i:], m.XXX_unrecognized)
+	if len(m.Peers) > 0 {
+		for iNdEx := len(m.Peers) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Peers[iNdEx])
+			copy(dAtA[i:], m.Peers[iNdEx])
+			i = encodeVarintDht(dAtA, i, uint64(len(m.Peers[iNdEx])))
+			i--
+			dAtA[i] = 0xa
+		}
 	}
-	return i, nil
+	return len(dAtA) - i, nil
 }
 
 func encodeVarintDht(dAtA []byte, offset int, v uint64) int {
@@ -1160,9 +1167,6 @@ func skipDht(dAtA []byte) (n int, err error) {
 				return 0, ErrInvalidLengthDht
 			}
 			iNdEx += length
-			if iNdEx < 0 {
-				return 0, ErrInvalidLengthDht
-			}
 		case 3:
 			depth++
 		case 4:
@@ -1174,6 +1178,9 @@ func skipDht(dAtA []byte) (n int, err error) {
 			iNdEx += 4
 		default:
 			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
+		}
+		if iNdEx < 0 {
+			return 0, ErrInvalidLengthDht
 		}
 		if depth == 0 {
 			return iNdEx, nil

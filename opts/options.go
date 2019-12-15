@@ -34,6 +34,10 @@ type PersistConfig struct {
 	SeedsProposer    persist.SeedsProposer
 	SnapshotInterval time.Duration
 	FallbackPeers    []peer.ID
+
+	SeederDialTimeout      time.Duration // grace period for one dial attempt by the seeder
+	TotalSeederDialTimeout time.Duration // total grace period for a group of dial attempts by the seeder
+	SeederConcurrentDials  int           // number of peers the seeder will dial simultaneously
 }
 
 var DefaultSnapshotInterval = 5 * time.Minute
@@ -46,11 +50,6 @@ type Options struct {
 	Protocols       []protocol.ID
 	Persistence     *PersistConfig
 	BucketSize      int
-	Datastore       ds.Batching
-	Validator       record.Validator
-	Client          bool
-	Protocols       []protocol.ID
-	BucketSize      int
 	MaxRecordAge    time.Duration
 	EnableProviders bool
 	EnableValues    bool
@@ -60,7 +59,6 @@ type Options struct {
 		RefreshPeriod       time.Duration
 		AutoRefresh         bool
 	}
-	Persistence     *PersistConfig
 	BootstrapConfig BootstrapConfig
 }
 
@@ -93,6 +91,13 @@ var Defaults = func(o *Options) error {
 	o.RoutingTable.AutoRefresh = true
 	o.MaxRecordAge = time.Hour * 36
 
+	o.Persistence = new(PersistConfig)
+	o.Persistence.SnapshotInterval = DefaultSnapshotInterval
+
+	o.Persistence.SeederDialTimeout = 5 * time.Second
+	o.Persistence.TotalSeederDialTimeout = 30 * time.Second
+	o.Persistence.SeederConcurrentDials = 50
+
 	return nil
 }
 
@@ -103,9 +108,6 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 		o.RoutingTable.RefreshQueryTimeout = timeout
 		return nil
 	}
-	o.Persistence = new(PersistConfig)
-	o.Persistence.SnapshotInterval = DefaultSnapshotInterval
-	return nil
 }
 
 // RoutingTableRefreshPeriod sets the period for refreshing buckets in the
@@ -124,6 +126,17 @@ func RoutingTableRefreshPeriod(period time.Duration) Option {
 func SeedsProposer(sp persist.SeedsProposer) Option {
 	return func(o *Options) error {
 		o.Persistence.SeedsProposer = sp
+		return nil
+	}
+}
+
+// SeederParams are the params to configure the Dht seeder. Please take a look at the
+// doc for the Persistence config
+func SeederParams(peerDialTimeout, totalDialTimeout time.Duration, nConcurrentDials int) Option {
+	return func(o *Options) error {
+		o.Persistence.SeederDialTimeout = peerDialTimeout
+		o.Persistence.TotalSeederDialTimeout = totalDialTimeout
+		o.Persistence.SeederConcurrentDials = nConcurrentDials
 		return nil
 	}
 }

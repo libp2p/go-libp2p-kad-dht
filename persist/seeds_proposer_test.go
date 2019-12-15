@@ -25,34 +25,19 @@ func TestRandomSeedsProposer(t *testing.T) {
 		nFallbacksAlreadyInRT      int // fallback peers that are already in RT
 		expectedNumPeersInProposal int // number of peers we expect in the routing table after seeding is complete
 	}{
-		"No Proposals -> RT already has target peers": {
-			10, 10, 0, 0, 10, 0,
-			0,
-		},
-		"No Proposals -> candidate & fallback sets are empty": {
-			0, 0, 0, 0, 0, 0,
-			0,
-		},
-		"No Proposals -> candidates & fallbacks already in RT": {
-			3, 0, 0, 3, 3, 3,
-			0,
-		},
-		"No Proposals -> candidates not in peerstore & fallbacks already in RT": {
-			3, 0, 3, 0, 3, 3,
-			0,
-		},
-		"Success -> only candidates": {
-			15, 2, 5, 2, 0, 0,
-			6,
-		},
-		"Success -> candidates + fallbacks": {
-			5, 2, 1, 1, 1, 0,
-			4,
-		},
-		"Success -> only fallbacks": {
-			7, 2, 5, 2, 10, 2,
-			4,
-		},
+		"No Proposals -> RT already has target peers": {10, 10, 0, 0, 10, 0, 0},
+
+		"No Proposals -> candidate & fallback sets are empty": {0, 0, 0, 0, 0, 0, 0},
+
+		"No Proposals -> candidates & fallbacks already in RT": {3, 0, 0, 3, 3, 3, 0},
+
+		"No Proposals -> candidates not in peerstore & fallbacks already in RT": {3, 0, 3, 0, 3, 3, 0},
+
+		"Success -> only candidates": {15, 2, 5, 2, 0, 0, 6},
+
+		"Success -> candidates + fallbacks": {5, 2, 1, 1, 1, 0, 4},
+
+		"Success -> only fallbacks": {7, 2, 5, 2, 10, 2, 4},
 	}
 
 	for name, testcase := range testCases {

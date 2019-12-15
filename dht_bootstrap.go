@@ -8,6 +8,7 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multiaddr"
 	_ "github.com/multiformats/go-multiaddr-dns"
@@ -41,6 +42,19 @@ func init() {
 		}
 		DefaultBootstrapPeers = append(DefaultBootstrapPeers, ma)
 	}
+}
+
+func getDefaultBootstrapPeerIDs() []peer.ID {
+	var defaultBootstrapPeerIDs []peer.ID
+	for i := range DefaultBootstrapPeers {
+		info, err := peer.AddrInfoFromP2pAddr(DefaultBootstrapPeers[i])
+		if err != nil {
+			logger.Errorf("failed to get peerID for peer with multiaddress %s: error is %s", DefaultBootstrapPeers[i].String(), err)
+			continue
+		}
+		defaultBootstrapPeerIDs = append(defaultBootstrapPeerIDs, info.ID)
+	}
+	return defaultBootstrapPeerIDs
 }
 
 // Start the refresh worker.

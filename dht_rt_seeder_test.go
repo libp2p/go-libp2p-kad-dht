@@ -40,22 +40,18 @@ func TestRTSeeder(t *testing.T) {
 		nFallbacks                     int // fallback list
 		expectedNumPeersInRoutingTable int // number of peers we expect in the routing table after seeding is complete
 	}{
-		"Only Candidates": {10, 1, 0,
-			9},
-
-		"Candidates + Fallbacks": {10, 4, 7,
-			13},
-
-		"Only Fallbacks": {5, 5, 9,
-			9},
-
-		"Empty Candidates": {0, 0, 5,
-			5},
+		"Only Candidates":        {10, 1, 0, 9},
+		"Candidates + Fallbacks": {10, 4, 7, 13},
+		"Only Fallbacks":         {5, 5, 9, 9},
+		"Empty Candidates":       {0, 0, 5, 5},
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	for name, testcase := range testCases {
 		// create host for self
-		self := bhost.New(swarmt.GenSwarm(t, context.Background(), swarmt.OptDisableReuseport))
+		self := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 
 		// create candidate hosts & add them to the peer store
 		candidateHosts := make([]bhost.BasicHost, testcase.nTotalCandidates)

@@ -2,26 +2,18 @@ package dht
 
 import (
 	"context"
-	"time"
 
 	"github.com/ipfs/go-todocounter"
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-// SeederDialTimeout is the grace period for one dial attempt
-var SeederDialTimeout = 5 * time.Second
-
-// TotalSeederDialTimeout is the total grace period for a group of dial attempts
-var TotalSeederDialTimeout = 30 * time.Second
-
-// SeederConcurrentDials is the number of peers we will dial simultaneously
-var SeederConcurrentDials = 50
-
 func (dht *IpfsDHT) seedRoutingTable(candidates, fallbacks []peer.ID) error {
 	peersFromSet := func(m map[peer.ID]struct{}) []peer.ID {
-		var peers []peer.ID
+		peers := make([]peer.ID, len(m))
+		i := 0
 		for p := range m {
-			peers = append(peers, p)
+			peers[i] = p
+			i++
 		}
 
 		return peers
@@ -55,7 +47,7 @@ func (dht *IpfsDHT) seedRoutingTable(candidates, fallbacks []peer.ID) error {
 
 			// attempts to dial to a given peer to verify it's available
 			dialFn := func(ctx context.Context, p peer.ID, res chan<- result) {
-				childCtx, cancel := context.WithTimeout(ctx, SeederDialTimeout)
+				childCtx, cancel := context.WithTimeout(ctx, dht.seederDialTimeout)
 				defer cancel()
 				_, err := dht.host.Network().DialPeer(childCtx, p)
 				select {
@@ -65,11 +57,11 @@ func (dht *IpfsDHT) seedRoutingTable(candidates, fallbacks []peer.ID) error {
 			}
 
 			resCh := make(chan result) // dial results.
-			ctx, cancel := context.WithTimeout(dht.ctx, TotalSeederDialTimeout)
+			ctx, cancel := context.WithTimeout(dht.ctx, dht.totalSeederDialTimeout)
 			defer cancel()
 
 			// start dialing
-			semaphore := make(chan struct{}, SeederConcurrentDials)
+			semaphore := make(chan struct{}, dht.seederConcurrentDials)
 			go func(peers []peer.ID) {
 				for _, p := range peers {
 					semaphore <- struct{}{}

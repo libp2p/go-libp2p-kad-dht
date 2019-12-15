@@ -37,6 +37,7 @@ func NewDatastoreSnapshotter(dstore ds.Datastore, namespace string) (Snapshotter
 
 func (dsp *dsSnapshotter) Load() (result []peer.ID, err error) {
 	val, err := dsp.Get(dsSnapshotKey)
+
 	switch err {
 	case nil:
 	case ds.ErrNotFound:
@@ -45,7 +46,7 @@ func (dsp *dsSnapshotter) Load() (result []peer.ID, err error) {
 		return nil, err
 	}
 
-	var s dht_pb.RoutingTableSnapshot
+	s := &dht_pb.RoutingTableSnapshot{}
 	if err := s.Unmarshal(val); err != nil {
 		return nil, err
 	}
@@ -82,5 +83,10 @@ func (dsp *dsSnapshotter) Store(rt *kb.RoutingTable) error {
 		return err
 	}
 
-	return dsp.Put(dsSnapshotKey, bytes)
+	if err := dsp.Put(dsSnapshotKey, bytes); err != nil {
+		return err
+	}
+
+	// flush to disk
+	return dsp.Sync(dsSnapshotKey)
 }

@@ -34,6 +34,7 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
+	pkgerr "github.com/pkg/errors"
 )
 
 var logger = logging.Logger("dht")
@@ -82,8 +83,12 @@ type IpfsDHT struct {
 
 	triggerBootstrap chan struct{}
 
-	seedsProposer persist.SeedsProposer
-	maxRecordAge  time.Duration
+	seedsProposer          persist.SeedsProposer
+	seederDialTimeout      time.Duration
+	totalSeederDialTimeout time.Duration
+	seederConcurrentDials  int
+
+	maxRecordAge time.Duration
 
 	// Allows disabling dht subsystems. These should _only_ be set on
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
@@ -103,24 +108,23 @@ var (
 
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
-	var cfg opts.Options
+	cfg := &opts.Options{}
 	cfg.BucketSize = KValue
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
 
 	// set seedsProposer, snapshotter & fallback peers if not set
-	seedsProposer := cfg.Persistence.SeedsProposer
-	if seedsProposer == nil {
-		seedsProposer = persist.NewRandomSeedsProposer(h, persist.DefaultRndSeederTarget)
+	if cfg.Persistence.SeedsProposer == nil {
+		cfg.Persistence.SeedsProposer = persist.NewRandomSeedsProposer(h, persist.DefaultRndSeederTarget)
 	}
 	snapshotter := cfg.Persistence.Snapshotter
 	if snapshotter == nil {
 		s, err := persist.NewDatastoreSnapshotter(cfg.Datastore, persist.DefaultSnapshotNS)
 		// should never happen
 		if err != nil {
-			logger.Error("failed to initialize the default datastore backed snapshotter")
-			panic(err)
+			logger.Errorf("failed to initialize the default datastore backed snapshotter, err: %s", err)
+			return nil, pkgerr.WithMessage(err, "failed to initialize the default datastore backed snapshotter")
 		}
 		snapshotter = s
 	}
@@ -129,18 +133,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		cfg.Persistence.FallbackPeers = getDefaultBootstrapPeerIDs()
 	}
 
-	dht := makeDHT(ctx, h, &cfg, cfg.BucketSize)
-
-	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
-	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
-	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
-	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
-
-	dht.maxRecordAge = cfg.MaxRecordAge
-	dht.enableProviders = cfg.EnableProviders
-	dht.enableValues = cfg.EnableValues
-	dht.bootstrapCfg = cfg.BootstrapConfig
-	dht.seedsProposer = seedsProposer
+	dht := makeDHT(ctx, h, cfg)
 
 	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
@@ -204,9 +197,9 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 	self := kb.ConvertPeerID(h.ID())
-	rt := kb.NewRoutingTable(bucketSize, self, time.Minute, h.Peerstore())
+	rt := kb.NewRoutingTable(cfg.BucketSize, self, time.Minute, h.Peerstore())
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -218,36 +211,36 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
-	// TODO this is just an example of how the Persist/Seeder API would be used.
-	//  We should set the Snapshotter and the Seeder as fields in IpfsDHT.
-	/*if cfg.Persistence != nil {
-		if cfg.Persistence.Snapshotter != nil && cfg.Persistence.Seeder != nil {
-			candidates, err := cfg.Persistence.Snapshotter.Load()
-			if err != nil {
-				logger.Warningf("error while loading a previous snapshot: %s", err)
-			}
-			if err = cfg.Persistence.Seeder.Seed(rt, candidates, cfg.Persistence.FallbackPeers); err != nil {
-				logger.Warningf("error while seedindg candidates to the routing table: %s", err)
-			}
-		}
-	}*/
-
 	dht := &IpfsDHT{
-		datastore:        dstore,
+		datastore:        cfg.Datastore,
 		self:             h.ID(),
 		peerstore:        h.Peerstore(),
 		host:             h,
 		strmap:           make(map[peer.ID]*messageSender),
 		ctx:              ctx,
-		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
+		providers:        providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
 		birth:            time.Now(),
 		routingTable:     rt,
-		protocols:        protocols,
-		bucketSize:       bucketSize,
+		protocols:        cfg.Protocols,
+		bucketSize:       cfg.BucketSize,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
+
+	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
+	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
+	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
+
+	dht.maxRecordAge = cfg.MaxRecordAge
+	dht.enableProviders = cfg.EnableProviders
+	dht.enableValues = cfg.EnableValues
+	dht.bootstrapCfg = cfg.BootstrapConfig
+
+	dht.seedsProposer = cfg.Persistence.SeedsProposer
+	dht.seederDialTimeout = cfg.Persistence.SeederDialTimeout
+	dht.totalSeederDialTimeout = cfg.Persistence.TotalSeederDialTimeout
+	dht.seederConcurrentDials = cfg.Persistence.SeederConcurrentDials
 
 	return dht
 }

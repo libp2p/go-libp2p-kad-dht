@@ -45,7 +45,7 @@ func init() {
 
 // Start the refresh worker.
 func (dht *IpfsDHT) startRefreshing() error {
-	// scan the RT table periodically & do a random walk on k-buckets that haven't been queried since the given bucket period
+	// scan the RT table periodically & do a random walk for cpl's that haven't been queried since the given period
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
 
@@ -104,20 +104,20 @@ func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
 	if err := dht.selfWalk(ctx); err != nil {
 		merr = multierror.Append(merr, err)
 	}
-	if err := dht.refreshBuckets(ctx); err != nil {
+	if err := dht.refreshCpls(ctx); err != nil {
 		merr = multierror.Append(merr, err)
 	}
 	return merr
 }
 
-// refreshBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
-func (dht *IpfsDHT) refreshBuckets(ctx context.Context) error {
-	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
-		logger.Infof("starting refreshing bucket %d to %s (routing table size was %d)",
-			bucketId, target, dht.routingTable.Size())
+// refreshCpls scans the routing table, and does a random walk for cpl's that haven't been queried since the given period
+func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
+	doQuery := func(cpl uint, target string, f func(context.Context) error) error {
+		logger.Infof("starting refreshing cpl %d to %s (routing table size was %d)",
+			cpl, target, dht.routingTable.Size())
 		defer func() {
-			logger.Infof("finished refreshing bucket %d to %s (routing table size is now %d)",
-				bucketId, target, dht.routingTable.Size())
+			logger.Infof("finished refreshing cpl %d to %s (routing table size is now %d)",
+				cpl, target, dht.routingTable.Size())
 		}()
 		queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 		defer cancel()
@@ -128,35 +128,33 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) error {
 		return err
 	}
 
-	buckets := dht.routingTable.GetAllBuckets()
-	if len(buckets) > 16 {
-		// Don't bother bootstrapping more than 16 buckets.
-		// GenRandPeerID can't generate target peer IDs with more than
-		// 16 bits specified anyways.
-		buckets = buckets[:16]
-	}
+	trackedCpls := dht.routingTable.GetTrackedCplsForRefresh()
 
 	var merr error
-	for bucketID, bucket := range buckets {
-		if time.Since(bucket.RefreshedAt()) <= dht.rtRefreshPeriod {
+	for _, tcpl := range trackedCpls {
+		if time.Since(tcpl.LastRefreshAt) <= dht.rtRefreshPeriod {
 			continue
 		}
-		// gen rand peer in the bucket
-		randPeerInBucket := dht.routingTable.GenRandPeerID(bucketID)
+		// gen rand peer with the cpl
+		randPeer, err := dht.routingTable.GenRandPeerID(tcpl.Cpl)
+		if err != nil {
+			logger.Errorf("failed to generate peerID for cpl %d, err: %s", tcpl.Cpl, err)
+			continue
+		}
 
 		// walk to the generated peer
 		walkFnc := func(c context.Context) error {
-			_, err := dht.FindPeer(c, randPeerInBucket)
+			_, err := dht.FindPeer(c, randPeer)
 			if err == routing.ErrNotFound {
 				return nil
 			}
 			return err
 		}
 
-		if err := doQuery(bucketID, randPeerInBucket.String(), walkFnc); err != nil {
+		if err := doQuery(tcpl.Cpl, randPeer.String(), walkFnc); err != nil {
 			merr = multierror.Append(
 				merr,
-				fmt.Errorf("failed to do a random walk on bucket %d: %s", bucketID, err),
+				fmt.Errorf("failed to do a random walk for cpl %d: %s", tcpl.Cpl, err),
 			)
 		}
 	}

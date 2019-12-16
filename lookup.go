@@ -103,8 +103,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		}
 
 		if res != nil && res.queriedSet != nil {
-			// refresh the k-bucket containing this key as the query was successful
-			dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
+			// refresh the cpl for this key as the query was successful
+			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 
 			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
 			l := len(sorted)

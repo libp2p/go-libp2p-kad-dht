@@ -99,6 +99,7 @@ var Defaults = func(o *Options) error {
 	o.Persistence.SeederConcurrentDials = 50
 	o.Persistence.SeederRTSizeTarget = 30
 	o.Persistence.TotalSeederTimeout = 1 * time.Minute
+	o.Persistence.SeedsProposer = persist.NewRandomSeedsProposer()
 
 	return nil
 }

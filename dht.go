@@ -81,8 +81,6 @@ type IpfsDHT struct {
 	bootstrapCfg          opts.BootstrapConfig
 	triggerRtRefresh      chan chan<- error
 
-	triggerBootstrap chan struct{}
-
 	seedsProposer         persist.SeedsProposer
 	seederRTSizeTarget    int
 	seederDialTimeout     time.Duration
@@ -115,10 +113,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 
-	// set seedsProposer, snapshotter & fallback peers if not set
-	if cfg.Persistence.SeedsProposer == nil {
-		cfg.Persistence.SeedsProposer = persist.NewRandomSeedsProposer()
-	}
+	// set snapshotter & fallback peers if not set
 	snapshotter := cfg.Persistence.Snapshotter
 	if snapshotter == nil {
 		s, err := persist.NewDatastoreSnapshotter(cfg.Datastore, persist.DefaultSnapshotNS)

@@ -35,9 +35,10 @@ type PersistConfig struct {
 	SnapshotInterval time.Duration
 	FallbackPeers    []peer.ID
 
-	SeederDialTimeout      time.Duration // grace period for one dial attempt by the seeder
-	TotalSeederDialTimeout time.Duration // total grace period for a group of dial attempts by the seeder
-	SeederConcurrentDials  int           // number of peers the seeder will dial simultaneously
+	SeederDialTimeout     time.Duration // grace period for one dial attempt by the seeder
+	SeederConcurrentDials int           // number of peers the seeder will dial simultaneously
+	SeederRTSizeTarget    int           // target number of peers we want in the RT before seeder stops
+	TotalSeederTimeout    time.Duration // grace period for the whole seeding proces
 }
 
 var DefaultSnapshotInterval = 5 * time.Minute
@@ -95,8 +96,9 @@ var Defaults = func(o *Options) error {
 	o.Persistence.SnapshotInterval = DefaultSnapshotInterval
 
 	o.Persistence.SeederDialTimeout = 5 * time.Second
-	o.Persistence.TotalSeederDialTimeout = 30 * time.Second
 	o.Persistence.SeederConcurrentDials = 50
+	o.Persistence.SeederRTSizeTarget = 30
+	o.Persistence.TotalSeederTimeout = 1 * time.Minute
 
 	return nil
 }
@@ -132,11 +134,18 @@ func SeedsProposer(sp persist.SeedsProposer) Option {
 
 // SeederParams are the params to configure the Dht seeder. Please take a look at the
 // doc for the Persistence config
-func SeederParams(peerDialTimeout, totalDialTimeout time.Duration, nConcurrentDials int) Option {
+func SeederParams(peerDialTimeout, totalSeederTimeout time.Duration, nConcurrentDials int) Option {
 	return func(o *Options) error {
 		o.Persistence.SeederDialTimeout = peerDialTimeout
-		o.Persistence.TotalSeederDialTimeout = totalDialTimeout
 		o.Persistence.SeederConcurrentDials = nConcurrentDials
+		o.Persistence.TotalSeederTimeout = totalSeederTimeout
+		return nil
+	}
+}
+
+func SeederRTSizeTarget(rtSizeTarget int) Option {
+	return func(o *Options) error {
+		o.Persistence.SeederRTSizeTarget = rtSizeTarget
 		return nil
 	}
 }

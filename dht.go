@@ -83,10 +83,11 @@ type IpfsDHT struct {
 
 	triggerBootstrap chan struct{}
 
-	seedsProposer          persist.SeedsProposer
-	seederDialTimeout      time.Duration
-	totalSeederDialTimeout time.Duration
-	seederConcurrentDials  int
+	seedsProposer         persist.SeedsProposer
+	seederRTSizeTarget    int
+	seederDialTimeout     time.Duration
+	seederConcurrentDials int
+	totalSeederTimeout    time.Duration
 
 	maxRecordAge time.Duration
 
@@ -116,7 +117,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 
 	// set seedsProposer, snapshotter & fallback peers if not set
 	if cfg.Persistence.SeedsProposer == nil {
-		cfg.Persistence.SeedsProposer = persist.NewRandomSeedsProposer(h, persist.DefaultRndSeederTarget)
+		cfg.Persistence.SeedsProposer = persist.NewRandomSeedsProposer()
 	}
 	snapshotter := cfg.Persistence.Snapshotter
 	if snapshotter == nil {
@@ -163,7 +164,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.host.Network().Notify((*netNotifiee)(dht))
 
 	dht.proc.AddChild(dht.providers.Process())
-	dht.Validator = cfg.Validator
 
 	if !cfg.Client {
 		for _, p := range cfg.Protocols {
@@ -228,6 +228,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
+	dht.Validator = cfg.Validator
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
 	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
@@ -239,8 +240,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 
 	dht.seedsProposer = cfg.Persistence.SeedsProposer
 	dht.seederDialTimeout = cfg.Persistence.SeederDialTimeout
-	dht.totalSeederDialTimeout = cfg.Persistence.TotalSeederDialTimeout
 	dht.seederConcurrentDials = cfg.Persistence.SeederConcurrentDials
+	dht.seederRTSizeTarget = cfg.Persistence.SeederRTSizeTarget
+	dht.totalSeederTimeout = cfg.Persistence.TotalSeederTimeout
 
 	return dht
 }

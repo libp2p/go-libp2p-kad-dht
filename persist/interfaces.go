@@ -1,6 +1,8 @@
 package persist
 
 import (
+	"context"
+
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 
@@ -14,12 +16,12 @@ var logSeedProposer = log.Logger("dht/seeds-proposer")
 // for seeding the RT.
 type SeedsProposer interface {
 	// Propose takes an optional set of candidates from a snapshot (or nil if none could be loaded),
-	// and a set of fallback peers, and it returns a set of eligible peers that can be
+	// and a set of fallback peers, and it returns a channel of peers that can be
 	// used to seed the given routing table.
-	// Returns nil if it has no more proposals.
+	// Returns an empty channel if it has no proposals.
 	// Note: Seeding a routing table with the eligible peers will work only if the the dht uses a persistent peerstore across restarts.
 	// This is because we can recover metadata for the candidate peers only if the peerstore was/is persistent.
-	Propose(rt *kbucket.RoutingTable, candidates []peer.ID, fallback []peer.ID) []peer.ID
+	Propose(ctx context.Context, rt *kbucket.RoutingTable, candidates []peer.ID, fallback []peer.ID) chan peer.ID
 }
 
 // A Snapshotter provides the ability to save and restore a routing table from a persistent medium.

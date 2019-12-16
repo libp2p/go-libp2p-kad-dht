@@ -448,15 +448,15 @@ func TestSnapshottingAndSeeding(t *testing.T) {
 	assert.NoError(t, selfDht.Close())
 
 	// now start a new dht with a seedsProposer & ensure it's routing table gets populated
-	sp := persist.NewRandomSeedsProposer(h, 3)
-	newDht, err := New(ctx, h, snapShotterOpt, opts.SeedsProposer(sp))
+	sp := persist.NewRandomSeedsProposer()
+	newDht, err := New(ctx, h, snapShotterOpt, opts.SeedsProposer(sp), opts.SeederRTSizeTarget(3))
 	assert.NoError(t, err)
 	defer newDht.Close()
 	assert.True(t, newDht.routingTable.Size() == 3)
 
 	// once more with a different target
-	sp = persist.NewRandomSeedsProposer(h, 4)
-	newDht, err = New(ctx, h, snapShotterOpt, opts.SeedsProposer(sp))
+	sp = persist.NewRandomSeedsProposer()
+	newDht, err = New(ctx, h, snapShotterOpt, opts.SeedsProposer(sp), opts.SeederRTSizeTarget(4))
 	assert.NoError(t, err)
 	defer newDht.Close()
 	assert.True(t, newDht.routingTable.Size() == 4)

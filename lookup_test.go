@@ -28,9 +28,15 @@ func TestLoggableKey(t *testing.T) {
 		t.Error("expected cid to be formatted as a loggable key")
 	}
 
-	for _, s := range []string{"bla bla", "/bla", "/bla/asdf", ""} {
+	for _, s := range []string{"/bla", ""} {
 		if _, err := tryFormatLoggableKey(s); err == nil {
 			t.Errorf("expected to fail formatting: %s", s)
+		}
+	}
+
+	for _, s := range []string{"bla bla", "/bla/asdf"} {
+		if _, err := tryFormatLoggableKey(s); err != nil {
+			t.Errorf("expected to be formatable: %s", s)
 		}
 	}
 }

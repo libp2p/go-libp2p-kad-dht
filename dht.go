@@ -24,7 +24,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
 	"github.com/jbenet/goprocess"
@@ -33,6 +32,7 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
+	"github.com/multiformats/go-multihash"
 )
 
 var logger = logging.Logger("dht")
@@ -374,18 +374,17 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 	}
 }
 
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findProvidersSingle", p, key)
+func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key multihash.Multihash) (*pb.Message, error) {
+	eip := logger.EventBegin(ctx, "findProvidersSingle", p, multihashLoggableKey(key))
 	defer eip.Done()
 
-	keyMH := key.Hash()
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, keyMH, 0)
+	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
 	switch err {
 	case nil:
 		return resp, nil
 	case ErrReadTimeout:
-		logger.Warningf("read timeout: %s %s", p.Pretty(), keyMH)
+		logger.Warningf("read timeout: %s %s", p.Pretty(), key)
 		fallthrough
 	default:
 		eip.SetError(err)

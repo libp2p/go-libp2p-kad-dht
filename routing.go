@@ -19,6 +19,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
+	"github.com/multiformats/go-multihash"
 )
 
 // asyncQueryBuffer is the size of buffered channels in async queries. This
@@ -415,8 +416,8 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	}
-	eip := logger.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
 	keyMH := key.Hash()
+	eip := logger.EventBegin(ctx, "Provide", multihashLoggableKey(keyMH), logging.LoggableMap{"broadcast": brdcst})
 	defer func() {
 		if err != nil {
 			eip.SetError(err)
@@ -515,19 +516,19 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 		return peerOut
 	}
 
-	logger.Event(ctx, "findProviders", key)
+	keyMH := key.Hash()
+	logger.Event(ctx, "findProviders", multihashLoggableKey(keyMH))
 
-	go dht.findProvidersAsyncRoutine(ctx, key, count, peerOut)
+	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut)
 	return peerOut
 }
 
-func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, count int, peerOut chan peer.AddrInfo) {
-	defer logger.EventBegin(ctx, "findProvidersAsync", key).Done()
+func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
+	defer logger.EventBegin(ctx, "findProvidersAsync", multihashLoggableKey(key)).Done()
 	defer close(peerOut)
 
-	keyMH := key.Hash()
 	ps := peer.NewLimitedSet(count)
-	provs := dht.providers.GetProviders(ctx, keyMH)
+	provs := dht.providers.GetProviders(ctx, key)
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p) {
@@ -546,7 +547,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		}
 	}
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertKey(string(keyMH)), AlphaValue)
+	peers := dht.routingTable.NearestPeers(kb.ConvertKey(string(key)), AlphaValue)
 	if len(peers) == 0 {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,
@@ -557,7 +558,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 
 	// setup the Query
 	parent := ctx
-	query := dht.newQuery(string(keyMH), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
+	query := dht.newQuery(string(key), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
 		routing.PublishQueryEvent(parent, &routing.QueryEvent{
 			Type: routing.SendingQuery,
 			ID:   p,
@@ -625,7 +626,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 	}
 
 	// refresh the cpl for this key after the query is run
-	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(keyMH)), time.Now())
+	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(key)), time.Now())
 }
 
 // FindPeer searches for a peer with given ID.

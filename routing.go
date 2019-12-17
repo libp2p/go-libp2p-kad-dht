@@ -396,9 +396,8 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 		//
 		// We'll just call this a success.
 		if got > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
-			// refresh the k-bucket containing this key as the query was successful
-			dht.routingTable.BucketForID(kb.ConvertKey(key)).ResetRefreshedAt(time.Now())
-
+			// refresh the cpl for this key as the query was successful
+			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 			err = nil
 		}
 		done(err)
@@ -623,8 +622,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 		})
 	}
 
-	// refresh the k-bucket containing this key after the query is run
-	dht.routingTable.BucketForID(kb.ConvertKey(key.KeyString())).ResetRefreshedAt(time.Now())
+	// refresh the cpl for this key after the query is run
+	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key.KeyString()), time.Now())
 }
 
 // FindPeer searches for a peer with given ID.
@@ -696,8 +695,8 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
-	// refresh the k-bucket containing this key since the lookup was successful
-	dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
+	// refresh the cpl for this key since the lookup was successful
+	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
 
 	logger.Debugf("FindPeer %v %v", id, result.success)
 	if result.peer.ID == "" {
@@ -767,8 +766,8 @@ func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<
 			logger.Debug(err)
 		}
 
-		// refresh the k-bucket containing this key
-		dht.routingTable.BucketForID(kb.ConvertPeerID(id)).ResetRefreshedAt(time.Now())
+		// refresh the cpl for this key
+		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
 
 		// close the peerchan channel when done.
 		close(peerchan)

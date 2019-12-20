@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
+	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 
@@ -31,7 +32,8 @@ func TestGetFailures(t *testing.T) {
 	host1 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 	host2 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 
-	d, err := New(ctx, host1)
+	os := []opts.Option{opts.DisableAutoRefresh()}
+	d, err := New(ctx, host1, os...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,9 @@ func TestNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	d, err := New(ctx, hosts[0])
+
+	os := []opts.Option{opts.DisableAutoRefresh()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +240,8 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	d, err := New(ctx, hosts[0])
+	os := []opts.Option{opts.DisableAutoRefresh()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +312,8 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	d, err := New(ctx, hosts[0])
+	os := []opts.Option{opts.DisableAutoRefresh()}
+	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}

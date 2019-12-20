@@ -18,7 +18,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/whyrusleeping/base32"
+	"github.com/multiformats/go-base32"
 )
 
 // dhthandler specifies the signature of functions that handle DHT messages.
@@ -26,21 +26,31 @@ type dhtHandler func(context.Context, peer.ID, *pb.Message, network.Conn) (*pb.M
 
 func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 	switch t {
-	case pb.Message_GET_VALUE:
-		return dht.handleGetValue
-	case pb.Message_PUT_VALUE:
-		return dht.handlePutValue
 	case pb.Message_FIND_NODE:
 		return dht.handleFindPeer
-	case pb.Message_ADD_PROVIDER:
-		return dht.handleAddProvider
-	case pb.Message_GET_PROVIDERS:
-		return dht.handleGetProviders
 	case pb.Message_PING:
 		return dht.handlePing
-	default:
-		return nil
 	}
+
+	if dht.enableValues {
+		switch t {
+		case pb.Message_GET_VALUE:
+			return dht.handleGetValue
+		case pb.Message_PUT_VALUE:
+			return dht.handlePutValue
+		}
+	}
+
+	if dht.enableProviders {
+		switch t {
+		case pb.Message_ADD_PROVIDER:
+			return dht.handleAddProvider
+		case pb.Message_GET_PROVIDERS:
+			return dht.handleGetProviders
+		}
+	}
+
+	return nil
 }
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message, remote network.Conn) (_ *pb.Message, err error) {
@@ -118,7 +128,7 @@ func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 		recordIsBad = true
 	}
 
-	if time.Since(recvtime) > MaxRecordAge {
+	if time.Since(recvtime) > dht.maxRecordAge {
 		logger.Debug("old record found, tossing.")
 		recordIsBad = true
 	}

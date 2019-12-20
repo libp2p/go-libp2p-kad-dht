@@ -33,11 +33,11 @@ import (
 	goprocessctx "github.com/jbenet/goprocess/context"
 	circuit "github.com/libp2p/go-libp2p-circuit"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p-record"
+	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr-net"
-	base32 "github.com/whyrusleeping/base32"
 )
 
 var logger = logging.Logger("dht")
@@ -48,6 +48,8 @@ const (
 	ModeServer = DHTMode(1)
 	ModeClient = DHTMode(2)
 )
+
+const BaseConnMgrScore = 5
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
@@ -86,9 +88,17 @@ type IpfsDHT struct {
 		evtPeerIdentification event.Subscription
 	}
 
-	bootstrapCfg opts.BootstrapConfig
+	autoRefresh           bool
+	rtRefreshQueryTimeout time.Duration
+	rtRefreshPeriod       time.Duration
+	triggerRtRefresh      chan chan<- error
 
-	triggerBootstrap chan struct{}
+	maxRecordAge time.Duration
+
+	// Allows disabling dht subsystems. These should _only_ be set on
+	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
+	// networks).
+	enableProviders, enableValues bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -109,7 +119,13 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		return nil, err
 	}
 	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
-	dht.bootstrapCfg = cfg.BootstrapConfig
+	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
+	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
+	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
+
+	dht.maxRecordAge = cfg.MaxRecordAge
+	dht.enableProviders = cfg.EnableProviders
+	dht.enableValues = cfg.EnableValues
 
 	dht.Validator = cfg.Validator
 	dht.mode = ModeClient
@@ -136,6 +152,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// handle providers
 	dht.proc.AddChild(dht.providers.Process())
 
+	dht.startRefreshing()
 	return dht, nil
 }
 
@@ -163,12 +180,13 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int) *IpfsDHT {
-	rt := kb.NewRoutingTable(bucketSize, kb.ConvertPeerID(h.ID()), time.Minute, h.Peerstore())
-
+	self := kb.ConvertPeerID(h.ID())
+	rt := kb.NewRoutingTable(bucketSize, self, time.Minute, h.Peerstore())
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
-		cmgr.TagPeer(p, "kbucket", 5)
+		commonPrefixLen := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))
+		cmgr.TagPeer(p, "kbucket", BaseConnMgrScore+commonPrefixLen)
 	}
 
 	rt.PeerRemoved = func(p peer.ID) {
@@ -187,7 +205,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		routingTable:     rt,
 		protocols:        protocols,
 		bucketSize:       bucketSize,
-		triggerBootstrap: make(chan struct{}),
+		triggerRtRefresh: make(chan chan<- error),
 	}
 
 	var err error
@@ -209,7 +227,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	writeResp := func(errorChan chan error, err error) {
 		select {
 		case <-proc.Closing():
-		case errorChan <- err:
+		case errorChan <- errChan:
 		}
 		close(errorChan)
 	}

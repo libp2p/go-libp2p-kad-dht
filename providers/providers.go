@@ -19,7 +19,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/simplelru"
 	goprocess "github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	base32 "github.com/whyrusleeping/base32"
+	base32 "github.com/multiformats/go-base32"
 )
 
 var batchBufferSize = 256

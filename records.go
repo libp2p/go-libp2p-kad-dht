@@ -3,21 +3,12 @@ package dht
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 )
-
-// MaxRecordAge specifies the maximum time that any node will hold onto a record
-// from the time its received. This does not apply to any other forms of validity that
-// the record may contain.
-// For example, a record may contain an ipns entry with an EOL saying its valid
-// until the year 2020 (a great time in the future). For that record to stick around
-// it must be rebroadcasted more frequently than once every 'MaxRecordAge'
-const MaxRecordAge = time.Hour * 36
 
 type pubkrs struct {
 	pubk ci.PubKey

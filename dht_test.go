@@ -805,7 +805,7 @@ func TestEmptyTable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nDHTs := 50 // needs more than 40 peers so we don't add all of them to our routing table.
+	nDHTs := 50
 	dhts := setupDHTS(t, ctx, nDHTs)
 	defer func() {
 		for _, dht := range dhts {
@@ -836,6 +836,10 @@ func TestEmptyTable(t *testing.T) {
 		}
 		oldSize = newSize
 	}
+
+	// remove any one peer from the RT so we don't  end up disconnecting all of them if the RT
+	// already has all peers we are connected to
+	dhts[0].routingTable.Remove(dhts[0].routingTable.ListPeers()[0])
 
 	if u.Debug {
 		printRoutingTables(dhts[:1])

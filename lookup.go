@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
 func tryFormatLoggableKey(k string) (string, error) {
@@ -69,8 +69,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	parent := ctx
 	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
 		// For DHT query command
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type: notif.SendingQuery,
+		routing.PublishQueryEvent(parent, &routing.QueryEvent{
+			Type: routing.SendingQuery,
 			ID:   p,
 		})
 
@@ -82,8 +82,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
 		// For DHT query command
-		notif.PublishQueryEvent(parent, &notif.QueryEvent{
-			Type:      notif.PeerResponse,
+		routing.PublishQueryEvent(parent, &routing.QueryEvent{
+			Type:      routing.PeerResponse,
 			ID:        p,
 			Responses: peers,
 		})

@@ -17,7 +17,6 @@ import (
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 	queue "github.com/libp2p/go-libp2p-peerstore/queue"
-	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
@@ -197,8 +196,8 @@ func (r *dhtQueryRunner) addPeerToQuery(next peer.ID) {
 		return
 	}
 
-	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-		Type: notif.AddingPeer,
+	routing.PublishQueryEvent(r.runCtx, &routing.QueryEvent{
+		Type: routing.AddingPeer,
 		ID:   next,
 	})
 
@@ -247,16 +246,16 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 	}
 
 	logger.Debug("not connected. dialing.")
-	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-		Type: notif.DialingPeer,
+	routing.PublishQueryEvent(r.runCtx, &routing.QueryEvent{
+		Type: routing.DialingPeer,
 		ID:   p,
 	})
 
 	pi := peer.AddrInfo{ID: p}
 	if err := r.query.dht.host.Connect(ctx, pi); err != nil {
 		logger.Debugf("error connecting: %s", err)
-		notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
-			Type:  notif.QueryError,
+		routing.PublishQueryEvent(r.runCtx, &routing.QueryEvent{
+			Type:  routing.QueryError,
 			Extra: err.Error(),
 			ID:    p,
 		})

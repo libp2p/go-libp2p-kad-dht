@@ -13,6 +13,8 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
+	"github.com/multiformats/go-base32"
+	"github.com/multiformats/go-multihash"
 )
 
 func tryFormatLoggableKey(k string) (string, error) {
@@ -33,11 +35,15 @@ func tryFormatLoggableKey(k string) (string, error) {
 		cstr = k
 	}
 
+	var encStr string
 	c, err := cid.Cast([]byte(cstr))
-	if err != nil {
-		return "", fmt.Errorf("loggableKey could not cast key to a CID: %x %v", k, err)
+	if err == nil {
+		encStr = c.String()
+	} else {
+		encStr = base32.RawStdEncoding.EncodeToString([]byte(cstr))
 	}
-	return fmt.Sprintf("/%s/%s", proto, c.String()), nil
+
+	return fmt.Sprintf("/%s/%s", proto, encStr), nil
 }
 
 func loggableKey(k string) logging.LoggableMap {
@@ -50,6 +56,12 @@ func loggableKey(k string) logging.LoggableMap {
 
 	return logging.LoggableMap{
 		"key": k,
+	}
+}
+
+func multihashLoggableKey(mh multihash.Multihash) logging.LoggableMap {
+	return logging.LoggableMap{
+		"multihash": base32.RawStdEncoding.EncodeToString(mh),
 	}
 }
 

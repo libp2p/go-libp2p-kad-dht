@@ -13,7 +13,6 @@ import (
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -317,26 +316,26 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	logger.SetTag(ctx, "peer", p)
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
-	c, err := cid.Cast([]byte(pmes.GetKey()))
-	if err != nil {
-		return nil, err
+	key := pmes.GetKey()
+	if len(key) > 80 {
+		return nil, fmt.Errorf("handleGetProviders key size too large")
 	}
-	logger.SetTag(ctx, "key", c)
+	logger.SetTag(ctx, "key", key)
 
 	// debug logging niceness.
-	reqDesc := fmt.Sprintf("%s handleGetProviders(%s, %s): ", dht.self, p, c)
+	reqDesc := fmt.Sprintf("%s handleGetProviders(%s, %s): ", dht.self, p, key)
 	logger.Debugf("%s begin", reqDesc)
 	defer logger.Debugf("%s end", reqDesc)
 
 	// check if we have this value, to add ourselves as provider.
-	has, err := dht.datastore.Has(convertToDsKey(c.Bytes()))
+	has, err := dht.datastore.Has(convertToDsKey(key))
 	if err != nil && err != ds.ErrNotFound {
 		logger.Debugf("unexpected datastore error: %v\n", err)
 		has = false
 	}
 
 	// setup providers
-	providers := dht.providers.GetProviders(ctx, c)
+	providers := dht.providers.GetProviders(ctx, key)
 	if has {
 		providers = append(providers, dht.self)
 		logger.Debugf("%s have the value. added self as provider", reqDesc)
@@ -366,13 +365,13 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 	defer func() { logger.FinishWithErr(ctx, _err) }()
 	logger.SetTag(ctx, "peer", p)
 
-	c, err := cid.Cast([]byte(pmes.GetKey()))
-	if err != nil {
-		return nil, err
+	key := pmes.GetKey()
+	if len(key) > 80 {
+		return nil, fmt.Errorf("handleAddProviders key size too large")
 	}
-	logger.SetTag(ctx, "key", c)
+	logger.SetTag(ctx, "key", key)
 
-	logger.Debugf("%s adding %s as a provider for '%s'\n", dht.self, p, c)
+	logger.Debugf("%s adding %s as a provider for '%s'\n", dht.self, p, key)
 
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
@@ -389,12 +388,12 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			continue
 		}
 
-		logger.Debugf("received provider %s for %s (addrs: %s)", p, c, pi.Addrs)
+		logger.Debugf("received provider %s for %s (addrs: %s)", p, key, pi.Addrs)
 		if pi.ID != dht.self { // don't add own addrs.
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)
 		}
-		dht.providers.AddProvider(ctx, c, p)
+		dht.providers.AddProvider(ctx, key, p)
 	}
 
 	return nil, nil

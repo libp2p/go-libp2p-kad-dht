@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/log"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
@@ -15,7 +18,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -32,38 +34,38 @@ var asyncQueryBuffer = 10
 // Basic Put/Get
 
 // PutValue adds value corresponding to given Key.
-// This is the top level "Store" operation of the DHT
-func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
-	eip := logger.EventBegin(ctx, "PutValue")
-	defer func() {
-		eip.Append(loggableKey(key))
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
+// This is the top level "Store" operation of the DHT.
+func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) error {
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.put_value", opentracing.Tags{
+		"dht.record_key": key,
+	})
+	defer LinkedFinish(sp, &err)
+
 	logger.Debugf("PutValue %s", key)
 
 	// don't even allow local users to put bad values.
-	if err := dht.Validator.Validate(key, value); err != nil {
+	if err = dht.Validator.Validate(key, value); err != nil {
 		return err
 	}
 
+	// Try to fetch from the datastore.
 	old, err := dht.getLocal(key)
 	if err != nil {
-		// Means something is wrong with the datastore.
 		return err
 	}
 
 	// Check if we have an old value that's not the same as the new one.
 	if old != nil && !bytes.Equal(old.GetValue(), value) {
+		var i int
 		// Check to see if the new one is better.
-		i, err := dht.Validator.Select(key, [][]byte{value, old.GetValue()})
+		i, err = dht.Validator.Select(key, [][]byte{value, old.GetValue()})
 		if err != nil {
 			return err
 		}
 		if i != 0 {
-			return fmt.Errorf("can't replace a newer value with an older value")
+			err = fmt.Errorf("can't replace a newer value with an older value")
+			return err
 		}
 	}
 
@@ -82,10 +84,12 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	wg := sync.WaitGroup{}
 	for p := range pchan {
 		wg.Add(1)
+
 		go func(p peer.ID) {
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			defer wg.Done()
+
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.Value,
 				ID:   p,
@@ -93,6 +97,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 
 			err := dht.putValueToPeer(ctx, p, rec)
 			if err != nil {
+				sp.LogFields(log.Error(err))
 				logger.Debugf("failed putting value to peer: %s", err)
 			}
 		}(p)
@@ -109,15 +114,12 @@ type RecvdVal struct {
 }
 
 // GetValue searches for the value corresponding to given Key.
-func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) (_ []byte, err error) {
-	eip := logger.EventBegin(ctx, "GetValue")
-	defer func() {
-		eip.Append(loggableKey(key))
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
+func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.get_value", opentracing.Tags{
+		"dht.record_key": loggableKey(key),
+	})
+	defer LinkedFinish(sp, &err)
 
 	// apply defaultQuorum if relevant
 	var cfg routing.Options
@@ -130,8 +132,8 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	if err != nil {
 		return nil, err
 	}
-	var best []byte
 
+	var best []byte
 	for r := range responses {
 		best = r
 	}
@@ -341,10 +343,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 		res := &dhtQueryResult{closerPeers: peers}
 
 		if rec.GetValue() != nil || err == errInvalidRecord {
-			rv := RecvdVal{
-				Val:  rec.GetValue(),
-				From: p,
-			}
+			rv := RecvdVal{Val: rec.GetValue(), From: p}
 			valslock.Lock()
 			select {
 			case vals <- rv:
@@ -397,14 +396,12 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
-	eip := logger.EventBegin(ctx, "Provide", key, logging.LoggableMap{"broadcast": brdcst})
-	defer func() {
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
+func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) error {
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.provide", opentracing.Tags{
+		"record.key": loggableKey(key.String()),
+	})
+	defer LinkedFinish(sp, &err)
 
 	// add self locally
 	dht.providers.AddProvider(ctx, key, dht.self)
@@ -448,6 +445,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
+
 			logger.Debugf("putProvider(%s, %s)", key, p)
 			err := dht.sendMessage(ctx, p, mes)
 			if err != nil {
@@ -456,6 +454,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		}(p)
 	}
 	wg.Wait()
+
 	return nil
 }
 func (dht *IpfsDHT) makeProvRecord(skey cid.Cid) (*pb.Message, error) {

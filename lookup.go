@@ -2,63 +2,21 @@ package dht
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/opentracing/opentracing-go"
 
-	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	notif "github.com/libp2p/go-libp2p-routing/notifications"
 )
 
-func tryFormatLoggableKey(k string) (string, error) {
-	if len(k) == 0 {
-		return "", fmt.Errorf("loggableKey is empty")
-	}
-	var proto, cstr string
-	if k[0] == '/' {
-		// it's a path (probably)
-		protoEnd := strings.IndexByte(k[1:], '/')
-		if protoEnd < 0 {
-			return k, fmt.Errorf("loggableKey starts with '/' but is not a path: %x", k)
-		}
-		proto = k[1 : protoEnd+1]
-		cstr = k[protoEnd+2:]
-	} else {
-		proto = "provider"
-		cstr = k
-	}
-
-	c, err := cid.Cast([]byte(cstr))
-	if err != nil {
-		return "", fmt.Errorf("loggableKey could not cast key to a CID: %x %v", k, err)
-	}
-	return fmt.Sprintf("/%s/%s", proto, c.String()), nil
-}
-
-func loggableKey(k string) logging.LoggableMap {
-	newKey, err := tryFormatLoggableKey(k)
-	if err != nil {
-		logger.Debug(err)
-	} else {
-		k = newKey
-	}
-
-	return logging.LoggableMap{
-		"key": k,
-	}
-}
-
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
-	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
-	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
-	if len(tablepeers) == 0 {
+	nearest := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
+	if len(nearest) == 0 {
 		return nil, kb.ErrLookupFailure
 	}
 
@@ -92,14 +50,21 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	})
 
 	go func() {
+		var err error
+		sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.get_closest_peers", opentracing.Tags{
+			"lookup.key": key,
+		})
+		defer LinkedFinish(sp, &err)
+
 		defer close(out)
-		defer e.Done()
+
 		timedCtx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
-		// run it!
-		res, err := query.Run(timedCtx, tablepeers)
+
+		res, err := query.Run(timedCtx, nearest)
 		if err != nil {
 			logger.Debugf("closestPeers query run error: %s", err)
+			return
 		}
 
 		if res != nil && res.queriedSet != nil {

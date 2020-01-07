@@ -2,6 +2,8 @@ package dht
 
 import (
 	"context"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/log"
 	"math"
 	"sync"
 	"time"
@@ -14,15 +16,19 @@ const (
 	// DefaultDialQueueMinParallelism is the default value for the minimum number of worker dial goroutines that will
 	// be alive at any time.
 	DefaultDialQueueMinParallelism = 6
+
 	// DefaultDialQueueMaxParallelism is the default value for the maximum number of worker dial goroutines that can
 	// be alive at any time.
 	DefaultDialQueueMaxParallelism = 20
+
 	// DefaultDialQueueMaxIdle is the default value for the period that a worker dial goroutine waits before signalling
 	// a worker pool downscaling.
 	DefaultDialQueueMaxIdle = 5 * time.Second
+
 	// DefaultDialQueueScalingMutePeriod is the default value for the amount of time to ignore further worker pool
 	// scaling events, after one is processed. Its role is to reduce jitter.
 	DefaultDialQueueScalingMutePeriod = 1 * time.Second
+
 	// DefaultDialQueueScalingFactor is the default factor by which the current number of workers will be multiplied
 	// or divided when upscaling and downscaling events occur, respectively.
 	DefaultDialQueueScalingFactor = 1.5
@@ -52,14 +58,18 @@ type dqParams struct {
 type dqConfig struct {
 	// minParallelism is the minimum number of worker dial goroutines that will be alive at any time.
 	minParallelism uint
+
 	// maxParallelism is the maximum number of worker dial goroutines that can be alive at any time.
 	maxParallelism uint
+
 	// scalingFactor is the factor by which the current number of workers will be multiplied or divided when upscaling
 	// and downscaling events occur, respectively.
 	scalingFactor float64
+
 	// mutePeriod is the amount of time to ignore further worker pool scaling events, after one is processed.
 	// Its role is to reduce jitter.
 	mutePeriod time.Duration
+
 	// maxIdle is the period that a worker dial goroutine waits before signalling a worker pool downscaling.
 	maxIdle time.Duration
 }
@@ -125,6 +135,7 @@ func (dq *dialQueue) control() {
 		dialled        <-chan peer.ID
 		waiting        []waitingCh
 		lastScalingEvt = time.Now()
+		sp             = opentracing.SpanFromContext(dq.dqParams.ctx)
 	)
 
 	defer func() {
@@ -132,6 +143,7 @@ func (dq *dialQueue) control() {
 			close(w.ch)
 		}
 		waiting = nil
+		sp.LogKV("event", "dial queue closed")
 	}()
 
 	// start workers
@@ -142,8 +154,7 @@ func (dq *dialQueue) control() {
 	}
 	dq.nWorkers = uint(tgt)
 
-	// control workers
-
+	// this loop supervises workers and their scale.
 	for {
 		// First process any backlog of dial jobs and waiters -- making progress is the priority.
 		// This block is copied below; couldn't find a more concise way of doing this.
@@ -183,10 +194,17 @@ func (dq *dialQueue) control() {
 				return // we're done if the ChanQueue is closed, which happens when the context is closed.
 			}
 			w := waiting[0]
-			logger.Debugf("delivering dialled peer to DHT; took %dms.", time.Since(w.ts)/time.Millisecond)
+			t := time.Since(w.ts) / time.Millisecond
+			logger.Debugf("delivering dialled peer to DHT; took %dms.")
 			w.ch <- p
 			close(w.ch)
 			waiting = waiting[1:]
+			sp.LogFields(
+				log.String("component", "dial queue"),
+				log.String("event", "delivered dial"),
+				log.Int64("took_ns", int64(t)),
+				log.Int("waiting", len(waiting)),
+			)
 			if len(waiting) == 0 {
 				// no more waiters, so stop consuming dialled jobs.
 				dialled = nil
@@ -249,6 +267,13 @@ func (dq *dialQueue) grow() {
 			return
 		}
 		logger.Debugf("grew dial worker pool: %d => %d", prev, dq.nWorkers)
+		sp := opentracing.SpanFromContext(dq.dqParams.ctx)
+		sp.LogFields(
+			log.String("component", "dial queue"),
+			log.String("event", "queue expanded"),
+			log.Uint64("before", uint64(prev)),
+			log.Uint64("after", uint64(dq.nWorkers)),
+		)
 	}(dq.nWorkers)
 
 	if dq.nWorkers == dq.config.maxParallelism {
@@ -271,6 +296,13 @@ func (dq *dialQueue) shrink() {
 			return
 		}
 		logger.Debugf("shrunk dial worker pool: %d => %d", prev, dq.nWorkers)
+		sp := opentracing.SpanFromContext(dq.dqParams.ctx)
+		sp.LogFields(
+			log.String("component", "dial queue"),
+			log.String("event", "queue shrunk"),
+			log.Uint64("before", uint64(prev)),
+			log.Uint64("after", uint64(dq.nWorkers)),
+		)
 	}(dq.nWorkers)
 
 	if dq.nWorkers == dq.config.minParallelism {
@@ -324,8 +356,11 @@ func (dq *dialQueue) worker() {
 			}
 
 			t := time.Now()
-			if err := dq.dialFn(dq.ctx, p); err != nil {
+			sp, ctx := opentracing.StartSpanFromContext(dq.dqParams.ctx, "dht.dial_queue.dial")
+			if err := dq.dialFn(ctx, p); err != nil {
 				logger.Debugf("discarding dialled peer because of error: %v", err)
+				recordErr(sp, err)
+				sp.Finish()
 				continue
 			}
 			logger.Debugf("dialling %v took %dms (as observed by the dht subsystem).", p, time.Since(t)/time.Millisecond)

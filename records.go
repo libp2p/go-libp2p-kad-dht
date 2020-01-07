@@ -3,9 +3,16 @@ package dht
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/gogo/protobuf/proto"
+	ds "github.com/ipfs/go-datastore"
+	u "github.com/ipfs/go-ipfs-util"
+	"github.com/opentracing/opentracing-go"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 )
@@ -18,17 +25,26 @@ type pubkrs struct {
 func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, error) {
 	logger.Debugf("getPublicKey for: %s", p)
 
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.get_public_key", opentracing.Tags{
+		"peer.id": p,
+	})
+	defer sp.Finish()
+
 	// Check locally. Will also try to extract the public key from the peer
 	// ID itself if possible (if inlined).
 	pk := dht.peerstore.PubKey(p)
 	if pk != nil {
+		sp.SetTag("provenance", "local")
 		return pk, nil
 	}
+
+	sp.SetTag("provenance", "network")
 
 	// Try getting the public key both directly from the node it identifies
 	// and from the DHT, in parallel
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	resp := make(chan pubkrs, 2)
 	go func() {
 		pubk, err := dht.getPublicKeyFromNode(ctx, p)
@@ -47,7 +63,7 @@ func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, err
 	}()
 
 	// Wait for one of the two go routines to return
-	// a public key (or for both to error out)
+	// a public key (or for both to error out).
 	var err error
 	for i := 0; i < 2; i++ {
 		r := <-resp
@@ -125,4 +141,123 @@ func (dht *IpfsDHT) getPublicKeyFromNode(ctx context.Context, p peer.ID) (ci.Pub
 
 	logger.Debugf("Got public key from node %v itself", p)
 	return pubk, nil
+}
+
+// getLocal attempts to retrieve the value from the datastore
+func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
+	logger.Debugf("getLocal %s", key)
+	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
+	if err != nil {
+		logger.Warningf("getLocal: %s", err)
+		return nil, err
+	}
+
+	// Double check the key. Can't hurt.
+	if rec != nil && string(rec.GetKey()) != key {
+		logger.Errorf("BUG getLocal: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
+		return nil, nil
+
+	}
+	return rec, nil
+}
+
+// putLocal stores the key value pair in the datastore
+func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
+	logger.Debugf("putLocal: %v %v", key, rec)
+	data, err := proto.Marshal(rec)
+	if err != nil {
+		logger.Warningf("putLocal: %s", err)
+		return err
+	}
+
+	return dht.datastore.Put(mkDsKey(key), data)
+}
+
+func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
+	logger.Debugf("%s handleGetValue looking into ds", dht.self)
+	dskey := convertToDsKey(k)
+	buf, err := dht.datastore.Get(dskey)
+	logger.Debugf("%s handleGetValue looking into ds GOT %v", dht.self, buf)
+
+	if err == ds.ErrNotFound {
+		return nil, nil
+	}
+
+	// if we got an unexpected error, bail.
+	if err != nil {
+		return nil, err
+	}
+
+	// if we have the value, send it back
+	logger.Debugf("%s handleGetValue success!", dht.self)
+
+	rec := new(recpb.Record)
+	err = proto.Unmarshal(buf, rec)
+	if err != nil {
+		logger.Debug("failed to unmarshal DHT record from datastore")
+		return nil, err
+	}
+
+	var recordIsBad bool
+	recvtime, err := u.ParseRFC3339(rec.GetTimeReceived())
+	if err != nil {
+		logger.Info("either no receive time set on record, or it was invalid: ", err)
+		recordIsBad = true
+	}
+
+	if time.Since(recvtime) > dht.maxRecordAge {
+		logger.Debug("old record found, tossing.")
+		recordIsBad = true
+	}
+
+	// NOTE: We do not verify the record here beyond checking these timestamps.
+	// we put the burden of checking the records on the requester as checking a record
+	// may be computationally expensive
+
+	if recordIsBad {
+		err := dht.datastore.Delete(dskey)
+		if err != nil {
+			logger.Error("Failed to delete bad record from datastore: ", err)
+		}
+
+		return nil, nil // can treat this as not having the record at all
+	}
+
+	return rec, nil
+}
+
+// Cleans the record (to avoid storing arbitrary data).
+func cleanRecord(rec *recpb.Record) {
+	rec.TimeReceived = ""
+}
+
+// returns nil, nil when either nothing is found or the value found doesn't
+// properly validate. returns nil, some_error when there's a *datastore* error
+// (i.e., something goes very wrong)
+func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
+	buf, err := dht.datastore.Get(dskey)
+	if err == ds.ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		logger.Errorf("Got error retrieving record with key %s from datastore: %s", dskey, err)
+		return nil, err
+	}
+	rec := new(recpb.Record)
+	err = proto.Unmarshal(buf, rec)
+	if err != nil {
+		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
+		logger.Errorf("Bad record data stored in datastore with key %s: could not unmarshal record", dskey)
+		return nil, nil
+	}
+
+	err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue())
+	if err != nil {
+		// Invalid record in datastore, probably expired but don't return an error,
+		// we'll just overwrite it
+		logger.Debugf("Local record verify failed: %s (discarded)", err)
+		return nil, nil
+	}
+
+	return rec, nil
 }

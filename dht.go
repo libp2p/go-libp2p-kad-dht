@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go/log"
+
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -16,23 +18,23 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"go.opencensus.io/tag"
-	"golang.org/x/xerrors"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
 	"github.com/jbenet/goprocess"
-	"github.com/jbenet/goprocess/context"
+	goprocessctx "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p-record"
+	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
+
+	"github.com/opentracing/opentracing-go"
 )
 
 var logger = logging.Logger("dht")
@@ -210,11 +212,18 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 }*/
 
-// putValueToPeer stores the given key/value pair at the peer 'p'
+// putValueToPeer stores the given key/value pair at the peer 'p'.
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
+
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.put_value.out", opentracing.Tags{
+		"target.peer_id": p,
+		"dht.record_key": rec.GetKey(),
+	})
+	defer LinkedFinish(sp, &err)
+
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
 	if err != nil {
 		logger.Debugf("putValueToPeer: %v. (peer: %s, key: %s)", err, p.Pretty(), loggableKey(string(rec.Key)))
@@ -223,7 +232,8 @@ func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Re
 
 	if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
 		logger.Warningf("putValueToPeer: value not put correctly. (%v != %v)", pmes, rpmes)
-		return errors.New("value not put correctly")
+		err = errors.New("value not put correctly")
+		return err
 	}
 
 	return nil
@@ -236,31 +246,40 @@ var errInvalidRecord = errors.New("received invalid record")
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
 func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.get_value_or_peers", opentracing.Tags{
+		"target.peer_id": p,
+		"dht.record_key": loggableKey(key),
+	})
+	defer LinkedFinish(sp, &err)
 
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Perhaps we were given closer peers
-	peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+	var (
+		peers  = pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+		record = pmes.GetRecord()
+	)
 
-	if record := pmes.GetRecord(); record != nil {
-		// Success! We were given the value
+	// We have a value.
+	if record != nil {
 		logger.Debug("getValueOrPeers: got value")
 
-		// make sure record is valid.
+		// Is the record valid?
 		err = dht.Validator.Validate(string(record.GetKey()), record.GetValue())
 		if err != nil {
 			logger.Info("Received invalid record! (discarded)")
-			// return a sentinal to signify an invalid record was received
+			// return a sentinel to signify an invalid record was received.
 			err = errInvalidRecord
 			record = new(recpb.Record)
 		}
 		return record, peers, err
 	}
 
-	if len(peers) > 0 {
+	if l := len(peers); l > 0 {
+		sp.LogFields(log.Int("dht.closer_peers", l))
 		logger.Debug("getValueOrPeers: peers")
 		return nil, peers, nil
 	}
@@ -271,13 +290,12 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 
 // getValueSingle simply performs the get value RPC with the given parameters
 func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (*pb.Message, error) {
-	meta := logging.LoggableMap{
-		"key":  key,
-		"peer": p,
-	}
-
-	eip := logger.EventBegin(ctx, "getValueSingle", meta)
-	defer eip.Done()
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.get_value_single", opentracing.Tags{
+		"peer.id":        p,
+		"dht.record_key": loggableKey(key),
+	})
+	defer LinkedFinish(sp, &err)
 
 	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -288,49 +306,38 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 		logger.Warningf("getValueSingle: read timeout %s %s", p.Pretty(), key)
 		fallthrough
 	default:
-		eip.SetError(err)
 		return nil, err
 	}
-}
-
-// getLocal attempts to retrieve the value from the datastore
-func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
-	logger.Debugf("getLocal %s", key)
-	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
-	if err != nil {
-		logger.Warningf("getLocal: %s", err)
-		return nil, err
-	}
-
-	// Double check the key. Can't hurt.
-	if rec != nil && string(rec.GetKey()) != key {
-		logger.Errorf("BUG getLocal: found a DHT record that didn't match it's key: %s != %s", rec.GetKey(), key)
-		return nil, nil
-
-	}
-	return rec, nil
-}
-
-// putLocal stores the key value pair in the datastore
-func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
-	logger.Debugf("putLocal: %v %v", key, rec)
-	data, err := proto.Marshal(rec)
-	if err != nil {
-		logger.Warningf("putLocal: %s", err)
-		return err
-	}
-
-	return dht.datastore.Put(mkDsKey(key), data)
 }
 
 // Update signals the routingTable to Update its last-seen status
 // on the given peer.
 func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
-	logger.Event(ctx, "updatePeer", p)
-	dht.routingTable.Update(p)
+	evicted, err := dht.routingTable.Update(p)
+
+	sp := opentracing.SpanFromContext(ctx)
+	if sp == nil {
+		return
+	}
+
+	fields := []log.Field{
+		log.String("component", "routing table"),
+		log.String("event", "routing table updated"),
+	}
+
+	if err != nil {
+		fields = append(fields, log.Error(err))
+	} else if evicted == "" {
+		fields = append(fields, log.Bool("evicted", false))
+	} else {
+		fields = append(fields, log.Bool("evicted", true), log.String("evicted.peer_id", p.Pretty()))
+	}
+
+	sp.LogFields(fields...)
 }
 
-// FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
+// FindLocal looks for a peer with a given ID connected to this dht and returns
+// the peer and the table it was found in.
 func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
 	switch dht.host.Network().Connectedness(id) {
 	case network.Connected, network.CanConnect:
@@ -342,12 +349,12 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
 
 // findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
 func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findPeerSingle",
-		logging.LoggableMap{
-			"peer":   p,
-			"target": id,
-		})
-	defer eip.Done()
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.find_peer_single", opentracing.Tags{
+		"peer.id":   p,
+		"target.id": id,
+	})
+	defer LinkedFinish(sp, &err)
 
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -358,14 +365,17 @@ func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (
 		logger.Warningf("read timeout: %s %s", p.Pretty(), id)
 		fallthrough
 	default:
-		eip.SetError(err)
 		return nil, err
 	}
 }
 
 func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.Cid) (*pb.Message, error) {
-	eip := logger.EventBegin(ctx, "findProvidersSingle", p, key)
-	defer eip.Done()
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.find_providers_single", opentracing.Tags{
+		"peer.id":   p,
+		"target.id": key.String(),
+	})
+	defer LinkedFinish(sp, &err)
 
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key.Bytes(), 0)
 	resp, err := dht.sendRequest(ctx, p, pmes)
@@ -376,63 +386,58 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key cid.
 		logger.Warningf("read timeout: %s %s", p.Pretty(), key)
 		fallthrough
 	default:
-		eip.SetError(err)
 		return nil, err
 	}
 }
 
-// nearestPeersToQuery returns the routing tables closest peers.
-func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
-	closer := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count)
-	return closer
-}
+// betterPeersToQuery returns the nearest peers in the routing table, but if and
+// only if closer than self.
+func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, target peer.ID, count int) []peer.ID {
+	var (
+		key    = kb.ConvertKey(string(pmes.GetKey()))
+		closer = dht.routingTable.NearestPeers(key, count)
+	)
 
-// betterPeersToQuery returns nearestPeersToQuery, but if and only if closer than self.
-func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) []peer.ID {
-	closer := dht.nearestPeersToQuery(pmes, count)
-
-	// no node? nil
 	if closer == nil {
-		logger.Warning("betterPeersToQuery: no closer peers to send:", p)
+		logger.Warning("betterPeersToQuery: no closer peers to send:", target)
 		return nil
 	}
 
 	filtered := make([]peer.ID, 0, len(closer))
-	for _, clp := range closer {
-
-		// == to self? thats bad
-		if clp == dht.self {
-			logger.Error("BUG betterPeersToQuery: attempted to return self! this shouldn't happen...")
+	for _, p := range closer {
+		switch p {
+		case dht.self:
+			// == to self? thats bad
+			logger.Error("betterPeersToQuery: attempted to return self; this shouldn't happen.")
 			return nil
-		}
-		// Dont send a peer back themselves
-		if clp == p {
-			continue
-		}
 
-		filtered = append(filtered, clp)
+		case target:
+			continue
+
+		default:
+			filtered = append(filtered, p)
+		}
 	}
 
-	// ok seems like closer nodes
 	return filtered
 }
 
-// Context return dht's context
+// Context returns the DHT context.Context.
 func (dht *IpfsDHT) Context() context.Context {
 	return dht.ctx
 }
 
-// Process return dht's process
+// Process returns DHT goprocess.Process.
 func (dht *IpfsDHT) Process() goprocess.Process {
 	return dht.proc
 }
 
-// RoutingTable return dht's routingTable
+// RoutingTable returns the DHT's kbucket.RoutingTable.
 func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 	return dht.routingTable
 }
 
-// Close calls Process Close
+// Close calls goprocess.Process Close.
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
 }
@@ -463,13 +468,21 @@ func (dht *IpfsDHT) Host() host.Host {
 }
 
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.ping.out", opentracing.Tags{
+		"remote.peer_id": p.Pretty(),
+	})
+	defer LinkedFinish(sp, &err)
+
 	req := pb.NewMessage(pb.Message_PING, nil, 0)
 	resp, err := dht.sendRequest(ctx, p, req)
 	if err != nil {
-		return xerrors.Errorf("sending request: %w", err)
+		err = fmt.Errorf("sending request: %w", err)
+		return err
 	}
 	if resp.Type != pb.Message_PING {
-		return xerrors.Errorf("got unexpected response type: %v", resp.Type)
+		err = fmt.Errorf("got unexpected response type: %v", resp.Type)
+		return err
 	}
 	return nil
 }

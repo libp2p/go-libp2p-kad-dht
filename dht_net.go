@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/log"
 	"io"
 	"sync"
 	"time"
@@ -162,7 +164,15 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+	var err error
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
+
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.send_request", opentracing.Tags{
+		"target.peer_id": p,
+		"request.type":   pmes.Type.String(),
+		"request.key":    pmes.Key,
+	})
+	defer LinkedFinish(sp, &err)
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
@@ -190,13 +200,19 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 		),
 	)
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
 	return rpmes, nil
 }
 
 // sendMessage sends out a message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
+
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.send_message", opentracing.Tags{
+		"peer.id":      p,
+		"message.type": pmes.Type.String(),
+		"message.key":  pmes.Key,
+	})
+	defer LinkedFinish(sp, &err)
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
@@ -242,14 +258,19 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 		dht.smlk.Lock()
 		defer dht.smlk.Unlock()
 
+		opentracing.SpanFromContext(ctx).LogFields(
+			log.String("component", "dht.message_sender"),
+			log.String("event", "message sender failed"),
+			log.Error(err),
+		)
+
 		if msCur, ok := dht.strmap[p]; ok {
 			// Changed. Use the new one, old one is invalid and
 			// not in the map so we can just throw it away.
 			if ms != msCur {
 				return msCur, nil
 			}
-			// Not changed, remove the now invalid stream from the
-			// map.
+			// Not changed, remove the now invalid stream from the map.
 			delete(dht.strmap, p)
 		}
 		// Invalid but not in map. Must have been removed by a disconnect.

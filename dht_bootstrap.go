@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
+
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
@@ -101,6 +103,12 @@ func (dht *IpfsDHT) startRefreshing() error {
 
 func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
 	var merr error
+	sp, ctx := opentracing.StartSpanFromContext(context.Background(), "routing_table_refresh", opentracing.Tags{
+		"system":    "dht",
+		"component": "routing_table",
+	})
+	defer LinkedFinish(sp, &merr)
+
 	if err := dht.selfWalk(ctx); err != nil {
 		merr = multierror.Append(merr, err)
 	}
@@ -110,21 +118,45 @@ func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
 	return merr
 }
 
-// refreshBuckets scans the routing table, and does a random walk on k-buckets that haven't been queried since the given bucket period
+// refreshBuckets scans the routing table, and does a random walk on k-buckets
+// that haven't been queried since the given bucket period.
 func (dht *IpfsDHT) refreshBuckets(ctx context.Context) error {
+	var merr error
+	sp, ctx := opentracing.StartSpanFromContext(context.Background(), "refresh_buckets", opentracing.Tags{
+		"system": "dht",
+	})
+	defer LinkedFinish(sp, &merr)
+
 	doQuery := func(bucketId int, target string, f func(context.Context) error) error {
-		logger.Infof("starting refreshing bucket %d to %s (routing table size was %d)",
-			bucketId, target, dht.routingTable.Size())
+		var err error
+		sp, ctx := opentracing.StartSpanFromContext(context.Background(), "refresh_bucket", opentracing.Tags{
+			"system": "dht",
+			"bucket": bucketId,
+			"target": target,
+		})
+		defer LinkedFinish(sp, &err)
+
+		logger.Infof(
+			"starting refreshing bucket %d to %s (routing table size was %d)",
+			bucketId,
+			target,
+			dht.routingTable.Size())
+
 		defer func() {
-			logger.Infof("finished refreshing bucket %d to %s (routing table size is now %d)",
-				bucketId, target, dht.routingTable.Size())
+			logger.Infof(
+				"finished refreshing bucket %d to %s (routing table size is now %d)",
+				bucketId,
+				target,
+				dht.routingTable.Size())
 		}()
+
 		queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 		defer cancel()
-		err := f(queryCtx)
-		if err == context.DeadlineExceeded && queryCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+
+		if err = f(queryCtx); err == context.DeadlineExceeded && queryCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 			return nil
 		}
+
 		return err
 	}
 
@@ -136,7 +168,6 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) error {
 		buckets = buckets[:16]
 	}
 
-	var merr error
 	for bucketID, bucket := range buckets {
 		if time.Since(bucket.RefreshedAt()) <= dht.rtRefreshPeriod {
 			continue
@@ -165,13 +196,21 @@ func (dht *IpfsDHT) refreshBuckets(ctx context.Context) error {
 
 // Traverse the DHT toward the self ID
 func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
+	var err error
+	sp, ctx := opentracing.StartSpanFromContext(context.Background(), "self_walk", opentracing.Tags{
+		"system": "dht",
+	})
+	defer LinkedFinish(sp, &err)
+
 	queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 	defer cancel()
-	_, err := dht.FindPeer(queryCtx, dht.self)
+	_, err = dht.FindPeer(queryCtx, dht.self)
 	if err == routing.ErrNotFound {
+		err = nil
 		return nil
 	}
-	return fmt.Errorf("failed to query self during routing table refresh: %s", err)
+	err = fmt.Errorf("failed to query self during routing table refresh: %s", err)
+	return err
 }
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the

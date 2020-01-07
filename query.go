@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"errors"
+	"github.com/opentracing/opentracing-go"
 	"sync"
 
 	"github.com/libp2p/go-libp2p-core/network"
@@ -71,10 +72,7 @@ func (q *dhtQuery) Run(ctx context.Context, peers []peer.ID) (*dhtQueryResult, e
 	default:
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	runner := newQueryRunner(q)
+	runner := newQueryRunner(ctx, q)
 	return runner.Run(ctx, peers)
 }
 
@@ -97,9 +95,13 @@ type dhtQueryRunner struct {
 	sync.RWMutex
 }
 
-func newQueryRunner(q *dhtQuery) *dhtQueryRunner {
-	proc := process.WithParent(process.Background())
-	ctx := ctxproc.OnClosingContext(proc)
+func newQueryRunner(ctx context.Context, q *dhtQuery) *dhtQueryRunner {
+	proc := process.WithParent(ctxproc.WithContext(ctx))
+	ctxp := ctxproc.OnClosingContext(proc)
+
+	// transfer the context.
+	ctxp = opentracing.ContextWithSpan(ctxp, opentracing.SpanFromContext(ctx))
+
 	peersToQuery := queue.NewChanQueue(ctx, queue.NewXORDistancePQ(string(q.key)))
 	r := &dhtQueryRunner{
 		query:          q,
@@ -242,6 +244,12 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 		return nil
 	}
 
+	// TODO set XOR distance as baggage item
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "dht.dial", opentracing.Tags{
+		"peer.id": p,
+	})
+	defer sp.Finish()
+
 	logger.Debug("not connected. dialing.")
 	notif.PublishQueryEvent(r.runCtx, &notif.QueryEvent{
 		Type: notif.DialingPeer,
@@ -257,6 +265,8 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 			ID:    p,
 		})
 
+		recordErr(sp, err)
+
 		// This peer is dropping out of the race.
 		r.peersRemaining.Decrement(1)
 		return err
@@ -266,21 +276,19 @@ func (r *dhtQueryRunner) dialPeer(ctx context.Context, p peer.ID) error {
 }
 
 func (r *dhtQueryRunner) queryPeer(proc process.Process, p peer.ID) {
-	// ok let's do this!
-
 	// create a context from our proc.
 	ctx := ctxproc.OnClosingContext(proc)
 
-	// make sure we do this when we exit
 	defer func() {
 		// signal we're done processing peer p
 		r.peersRemaining.Decrement(1)
 		r.rateLimit <- struct{}{}
 	}()
 
-	// finally, run the query against this peer
+	// actually run the query against this peer.
 	res, err := r.query.qfunc(ctx, p)
 
+	// mark this peer as queried.
 	r.peersQueried.Add(p)
 
 	if err != nil {

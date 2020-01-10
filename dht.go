@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jbenet/goprocess/periodic"
+	periodicproc "github.com/jbenet/goprocess/periodic"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -34,7 +34,6 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
-	pkgerr "github.com/pkg/errors"
 )
 
 var logger = logging.Logger("dht")
@@ -119,8 +118,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		s, err := persist.NewDatastoreSnapshotter(cfg.Datastore, persist.DefaultSnapshotNS)
 		// should never happen
 		if err != nil {
-			logger.Errorf("failed to initialize the default datastore backed snapshotter, err: %s", err)
-			return nil, pkgerr.WithMessage(err, "failed to initialize the default datastore backed snapshotter")
+			err = fmt.Errorf("failed to initialize the default datastore backed snapshotter: %w", err)
+			logger.Error(err)
+			return nil, err
 		}
 		snapshotter = s
 	}

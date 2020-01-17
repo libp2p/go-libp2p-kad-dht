@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -63,7 +64,8 @@ type IpfsDHT struct {
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
 	providers    *providers.ProviderManager
 
-	birth time.Time // When this peer started up
+	birth time.Time  // When this peer started up
+	rng   *rand.Rand // Source of randomness
 
 	Validator record.Validator
 
@@ -83,6 +85,7 @@ type IpfsDHT struct {
 	modeLk sync.Mutex
 
 	bucketSize int
+	d          int // Number of Disjoint Paths to query
 
 	subscriptions struct {
 		evtPeerIdentification event.Subscription
@@ -202,9 +205,11 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		ctx:              ctx,
 		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
 		birth:            time.Now(),
+		rng:              rand.New(rand.NewSource(rand.Int63())),
 		routingTable:     rt,
 		protocols:        protocols,
 		bucketSize:       bucketSize,
+		d:                8,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 

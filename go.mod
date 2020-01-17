@@ -30,6 +30,7 @@ require (
 	github.com/multiformats/go-multiaddr-net v0.1.1
 	github.com/multiformats/go-multistream v0.1.0
 	github.com/stretchr/testify v1.4.0
+	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.22.2
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898
 )

@@ -11,6 +11,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
+	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 )
@@ -57,66 +58,56 @@ func loggableKey(k string) logging.LoggableMap {
 // to the given key
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
-	tablepeers := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
-	if len(tablepeers) == 0 {
-		return nil, kb.ErrLookupFailure
-	}
+	defer e.Done()
+
+	queries := dht.runDisjointQueries(ctx, dht.d, key,
+		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type: routing.SendingQuery,
+				ID:   p,
+			})
+
+			pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
+			if err != nil {
+				logger.Debugf("error getting closer peers: %s", err)
+				return nil, err
+			}
+			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type:      routing.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
+
+			return peers, err
+		},
+		func(peerset *kpeerset.SortedPeerset) bool { return false },
+	)
 
 	out := make(chan peer.ID, dht.bucketSize)
+	defer close(out)
 
-	// since the query doesnt actually pass our context down
-	// we have to hack this here. whyrusleeping isnt a huge fan of goprocess
-	parent := ctx
-	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		// For DHT query command
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type: routing.SendingQuery,
-			ID:   p,
-		})
+	allPeers := make([]peer.ID, 0, dht.bucketSize*dht.d)
+	for _, q := range queries {
+		allPeers = append(allPeers, q.localPeers.TopK()...)
+	}
 
-		pmes, err := dht.findPeerSingle(ctx, p, peer.ID(key))
-		if err != nil {
-			logger.Debugf("error getting closer peers: %s", err)
-			return nil, err
+	kadID := kb.ConvertKey(key)
+	allPeers = kb.SortClosestPeers(allPeers, kadID)
+	for i, p := range allPeers {
+		if i == dht.bucketSize {
+			break
 		}
-		peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+		out <- p
+	}
 
-		// For DHT query command
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type:      routing.PeerResponse,
-			ID:        p,
-			Responses: peers,
-		})
-
-		return &dhtQueryResult{closerPeers: peers}, nil
-	})
-
-	go func() {
-		defer close(out)
-		defer e.Done()
-		timedCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		defer cancel()
-		// run it!
-		res, err := query.Run(timedCtx, tablepeers)
-		if err != nil {
-			logger.Debugf("closestPeers query run error: %s", err)
-		}
-
-		if res != nil && res.queriedSet != nil {
-			// refresh the cpl for this key as the query was successful
-			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
-
-			sorted := kb.SortClosestPeers(res.queriedSet.Peers(), kb.ConvertKey(key))
-			l := len(sorted)
-			if l > dht.bucketSize {
-				sorted = sorted[:dht.bucketSize]
-			}
-
-			for _, p := range sorted {
-				out <- p
-			}
-		}
-	}()
+	if ctx.Err() != nil {
+		// refresh the cpl for this key as the query was successful
+		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+	}
 
 	return out, nil
 }

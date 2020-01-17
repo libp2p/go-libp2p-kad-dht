@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -51,7 +52,8 @@ type IpfsDHT struct {
 	// ProviderManager stores & manages the provider records for this Dht peer.
 	ProviderManager *providers.ProviderManager
 
-	birth time.Time // When this peer started up
+	birth time.Time  // When this peer started up
+	rng   *rand.Rand // Source of randomness
 
 	Validator record.Validator
 
@@ -68,6 +70,7 @@ type IpfsDHT struct {
 	protocols []protocol.ID // DHT protocols
 
 	bucketSize int
+	d          int // Number of Disjoint Paths to query
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
@@ -167,9 +170,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 		host:             h,
 		strmap:           make(map[peer.ID]*messageSender),
 		birth:            time.Now(),
+		rng:              rand.New(rand.NewSource(rand.Int63())),
 		routingTable:     rt,
 		protocols:        cfg.Protocols,
 		bucketSize:       cfg.BucketSize,
+		d:                8,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 
@@ -227,7 +232,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
@@ -251,7 +255,6 @@ var errInvalidRecord = errors.New("received invalid record")
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
 func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
-
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err

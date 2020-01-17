@@ -10,7 +10,6 @@ require (
 	github.com/ipfs/go-datastore v0.4.4
 	github.com/ipfs/go-ipfs-util v0.0.1
 	github.com/ipfs/go-log v1.0.2
-	github.com/ipfs/go-todocounter v0.0.2
 	github.com/jbenet/goprocess v0.1.3
 	github.com/libp2p/go-libp2p v0.6.1
 	github.com/libp2p/go-libp2p-core v0.5.0
@@ -27,5 +26,6 @@ require (
 	github.com/multiformats/go-multihash v0.0.13
 	github.com/multiformats/go-multistream v0.1.1
 	github.com/stretchr/testify v1.5.1
+	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.22.3
 )

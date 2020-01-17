@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"runtime"
+	"github.com/libp2p/go-libp2p-core/network"
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -16,6 +15,7 @@ import (
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
+	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -168,13 +168,10 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 	responsesNeeded := 0
 	if !cfg.Offline {
-		responsesNeeded = getQuorum(&cfg, -1)
+		responsesNeeded = getQuorum(&cfg, 0)
 	}
 
-	valCh, err := dht.getValues(ctx, key, responsesNeeded)
-	if err != nil {
-		return nil, err
-	}
+	valCh := dht.getValues(ctx, key, responsesNeeded)
 
 	out := make(chan []byte)
 	go func() {
@@ -196,25 +193,40 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 				return
 			}
 			fixupRec := record.MakePutRecord(key, best.Val)
+
+			correctingEntries := make(map[peer.ID]RecvdVal)
+			correctingPeers := make([]peer.ID, 0, len(vals))
+
 			for _, v := range vals {
 				// if someone sent us a different 'less-valid' record, lets correct them
 				if !bytes.Equal(v.Val, best.Val) {
-					go func(v RecvdVal) {
-						if v.From == dht.self {
-							err := dht.putLocal(key, fixupRec)
-							if err != nil {
-								logger.Error("Error correcting local dht entry:", err)
-							}
-							return
-						}
-						ctx, cancel := context.WithTimeout(dht.Context(), time.Second*30)
-						defer cancel()
-						err := dht.putValueToPeer(ctx, v.From, fixupRec)
-						if err != nil {
-							logger.Debug("Error correcting DHT entry: ", err)
-						}
-					}(v)
+					correctingEntries[v.From] = v
+					correctingPeers = append(correctingPeers, v.From)
 				}
+			}
+
+			// only correct the peers closest to the target
+			correctingPeers = kb.SortClosestPeers(correctingPeers, kb.ConvertKey(key))
+			if numCorrectingPeers := len(correctingPeers); maxVals > numCorrectingPeers {
+				maxVals = numCorrectingPeers
+			}
+
+			for _, p := range correctingPeers[:maxVals] {
+				go func(v RecvdVal) {
+					if v.From == dht.self {
+						err := dht.putLocal(key, fixupRec)
+						if err != nil {
+							logger.Error("Error correcting local dht entry:", err)
+						}
+						return
+					}
+					ctx, cancel := context.WithTimeout(dht.Context(), time.Second*30)
+					defer cancel()
+					err := dht.putValueToPeer(ctx, v.From, fixupRec)
+					if err != nil {
+						logger.Debug("Error correcting DHT entry: ", err)
+					}
+				}(correctingEntries[p])
 			}
 		}()
 
@@ -225,9 +237,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 					return
 				}
 
-				if len(vals) < maxVals {
-					vals = append(vals, v)
-				}
+				vals = append(vals, v)
 
 				if v.Val == nil {
 					continue
@@ -271,11 +281,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	eip.Append(loggableKey(key))
 	defer eip.Done()
 
-	valCh, err := dht.getValues(ctx, key, nvals)
-	if err != nil {
-		eip.SetError(err)
-		return nil, err
-	}
+	valCh := dht.getValues(ctx, key, nvals)
 
 	out := make([]RecvdVal, 0, nvals)
 	for val := range valCh {
@@ -285,126 +291,163 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	return out, ctx.Err()
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-chan RecvdVal, error) {
-	vals := make(chan RecvdVal, 1)
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) <-chan RecvdVal {
+	valCh := make(chan RecvdVal, 1)
 
-	done := func(err error) (<-chan RecvdVal, error) {
-		defer close(vals)
-		return vals, err
-	}
+	valSignal := make(chan struct{}, 1)
 
-	// If we have it local, don't bother doing an RPC!
-	lrec, err := dht.getLocal(key)
-	if err != nil {
-		// something is wrong with the datastore.
-		return done(err)
-	}
-	if lrec != nil {
-		// TODO: this is tricky, we don't always want to trust our own value
-		// what if the authoritative source updated it?
-		logger.Debug("have it locally")
-		vals <- RecvdVal{
-			Val:  lrec.GetValue(),
-			From: dht.self,
-		}
+	valsSent := 0
+	valsSentMx := sync.RWMutex{}
 
-		if nvals == 0 || nvals == 1 {
-			return done(nil)
-		}
+	vbuf := make([]RecvdVal, 0, 32)
+	vbufMx := sync.Mutex{}
 
-		nvals--
-	} else if nvals == 0 {
-		return done(routing.ErrNotFound)
-	}
-
-	// get closest peers in the routing table
-	rtp := dht.routingTable.NearestPeers(kb.ConvertKey(key), AlphaValue)
-	logger.Debugf("peers in rt: %d %s", len(rtp), rtp)
-	if len(rtp) == 0 {
-		logger.Warning("No peers from routing table!")
-		return done(kb.ErrLookupFailure)
-	}
-
-	var valslock sync.Mutex
-	var got int
-
-	// setup the Query
-	parent := ctx
-	query := dht.newQuery(key, func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type: routing.SendingQuery,
-			ID:   p,
-		})
-
-		rec, peers, err := dht.getValueOrPeers(ctx, p, key)
-		switch err {
-		case routing.ErrNotFound:
-			// in this case, they responded with nothing,
-			// still send a notification so listeners can know the
-			// request has completed 'successfully'
-			routing.PublishQueryEvent(parent, &routing.QueryEvent{
-				Type: routing.PeerResponse,
-				ID:   p,
-			})
-			return nil, err
-		default:
-			return nil, err
-
-		case nil, errInvalidRecord:
-			// in either of these cases, we want to keep going
-		}
-
-		res := &dhtQueryResult{closerPeers: peers}
-
-		if rec.GetValue() != nil || err == errInvalidRecord {
-			rv := RecvdVal{
-				Val:  rec.GetValue(),
-				From: p,
-			}
-			valslock.Lock()
-			select {
-			case vals <- rv:
-			case <-ctx.Done():
-				valslock.Unlock()
-				return nil, ctx.Err()
-			}
-			got++
-
-			// If we have collected enough records, we're done
-			if nvals == got {
-				res.success = true
-			}
-			valslock.Unlock()
-		}
-
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type:      routing.PeerResponse,
-			ID:        p,
-			Responses: peers,
-		})
-
-		return res, nil
-	})
-
+	valEmitCtx, cancelValEmit := context.WithCancel(ctx)
 	go func() {
-		reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		defer cancel()
+		defer close(valCh)
 
-		_, err = query.Run(reqCtx, rtp)
+		for {
+			var next RecvdVal
 
-		// We do have some values but we either ran out of peers to query or
-		// searched for a whole minute.
-		//
-		// We'll just call this a success.
-		if got > 0 && (err == routing.ErrNotFound || reqCtx.Err() == context.DeadlineExceeded) {
-			// refresh the cpl for this key as the query was successful
-			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
-			err = nil
+			trySetNext := func() bool {
+				vbufMx.Lock()
+				notEmpty := len(vbuf) > 0
+				if notEmpty {
+					next = vbuf[0]
+					vbuf = vbuf[1:]
+				}
+				vbufMx.Unlock()
+				return notEmpty
+			}
+
+			if !trySetNext() {
+			signal:
+				for {
+					select {
+					case <-valSignal:
+						if trySetNext() {
+							break signal
+						}
+					case <-valEmitCtx.Done():
+						if !trySetNext() {
+							return
+						}
+						for {
+							select {
+							case valCh <- next:
+								valsSentMx.Lock()
+								valsSent++
+								valsSentMx.Unlock()
+
+								if !trySetNext() {
+									return
+								}
+							default:
+								return
+							}
+						}
+					}
+				}
+			}
+
+		send:
+			for {
+				select {
+				case valCh <- next:
+					valsSentMx.Lock()
+					valsSent++
+					valsSentMx.Unlock()
+
+					if !trySetNext() {
+						break send
+					}
+				case <-valEmitCtx.Done():
+					break send
+				}
+			}
 		}
-		done(err)
 	}()
 
-	return vals, nil
+	go func() {
+		queries := dht.runDisjointQueries(ctx, dht.d, key,
+			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+				// For DHT query command
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.SendingQuery,
+					ID:   p,
+				})
+
+				rec, peers, err := dht.getValueOrPeers(ctx, p, key)
+				switch err {
+				case routing.ErrNotFound:
+					// in this case, they responded with nothing,
+					// still send a notification so listeners can know the
+					// request has completed 'successfully'
+					routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+						Type: routing.PeerResponse,
+						ID:   p,
+					})
+					return nil, err
+				default:
+					return nil, err
+				case nil, errInvalidRecord:
+					// in either of these cases, we want to keep going
+				}
+
+				// TODO: What should happen if the record is invalid?
+				// Pre-existing code counted it towards the quorum, but should it?
+				if rec != nil && rec.GetValue() != nil {
+					rv := RecvdVal{
+						Val:  rec.GetValue(),
+						From: p,
+					}
+
+					vbufMx.Lock()
+					vbuf = append(vbuf, rv)
+					vbufMx.Unlock()
+					select {
+					case valSignal <- struct{}{}:
+					default:
+					}
+				}
+
+				// For DHT query command
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type:      routing.PeerResponse,
+					ID:        p,
+					Responses: peers,
+				})
+
+				return peers, err
+			},
+			func(peerset *kpeerset.SortedPeerset) bool {
+				if nvals <= 0 {
+					return false
+				}
+				valsSentMx.RLock()
+				defer valsSentMx.RUnlock()
+				return valsSent >= nvals
+			},
+		)
+
+		cancelValEmit()
+
+		shortcutTaken := false
+		for _, q := range queries {
+			if len(q.localPeers.KUnqueried()) > 0 {
+				shortcutTaken = true
+				break
+			}
+		}
+
+		if !shortcutTaken {
+			kadID := kb.ConvertKey(key)
+			// refresh the cpl for this key as the query was successful
+			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+		}
+	}()
+
+	return valCh
 }
 
 // Provider abstraction for indirect stores.
@@ -547,86 +590,66 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	peers := dht.routingTable.NearestPeers(kb.ConvertKey(string(key)), AlphaValue)
-	if len(peers) == 0 {
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type:  routing.QueryError,
-			Extra: kb.ErrLookupFailure.Error(),
-		})
-		return
-	}
+	dht.runDisjointQueries(ctx, dht.d, string(key),
+		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type: routing.SendingQuery,
+				ID:   p,
+			})
 
-	// setup the Query
-	parent := ctx
-	query := dht.newQuery(string(key), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type: routing.SendingQuery,
-			ID:   p,
-		})
-		pmes, err := dht.findProvidersSingle(ctx, p, key)
-		if err != nil {
-			return nil, err
-		}
-
-		logger.Debugf("%d provider entries", len(pmes.GetProviderPeers()))
-		provs := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
-		logger.Debugf("%d provider entries decoded", len(provs))
-
-		// Add unique providers from request, up to 'count'
-		for _, prov := range provs {
-			if prov.ID != dht.self {
-				dht.peerstore.AddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+			pmes, err := dht.findProvidersSingle(ctx, p, key)
+			if err != nil {
+				return nil, err
 			}
-			logger.Debugf("got provider: %s", prov)
-			if ps.TryAdd(prov.ID) {
-				logger.Debugf("using provider: %s", prov)
-				select {
-				case peerOut <- *prov:
-				case <-ctx.Done():
-					logger.Debug("context timed out sending more providers")
-					return nil, ctx.Err()
+
+			logger.Debugf("%d provider entries", len(pmes.GetProviderPeers()))
+			provs := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
+			logger.Debugf("%d provider entries decoded", len(provs))
+
+			// Add unique providers from request, up to 'count'
+			for _, prov := range provs {
+				if prov.ID != dht.self {
+					dht.peerstore.AddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+				}
+				logger.Debugf("got provider: %s", prov)
+				if ps.TryAdd(prov.ID) {
+					logger.Debugf("using provider: %s", prov)
+					select {
+					case peerOut <- *prov:
+					case <-ctx.Done():
+						logger.Debug("context timed out sending more providers")
+						return nil, ctx.Err()
+					}
+				}
+				if ps.Size() >= count {
+					logger.Debugf("got enough providers (%d/%d)", ps.Size(), count)
+					return nil, nil
 				}
 			}
-			if ps.Size() >= count {
-				logger.Debugf("got enough providers (%d/%d)", ps.Size(), count)
-				return &dhtQueryResult{success: true}, nil
-			}
-		}
 
-		// Give closer peers back to the query to be queried
-		closer := pmes.GetCloserPeers()
-		clpeers := pb.PBPeersToPeerInfos(closer)
-		logger.Debugf("got closer peers: %d %s", len(clpeers), clpeers)
+			// Give closer peers back to the query to be queried
+			closer := pmes.GetCloserPeers()
+			peers := pb.PBPeersToPeerInfos(closer)
+			logger.Debugf("got closer peers: %d %s", len(peers), peers)
 
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type:      routing.PeerResponse,
-			ID:        p,
-			Responses: clpeers,
-		})
-		return &dhtQueryResult{closerPeers: clpeers}, nil
-	})
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type:      routing.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
 
-	_, err := query.Run(ctx, peers)
-	if err != nil {
-		logger.Debugf("Query error: %s", err)
-		// Special handling for issue: https://github.com/ipfs/go-ipfs/issues/3032
-		if fmt.Sprint(err) == "<nil>" {
-			logger.Error("reproduced bug 3032:")
-			logger.Errorf("Errors type information: %#v", err)
-			logger.Errorf("go version: %s", runtime.Version())
-			logger.Error("please report this information to: https://github.com/ipfs/go-ipfs/issues/3032")
+			return peers, nil
+		},
+		func(peerset *kpeerset.SortedPeerset) bool {
+			return ps.Size() > count
+		},
+	)
 
-			// replace problematic error with something that won't crash the daemon
-			err = fmt.Errorf("<nil>")
-		}
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type:  routing.QueryError,
-			Extra: err.Error(),
-		})
+	if ctx.Err() == nil {
+		// refresh the cpl for this key after the query is run
+		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(key)), time.Now())
 	}
-
-	// refresh the cpl for this key after the query is run
-	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(key)), time.Now())
 }
 
 // FindPeer searches for a peer with given ID.
@@ -657,124 +680,60 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		}
 	}
 
-	// setup the Query
-	parent := ctx
-	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type: routing.SendingQuery,
-			ID:   p,
-		})
+	queries := dht.runDisjointQueries(ctx, dht.d, string(id),
+		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type: routing.SendingQuery,
+				ID:   p,
+			})
 
-		pmes, err := dht.findPeerSingle(ctx, p, id)
-		if err != nil {
-			return nil, err
-		}
+			pmes, err := dht.findPeerSingle(ctx, p, id)
+			if err != nil {
+				logger.Debugf("error getting closer peers: %s", err)
+				return nil, err
+			}
+			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
-		closer := pmes.GetCloserPeers()
-		clpeerInfos := pb.PBPeersToPeerInfos(closer)
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type:      routing.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
 
-		// see if we got the peer here
-		for _, npi := range clpeerInfos {
-			if npi.ID == id {
-				return &dhtQueryResult{
-					peer:    npi,
-					success: true,
-				}, nil
+			return peers, err
+		},
+		func(peerset *kpeerset.SortedPeerset) bool {
+			return dht.host.Network().Connectedness(id) == network.Connected
+		},
+	)
+
+	//	logger.Debugf("FindPeer %v %v", id, result.success)
+
+	if dht.host.Network().Connectedness(id) == network.Connected {
+		shortcutTaken := false
+		for _, q := range queries {
+			if len(q.localPeers.KUnqueried()) > 0 {
+				shortcutTaken = true
+				break
 			}
 		}
 
-		routing.PublishQueryEvent(parent, &routing.QueryEvent{
-			Type:      routing.PeerResponse,
-			ID:        p,
-			Responses: clpeerInfos,
-		})
+		if !shortcutTaken {
+			kadID := kb.ConvertPeerID(id)
+			// refresh the cpl for this key as the query was successful
+			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+		}
 
-		return &dhtQueryResult{closerPeers: clpeerInfos}, nil
-	})
+		return dht.peerstore.PeerInfo(id), nil
+	} else {
+		if ctx.Err() != nil {
+			kadID := kb.ConvertPeerID(id)
+			// refresh the cpl for this key as the query was successful
+			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+		}
 
-	// run it!
-	result, err := query.Run(ctx, peers)
-	if err != nil {
-		return peer.AddrInfo{}, err
-	}
-
-	// refresh the cpl for this key since the lookup was successful
-	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
-
-	logger.Debugf("FindPeer %v %v", id, result.success)
-	if result.peer.ID == "" {
 		return peer.AddrInfo{}, routing.ErrNotFound
 	}
-
-	return *result.peer, nil
-}
-
-// FindPeersConnectedToPeer searches for peers directly connected to a given peer.
-func (dht *IpfsDHT) FindPeersConnectedToPeer(ctx context.Context, id peer.ID) (<-chan *peer.AddrInfo, error) {
-
-	peerchan := make(chan *peer.AddrInfo, asyncQueryBuffer)
-	peersSeen := make(map[peer.ID]struct{})
-	var peersSeenMx sync.Mutex
-
-	peers := dht.routingTable.NearestPeers(kb.ConvertPeerID(id), AlphaValue)
-	if len(peers) == 0 {
-		return nil, kb.ErrLookupFailure
-	}
-
-	// setup the Query
-	query := dht.newQuery(string(id), func(ctx context.Context, p peer.ID) (*dhtQueryResult, error) {
-
-		pmes, err := dht.findPeerSingle(ctx, p, id)
-		if err != nil {
-			return nil, err
-		}
-
-		var clpeers []*peer.AddrInfo
-		closer := pmes.GetCloserPeers()
-		for _, pbp := range closer {
-			pi := pb.PBPeerToPeerInfo(pbp)
-
-			// skip peers already seen
-			peersSeenMx.Lock()
-			if _, found := peersSeen[pi.ID]; found {
-				peersSeenMx.Unlock()
-				continue
-			}
-			peersSeen[pi.ID] = struct{}{}
-			peersSeenMx.Unlock()
-
-			// if peer is connected, send it to our client.
-			if pb.Connectedness(pbp.Connection) == network.Connected {
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case peerchan <- pi:
-				}
-			}
-
-			// if peer is the peer we're looking for, don't bother querying it.
-			// TODO maybe query it?
-			if pb.Connectedness(pbp.Connection) != network.Connected {
-				clpeers = append(clpeers, pi)
-			}
-		}
-
-		return &dhtQueryResult{closerPeers: clpeers}, nil
-	})
-
-	// run it! run it asynchronously to gen peers as results are found.
-	// this does no error checking
-	go func() {
-		if _, err := query.Run(ctx, peers); err != nil {
-			logger.Debug(err)
-		}
-
-		// refresh the cpl for this key
-		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
-
-		// close the peerchan channel when done.
-		close(peerchan)
-	}()
-
-	return peerchan, nil
 }

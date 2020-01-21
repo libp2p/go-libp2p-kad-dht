@@ -171,13 +171,14 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 		responsesNeeded = getQuorum(&cfg, 0)
 	}
 
-	valCh, queries := dht.getValues(ctx, key, func() bool { return false })
+	stopCh := make(chan struct{})
+	valCh, queries := dht.getValues(ctx, key, stopCh)
 
 	out := make(chan []byte)
 	go func() {
 		defer close(out)
-		best, peersWithBest := dht.searchValueQuorum(ctx, key, valCh, out, responsesNeeded)
-		if best == nil {
+		best, peersWithBest, aborted := dht.searchValueQuorum(ctx, key, valCh, stopCh, out, responsesNeeded)
+		if best == nil || aborted {
 			return
 		}
 
@@ -205,8 +206,8 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	return out, nil
 }
 
-func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal,
-	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}) {
+func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
+	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
 	numResponses := 0
 	return dht.processValues(ctx, key, valCh,
 		func(ctx context.Context, v RecvdVal, better bool) bool {
@@ -220,6 +221,7 @@ func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-c
 			}
 
 			if nvals > 0 && numResponses > nvals {
+				close(stopCh)
 				return true
 			}
 			return false
@@ -237,9 +239,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	defer eip.Done()
 
 	queryCtx, cancel := context.WithCancel(ctx)
-	valCh, _ := dht.getValues(queryCtx, key, func() bool {
-		return false
-	})
+	valCh, _ := dht.getValues(queryCtx, key, nil)
 
 	out := make([]RecvdVal, 0, nvals)
 	for val := range valCh {
@@ -253,13 +253,11 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 }
 
 func (dht *IpfsDHT) processValues(ctx context.Context, key string, vals <-chan RecvdVal,
-	newVal func(ctx context.Context, v RecvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}) {
-	aborted := false
-
+	newVal func(ctx context.Context, v RecvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:
 	for {
 		if aborted {
-			return best, nil
+			return
 		}
 
 		select {
@@ -294,9 +292,6 @@ loop:
 		}
 	}
 
-	if aborted {
-		return best, nil
-	}
 	return
 }
 
@@ -322,7 +317,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopFn func() bool) (<-chan RecvdVal, <-chan []*qu) {
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan []*qu) {
 	valCh := make(chan RecvdVal, 1)
 	queriesCh := make(chan []*qu, 1)
 
@@ -387,7 +382,12 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopFn func() boo
 				return peers, err
 			},
 			func(peerset *kpeerset.SortedPeerset) bool {
-				return stopFn()
+				select {
+				case <-stopQuery:
+					return true
+				default:
+					return false
+				}
 			},
 		)
 

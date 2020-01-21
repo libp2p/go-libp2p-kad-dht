@@ -403,7 +403,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopFn func() boo
 			}
 		}
 
-		if !shortcutTaken {
+		if !shortcutTaken && ctx.Err() == nil {
 			kadID := kb.ConvertKey(key)
 			// refresh the cpl for this key as the query was successful
 			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
@@ -678,7 +678,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 
 		return dht.peerstore.PeerInfo(id), nil
 	} else {
-		if ctx.Err() != nil {
+		if ctx.Err() == nil {
 			kadID := kb.ConvertPeerID(id)
 			// refresh the cpl for this key as the query was successful
 			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())

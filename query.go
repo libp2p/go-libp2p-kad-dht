@@ -3,7 +3,9 @@ package dht
 import (
 	"context"
 	"errors"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -110,6 +112,7 @@ func strictParallelismQuery(q *qu) {
 
 	var lastPeers []peer.ID
 	for {
+		topPeers := q.localPeers.TopK()
 		peersToQuery := q.localPeers.KUnqueried()
 
 		if len(peersToQuery) == 0 {
@@ -117,11 +120,13 @@ func strictParallelismQuery(q *qu) {
 		}
 
 		numQuery := AlphaValue
-		if lastPeers != nil && peerSlicesEqual(lastPeers, peersToQuery) {
+		// TODO: alternative: Check if we did not get any peers closer than alpha closest try k
+		if lastPeers != nil && peerSlicesEqual(lastPeers, topPeers) {
 			numQuery = len(peersToQuery)
 		} else if pqLen := len(peersToQuery); pqLen < numQuery {
 			numQuery = pqLen
 		}
+		lastPeers = topPeers
 
 		queryResCh := make(chan bool, numQuery)
 		resultsReceived := 0
@@ -307,11 +312,30 @@ func (q *qu) queryPeer(ctx context.Context, p peer.ID) bool {
 	return true
 }
 
-/*
-	Call func d times, each with a different set of peers (take k closest and shuffle + divide into d buckets)
-*/
-
 func (dht *IpfsDHT) dialPeer(ctx context.Context, p peer.ID) error {
+	// short-circuit if we're already connected.
+	if dht.host.Network().Connectedness(p) == network.Connected {
+		return nil
+	}
+
+	logger.Debug("not connected. dialing.")
+	routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+		Type: routing.DialingPeer,
+		ID:   p,
+	})
+
+	pi := peer.AddrInfo{ID: p}
+	if err := dht.host.Connect(ctx, pi); err != nil {
+		logger.Debugf("error connecting: %s", err)
+		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+			Type:  routing.QueryError,
+			Extra: err.Error(),
+			ID:    p,
+		})
+
+		return err
+	}
+	logger.Debugf("connected. dial success.")
 	return nil
 }
 

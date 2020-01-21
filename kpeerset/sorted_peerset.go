@@ -116,23 +116,24 @@ func (ps *SortedPeerset) Add(p peer.ID) {
 }
 
 func (ps *SortedPeerset) TopK() []peer.ID {
-	return ps.getTopK(nil)
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	topK := make([]peer.ID, 0, len(ps.heapTopKPeers.data))
+	for _, pm := range ps.heapTopKPeers.data {
+		topK = append(topK, pm.Peer())
+	}
+
+	return topK
 }
 
 func (ps *SortedPeerset) KUnqueried() []peer.ID {
-	return ps.getTopK(func(p peer.ID) bool {
-		_, ok := ps.queried[p]
-		return ok
-	})
-}
-
-func (ps *SortedPeerset) getTopK(filter func(p peer.ID) bool) []peer.ID {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
 	topK := make([]IPeerMetric, 0, len(ps.heapTopKPeers.data))
 	for _, pm := range ps.heapTopKPeers.data {
-		if filter == nil || !filter(pm.Peer()) {
+		if _, ok := ps.queried[pm.Peer()]; !ok {
 			topK = append(topK, pm.IPeerMetric)
 		}
 	}

@@ -105,7 +105,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		out <- p
 	}
 
-	if ctx.Err() != nil {
+	if ctx.Err() == nil {
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
 	}

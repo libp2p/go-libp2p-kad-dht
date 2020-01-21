@@ -69,6 +69,7 @@ func multihashLoggableKey(mh multihash.Multihash) logging.LoggableMap {
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
+	//TODO: I can break the interface! return []peer.ID
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	defer e.Done()
 

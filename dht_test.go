@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1672,8 +1673,8 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		time.Sleep(time.Second * 2)
 
 		err = dhtA.PutValue(ctx, "/v/cat", []byte("meow"))
-		if err != nil {
-			t.Fatalf("putting to an empty routing table should succeed, err: '%v'", err)
+		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
+			t.Fatalf("put should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 
 		v, err := dhtB.GetValue(ctx, "/v/cat")

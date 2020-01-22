@@ -332,7 +332,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	}
 
 	go func() {
-		queries := dht.runDisjointQueries(ctx, dht.d, key,
+		queries, _ := dht.runDisjointQueries(ctx, dht.d, key,
 			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -553,7 +553,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	dht.runDisjointQueries(ctx, dht.d, string(key),
+	_, _ = dht.runDisjointQueries(ctx, dht.d, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -630,7 +630,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return pi, nil
 	}
 
-	queries := dht.runDisjointQueries(ctx, dht.d, string(id),
+	queries, err := dht.runDisjointQueries(ctx, dht.d, string(id),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -658,6 +658,10 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)
+
+	if err != nil {
+		return peer.AddrInfo{}, err
+	}
 
 	//	logger.Debugf("FindPeer %v %v", id, result.success)
 

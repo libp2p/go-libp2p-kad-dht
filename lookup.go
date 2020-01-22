@@ -73,7 +73,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	defer e.Done()
 
-	queries := dht.runDisjointQueries(ctx, dht.d, key,
+	queries, err := dht.runDisjointQueries(ctx, dht.d, key,
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -99,6 +99,10 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		},
 		func(peerset *kpeerset.SortedPeerset) bool { return false },
 	)
+
+	if err != nil {
+		return nil, err
+	}
 
 	out := make(chan peer.ID, dht.bucketSize)
 	defer close(out)

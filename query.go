@@ -31,21 +31,20 @@ type qu struct {
 	stopFn               sfn
 }
 
-func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn qfn, stopFn sfn) []*qu {
+func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn qfn, stopFn sfn) ([]*qu, error) {
 	queryCtx, cancelQuery := context.WithCancel(ctx)
 
 	numQueriesComplete := 0
 	queryDone := make(chan struct{}, d)
 
 	seedPeers := dht.routingTable.NearestPeers(kb.ConvertKey(target), KValue)
-	// TODO does this need to be here?
-	//if len(seedPeers) == 0 {
-	//	routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-	//		Type:  routing.QueryError,
-	//		Extra: kb.ErrLookupFailure.Error(),
-	//	})
-	//	return nil, kb.ErrLookupFailure
-	//}
+	if len(seedPeers) == 0 {
+		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+			Type:  routing.QueryError,
+			Extra: kb.ErrLookupFailure.Error(),
+		})
+		return nil, kb.ErrLookupFailure
+	}
 
 	dht.rng.Shuffle(len(seedPeers), func(i, j int) {
 		seedPeers[i], seedPeers[j] = seedPeers[j], seedPeers[i]
@@ -93,7 +92,7 @@ loop:
 		}
 	}
 
-	return queries
+	return queries, nil
 }
 
 func (dht *IpfsDHT) sortPeers(peers []kpeerset.IPeerMetric) kpeerset.SortablePeers {

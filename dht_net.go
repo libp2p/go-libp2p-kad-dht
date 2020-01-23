@@ -23,7 +23,7 @@ import (
 )
 
 var dhtReadMessageTimeout = time.Minute
-var dhtStreamIdleTimeout = 10 * time.Minute
+var dhtStreamIdleTimeout = 1 * time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 // The Protobuf writer performs multiple small writes when writing a message.

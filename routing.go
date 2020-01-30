@@ -673,8 +673,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
-	//	logger.Debugf("FindPeer %v %v", id, result.success)
-
+	// TODO: Consider unlucky disconnect timing and potentially utilizing network.CanConnect or something similar
 	if dht.host.Network().Connectedness(id) == network.Connected {
 		shortcutTaken := false
 		for _, q := range queries {

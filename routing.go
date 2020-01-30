@@ -191,7 +191,10 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 			peers := q[0].globallyQueriedPeers.Peers()
 			peers = kb.SortClosestPeers(peers, kb.ConvertKey(key))
-			for _, p := range peers {
+			for i, p := range peers {
+				if i == dht.bucketSize {
+					break
+				}
 				if _, ok := peersWithBest[p]; !ok {
 					updatePeers = append(updatePeers, p)
 				}

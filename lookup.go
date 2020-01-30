@@ -107,13 +107,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	out := make(chan peer.ID, dht.bucketSize)
 	defer close(out)
 
-	allPeers := make([]peer.ID, 0, dht.bucketSize*dht.d)
-	for _, q := range queries {
-		allPeers = append(allPeers, q.localPeers.TopK()...)
-	}
-
 	kadID := kb.ConvertKey(key)
-	allPeers = kb.SortClosestPeers(allPeers, kadID)
+	allPeers := kb.SortClosestPeers(queries[0].globallyQueriedPeers.Peers(), kadID)
 	for i, p := range allPeers {
 		if i == dht.bucketSize {
 			break

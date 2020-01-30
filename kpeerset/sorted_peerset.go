@@ -73,15 +73,16 @@ type SortedPeerset struct {
 	lock sync.Mutex
 }
 
-func (ps *SortedPeerset) Add(p peer.ID) {
+// Add adds the peer to the set. It returns true if the peer was newly added to the topK peers.
+func (ps *SortedPeerset) Add(p peer.ID) bool {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
 	if _, ok := ps.topKPeers[p]; ok {
-		return
+		return false
 	}
 	if _, ok := ps.restOfPeers[p]; ok {
-		return
+		return false
 	}
 
 	distance := ks.XORKeySpace.Key([]byte(p)).Distance(ps.from)
@@ -95,13 +96,14 @@ func (ps *SortedPeerset) Add(p peer.ID) {
 	if ps.heapTopKPeers.Len() < ps.kvalue {
 		heap.Push(&ps.heapTopKPeers, pm)
 		ps.topKPeers[p] = pm
-		return
+		return true
 	}
 
 	switch ps.heapTopKPeers.data[0].Metric().Cmp(distance) {
 	case -1:
 		heap.Push(&ps.heapRestOfPeers, pm)
 		ps.restOfPeers[p] = pm
+		return false
 	case 1:
 		bumpedPeer := heap.Pop(&ps.heapTopKPeers).(*peerMetricHeapItem)
 		delete(ps.topKPeers, bumpedPeer.Peer())
@@ -111,7 +113,9 @@ func (ps *SortedPeerset) Add(p peer.ID) {
 
 		heap.Push(&ps.heapTopKPeers, pm)
 		ps.topKPeers[p] = pm
+		return true
 	default:
+		return false
 	}
 }
 

@@ -1496,7 +1496,7 @@ func testFindPeerQuery(t *testing.T,
 
 	sort.Sort(peer.IDSlice(outpeers))
 
-	exp := kb.SortClosestPeers(reachableIds, rtval)[:minInt(KValue, len(reachableIds))]
+	exp := kb.SortClosestPeers(reachableIds, rtval)[:minInt(guy.bucketSize, len(reachableIds))]
 	t.Logf("got %d peers", len(outpeers))
 	got := kb.SortClosestPeers(outpeers, rtval)
 
@@ -1521,7 +1521,8 @@ func TestFindClosestPeers(t *testing.T) {
 		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
 	}
 
-	peers, err := dhts[1].GetClosestPeers(ctx, "foo")
+	querier := dhts[1]
+	peers, err := querier.GetClosestPeers(ctx, "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1531,8 +1532,8 @@ func TestFindClosestPeers(t *testing.T) {
 		out = append(out, p)
 	}
 
-	if len(out) != KValue {
-		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
+	if len(out) != querier.bucketSize {
+		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), querier.bucketSize)
 	}
 }
 

@@ -1481,8 +1481,8 @@ func testFindPeerQuery(t *testing.T,
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
 
-	rtablePeers := guy.routingTable.NearestPeers(rtval, AlphaValue)
-	assert.Len(t, rtablePeers, minInt(bootstrappers, AlphaValue))
+	rtablePeers := guy.routingTable.NearestPeers(rtval, guy.alpha)
+	assert.Len(t, rtablePeers, minInt(bootstrappers, guy.alpha))
 
 	assert.Len(t, guy.host.Network().Peers(), bootstrappers)
 

@@ -26,6 +26,8 @@ type Options struct {
 	Client          bool
 	Protocols       []protocol.ID
 	BucketSize      int
+	DisjointPaths   int
+	Concurrency     int
 	MaxRecordAge    time.Duration
 	EnableProviders bool
 	EnableValues    bool
@@ -65,6 +67,9 @@ var Defaults = func(o *Options) error {
 	o.RoutingTable.RefreshPeriod = 1 * time.Hour
 	o.RoutingTable.AutoRefresh = true
 	o.MaxRecordAge = time.Hour * 36
+
+	o.BucketSize = 20
+	o.Concurrency = 3
 
 	return nil
 }
@@ -149,12 +154,32 @@ func Protocols(protocols ...protocol.ID) Option {
 	}
 }
 
-// BucketSize configures the bucket size of the routing table.
+// BucketSize configures the bucket size (k in the Kademlia paper) of the routing table.
 //
 // The default value is 20.
 func BucketSize(bucketSize int) Option {
 	return func(o *Options) error {
 		o.BucketSize = bucketSize
+		return nil
+	}
+}
+
+// Concurrency configures the number of concurrent requests (alpha in the Kademlia paper) for a given query path.
+//
+// The default value is 3.
+func Concurrency(alpha int) Option {
+	return func(o *Options) error {
+		o.Concurrency = alpha
+		return nil
+	}
+}
+
+// DisjointPaths configures the number of disjoint paths (d in the S/Kademlia paper) taken per query.
+//
+// The default value is BucketSize/2.
+func DisjointPaths(d int) Option {
+	return func(o *Options) error {
+		o.DisjointPaths = d
 		return nil
 	}
 }

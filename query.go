@@ -36,7 +36,7 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 	numQueriesComplete := 0
 	queryDone := make(chan struct{}, d)
 
-	seedPeers := dht.routingTable.NearestPeers(kb.ConvertKey(target), KValue)
+	seedPeers := dht.routingTable.NearestPeers(kb.ConvertKey(target), dht.bucketSize)
 	if len(seedPeers) == 0 {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,
@@ -57,7 +57,7 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 			ctx:                  queryCtx,
 			cancel:               cancelQuery,
 			dht:                  dht,
-			localPeers:           kpeerset.NewSortedPeerset(KValue, target, dht.sortPeers),
+			localPeers:           kpeerset.NewSortedPeerset(dht.bucketSize, target, dht.sortPeers),
 			globallyQueriedPeers: peersQueried,
 			queryFn:              queryFn,
 			stopFn:               stopFn,

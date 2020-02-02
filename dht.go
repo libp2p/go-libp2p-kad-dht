@@ -70,6 +70,7 @@ type IpfsDHT struct {
 	protocols []protocol.ID // DHT protocols
 
 	bucketSize int
+	alpha      int // The concurrency parameter per path
 	d          int // Number of Disjoint Paths to query
 
 	autoRefresh           bool
@@ -98,11 +99,13 @@ var (
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
 	var cfg opts.Options
-	cfg.BucketSize = KValue
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, &cfg)
+	if cfg.DisjointPaths == 0 {
+		cfg.DisjointPaths = cfg.BucketSize / 2
+	}
+	dht := makeDHT(ctx, h, cfg)
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
 	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
@@ -155,7 +158,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 	self := kb.ConvertPeerID(h.ID())
 	rt := kb.NewRoutingTable(cfg.BucketSize, self, cfg.RoutingTable.LatencyTolerance, h.Peerstore())
 	cmgr := h.ConnManager()
@@ -182,7 +185,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 		routingTable:     rt,
 		protocols:        cfg.Protocols,
 		bucketSize:       cfg.BucketSize,
-		d:                8,
+		alpha:            cfg.Concurrency,
+		d:                cfg.DisjointPaths,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 

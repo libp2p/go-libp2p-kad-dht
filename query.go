@@ -117,7 +117,7 @@ func strictParallelismQuery(q *qu) {
 		}
 
 		// TODO: Is it finding a closer peer if it's closer than one we know about or one we have queried?
-		numQuery := AlphaValue
+		numQuery := q.dht.alpha
 		if foundCloser {
 			numQuery = len(peersToQuery)
 		} else if pqLen := len(peersToQuery); pqLen < numQuery {
@@ -169,7 +169,7 @@ func simpleQuery(q *qu) {
 			return
 		}
 
-		numQuery := AlphaValue
+		numQuery := q.dht.alpha
 		if lastPeers != nil && peerSlicesEqual(lastPeers, peersToQuery) {
 			numQuery = len(peersToQuery)
 		} else if pqLen := len(peersToQuery); pqLen < numQuery {
@@ -228,7 +228,7 @@ func boundedDialQuery(q *qu) {
 			return
 		}
 
-		numQuery := AlphaValue
+		numQuery := q.dht.alpha
 		if lastPeers != nil && peerSlicesEqual(lastPeers, peersToQuery) {
 			numQuery = len(peersToQuery)
 		}

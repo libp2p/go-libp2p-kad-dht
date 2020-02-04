@@ -615,7 +615,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key cid.Cid, 
 			return peers, nil
 		},
 		func(peerset *kpeerset.SortedPeerset) bool {
-			return ps.Size() > count
+			return ps.Size() >= count
 		},
 	)
 

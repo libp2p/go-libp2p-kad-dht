@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -1722,4 +1723,68 @@ func TestModeChange(t *testing.T) {
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
 	assert.NotNil(t, err)
+}
+
+func TestDynamicModeSwitching(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prober := setupDHT(ctx, t, true) // our test harness
+	node := setupDHT(ctx, t, true)   // the node under test
+	go RoutabilityBasedModeSwitching(node)
+	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
+	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
+		t.Fatal(err)
+	}
+
+	var err error
+	var emitters struct {
+		evtLocalRoutabilityPrivate event.Emitter
+		evtLocalRoutabilityPublic  event.Emitter
+		evtLocalRoutabilityUnknown event.Emitter
+	}
+
+	emitters.evtLocalRoutabilityPublic, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityPublic))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitters.evtLocalRoutabilityPrivate, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityPrivate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitters.evtLocalRoutabilityUnknown, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityUnknown))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertDHTClient := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+			t.Errorf("expected routing table length to be 0; instead is %d", l)
+		}
+	}
+
+	assertDHTServer := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.Nil(t, err)
+		if l := len(prober.RoutingTable().ListPeers()); l != 1 {
+			t.Errorf("expected routing table length to be 1; instead is %d", l)
+		}
+	}
+
+	emitters.evtLocalRoutabilityPrivate.Emit(event.EvtLocalRoutabilityPrivate{})
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+
+	emitters.evtLocalRoutabilityPublic.Emit(event.EvtLocalRoutabilityPublic{})
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTServer()
+
+	emitters.evtLocalRoutabilityUnknown.Emit(event.EvtLocalRoutabilityUnknown{})
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
 }

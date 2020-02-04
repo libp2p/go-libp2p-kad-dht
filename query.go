@@ -280,6 +280,11 @@ func (q *qu) queryPeer(ctx context.Context, p peer.ID) *queryResult {
 		return &queryResult{}
 	}
 
+	if q.stopFn(q.localPeers) {
+		q.cancel()
+		return &queryResult{}
+	}
+
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {
 		q.localPeers.Remove(p)

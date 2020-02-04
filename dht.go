@@ -152,6 +152,9 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// register for network notifs.
 	dht.proc.AddChild((*subscriberNotifee)(dht).Process())
 
+	// switch modes dynamically based on local routability changes.
+	dht.proc.Go(dht.dynamicModeSwitching)
+
 	// handle protocol changes
 	dht.proc.Go(dht.handleProtocolChanges)
 
@@ -547,6 +550,50 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 	// ok seems like closer nodes
 	return filtered
+}
+
+func (dht *IpfsDHT) dynamicModeSwitching(proc goprocess.Process) {
+	evts := []interface{}{
+		&event.EvtLocalRoutabilityPublic{},
+		&event.EvtLocalRoutabilityPrivate{},
+		&event.EvtLocalRoutabilityUnknown{},
+	}
+
+	sub, err := dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to local routability events; dynamic mode switching will not work; err: %s", err)
+	}
+	defer sub.Close()
+
+	for {
+		select {
+		case ev := <-sub.Out():
+			var target DHTMode
+
+			switch ev.(type) {
+			case event.EvtLocalRoutabilityPrivate, event.EvtLocalRoutabilityUnknown:
+				target = ModeClient
+			case event.EvtLocalRoutabilityPublic:
+				target = ModeServer
+			}
+
+			if dht.getMode() == target {
+				continue
+			}
+
+			logger.Infof("processed event %T; performing dht mode switch", ev)
+
+			err := dht.SetMode(target)
+			// NOTE: the mode will be printed out as a decimal.
+			if err == nil {
+				logger.Infof("switched DHT mode successfully; new mode: %d", target)
+			} else {
+				logger.Warningf("switching DHT mode failed; new mode: %d, err: %s", target, err)
+			}
+		case <-proc.Closing():
+			return
+		}
+	}
 }
 
 func (dht *IpfsDHT) SetMode(m DHTMode) error {

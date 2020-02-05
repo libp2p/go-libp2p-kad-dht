@@ -135,7 +135,7 @@ func (m *Message) GetClusterLevel() int {
 // default "no value" protobuf behavior (0)
 func (m *Message) SetClusterLevel(level int) {
 	lvl := int32(level)
-	m.ClusterLevelRaw = lvl
+	m.ClusterLevelRaw = lvl + 1
 }
 
 // Loggable turns a Message into machine-readable log output

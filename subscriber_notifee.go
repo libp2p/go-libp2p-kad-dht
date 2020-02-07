@@ -1,12 +1,12 @@
 package dht
 
 import (
-	"context"
-
 	"github.com/jbenet/goprocess"
-	goprocessctx "github.com/jbenet/goprocess/context"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
+
+	"github.com/libp2p/go-eventbus"
+
 	ma "github.com/multiformats/go-multiaddr"
 )
 
@@ -19,27 +19,52 @@ func (nn *subscriberNotifee) DHT() *IpfsDHT {
 	return (*IpfsDHT)(nn)
 }
 
-func (nn *subscriberNotifee) Process(ctx context.Context) goprocess.Process {
-	proc := goprocessctx.WithContext(ctx)
-	proc.Go(nn.subscribe)
-	return proc
-}
-
 func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	dht := nn.DHT()
+
+	dht.host.Network().Notify(nn)
+	defer dht.host.Network().StopNotify(nn)
+
+	var err error
+	evts := []interface{}{
+		&event.EvtPeerIdentificationCompleted{},
+	}
+
+	// subscribe to the EvtPeerIdentificationCompleted event which notifies us every time a peer successfully completes identification
+	sub, err := dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
+	}
+	defer sub.Close()
+
 	for {
 		select {
-		case evt, more := <-dht.subscriptions.evtPeerIdentification.Out():
+		case evt, more := <-sub.Out():
+			// we will not be getting any more events
 			if !more {
 				return
 			}
-			switch ev := evt.(type) {
-			case event.EvtPeerIdentificationCompleted:
-				protos, err := dht.peerstore.SupportsProtocols(ev.Peer, dht.protocolStrs()...)
-				if err == nil && len(protos) != 0 {
-					dht.Update(dht.ctx, ev.Peer)
+
+			// something has gone really wrong if we get an event for another type
+			ev, ok := evt.(event.EvtPeerIdentificationCompleted)
+			if !ok {
+				logger.Errorf("got wrong type from subscription: %T", ev)
+				return
+			}
+
+			// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
+			protos, err := dht.peerstore.SupportsProtocols(ev.Peer, dht.protocolStrs()...)
+			if err == nil && len(protos) != 0 {
+				refresh := dht.routingTable.Size() <= minRTRefreshThreshold
+				dht.Update(dht.ctx, ev.Peer)
+				if refresh && dht.autoRefresh {
+					select {
+					case dht.triggerRtRefresh <- nil:
+					default:
+					}
 				}
 			}
+
 		case <-proc.Closing():
 			return
 		}
@@ -66,6 +91,17 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 	}
 
 	dht.routingTable.Remove(p)
+
+	if dht.routingTable.Size() < minRTRefreshThreshold {
+		// TODO: Actively bootstrap. For now, just try to add the currently connected peers.
+		for _, p := range dht.host.Network().Peers() {
+			// Don't bother probing, we do that on connect.
+			protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+			if err == nil && len(protos) != 0 {
+				dht.Update(dht.Context(), p)
+			}
+		}
+	}
 
 	dht.smlk.Lock()
 	defer dht.smlk.Unlock()

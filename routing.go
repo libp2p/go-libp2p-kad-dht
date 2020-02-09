@@ -350,13 +350,12 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 		default:
 			return nil, err
 
-		case nil, errInvalidRecord:
-			// in either of these cases, we want to keep going
+		case nil:
 		}
 
 		res := &dhtQueryResult{closerPeers: peers}
 
-		if rec.GetValue() != nil || err == errInvalidRecord {
+		if rec.GetValue() != nil {
 			rv := RecvdVal{
 				Val:  rec.GetValue(),
 				From: p,

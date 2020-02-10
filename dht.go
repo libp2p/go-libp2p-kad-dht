@@ -88,10 +88,6 @@ type IpfsDHT struct {
 	alpha      int // The concurrency parameter per path
 	d          int // Number of Disjoint Paths to query
 
-	subscriptions struct {
-		evtPeerIdentification event.Subscription
-	}
-
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
@@ -142,15 +138,10 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		}
 	}
 
-	dht.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
-		if dht.subscriptions.evtPeerIdentification != nil {
-			_ = dht.subscriptions.evtPeerIdentification.Close()
-		}
-		return nil
-	})
+	dht.proc = goprocessctx.WithContext(ctx)
 
 	// register for network notifs.
-	dht.proc.AddChild((*subscriberNotifee)(dht).Process())
+	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
 
 	// switch modes dynamically based on local routability changes.
 	dht.proc.Go(dht.dynamicModeSwitching)
@@ -224,13 +215,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 		alpha:            alpha,
 		d:                d,
 		triggerRtRefresh: make(chan chan<- error),
-	}
-
-	var err error
-	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
-	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
-	if err != nil {
-		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
@@ -567,7 +551,11 @@ func (dht *IpfsDHT) dynamicModeSwitching(proc goprocess.Process) {
 
 	for {
 		select {
-		case ev := <-sub.Out():
+		case ev, ok := <-sub.Out():
+			// there will be no more events
+			if !ok {
+				return
+			}
 			var target DHTMode
 
 			switch ev.(type) {
@@ -731,6 +719,8 @@ func (dht *IpfsDHT) connForPeer(p peer.ID) network.Conn {
 	return nil
 }
 
+// handleProtocolChanges listens for protocol changes in the peers we are connected to
+// and adds/drops them to/from the Routing Table if they add/remove the DHT protocol to/from their supported protocols
 func (dht *IpfsDHT) handleProtocolChanges(proc goprocess.Process) {
 	// register for event bus protocol ID changes
 	sub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated))
@@ -747,15 +737,18 @@ func (dht *IpfsDHT) handleProtocolChanges(proc goprocess.Process) {
 	for {
 		select {
 		case ie, ok := <-sub.Out():
+			// there are no more events to listen to
+			if !ok {
+				return
+			}
+
+			// check event type
 			e, ok := ie.(event.EvtPeerProtocolsUpdated)
 			if !ok {
 				logger.Errorf("got wrong type from subscription: %T", ie)
 				return
 			}
 
-			if !ok {
-				return
-			}
 			var drop, add bool
 			for _, p := range e.Added {
 				if pmap[p] {

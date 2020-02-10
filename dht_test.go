@@ -15,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multistream"
 
@@ -1558,6 +1559,44 @@ func TestProvideDisabled(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleRemotePeerProtocolChanges(t *testing.T) {
+	proto := protocol.ID("/v1/dht")
+	ctx := context.Background()
+	os := []opts.Option{
+		opts.Protocols(proto),
+		opts.Client(false),
+		opts.NamespacedValidator("v", blankValidator{}),
+		opts.DisableAutoRefresh(),
+	}
+
+	// start host 1 that speaks dht v1
+	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
+	require.NoError(t, err)
+	defer dhtA.Close()
+
+	// start host 2 that also speaks dht v1
+	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
+	require.NoError(t, err)
+	defer dhtB.Close()
+
+	connect(t, ctx, dhtA, dhtB)
+
+	// now assert both have each other in their RT
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second), "both RT should have one peer each")
+
+	// dhtB becomes a client
+	require.NoError(t, dhtB.SetMode(ModeClient))
+
+	// which means that dhtA should evict it from it's RT
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 0, 0, 10*time.Second), "dHTA routing table should have 0 peers")
+
+	// dhtB becomes a server
+	require.NoError(t, dhtB.SetMode(ModeServer))
+
+	// which means dhtA should have it in the RT again
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 1, 1, 10*time.Second), "dHTA routing table should have 1 peers")
 }
 
 func TestGetSetPluggedProtocol(t *testing.T) {

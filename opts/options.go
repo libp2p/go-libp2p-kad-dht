@@ -62,6 +62,7 @@ var Defaults = func(o *Options) error {
 	o.EnableProviders = true
 	o.EnableValues = true
 
+	o.RoutingTable.LatencyTolerance = time.Minute
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
 	o.RoutingTable.RefreshPeriod = 1 * time.Hour
 	o.RoutingTable.AutoRefresh = true

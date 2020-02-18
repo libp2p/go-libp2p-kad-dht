@@ -71,6 +71,8 @@ var Defaults = func(o *Options) error {
 	return nil
 }
 
+// RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
+// in the routing table's cluster.
 func RoutingTableLatencyTolerance(latency time.Duration) Option {
 	return func(o *Options) error {
 		o.RoutingTable.LatencyTolerance = latency

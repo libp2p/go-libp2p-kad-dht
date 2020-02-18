@@ -99,7 +99,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize, cfg.RoutingTable.LatencyTolerance)
+	dht := makeDHT(ctx, h, &cfg)
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
 	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
@@ -152,9 +152,9 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int, latency time.Duration) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 	self := kb.ConvertPeerID(h.ID())
-	rt := kb.NewRoutingTable(bucketSize, self, latency, h.Peerstore())
+	rt := kb.NewRoutingTable(cfg.BucketSize, self, cfg.RoutingTable.LatencyTolerance, h.Peerstore())
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -167,17 +167,17 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 	}
 
 	dht := &IpfsDHT{
-		datastore:        dstore,
+		datastore:        cfg.Datastore,
 		self:             h.ID(),
 		peerstore:        h.Peerstore(),
 		host:             h,
 		strmap:           make(map[peer.ID]*messageSender),
 		ctx:              ctx,
-		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
+		providers:        providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
 		birth:            time.Now(),
 		routingTable:     rt,
-		protocols:        protocols,
-		bucketSize:       bucketSize,
+		protocols:        cfg.Protocols,
+		bucketSize:       cfg.BucketSize,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 

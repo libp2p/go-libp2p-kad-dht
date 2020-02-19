@@ -34,6 +34,7 @@ type Options struct {
 		RefreshQueryTimeout time.Duration
 		RefreshPeriod       time.Duration
 		AutoRefresh         bool
+		LatencyTolerance    time.Duration
 	}
 }
 
@@ -61,12 +62,22 @@ var Defaults = func(o *Options) error {
 	o.EnableProviders = true
 	o.EnableValues = true
 
+	o.RoutingTable.LatencyTolerance = time.Minute
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
 	o.RoutingTable.RefreshPeriod = 1 * time.Hour
 	o.RoutingTable.AutoRefresh = true
 	o.MaxRecordAge = time.Hour * 36
 
 	return nil
+}
+
+// RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
+// in the routing table's cluster.
+func RoutingTableLatencyTolerance(latency time.Duration) Option {
+	return func(o *Options) error {
+		o.RoutingTable.LatencyTolerance = latency
+		return nil
+	}
 }
 
 // RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh

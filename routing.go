@@ -320,9 +320,9 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan []*qu) {
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan []*query) {
 	valCh := make(chan RecvdVal, 1)
-	queriesCh := make(chan []*qu, 1)
+	queriesCh := make(chan []*query, 1)
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {

@@ -15,10 +15,10 @@ import (
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
-type qfn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
-type sfn func(*kpeerset.SortedPeerset) bool
+type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
+type stopFn func(*kpeerset.SortedPeerset) bool
 
-type qu struct {
+type query struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -26,11 +26,11 @@ type qu struct {
 
 	localPeers           *kpeerset.SortedPeerset
 	globallyQueriedPeers *peer.Set
-	queryFn              qfn
-	stopFn               sfn
+	queryFn              queryFn
+	stopFn               stopFn
 }
 
-func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn qfn, stopFn sfn) ([]*qu, error) {
+func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) ([]*query, error) {
 	queryCtx, cancelQuery := context.WithCancel(ctx)
 
 	numQueriesComplete := 0
@@ -49,11 +49,11 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 		seedPeers[i], seedPeers[j] = seedPeers[j], seedPeers[i]
 	})
 
-	queries := make([]*qu, d)
+	queries := make([]*query, d)
 
 	peersQueried := peer.NewSet()
 	for i := 0; i < d; i++ {
-		query := &qu{
+		query := &query{
 			ctx:                  queryCtx,
 			cancel:               cancelQuery,
 			dht:                  dht,
@@ -98,7 +98,7 @@ func (dht *IpfsDHT) sortPeers(peers []kpeerset.IPeerMetric) kpeerset.SortablePee
 	return kpeerset.PeersSortedByLatency(peers, dht.host.Network(), dht.peerstore)
 }
 
-func strictParallelismQuery(q *qu) {
+func strictParallelismQuery(q *query) {
 	/*
 		start with K closest peers (some queried already some not)
 		take best alpha (sorted by some metric)
@@ -150,7 +150,7 @@ func strictParallelismQuery(q *qu) {
 	}
 }
 
-func simpleQuery(q *qu) {
+func simpleQuery(q *query) {
 	/*
 		start with K closest peers (some queried already some not)
 		take best alpha (sorted by some metric)
@@ -210,7 +210,7 @@ func simpleQuery(q *qu) {
 	}
 }
 
-func boundedDialQuery(q *qu) {
+func boundedDialQuery(q *query) {
 	/*
 		start with K closest peers (some queried already some not)
 		take best alpha (sorted by some metric)
@@ -268,7 +268,7 @@ type queryResult struct {
 	foundCloserPeer bool
 }
 
-func (q *qu) queryPeer(ctx context.Context, p peer.ID) *queryResult {
+func (q *query) queryPeer(ctx context.Context, p peer.ID) *queryResult {
 	dialCtx, queryCtx := ctx, ctx
 
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {

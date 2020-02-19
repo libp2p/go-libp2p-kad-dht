@@ -27,7 +27,7 @@ require (
 	github.com/multiformats/go-multiaddr-dns v0.2.0
 	github.com/multiformats/go-multihash v0.0.13
 	github.com/multiformats/go-multistream v0.1.1
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.5.0
 	go.opencensus.io v0.22.3
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898
 )

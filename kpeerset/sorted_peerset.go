@@ -14,34 +14,6 @@ type SortablePeers interface {
 	GetPeerID(i int) peer.ID
 }
 
-type comparer func(id1, id2 *peerMetric) bool
-
-type peerMetricList struct {
-	data []*peerMetric
-	cmp  comparer
-}
-
-func (pm peerMetricList) Len() int { return len(pm.data) }
-
-func (pm peerMetricList) Less(i, j int) bool {
-	return pm.cmp(pm.data[i], pm.data[j])
-}
-
-func (pm peerMetricList) Swap(i, j int) {
-	pm.data[i], pm.data[j] = pm.data[j], pm.data[i]
-}
-
-func (pm peerMetricList) GetPeerID(i int) peer.ID {
-	return pm.data[i].peer
-}
-
-func NewPeerMetricList(peers []*peerMetric, cmp func(p1, p2 *peerMetric) bool) peerMetricList {
-	return peerMetricList{
-		data: peers,
-		cmp:  cmp,
-	}
-}
-
 func NewSortedPeerset(kvalue int, from string, sortPeers func([]IPeerMetric) SortablePeers) *SortedPeerset {
 	fromKey := ks.XORKeySpace.Key([]byte(from))
 

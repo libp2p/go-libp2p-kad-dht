@@ -1,6 +1,8 @@
 package dht
 
 import (
+	"context"
+
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 
@@ -130,7 +132,7 @@ func (nn *netNotifiee) Disconnected(n network.Network, v network.Conn) {
 
 	// Do this asynchronously as ms.lk can block for a while.
 	go func() {
-		ms.lk.Lock()
+		ms.lk.Lock(context.Background())
 		defer ms.lk.Unlock()
 		ms.invalidate()
 	}()

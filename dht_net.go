@@ -234,7 +234,7 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 		dht.smlk.Unlock()
 		return ms, nil
 	}
-	ms = &messageSender{p: p, dht: dht}
+	ms = &messageSender{p: p, dht: dht, lk: newCtxMutex()}
 	dht.strmap[p] = ms
 	dht.smlk.Unlock()
 
@@ -262,7 +262,7 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 type messageSender struct {
 	s   network.Stream
 	r   msgio.ReadCloser
-	lk  sync.Mutex
+	lk  ctxMutex
 	p   peer.ID
 	dht *IpfsDHT
 
@@ -282,8 +282,11 @@ func (ms *messageSender) invalidate() {
 }
 
 func (ms *messageSender) prepOrInvalidate(ctx context.Context) error {
-	ms.lk.Lock()
+	if err := ms.lk.Lock(ctx); err != nil {
+		return err
+	}
 	defer ms.lk.Unlock()
+
 	if err := ms.prep(ctx); err != nil {
 		ms.invalidate()
 		return err
@@ -316,8 +319,11 @@ func (ms *messageSender) prep(ctx context.Context) error {
 const streamReuseTries = 3
 
 func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) error {
-	ms.lk.Lock()
+	if err := ms.lk.Lock(ctx); err != nil {
+		return err
+	}
 	defer ms.lk.Unlock()
+
 	retry := false
 	for {
 		if err := ms.prep(ctx); err != nil {
@@ -351,8 +357,11 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 }
 
 func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb.Message, error) {
-	ms.lk.Lock()
+	if err := ms.lk.Lock(ctx); err != nil {
+		return nil, err
+	}
 	defer ms.lk.Unlock()
+
 	retry := false
 	for {
 		if err := ms.prep(ctx); err != nil {

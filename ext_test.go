@@ -18,6 +18,49 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
+func TestHang(t *testing.T) {
+	ctx := context.Background()
+	mn, err := mocknet.FullMeshConnected(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := mn.Hosts()
+
+	os := []opts.Option{opts.DisableAutoRefresh()}
+	d, err := New(ctx, hosts[0], os...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hang on every request.
+	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
+		defer s.Reset()
+		<-ctx.Done()
+	})
+	d.Update(ctx, hosts[1].ID())
+
+	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel1()
+
+	peers, err := d.GetClosestPeers(ctx1, testCaseCids[0].KeyString())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	ctx2, cancel2 := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel2()
+	_ = d.Provide(ctx2, testCaseCids[0], true)
+	if ctx2.Err() != context.DeadlineExceeded {
+		t.Errorf("expected to fail with deadline exceeded, got: %s", ctx2.Err())
+	}
+	select {
+	case <-peers:
+		t.Error("GetClosestPeers should not have returned yet")
+	default:
+	}
+
+}
+
 func TestGetFailures(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()

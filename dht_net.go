@@ -83,7 +83,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		var req pb.Message
 		msgbytes, err := r.ReadMsg()
 		if err != nil {
-			defer r.ReleaseMsg(msgbytes)
+			r.ReleaseMsg(msgbytes)
 			if err == io.EOF {
 				return true
 			}

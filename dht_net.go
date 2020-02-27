@@ -96,6 +96,8 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 				ctx,
 				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
 				metrics.ReceivedMessageErrors.M(1),
+				metrics.ReceivedMessages.M(1),
+				metrics.ReceivedBytes.M(int64(req.Size())),
 			)
 			return false
 		}
@@ -107,6 +109,8 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 				ctx,
 				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
 				metrics.ReceivedMessageErrors.M(1),
+				metrics.ReceivedMessages.M(1),
+				metrics.ReceivedBytes.M(int64(req.Size())),
 			)
 			return false
 		}
@@ -164,6 +168,12 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
+	stats.Record(
+		ctx,
+		metrics.SentRequests.M(1),
+		metrics.SentBytes.M(int64(pmes.Size())),
+	)
+
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		stats.Record(ctx, metrics.SentRequestErrors.M(1))
@@ -183,8 +193,6 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	stats.Record(
 		ctx,
-		metrics.SentRequests.M(1),
-		metrics.SentBytes.M(int64(pmes.Size())),
 		metrics.OutboundRequestLatency.M(
 			float64(time.Since(start))/float64(time.Millisecond),
 		),
@@ -198,6 +206,12 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
+	stats.Record(
+		ctx,
+		metrics.SentMessages.M(1),
+		metrics.SentBytes.M(int64(pmes.Size())),
+	)
+
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		stats.Record(ctx, metrics.SentMessageErrors.M(1))
@@ -209,11 +223,6 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 		return err
 	}
 
-	stats.Record(
-		ctx,
-		metrics.SentMessages.M(1),
-		metrics.SentBytes.M(int64(pmes.Size())),
-	)
 	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
 	return nil
 }

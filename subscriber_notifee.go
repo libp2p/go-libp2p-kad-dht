@@ -75,15 +75,14 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		return
 	}
 
-	dht.routingTable.Remove(p)
-	if dht.routingTable.Size() < minRTRefreshThreshold {
-		// TODO: Actively bootstrap. For now, just try to add the currently connected peers.
-		for _, p := range dht.host.Network().Peers() {
-			// Don't bother probing, we do that on connect.
-			protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
-			if err == nil && len(protos) != 0 {
-				dht.Update(dht.Context(), p)
-			}
+	dht.routingTable.HandlePeerDisconnect(p)
+
+	// refresh the Routing Table if required
+	refresh := dht.routingTable.Size() <= minRTRefreshThreshold
+	if refresh && dht.autoRefresh {
+		select {
+		case dht.triggerRtRefresh <- nil:
+		default:
 		}
 	}
 

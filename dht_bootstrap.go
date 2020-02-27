@@ -17,7 +17,7 @@ var DefaultBootstrapPeers []multiaddr.Multiaddr
 
 // Minimum number of peers in the routing table. If we drop below this and we
 // see a new peer, we trigger a bootstrap round.
-var minRTRefreshThreshold = 4
+var minRTRefreshThreshold = 20
 
 func init() {
 	for _, s := range []string{
@@ -127,6 +127,12 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 		if time.Since(tcpl.LastRefreshAt) <= dht.rtRefreshPeriod {
 			continue
 		}
+
+		// do not refresh if bucket is full
+		if dht.routingTable.IsBucketFull(tcpl.Cpl) {
+			continue
+		}
+
 		// gen rand peer with the cpl
 		randPeer, err := dht.routingTable.GenRandPeerID(tcpl.Cpl)
 		if err != nil {

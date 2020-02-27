@@ -118,7 +118,10 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg.Datastore, cfg.Protocols, cfg.BucketSize)
+	dht, err := makeDHT(ctx, h, &cfg)
+	if err != nil {
+		return nil, err
+	}
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
 	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
@@ -179,9 +182,26 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []protocol.ID, bucketSize int) *IpfsDHT {
+func makeRoutingTable(h host.Host, cfg *opts.Options) (*kb.RoutingTable, error) {
 	self := kb.ConvertPeerID(h.ID())
-	rt := kb.NewRoutingTable(bucketSize, self, time.Minute, h.Peerstore())
+	// construct the routing table with a peer validation function
+	pvLogger := logging.Logger("RT peer validation")
+	pvF := func(c context.Context, p peer.ID) bool {
+		if err := h.Connect(c, peer.AddrInfo{ID: p}); err != nil {
+			pvLogger.Errorf("failed to connect to peer %s for validation, err=%s", p, err)
+			return false
+		}
+		fmt.Print("Returning true")
+		return true
+	}
+
+	rtOpts := []kb.Option{kb.PeerValidationFnc(pvF)}
+	if !(cfg.RoutingTableCleanup.Interval == 0) {
+		rtOpts = append(rtOpts, kb.TableCleanupInterval(cfg.RoutingTableCleanup.Interval))
+	}
+
+	rt, err := kb.NewRoutingTable(cfg.BucketSize, self, time.Minute, h.Peerstore(),
+		rtOpts...)
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -193,22 +213,30 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
+	return rt, err
+}
+
+func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) (*IpfsDHT, error) {
+	rt, err := makeRoutingTable(h, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
+	}
+
 	dht := &IpfsDHT{
-		datastore:        dstore,
+		datastore:        cfg.Datastore,
 		self:             h.ID(),
 		peerstore:        h.Peerstore(),
 		host:             h,
 		strmap:           make(map[peer.ID]*messageSender),
 		ctx:              ctx,
-		providers:        providers.NewProviderManager(ctx, h.ID(), dstore),
+		providers:        providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
 		birth:            time.Now(),
 		routingTable:     rt,
-		protocols:        protocols,
-		bucketSize:       bucketSize,
+		protocols:        cfg.Protocols,
+		bucketSize:       cfg.BucketSize,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 
-	var err error
 	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
 	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
 	if err != nil {
@@ -217,7 +245,7 @@ func makeDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocols []p
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)
 
-	return dht
+	return dht, nil
 }
 
 // TODO Implement RT seeding as described in https://github.com/libp2p/go-libp2p-kad-dht/pull/384#discussion_r320994340 OR
@@ -372,7 +400,7 @@ func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "updatePeer", p)
 	for _, c := range dht.host.Network().ConnsToPeer(p) {
 		if dht.shouldAddPeerToRoutingTable(c) {
-			dht.routingTable.Update(c.RemotePeer())
+			dht.routingTable.HandlePeerAlive(c.RemotePeer())
 			return
 		}
 	}
@@ -383,7 +411,7 @@ func (dht *IpfsDHT) UpdateConn(ctx context.Context, c network.Conn) {
 		return
 	}
 	logger.Event(ctx, "updatePeer", c.RemotePeer())
-	dht.routingTable.Update(c.RemotePeer())
+	dht.routingTable.HandlePeerAlive(c.RemotePeer())
 }
 
 func (dht *IpfsDHT) shouldAddPeerToRoutingTable(c network.Conn) bool {
@@ -710,9 +738,9 @@ func (dht *IpfsDHT) handleProtocolChanges(proc goprocess.Process) {
 				// TODO: discuss how to handle this case
 				logger.Warning("peer adding and dropping dht protocols? odd")
 			} else if add {
-				dht.RoutingTable().Update(e.Peer)
+				dht.RoutingTable().HandlePeerAlive(e.Peer)
 			} else if drop {
-				dht.RoutingTable().Remove(e.Peer)
+				dht.RoutingTable().HandlePeerDead(e.Peer)
 			}
 		case <-proc.Closing():
 			return

@@ -35,6 +35,10 @@ type Options struct {
 		RefreshPeriod       time.Duration
 		AutoRefresh         bool
 	}
+
+	RoutingTableCleanup struct {
+		Interval time.Duration
+	}
 }
 
 // Apply applies the given options to this Option
@@ -62,11 +66,19 @@ var Defaults = func(o *Options) error {
 	o.EnableValues = true
 
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
-	o.RoutingTable.RefreshPeriod = 1 * time.Hour
+	o.RoutingTable.RefreshPeriod = 10 * time.Minute
 	o.RoutingTable.AutoRefresh = true
 	o.MaxRecordAge = time.Hour * 36
 
 	return nil
+}
+
+// RoutingTableCleanupInterval is the interval between two runs of the RT cleanup routine.
+func RoutingTableCleanupInterval(i time.Duration) Option {
+	return func(o *Options) error {
+		o.RoutingTableCleanup.Interval = i
+		return nil
+	}
 }
 
 // RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh

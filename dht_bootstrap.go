@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/event"
+	"github.com/libp2p/go-libp2p-core/routing"
+
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
-	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multiaddr"
 	_ "github.com/multiformats/go-multiaddr-dns"
 )
@@ -33,6 +35,60 @@ func init() {
 		}
 		DefaultBootstrapPeers = append(DefaultBootstrapPeers, ma)
 	}
+}
+
+// startSelfLookup starts a go-routine that listens for requests to trigger a self walk on a dedicated channel
+// and then sends the error status back on the error channel sent along with the request.
+// if multiple callers "simultaneously" ask for a self walk, it performs ONLY one self walk and sends the same error status to all of them.
+func (dht *IpfsDHT) startSelfLookup() error {
+	dht.proc.Go(func(proc process.Process) {
+		ctx := processctx.OnClosingContext(proc)
+		for {
+			var waiting []chan<- error
+			select {
+			case res := <-dht.triggerSelfLookup:
+				if res != nil {
+					waiting = append(waiting, res)
+				}
+			case <-ctx.Done():
+				return
+			}
+
+			// Batch multiple refresh requests if they're all waiting at the same time.
+		collectWaiting:
+			for {
+				select {
+				case res := <-dht.triggerSelfLookup:
+					if res != nil {
+						waiting = append(waiting, res)
+					}
+				default:
+					break collectWaiting
+				}
+			}
+
+			// Do a self walk
+			queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
+			defer cancel()
+			_, err := dht.FindPeer(queryCtx, dht.self)
+			if err == routing.ErrNotFound {
+				err = nil
+			} else if err != nil {
+				err = fmt.Errorf("failed to query self during routing table refresh: %s", err)
+			}
+
+			// send back the error status
+			for _, w := range waiting {
+				w <- err
+				close(w)
+			}
+			if err != nil {
+				logger.Warning(err)
+			}
+		}
+	})
+
+	return nil
 }
 
 // Start the refresh worker.
@@ -88,14 +144,52 @@ func (dht *IpfsDHT) startRefreshing() error {
 		}
 	})
 
+	// when our address changes, we should proactively tell our closest peers about it so
+	// we become discoverable quickly. The Identify protocol will push a signed peer record
+	// with our new address to all peers we are connected to. However, we might not necessarily be connected
+	// to our closet peers & so in the true spirit of Zen, searching for ourself in the network really is the best way
+	// to to forge connections with those matter.
+	dht.proc.Go(func(proc process.Process) {
+		for {
+			select {
+			case evt, more := <-dht.subscriptions.everPeerAddressChanged.Out():
+				if !more {
+					return
+				}
+				switch evt.(type) {
+				case event.EvtLocalAddressesUpdated:
+					// our address has changed, trigger a self walk so our closet peers know about it
+					res := make(chan error, 1)
+					select {
+					case dht.triggerSelfLookup <- res:
+					default:
+
+					}
+				}
+			case <-proc.Closing():
+				return
+			}
+		}
+	})
+
 	return nil
 }
 
 func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
 	var merr error
-	if err := dht.selfWalk(ctx); err != nil {
-		merr = multierror.Append(merr, err)
+
+	// wait for self walk result
+	selfWalkres := make(chan error, 1)
+	dht.triggerSelfLookup <- selfWalkres
+	select {
+	case err := <-selfWalkres:
+		if err != nil {
+			merr = multierror.Append(merr, err)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+
 	if err := dht.refreshCpls(ctx); err != nil {
 		merr = multierror.Append(merr, err)
 	}
@@ -157,17 +251,6 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 		}
 	}
 	return merr
-}
-
-// Traverse the DHT toward the self ID
-func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
-	queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
-	defer cancel()
-	_, err := dht.FindPeer(queryCtx, dht.self)
-	if err == routing.ErrNotFound {
-		return nil
-	}
-	return fmt.Errorf("failed to query self during routing table refresh: %s", err)
 }
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the

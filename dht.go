@@ -85,13 +85,15 @@ type IpfsDHT struct {
 	bucketSize int
 
 	subscriptions struct {
-		evtPeerIdentification event.Subscription
+		evtPeerIdentification  event.Subscription
+		everPeerAddressChanged event.Subscription
 	}
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
 	triggerRtRefresh      chan chan<- error
+	triggerSelfLookup     chan chan<- error
 
 	maxRecordAge time.Duration
 
@@ -143,6 +145,10 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 		if dht.subscriptions.evtPeerIdentification != nil {
 			_ = dht.subscriptions.evtPeerIdentification.Close()
 		}
+
+		if dht.subscriptions.everPeerAddressChanged != nil {
+			_ = dht.subscriptions.everPeerAddressChanged.Close()
+		}
 		return nil
 	})
 
@@ -155,6 +161,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// handle providers
 	dht.proc.AddChild(dht.providers.Process())
 
+	dht.startSelfLookup()
 	dht.startRefreshing()
 	return dht, nil
 }
@@ -223,24 +230,30 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) (*IpfsDHT, err
 	}
 
 	dht := &IpfsDHT{
-		datastore:        cfg.Datastore,
-		self:             h.ID(),
-		peerstore:        h.Peerstore(),
-		host:             h,
-		strmap:           make(map[peer.ID]*messageSender),
-		ctx:              ctx,
-		providers:        providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
-		birth:            time.Now(),
-		routingTable:     rt,
-		protocols:        cfg.Protocols,
-		bucketSize:       cfg.BucketSize,
-		triggerRtRefresh: make(chan chan<- error),
+		datastore:         cfg.Datastore,
+		self:              h.ID(),
+		peerstore:         h.Peerstore(),
+		host:              h,
+		strmap:            make(map[peer.ID]*messageSender),
+		ctx:               ctx,
+		providers:         providers.NewProviderManager(ctx, h.ID(), cfg.Datastore),
+		birth:             time.Now(),
+		routingTable:      rt,
+		protocols:         cfg.Protocols,
+		bucketSize:        cfg.BucketSize,
+		triggerRtRefresh:  make(chan chan<- error),
+		triggerSelfLookup: make(chan chan<- error),
 	}
 
 	evts := []interface{}{&event.EvtPeerIdentificationCompleted{}, &event.EvtPeerIdentificationFailed{}}
 	dht.subscriptions.evtPeerIdentification, err = h.EventBus().Subscribe(evts, eventbus.BufSize(256))
 	if err != nil {
 		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
+	}
+
+	dht.subscriptions.everPeerAddressChanged, err = h.EventBus().Subscribe(&event.EvtLocalAddressesUpdated{}, eventbus.BufSize(256))
+	if err != nil {
+		logger.Errorf("dht not sybscribed to peer address changed event; err=%s ", err)
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

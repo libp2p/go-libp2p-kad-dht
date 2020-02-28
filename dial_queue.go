@@ -294,6 +294,7 @@ func (dq *dialQueue) worker() {
 	// This idle timer tracks if the environment is slow. If we're waiting to long to acquire a peer to dial,
 	// it means that the DHT query is progressing slow and we should shrink the worker pool.
 	idleTimer := time.NewTimer(24 * time.Hour) // placeholder init value which will be overridden immediately.
+	defer idleTimer.Stop()
 	for {
 		// trap exit signals first.
 		select {
@@ -308,6 +309,11 @@ func (dq *dialQueue) worker() {
 		select {
 		case <-idleTimer.C:
 		default:
+			// NOTE: There is a slight race here. We could be in the
+			// middle of firing the timer and not read anything from the channel.
+			//
+			// However, that's not really a huge issue. We'll think
+			// we're idle but that's fine.
 		}
 		idleTimer.Reset(dq.config.maxIdle)
 

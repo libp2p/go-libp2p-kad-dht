@@ -318,7 +318,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 		return nil
 	}
 
-	nstr, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.protocols...)
+	nstr, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.clientProtocols...)
 	if err != nil {
 		return err
 	}

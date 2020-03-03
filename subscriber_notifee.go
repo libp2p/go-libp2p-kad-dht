@@ -56,7 +56,7 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
 	for _, p := range dht.host.Network().Peers() {
-		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+		protos, err := dht.peerstore.SupportsProtocols(p, dht.clientProtocolStrs()...)
 		if err != nil {
 			return nil, fmt.Errorf("could not check peerstore for protocol support: err: %s", err)
 		}
@@ -110,7 +110,7 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentif
 	}
 
 	// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
-	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.clientProtocolStrs()...)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
 		return
@@ -122,7 +122,7 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentif
 }
 
 func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {
-	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.clientProtocolStrs()...)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
 		return
@@ -167,7 +167,7 @@ func fixLowPeers(dht *IpfsDHT) {
 	// Passively add peers we already know about
 	for _, p := range dht.host.Network().Peers() {
 		// Don't bother probing, we do that on connect.
-		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+		protos, err := dht.peerstore.SupportsProtocols(p, dht.clientProtocolStrs()...)
 		if err == nil && len(protos) != 0 {
 			dht.Update(dht.Context(), p)
 		}

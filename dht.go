@@ -73,7 +73,7 @@ type IpfsDHT struct {
 
 	stripedPutLocks [256]sync.Mutex
 
-	protocols []protocol.ID // DHT protocols
+	protocols, clientProtocols []protocol.ID // DHT protocols
 
 	auto   bool
 	mode   mode
@@ -112,9 +112,10 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	if err := cfg.Apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if cfg.disjointPaths == 0 {
-		cfg.disjointPaths = cfg.bucketSize / 2
+	if err := opts.UnsetDefaults(&cfg); err != nil {
+		return nil, err
 	}
+
 	dht := makeDHT(ctx, h, cfg)
 	dht.autoRefresh = cfg.routingTable.autoRefresh
 	dht.rtRefreshPeriod = cfg.routingTable.refreshPeriod
@@ -205,10 +206,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		birth:            time.Now(),
 		rng:              rand.New(rand.NewSource(rand.Int63())),
 		routingTable:     rt,
-		protocols:        cfg.protocols,
-		bucketSize:       cfg.bucketSize,
-		alpha:            cfg.concurrency,
-		d:                cfg.disjointPaths,
+		protocols:        cfg.Protocols,
+		clientProtocols:  cfg.ClientProtocols,
+		bucketSize:       cfg.BucketSize,
+		alpha:            cfg.Concurrency,
+		d:                cfg.DisjointPaths,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 
@@ -540,9 +542,9 @@ func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
 }
 
-func (dht *IpfsDHT) protocolStrs() []string {
-	pstrs := make([]string, len(dht.protocols))
-	for idx, proto := range dht.protocols {
+func (dht *IpfsDHT) clientProtocolStrs() []string {
+	pstrs := make([]string, len(dht.clientProtocols))
+	for idx, proto := range dht.clientProtocols {
 		pstrs[idx] = string(proto)
 	}
 

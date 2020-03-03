@@ -297,6 +297,7 @@ func (q *query) queryPeer(ctx context.Context, p peer.ID) *queryResult {
 		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
 	}
 
+	foundCloserPeer := false
 	for _, next := range newPeers {
 		if next.ID == q.dht.self { // don't add self.
 			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
@@ -304,13 +305,11 @@ func (q *query) queryPeer(ctx context.Context, p peer.ID) *queryResult {
 		}
 
 		// add their addresses to the dialer's peerstore
-		q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-	}
-
-	foundCloserPeer := false
-	for _, np := range newPeers {
-		closer := q.localPeers.Add(np.ID)
-		foundCloserPeer = foundCloserPeer || closer
+		if q.dht.queryPeerFilter(q.dht.host, *next) {
+			q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
+			closer := q.localPeers.Add(next.ID)
+			foundCloserPeer = foundCloserPeer || closer
+		}
 	}
 
 	if q.stopFn(q.localPeers) {

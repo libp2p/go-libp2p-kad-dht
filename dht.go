@@ -84,6 +84,9 @@ type IpfsDHT struct {
 	alpha      int // The concurrency parameter per path
 	d          int // Number of Disjoint Paths to query
 
+	queryPeerFilter        func(h host.Host, ai peer.AddrInfo) bool
+	routingTablePeerFilter func(conns []network.Conn) bool
+
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
@@ -198,19 +201,21 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 	}
 
 	dht := &IpfsDHT{
-		datastore:        cfg.Datastore,
-		self:             h.ID(),
-		peerstore:        h.Peerstore(),
-		host:             h,
-		strmap:           make(map[peer.ID]*messageSender),
-		birth:            time.Now(),
-		rng:              rand.New(rand.NewSource(rand.Int63())),
-		routingTable:     rt,
-		protocols:        cfg.Protocols,
-		bucketSize:       cfg.BucketSize,
-		alpha:            cfg.Concurrency,
-		d:                cfg.DisjointPaths,
-		triggerRtRefresh: make(chan chan<- error),
+		datastore:              cfg.Datastore,
+		self:                   h.ID(),
+		peerstore:              h.Peerstore(),
+		host:                   h,
+		strmap:                 make(map[peer.ID]*messageSender),
+		birth:                  time.Now(),
+		rng:                    rand.New(rand.NewSource(rand.Int63())),
+		routingTable:           rt,
+		protocols:              cfg.Protocols,
+		bucketSize:             cfg.BucketSize,
+		alpha:                  cfg.Concurrency,
+		d:                      cfg.DisjointPaths,
+		triggerRtRefresh:       make(chan chan<- error),
+		queryPeerFilter:        cfg.QueryPeerFilter,
+		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
 	}
 
 	// create a DHT proc with the given context
@@ -376,7 +381,9 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // on the given peer.
 func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "updatePeer", p)
-	dht.routingTable.Update(p)
+	if dht.routingTablePeerFilter(dht.host.Network().ConnsToPeer(p)) {
+		dht.routingTable.Update(p)
+	}
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.

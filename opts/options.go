@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
+
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-record"
 )
 
@@ -44,12 +48,14 @@ type Options struct {
 	MaxRecordAge    time.Duration
 	EnableProviders bool
 	EnableValues    bool
+	QueryPeerFilter func(h host.Host, ai peer.AddrInfo) bool
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
 		RefreshPeriod       time.Duration
 		AutoRefresh         bool
 		LatencyTolerance    time.Duration
+		PeerFilter          func(conns []network.Conn) bool
 	}
 }
 
@@ -76,11 +82,13 @@ var Defaults = func(o *Options) error {
 	o.Protocols = DefaultProtocols
 	o.EnableProviders = true
 	o.EnableValues = true
+	o.QueryPeerFilter = emptyQueryFilter
 
 	o.RoutingTable.LatencyTolerance = time.Minute
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
 	o.RoutingTable.RefreshPeriod = 1 * time.Hour
 	o.RoutingTable.AutoRefresh = true
+	o.RoutingTable.PeerFilter = emptyRTFilter
 	o.MaxRecordAge = time.Hour * 36
 
 	o.BucketSize = 20
@@ -88,6 +96,9 @@ var Defaults = func(o *Options) error {
 
 	return nil
 }
+
+func emptyQueryFilter(h host.Host, ai peer.AddrInfo) bool { return true }
+func emptyRTFilter(conns []network.Conn) bool             { return true }
 
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
@@ -266,6 +277,23 @@ func DisableProviders() Option {
 func DisableValues() Option {
 	return func(o *Options) error {
 		o.EnableValues = false
+		return nil
+	}
+}
+
+// QueryFilter sets a function that approves which peers may be dialed in a query
+func QueryFilter(filter func(h host.Host, ai peer.AddrInfo) bool) Option {
+	return func(o *Options) error {
+		o.QueryPeerFilter = filter
+		return nil
+	}
+}
+
+// RoutingTableFilter sets a function that approves which peers may be added to the routing table. The host should
+// already have at least one connection to the peer under consideration.
+func RoutingTableFilter(filter func(conns []network.Conn) bool) Option {
+	return func(o *Options) error {
+		o.RoutingTable.PeerFilter = filter
 		return nil
 	}
 }

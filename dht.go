@@ -600,28 +600,20 @@ func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
 				return
 			}
 
-			if !ok {
-				return
-			}
-			var drop, add bool
-			for _, p := range e.Added {
-				if pmap[p] {
-					add = true
-				}
-			}
-			for _, p := range e.Removed {
-				if pmap[p] {
-					drop = true
-				}
+			protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+			if err != nil {
+				continue
 			}
 
-			if add && drop {
-				// TODO: discuss how to handle this case
-				logger.Warning("peer adding and dropping dht protocols? odd")
-			} else if add {
-				dht.RoutingTable().Update(e.Peer)
-			} else if drop {
-				dht.RoutingTable().Remove(e.Peer)
+			if len(protos) > 0 {
+				for _, p := range e.Added {
+					if pmap[p] {
+						dht.routingTable.Update(e.Peer)
+						break
+					}
+				}
+			} else {
+				dht.routingTable.Remove(e.Peer)
 			}
 		case <-ctx.Done():
 			return

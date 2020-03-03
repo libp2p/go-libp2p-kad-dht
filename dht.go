@@ -125,11 +125,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
 
-	// register for network notifs.
-	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
-	go dht.handleProtocolChanges(ctx)
-	// handle providers
-	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
 	dht.mode = ModeClient
 
@@ -138,6 +133,13 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 			return nil, err
 		}
 	}
+
+	// register for network notifs.
+	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
+	go dht.handleProtocolChanges(ctx)
+	// handle providers
+	dht.proc.AddChild(dht.providers.Process())
+
 	dht.startRefreshing()
 	return dht, nil
 }

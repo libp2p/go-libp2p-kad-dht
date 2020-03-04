@@ -119,11 +119,6 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
 
-	subnot := (*subscriberNotifee)(dht)
-
-	// register for network notifs.
-	dht.host.Network().Notify(subnot)
-
 	dht.proc = goprocessctx.WithContext(ctx)
 
 	// register for network notifs.

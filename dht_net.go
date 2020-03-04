@@ -142,8 +142,6 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			return false
 		}
 
-		dht.updateFromMessage(ctx, mPeer, &req)
-
 		if resp == nil {
 			continue
 		}
@@ -187,9 +185,6 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 		return nil, err
 	}
 
-	// update the peer (on valid msgs only)
-	dht.updateFromMessage(ctx, p, rpmes)
-
 	stats.Record(ctx,
 		metrics.SentRequests.M(1),
 		metrics.SentBytes.M(int64(pmes.Size())),
@@ -227,15 +222,6 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	)
 
 	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
-	return nil
-}
-
-func (dht *IpfsDHT) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
-	// Make sure that this node is actually a DHT server, not just a client.
-	protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
-	if err == nil && len(protos) > 0 {
-		dht.Update(ctx, p)
-	}
 	return nil
 }
 

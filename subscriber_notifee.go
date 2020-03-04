@@ -52,6 +52,12 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 				return
 			}
 
+			dht.plk.Lock()
+			if dht.host.Network().Connectedness(ev.Peer) != network.Connected {
+				dht.plk.Unlock()
+				continue
+			}
+
 			// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
 			protos, err := dht.peerstore.SupportsProtocols(ev.Peer, dht.protocolStrs()...)
 			if err == nil && len(protos) != 0 {
@@ -64,6 +70,7 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 					}
 				}
 			}
+			dht.plk.Unlock()
 
 		case <-proc.Closing():
 			return

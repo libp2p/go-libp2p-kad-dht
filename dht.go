@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -85,10 +84,6 @@ type IpfsDHT struct {
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
 	// networks).
 	enableProviders, enableValues bool
-
-	subscriptions struct {
-		evtPeerIdentification event.Subscription
-	}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a

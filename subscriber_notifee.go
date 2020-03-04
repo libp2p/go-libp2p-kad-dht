@@ -39,11 +39,7 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	defer sub.Close()
 
 	dht.plk.Lock()
-	for _, p := range dht.host.Peerstore().Peers() {
-		if dht.host.Network().Connectedness(p) != network.Connected {
-			continue
-		}
-
+	for _, p := range dht.host.Network().Peers() {
 		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
 		if err == nil && len(protos) != 0 {
 			dht.Update(dht.ctx, p)

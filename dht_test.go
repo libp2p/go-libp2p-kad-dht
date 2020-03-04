@@ -402,6 +402,30 @@ func TestValueSetInvalid(t *testing.T) {
 	testSetGet("valid", true, "newer", nil)
 }
 
+func TestContextShutDown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dht := setupDHT(ctx, t, false)
+
+	// context is alive
+	select {
+	case <-dht.Context().Done():
+		t.Fatal("context should not be done")
+	default:
+	}
+
+	// shut down dht
+	require.NoError(t, dht.Close())
+
+	// now context should be done
+	select {
+	case <-dht.Context().Done():
+	default:
+		t.Fatal("context should be done")
+	}
+}
+
 func TestSearchValue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

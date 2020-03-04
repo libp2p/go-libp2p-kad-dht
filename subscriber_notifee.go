@@ -1,13 +1,14 @@
 package dht
 
 import (
-	"github.com/jbenet/goprocess"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
 
 	"github.com/libp2p/go-eventbus"
 
 	ma "github.com/multiformats/go-multiaddr"
+
+	"github.com/jbenet/goprocess"
 )
 
 // subscriberNotifee implements network.Notifee and also manages the subscriber to the event bus. We consume peer

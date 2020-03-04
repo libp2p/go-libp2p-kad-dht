@@ -80,19 +80,7 @@ func PrivateRoutingTableFilter(conns []network.Conn) bool {
 	return false
 }
 
-// taken from go-libp2p/p2p/host/relay
 func isRelayAddr(a ma.Multiaddr) bool {
-	isRelay := false
-
-	ma.ForEach(a, func(c ma.Component) bool {
-		switch c.Protocol().Code {
-		case ma.P_CIRCUIT:
-			isRelay = true
-			return false
-		default:
-			return true
-		}
-	})
-
-	return isRelay
+	val, err := a.ValueForProtocol(ma.P_CIRCUIT)
+	return err != nil && val != ""
 }

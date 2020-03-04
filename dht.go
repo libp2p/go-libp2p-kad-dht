@@ -115,8 +115,8 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableValues = cfg.EnableValues
 
 	// register for network notifs.
-	dht.host.Network().Notify((*netNotifiee)(dht))
-
+	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
+	// handle providers
 	dht.proc.AddChild(dht.ProviderManager.Process())
 	dht.Validator = cfg.Validator
 
@@ -182,12 +182,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 		triggerRtRefresh: make(chan chan<- error),
 	}
 
-	// create a DHT proc with the given teardown
-	dht.proc = goprocess.WithTeardown(func() error {
-		// remove ourselves from network notifs.
-		dht.host.Network().StopNotify((*netNotifiee)(dht))
-		return nil
-	})
+	// create a DHT proc with the given context
+	dht.proc = goprocessctx.WithContext(ctx)
 
 	// create a tagged context derived from the original context
 	ctxTags := dht.newContextWithLocalTags(ctx)

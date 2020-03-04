@@ -41,6 +41,7 @@ import (
 )
 
 var logger = logging.Logger("dht")
+var rtPvLogger = logging.Logger("dht/rt/peer-validation")
 
 type DHTMode int
 
@@ -192,13 +193,11 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 func makeRoutingTable(h host.Host, cfg *opts.Options) (*kb.RoutingTable, error) {
 	self := kb.ConvertPeerID(h.ID())
 	// construct the routing table with a peer validation function
-	pvLogger := logging.Logger("RT peer validation")
 	pvF := func(c context.Context, p peer.ID) bool {
 		if err := h.Connect(c, peer.AddrInfo{ID: p}); err != nil {
-			pvLogger.Errorf("failed to connect to peer %s for validation, err=%s", p, err)
+			rtPvLogger.Errorf("failed to connect to peer %s for validation, err=%s", p, err)
 			return false
 		}
-		fmt.Print("Returning true")
 		return true
 	}
 

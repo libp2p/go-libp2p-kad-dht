@@ -159,9 +159,8 @@ func (dht *IpfsDHT) startRefreshing() error {
 				switch evt.(type) {
 				case event.EvtLocalAddressesUpdated:
 					// our address has changed, trigger a self walk so our closet peers know about it
-					res := make(chan error, 1)
 					select {
-					case dht.triggerSelfLookup <- res:
+					case dht.triggerSelfLookup <- nil:
 					default:
 
 					}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/event"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
@@ -1782,22 +1783,7 @@ func TestDynamicModeSwitching(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var err error
-	var emitters struct {
-		evtLocalRoutabilityPrivate event.Emitter
-		evtLocalRoutabilityPublic  event.Emitter
-		evtLocalRoutabilityUnknown event.Emitter
-	}
-
-	emitters.evtLocalRoutabilityPublic, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityPublic))
-	if err != nil {
-		t.Fatal(err)
-	}
-	emitters.evtLocalRoutabilityPrivate, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityPrivate))
-	if err != nil {
-		t.Fatal(err)
-	}
-	emitters.evtLocalRoutabilityUnknown, err = node.host.EventBus().Emitter(new(event.EvtLocalRoutabilityUnknown))
+	emitter, err := node.host.EventBus().Emitter(new(event.EvtLocalReachabilityChanged))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1818,17 +1804,17 @@ func TestDynamicModeSwitching(t *testing.T) {
 		}
 	}
 
-	emitters.evtLocalRoutabilityPrivate.Emit(event.EvtLocalRoutabilityPrivate{})
+	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPrivate})
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTClient()
 
-	emitters.evtLocalRoutabilityPublic.Emit(event.EvtLocalRoutabilityPublic{})
+	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPublic})
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTServer()
 
-	emitters.evtLocalRoutabilityUnknown.Emit(event.EvtLocalRoutabilityUnknown{})
+	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityUnknown})
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTClient()

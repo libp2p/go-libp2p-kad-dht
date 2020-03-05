@@ -41,11 +41,7 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 	// only register for events if the DHT is operating in ModeAuto
 	var routabilitySub event.Subscription
 	if dht.auto {
-		routabilitySub, err = dht.Host().EventBus().Subscribe([]interface{}{
-			&event.EvtLocalRoutabilityPublic{},
-			&event.EvtLocalRoutabilityPrivate{},
-			&event.EvtLocalRoutabilityUnknown{},
-		}, bufSize)
+		routabilitySub, err = dht.Host().EventBus().Subscribe(new(event.EvtLocalReachabilityChanged), bufSize)
 		if err != nil {
 			return nil, fmt.Errorf("dht not subscribed to local routability events; err: %s", err)
 		}
@@ -165,10 +161,17 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, evt interface{}) {
 func handleRoutabilityChanges(dht *IpfsDHT, evt interface{}) {
 	var target mode
 
-	switch evt.(type) {
-	case event.EvtLocalRoutabilityPrivate, event.EvtLocalRoutabilityUnknown:
+	// something has gone really wrong if we get an event for another type
+	e, ok := evt.(event.EvtLocalReachabilityChanged)
+	if !ok {
+		logger.Errorf("got wrong type from subscription: %T", evt)
+		return
+	}
+
+	switch e.Reachability {
+	case network.ReachabilityPrivate, network.ReachabilityUnknown:
 		target = modeClient
-	case event.EvtLocalRoutabilityPublic:
+	case network.ReachabilityPublic:
 		target = modeServer
 	}
 

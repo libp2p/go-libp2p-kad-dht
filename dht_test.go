@@ -1559,6 +1559,9 @@ func TestProvideDisabled(t *testing.T) {
 			var (
 				optsA, optsB []Option
 			)
+			optsA = append(optsA, opts.Protocols("/dht/provMaybeDisabled"))
+			optsB = append(optsB, opts.Protocols("/dht/provMaybeDisabled"))
+
 			if !enabledA {
 				optsA = append(optsA, DisableProviders())
 			}

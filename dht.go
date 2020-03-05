@@ -5,12 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	goprocessctx "github.com/jbenet/goprocess/context"
 	"math/rand"
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -30,6 +28,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
 	"github.com/jbenet/goprocess"
+	goprocessctx "github.com/jbenet/goprocess/context"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -41,11 +40,11 @@ var logger = logging.Logger("dht")
 
 const BaseConnMgrScore = 5
 
-type DHTMode int
+type mode int
 
 const (
-	ModeServer = DHTMode(1)
-	ModeClient = DHTMode(2)
+	modeServer mode = 1
+	modeClient      = 2
 )
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -77,7 +76,8 @@ type IpfsDHT struct {
 
 	protocols []protocol.ID // DHT protocols
 
-	mode   DHTMode
+	auto   bool
+	mode   mode
 	modeLk sync.Mutex
 
 	bucketSize int
@@ -126,17 +126,33 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableValues = cfg.EnableValues
 
 	dht.Validator = cfg.Validator
-	dht.mode = ModeClient
 
-	if !cfg.Client {
+	switch cfg.Mode {
+	case opts.ModeAuto:
+		dht.auto = true
+		dht.mode = modeClient
+	case opts.ModeClient:
+		dht.auto = false
+		dht.mode = modeClient
+	case opts.ModeServer:
+		dht.auto = false
+		dht.mode = modeServer
+	default:
+		return nil, fmt.Errorf("invalid dht mode %d", cfg.Mode)
+	}
+
+	if dht.mode == modeServer {
 		if err := dht.moveToServerMode(); err != nil {
 			return nil, err
 		}
 	}
 
-	// register for network notifs.
-	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
-	go dht.handleProtocolChanges(ctx)
+	// register for event bus and network notifications
+	sn, err := newSubscriberNotifiee(dht)
+	if err != nil {
+		return nil, err
+	}
+	dht.proc.Go(sn.subscribe)
 	// handle providers
 	dht.proc.AddChild(dht.providers.Process())
 
@@ -450,7 +466,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 	return filtered
 }
 
-func (dht *IpfsDHT) SetMode(m DHTMode) error {
+func (dht *IpfsDHT) setMode(m mode) error {
 	dht.modeLk.Lock()
 	defer dht.modeLk.Unlock()
 
@@ -459,9 +475,9 @@ func (dht *IpfsDHT) SetMode(m DHTMode) error {
 	}
 
 	switch m {
-	case ModeServer:
+	case modeServer:
 		return dht.moveToServerMode()
-	case ModeClient:
+	case modeClient:
 		return dht.moveToClientMode()
 	default:
 		return fmt.Errorf("unrecognized dht mode: %d", m)
@@ -469,7 +485,7 @@ func (dht *IpfsDHT) SetMode(m DHTMode) error {
 }
 
 func (dht *IpfsDHT) moveToServerMode() error {
-	dht.mode = ModeServer
+	dht.mode = modeServer
 	for _, p := range dht.protocols {
 		dht.host.SetStreamHandler(p, dht.handleNewStream)
 	}
@@ -477,7 +493,7 @@ func (dht *IpfsDHT) moveToServerMode() error {
 }
 
 func (dht *IpfsDHT) moveToClientMode() error {
-	dht.mode = ModeClient
+	dht.mode = modeClient
 	for _, p := range dht.protocols {
 		dht.host.RemoveStreamHandler(p)
 	}
@@ -499,7 +515,7 @@ func (dht *IpfsDHT) moveToClientMode() error {
 	return nil
 }
 
-func (dht *IpfsDHT) getMode() DHTMode {
+func (dht *IpfsDHT) getMode() mode {
 	dht.modeLk.Lock()
 	defer dht.modeLk.Unlock()
 	return dht.mode
@@ -576,47 +592,4 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 		extraTags...,
 	) // ignoring error as it is unrelated to the actual function of this code.
 	return ctx
-}
-
-func (dht *IpfsDHT) handleProtocolChanges(ctx context.Context) {
-	// register for event bus protocol ID changes
-	sub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated))
-	if err != nil {
-		panic(err)
-	}
-	defer sub.Close()
-
-	pmap := make(map[protocol.ID]bool)
-	for _, p := range dht.protocols {
-		pmap[p] = true
-	}
-
-	for {
-		select {
-		case ie, ok := <-sub.Out():
-			e, ok := ie.(event.EvtPeerProtocolsUpdated)
-			if !ok {
-				logger.Errorf("got wrong type from subscription: %T", ie)
-				return
-			}
-
-			protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
-			if err != nil {
-				continue
-			}
-
-			if len(protos) > 0 {
-				for _, p := range e.Added {
-					if pmap[p] {
-						dht.routingTable.Update(e.Peer)
-						break
-					}
-				}
-			} else {
-				dht.routingTable.Remove(e.Peer)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
 }

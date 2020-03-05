@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"math/rand"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
@@ -130,14 +130,21 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 }
 
 func setupDHT(ctx context.Context, t *testing.T, client bool, options ...opts.Option) *IpfsDHT {
+	baseOpts := []opts.Option{
+		opts.NamespacedValidator("v", blankValidator{}),
+		opts.DisableAutoRefresh(),
+	}
+
+	if client {
+		baseOpts = append(baseOpts, opts.Mode(opts.ModeClient))
+	} else {
+		baseOpts = append(baseOpts, opts.Mode(opts.ModeServer))
+	}
+
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{
-			opts.Client(client),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
-		}, options...)...,
+		append(baseOpts, options...)...,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -793,7 +800,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	dhtA, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		opts.Client(false),
+		opts.Mode(opts.ModeServer),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
 	if err != nil {
@@ -1611,7 +1618,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	ctx := context.Background()
 	os := []opts.Option{
 		opts.Protocols(proto),
-		opts.Client(false),
+		opts.Mode(opts.ModeServer),
 		opts.NamespacedValidator("v", blankValidator{}),
 		opts.DisableAutoRefresh(),
 	}
@@ -1632,13 +1639,13 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second), "both RT should have one peer each")
 
 	// dhtB becomes a client
-	require.NoError(t, dhtB.SetMode(ModeClient))
+	require.NoError(t, dhtB.setMode(modeClient))
 
 	// which means that dhtA should evict it from it's RT
 	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 0, 0, 10*time.Second), "dHTA routing table should have 0 peers")
 
 	// dhtB becomes a server
-	require.NoError(t, dhtB.SetMode(ModeServer))
+	require.NoError(t, dhtB.setMode(modeServer))
 
 	// which means dhtA should have it in the RT again
 	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 1, 1, 10*time.Second), "dHTA routing table should have 1 peers")
@@ -1651,7 +1658,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		os := []opts.Option{
 			opts.Protocols("/esh/dht"),
-			opts.Client(false),
+			opts.Mode(opts.ModeServer),
 			opts.NamespacedValidator("v", blankValidator{}),
 			opts.DisableAutoRefresh(),
 		}
@@ -1690,7 +1697,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/esh/dht"),
-			opts.Client(false),
+			opts.Mode(opts.ModeServer),
 			opts.NamespacedValidator("v", blankValidator{}),
 			opts.DisableAutoRefresh(),
 		}...)
@@ -1700,7 +1707,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/lsr/dht"),
-			opts.Client(false),
+			opts.Mode(opts.ModeServer),
 			opts.NamespacedValidator("v", blankValidator{}),
 			opts.DisableAutoRefresh(),
 		}...)
@@ -1754,11 +1761,11 @@ func TestModeChange(t *testing.T) {
 	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
 	err := clientOnly.Ping(ctx, clientToServer.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
-	err = clientToServer.SetMode(ModeServer)
+	err = clientToServer.setMode(modeServer)
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
 	assert.Nil(t, err)
-	err = clientToServer.SetMode(ModeClient)
+	err = clientToServer.setMode(modeClient)
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
 	assert.NotNil(t, err)
@@ -1768,9 +1775,8 @@ func TestDynamicModeSwitching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	prober := setupDHT(ctx, t, true) // our test harness
-	node := setupDHT(ctx, t, true)   // the node under test
-	go RoutabilityBasedModeSwitching(node)
+	prober := setupDHT(ctx, t, true)                         // our test harness
+	node := setupDHT(ctx, t, true, opts.Mode(opts.ModeAuto)) // the node under test
 	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
 	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
 		t.Fatal(err)

@@ -19,11 +19,24 @@ var (
 	DefaultProtocols             = []protocol.ID{ProtocolDHT}
 )
 
+// ModeOpt describes what mode the dht should operate in
+type ModeOpt int
+
+const (
+	// ModeAuto utilizes EvtLocalReachabilityChanged events sent over the event bus to dynamically switch the DHT
+	// between Client and Server modes based on network conditions
+	ModeAuto ModeOpt = iota
+	// ModeClient operates the DHT as a client only, it cannot respond to incoming queries
+	ModeClient
+	// ModeServer operates the DHT as a server, it can both send and respond to queries
+	ModeServer
+)
+
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type Options struct {
 	Datastore       ds.Batching
 	Validator       record.Validator
-	Client          bool
+	Mode            ModeOpt
 	Protocols       []protocol.ID
 	BucketSize      int
 	DisjointPaths   int
@@ -122,7 +135,19 @@ func Datastore(ds ds.Batching) Option {
 // Defaults to false.
 func Client(only bool) Option {
 	return func(o *Options) error {
-		o.Client = only
+		if only {
+			o.Mode = ModeClient
+		}
+		return nil
+	}
+}
+
+// Mode configures which mode the DHT operates in (Client, Server, Auto).
+//
+// Defaults to ModeAuto.
+func Mode(m ModeOpt) Option {
+	return func(o *Options) error {
+		o.Mode = m
 		return nil
 	}
 }

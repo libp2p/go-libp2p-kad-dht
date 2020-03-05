@@ -81,7 +81,7 @@ func TestGetFailures(t *testing.T) {
 	host1 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 	host2 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 
-	d, err := New(ctx, host1, opts.DisableAutoRefresh())
+	d, err := New(ctx, host1, opts.DisableAutoRefresh(), opts.Mode(opts.ModeServer))
 	if err != nil {
 		t.Fatal(err)
 	}

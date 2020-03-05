@@ -81,7 +81,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	defer timer.Stop()
 
 	for {
-		if dht.getMode() != ModeServer {
+		if dht.getMode() != modeServer {
 			logger.Errorf("ignoring incoming dht message while not in server mode")
 			return false
 		}

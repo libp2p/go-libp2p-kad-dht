@@ -21,7 +21,9 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
-func TestHang(t *testing.T) {
+// Test that one hung request to a peer doesn't prevent another request
+// using that same peer from obeying its context.
+func TestHungRequest(t *testing.T) {
 	ctx := context.Background()
 	mn, err := mocknet.FullMeshConnected(ctx, 2)
 	if err != nil {
@@ -44,22 +46,27 @@ func TestHang(t *testing.T) {
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()
 
-	peers, err := d.GetClosestPeers(ctx1, testCaseCids[0].KeyString())
-	if err != nil {
-		t.Fatal(err)
-	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.GetClosestPeers(ctx1, testCaseCids[0].KeyString())
+		done <- err
+	}()
 
 	time.Sleep(100 * time.Millisecond)
 	ctx2, cancel2 := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel2()
-	_ = d.Provide(ctx2, testCaseCids[0], true)
-	if ctx2.Err() != context.DeadlineExceeded {
+	err = d.Provide(ctx2, testCaseCids[0], true)
+	if err != context.DeadlineExceeded {
 		t.Errorf("expected to fail with deadline exceeded, got: %s", ctx2.Err())
 	}
 	select {
-	case <-peers:
-		t.Error("GetClosestPeers should not have returned yet")
+	case <-done:
+		t.Errorf("GetClosestPeers should not have returned yet")
 	default:
+		err = <-done
+		if err != context.DeadlineExceeded {
+			t.Errorf("expected the deadline to be exceeded, got %s", err)
+		}
 	}
 
 }

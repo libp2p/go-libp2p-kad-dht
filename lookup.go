@@ -68,6 +68,9 @@ func multihashLoggableKey(mh multihash.Multihash) logging.LoggableMap {
 
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
 // to the given key
+//
+// If the context is canceled, this function will return the context error along
+// with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
 	//TODO: I can break the interface! return []peer.ID
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
@@ -121,5 +124,5 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
 	}
 
-	return out, nil
+	return out, ctx.Err()
 }

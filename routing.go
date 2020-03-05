@@ -461,7 +461,20 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		defer cancel()
 	}
 
+	var exceededDeadline bool
 	peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
+	switch err {
+	case context.DeadlineExceeded:
+		// If the _inner_ deadline has been exceeded but the _outer_
+		// context is still fine, provide the value to the closest peers
+		// we managed to find, even if they're not the _actual_ closest peers.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		exceededDeadline = true
+	case nil:
+	default:
+	}
 	if err != nil {
 		return err
 	}
@@ -484,7 +497,10 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		}(p)
 	}
 	wg.Wait()
-	return nil
+	if exceededDeadline {
+		return context.DeadlineExceeded
+	}
+	return ctx.Err()
 }
 func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
 	pi := peer.AddrInfo{

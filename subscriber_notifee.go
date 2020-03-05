@@ -183,6 +183,7 @@ func handleRoutabilityChanges(dht *IpfsDHT, evt interface{}) {
 	}
 }
 
+// fixLowPeers tries to get more peers into the routing table if we're below the threshold
 func fixLowPeers(dht *IpfsDHT) {
 	if dht.routingTable.Size() > minRTRefreshThreshold {
 		return

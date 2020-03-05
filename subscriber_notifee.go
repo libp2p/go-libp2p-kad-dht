@@ -2,9 +2,11 @@ package dht
 
 import (
 	"fmt"
-	"github.com/libp2p/go-eventbus"
+
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
+
+	"github.com/libp2p/go-eventbus"
 
 	ma "github.com/multiformats/go-multiaddr"
 

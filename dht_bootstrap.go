@@ -54,18 +54,8 @@ func (dht *IpfsDHT) startSelfLookup() error {
 				return
 			}
 
-			// Batch multiple refresh requests if they're all waiting at the same time.
-		collectWaiting:
-			for {
-				select {
-				case res := <-dht.triggerSelfLookup:
-					if res != nil {
-						waiting = append(waiting, res)
-					}
-				default:
-					break collectWaiting
-				}
-			}
+			// batch multiple refresh requests if they're all waiting at the same time.
+			waiting = append(waiting, collectWaitingChannels(dht.triggerSelfLookup)...)
 
 			// Do a self walk
 			queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
@@ -121,17 +111,7 @@ func (dht *IpfsDHT) startRefreshing() error {
 			}
 
 			// Batch multiple refresh requests if they're all waiting at the same time.
-		collectWaiting:
-			for {
-				select {
-				case res := <-dht.triggerRtRefresh:
-					if res != nil {
-						waiting = append(waiting, res)
-					}
-				default:
-					break collectWaiting
-				}
-			}
+			waiting = append(waiting, collectWaitingChannels(dht.triggerSelfLookup)...)
 
 			err := dht.doRefresh(ctx)
 			for _, w := range waiting {
@@ -156,14 +136,15 @@ func (dht *IpfsDHT) startRefreshing() error {
 				if !more {
 					return
 				}
-				switch evt.(type) {
-				case event.EvtLocalAddressesUpdated:
+				if _, ok := evt.(event.EvtLocalAddressesUpdated); ok {
 					// our address has changed, trigger a self walk so our closet peers know about it
 					select {
 					case dht.triggerSelfLookup <- nil:
 					default:
 
 					}
+				} else {
+					logger.Error("should not get an event other than EvtLocalAddressesUpdated on that subscription")
 				}
 			case <-proc.Closing():
 				return
@@ -172,6 +153,20 @@ func (dht *IpfsDHT) startRefreshing() error {
 	})
 
 	return nil
+}
+
+func collectWaitingChannels(source chan chan<- error) []chan<- error {
+	var waiting []chan<- error
+	for {
+		select {
+		case res := <-source:
+			if res != nil {
+				waiting = append(waiting, res)
+			}
+		default:
+			return waiting
+		}
+	}
 }
 
 func (dht *IpfsDHT) doRefresh(ctx context.Context) error {

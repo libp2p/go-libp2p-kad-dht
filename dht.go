@@ -252,7 +252,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) (*IpfsDHT, err
 
 	dht.subscriptions.everPeerAddressChanged, err = h.EventBus().Subscribe(&event.EvtLocalAddressesUpdated{}, eventbus.BufSize(256))
 	if err != nil {
-		logger.Errorf("dht not sybscribed to peer address changed event; err=%s ", err)
+		logger.Errorf("dht not subscribed to peer address changed event; err=%s ", err)
 	}
 
 	dht.ctx = dht.newContextWithLocalTags(ctx)

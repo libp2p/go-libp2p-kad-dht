@@ -84,8 +84,8 @@ type IpfsDHT struct {
 	alpha      int // The concurrency parameter per path
 	d          int // Number of Disjoint Paths to query
 
-	queryPeerFilter        func(h host.Host, ai peer.AddrInfo) bool
-	routingTablePeerFilter func(conns []network.Conn) bool
+	queryPeerFilter        opts.QueryFilterFunc
+	routingTablePeerFilter opts.RouteTableFilterFunc
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration

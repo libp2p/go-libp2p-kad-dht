@@ -11,7 +11,7 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/libp2p/go-libp2p-record"
+	record "github.com/libp2p/go-libp2p-record"
 )
 
 // Deprecated: The old format did not support more than one message per stream, and is not supported
@@ -48,14 +48,14 @@ type Options struct {
 	MaxRecordAge    time.Duration
 	EnableProviders bool
 	EnableValues    bool
-	QueryPeerFilter func(h host.Host, ai peer.AddrInfo) bool
+	QueryPeerFilter QueryFilterFunc
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
 		RefreshPeriod       time.Duration
 		AutoRefresh         bool
 		LatencyTolerance    time.Duration
-		PeerFilter          func(conns []network.Conn) bool
+		PeerFilter          RouteTableFilterFunc
 	}
 }
 

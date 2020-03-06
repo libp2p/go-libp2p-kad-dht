@@ -9,6 +9,13 @@ import (
 	manet "github.com/multiformats/go-multiaddr-net"
 )
 
+// QueryFilterFunc is a filter applied when considering peers to dial when querying
+type QueryFilterFunc func(h host.Host, ai peer.AddrInfo) bool
+
+// RouteTableFilterFunc is a filter applied when considering connections to keep in
+// the local route table.
+type RouteTableFilterFunc func(conns []network.Conn) bool
+
 // PublicQueryFilter returns true if the peer is suspected of being publicly accessible
 func PublicQueryFilter(h host.Host, ai peer.AddrInfo) bool {
 	if len(ai.Addrs) == 0 {

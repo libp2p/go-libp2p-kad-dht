@@ -86,7 +86,15 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 			case event.EvtPeerProtocolsUpdated:
 				handlePeerProtocolsUpdatedEvent(dht, evt)
 			case event.EvtLocalReachabilityChanged:
-				handleLocalReachabilityChangedEvent(dht, evt)
+				if dht.auto {
+					handleLocalReachabilityChangedEvent(dht, evt)
+				} else {
+					// something has gone really wrong if we get an event we did not subscribe to
+					logger.Errorf("received LocalReachabilityChanged event that was not subscribed to")
+				}
+			default:
+				// something has gone really wrong if we get an event for another type
+				logger.Errorf("got wrong type from subscription: %T", e)
 			}
 		case <-proc.Closing():
 			return

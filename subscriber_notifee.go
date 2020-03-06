@@ -17,41 +17,36 @@ import (
 // identification events to trigger inclusion in the routing table, and we consume Disconnected events to eject peers
 // from it.
 type subscriberNotifee struct {
-	dht                                    *IpfsDHT
-	identifySub, updateSub, routabilitySub event.Subscription
+	dht  *IpfsDHT
+	subs event.Subscription
 }
 
 func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 	bufSize := eventbus.BufSize(256)
 
-	// register for event bus notifications of when peers successfully complete identification in order to update the
-	// routing table
-	identifySub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), bufSize)
-	if err != nil {
-		return nil, fmt.Errorf("dht not subscribed to peer identification events; err: %s", err)
-	}
+	evts := []interface{}{
+		// register for event bus notifications of when peers successfully complete identification in order to update
+		// the routing table
+		new(event.EvtPeerIdentificationCompleted),
 
-	// register for event bus protocol ID changes in order to update the routing table
-	updateSub, err := dht.host.EventBus().Subscribe(new(event.EvtPeerProtocolsUpdated), bufSize)
-	if err != nil {
-		return nil, fmt.Errorf("dht not subscribed to peer protocol update events; err : %s", err)
+		// register for event bus protocol ID changes in order to update the routing table
+		new(event.EvtPeerProtocolsUpdated),
 	}
 
 	// register for event bus local routability changes in order to trigger switching between client and server modes
 	// only register for events if the DHT is operating in ModeAuto
-	var routabilitySub event.Subscription
 	if dht.auto {
-		routabilitySub, err = dht.Host().EventBus().Subscribe(new(event.EvtLocalReachabilityChanged), bufSize)
-		if err != nil {
-			return nil, fmt.Errorf("dht not subscribed to local routability events; err: %s", err)
-		}
+		evts = append(evts, new(event.EvtLocalReachabilityChanged))
+	}
+
+	subs, err := dht.host.EventBus().Subscribe(evts, bufSize)
+	if err != nil {
+		return nil, fmt.Errorf("dht could not subscribe to eventbus events; err: %s", err)
 	}
 
 	nn := &subscriberNotifee{
-		dht:            dht,
-		identifySub:    identifySub,
-		updateSub:      updateSub,
-		routabilitySub: routabilitySub,
+		dht:  dht,
+		subs: subs,
 	}
 
 	// register for network notifications
@@ -76,47 +71,30 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	dht := nn.dht
 	defer dht.host.Network().StopNotify(nn)
-	defer nn.identifySub.Close()
-	defer nn.updateSub.Close()
-
-	// skip routability events if they are not enabled
-	var routabilityEvts <-chan interface{}
-	if nn.routabilitySub != nil {
-		defer nn.routabilitySub.Close()
-		routabilityEvts = nn.routabilitySub.Out()
-	}
+	defer nn.subs.Close()
 
 	for {
 		select {
-		case evt, more := <-nn.identifySub.Out():
+		case e, more := <-nn.subs.Out():
 			if !more {
 				return
 			}
-			handlePeerIdentificationCompletedEvent(dht, evt)
-		case evt, more := <-nn.updateSub.Out():
-			if !more {
-				return
+
+			switch evt := e.(type) {
+			case event.EvtPeerIdentificationCompleted:
+				handlePeerIdentificationCompletedEvent(dht, evt)
+			case event.EvtPeerProtocolsUpdated:
+				handlePeerProtocolsUpdatedEvent(dht, evt)
+			case event.EvtLocalReachabilityChanged:
+				handleLocalReachabilityChangedEvent(dht, evt)
 			}
-			handlePeerProtocolsUpdatedEvent(dht, evt)
-		case evt, more := <-routabilityEvts:
-			if !more {
-				return
-			}
-			handleRoutabilityChanges(dht, evt)
 		case <-proc.Closing():
 			return
 		}
 	}
 }
 
-func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, evt interface{}) {
-	// something has gone really wrong if we get an event for another type
-	e, ok := evt.(event.EvtPeerIdentificationCompleted)
-	if !ok {
-		logger.Errorf("got wrong type from subscription: %T", e)
-		return
-	}
-
+func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentificationCompleted) {
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
 	if dht.host.Network().Connectedness(e.Peer) != network.Connected {
@@ -135,14 +113,7 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, evt interface{}) {
 	}
 }
 
-func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, evt interface{}) {
-	// something has gone really wrong if we get an event for another type
-	e, ok := evt.(event.EvtPeerProtocolsUpdated)
-	if !ok {
-		logger.Errorf("got wrong type from subscription: %T", evt)
-		return
-	}
-
+func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {
 	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
@@ -158,15 +129,8 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, evt interface{}) {
 	fixLowPeers(dht)
 }
 
-func handleRoutabilityChanges(dht *IpfsDHT, evt interface{}) {
+func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {
 	var target mode
-
-	// something has gone really wrong if we get an event for another type
-	e, ok := evt.(event.EvtLocalReachabilityChanged)
-	if !ok {
-		logger.Errorf("got wrong type from subscription: %T", evt)
-		return
-	}
 
 	switch e.Reachability {
 	case network.ReachabilityPrivate, network.ReachabilityUnknown:
@@ -175,7 +139,7 @@ func handleRoutabilityChanges(dht *IpfsDHT, evt interface{}) {
 		target = modeServer
 	}
 
-	logger.Infof("processed event %T; performing dht mode switch", evt)
+	logger.Infof("processed event %T; performing dht mode switch", e)
 
 	err := dht.setMode(target)
 	// NOTE: the mode will be printed out as a decimal.

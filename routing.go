@@ -474,8 +474,6 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		exceededDeadline = true
 	case nil:
 	default:
-	}
-	if err != nil {
 		return err
 	}
 

@@ -13,7 +13,7 @@ require (
 	github.com/jbenet/goprocess v0.1.3
 	github.com/libp2p/go-eventbus v0.1.0
 	github.com/libp2p/go-libp2p v0.5.3-0.20200221174525-7ba322244e0a
-	github.com/libp2p/go-libp2p-core v0.3.1
+	github.com/libp2p/go-libp2p-core v0.3.2-0.20200305051524-d143201d83c2
 	github.com/libp2p/go-libp2p-kbucket v0.2.3
 	github.com/libp2p/go-libp2p-peerstore v0.1.4
 	github.com/libp2p/go-libp2p-record v0.1.2

@@ -14,6 +14,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	msmux "github.com/multiformats/go-multistream"
 
 	ggio "github.com/gogo/protobuf/io"
 
@@ -80,6 +81,11 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	defer timer.Stop()
 
 	for {
+		if dht.getMode() != modeServer {
+			logger.Errorf("ignoring incoming dht message while not in server mode")
+			return false
+		}
+
 		var req pb.Message
 		msgbytes, err := r.ReadMsg()
 		msgLen := len(msgbytes)
@@ -167,6 +173,9 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx,
 			metrics.SentRequests.M(1),
 			metrics.SentRequestErrors.M(1),
@@ -178,6 +187,9 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx,
 			metrics.SentRequests.M(1),
 			metrics.SentRequestErrors.M(1),
@@ -201,6 +213,9 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx,
 			metrics.SentMessages.M(1),
 			metrics.SentMessageErrors.M(1),
@@ -209,6 +224,9 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	}
 
 	if err := ms.SendMessage(ctx, pmes); err != nil {
+		if err == msmux.ErrNotSupported {
+			dht.RoutingTable().Remove(p)
+		}
 		stats.Record(ctx,
 			metrics.SentMessages.M(1),
 			metrics.SentMessageErrors.M(1),

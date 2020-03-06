@@ -13,8 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/event"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
@@ -128,14 +131,21 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 }
 
 func setupDHT(ctx context.Context, t *testing.T, client bool, options ...opts.Option) *IpfsDHT {
+	baseOpts := []opts.Option{
+		opts.NamespacedValidator("v", blankValidator{}),
+		opts.DisableAutoRefresh(),
+	}
+
+	if client {
+		baseOpts = append(baseOpts, opts.Mode(opts.ModeClient))
+	} else {
+		baseOpts = append(baseOpts, opts.Mode(opts.ModeServer))
+	}
+
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{
-			opts.Client(client),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
-		}, options...)...,
+		append(baseOpts, options...)...,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -791,7 +801,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	dhtA, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		opts.Client(false),
+		opts.Mode(opts.ModeServer),
 		opts.NamespacedValidator("v", blankValidator{}),
 	)
 	if err != nil {
@@ -1604,6 +1614,44 @@ func TestProvideDisabled(t *testing.T) {
 	}
 }
 
+func TestHandleRemotePeerProtocolChanges(t *testing.T) {
+	proto := protocol.ID("/v1/dht")
+	ctx := context.Background()
+	os := []opts.Option{
+		opts.Protocols(proto),
+		opts.Mode(opts.ModeServer),
+		opts.NamespacedValidator("v", blankValidator{}),
+		opts.DisableAutoRefresh(),
+	}
+
+	// start host 1 that speaks dht v1
+	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
+	require.NoError(t, err)
+	defer dhtA.Close()
+
+	// start host 2 that also speaks dht v1
+	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
+	require.NoError(t, err)
+	defer dhtB.Close()
+
+	connect(t, ctx, dhtA, dhtB)
+
+	// now assert both have each other in their RT
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second), "both RT should have one peer each")
+
+	// dhtB becomes a client
+	require.NoError(t, dhtB.setMode(modeClient))
+
+	// which means that dhtA should evict it from it's RT
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 0, 0, 10*time.Second), "dHTA routing table should have 0 peers")
+
+	// dhtB becomes a server
+	require.NoError(t, dhtB.setMode(modeServer))
+
+	// which means dhtA should have it in the RT again
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 1, 1, 10*time.Second), "dHTA routing table should have 1 peers")
+}
+
 func TestGetSetPluggedProtocol(t *testing.T) {
 	t.Run("PutValue/GetValue - same protocol", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1611,7 +1659,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		os := []opts.Option{
 			opts.Protocols("/esh/dht"),
-			opts.Client(false),
+			opts.Mode(opts.ModeServer),
 			opts.NamespacedValidator("v", blankValidator{}),
 			opts.DisableAutoRefresh(),
 		}
@@ -1650,7 +1698,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/esh/dht"),
-			opts.Client(false),
+			opts.Mode(opts.ModeServer),
 			opts.NamespacedValidator("v", blankValidator{}),
 			opts.DisableAutoRefresh(),
 		}...)
@@ -1660,7 +1708,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
 			opts.Protocols("/lsr/dht"),
-			opts.Client(false),
+			opts.Mode(opts.ModeServer),
 			opts.NamespacedValidator("v", blankValidator{}),
 			opts.DisableAutoRefresh(),
 		}...)
@@ -1703,4 +1751,71 @@ func TestClientModeAtInit(t *testing.T) {
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+}
+
+func TestModeChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clientOnly := setupDHT(ctx, t, true)
+	clientToServer := setupDHT(ctx, t, true)
+	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
+	err := clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	err = clientToServer.setMode(modeServer)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.Nil(t, err)
+	err = clientToServer.setMode(modeClient)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.NotNil(t, err)
+}
+
+func TestDynamicModeSwitching(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prober := setupDHT(ctx, t, true)                         // our test harness
+	node := setupDHT(ctx, t, true, opts.Mode(opts.ModeAuto)) // the node under test
+	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
+	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
+		t.Fatal(err)
+	}
+
+	emitter, err := node.host.EventBus().Emitter(new(event.EvtLocalReachabilityChanged))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertDHTClient := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+			t.Errorf("expected routing table length to be 0; instead is %d", l)
+		}
+	}
+
+	assertDHTServer := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.Nil(t, err)
+		if l := len(prober.RoutingTable().ListPeers()); l != 1 {
+			t.Errorf("expected routing table length to be 1; instead is %d", l)
+		}
+	}
+
+	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPrivate})
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+
+	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPublic})
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTServer()
+
+	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityUnknown})
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
 }

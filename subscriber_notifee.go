@@ -1,6 +1,8 @@
 package dht
 
 import (
+	"fmt"
+
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
 
@@ -14,82 +16,173 @@ import (
 // subscriberNotifee implements network.Notifee and also manages the subscriber to the event bus. We consume peer
 // identification events to trigger inclusion in the routing table, and we consume Disconnected events to eject peers
 // from it.
-type subscriberNotifee IpfsDHT
-
-func (nn *subscriberNotifee) DHT() *IpfsDHT {
-	return (*IpfsDHT)(nn)
+type subscriberNotifee struct {
+	dht  *IpfsDHT
+	subs event.Subscription
 }
 
-func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
-	dht := nn.DHT()
+func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
+	bufSize := eventbus.BufSize(256)
 
-	dht.host.Network().Notify(nn)
-	defer dht.host.Network().StopNotify(nn)
-
-	var err error
 	evts := []interface{}{
-		&event.EvtPeerIdentificationCompleted{},
+		// register for event bus notifications of when peers successfully complete identification in order to update
+		// the routing table
+		new(event.EvtPeerIdentificationCompleted),
+
+		// register for event bus protocol ID changes in order to update the routing table
+		new(event.EvtPeerProtocolsUpdated),
 	}
 
-	// subscribe to the EvtPeerIdentificationCompleted event which notifies us every time a peer successfully completes identification
-	sub, err := dht.host.EventBus().Subscribe(evts, eventbus.BufSize(256))
+	// register for event bus local routability changes in order to trigger switching between client and server modes
+	// only register for events if the DHT is operating in ModeAuto
+	if dht.auto {
+		evts = append(evts, new(event.EvtLocalReachabilityChanged))
+	}
+
+	subs, err := dht.host.EventBus().Subscribe(evts, bufSize)
 	if err != nil {
-		logger.Errorf("dht not subscribed to peer identification events; things will fail; err: %s", err)
+		return nil, fmt.Errorf("dht could not subscribe to eventbus events; err: %s", err)
 	}
-	defer sub.Close()
 
+	nn := &subscriberNotifee{
+		dht:  dht,
+		subs: subs,
+	}
+
+	// register for network notifications
+	dht.host.Network().Notify(nn)
+
+	// Fill routing table with currently connected peers that are DHT servers
 	dht.plk.Lock()
+	defer dht.plk.Unlock()
 	for _, p := range dht.host.Network().Peers() {
 		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
-		if err == nil && len(protos) != 0 {
+		if err != nil {
+			return nil, fmt.Errorf("could not check peerstore for protocol support: err: %s", err)
+		}
+		if len(protos) != 0 {
 			dht.Update(dht.ctx, p)
 		}
 	}
-	dht.plk.Unlock()
+
+	return nn, nil
+}
+
+func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
+	dht := nn.dht
+	defer dht.host.Network().StopNotify(nn)
+	defer nn.subs.Close()
 
 	for {
 		select {
-		case evt, more := <-sub.Out():
-			// we will not be getting any more events
+		case e, more := <-nn.subs.Out():
 			if !more {
 				return
 			}
 
-			// something has gone really wrong if we get an event for another type
-			ev, ok := evt.(event.EvtPeerIdentificationCompleted)
-			if !ok {
-				logger.Errorf("got wrong type from subscription: %T", ev)
-				return
-			}
-
-			dht.plk.Lock()
-			if dht.host.Network().Connectedness(ev.Peer) != network.Connected {
-				dht.plk.Unlock()
-				continue
-			}
-
-			// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
-			protos, err := dht.peerstore.SupportsProtocols(ev.Peer, dht.protocolStrs()...)
-			if err == nil && len(protos) != 0 {
-				refresh := dht.routingTable.Size() <= minRTRefreshThreshold
-				dht.Update(dht.ctx, ev.Peer)
-				if refresh && dht.autoRefresh {
-					select {
-					case dht.triggerRtRefresh <- nil:
-					default:
-					}
+			switch evt := e.(type) {
+			case event.EvtPeerIdentificationCompleted:
+				handlePeerIdentificationCompletedEvent(dht, evt)
+			case event.EvtPeerProtocolsUpdated:
+				handlePeerProtocolsUpdatedEvent(dht, evt)
+			case event.EvtLocalReachabilityChanged:
+				if dht.auto {
+					handleLocalReachabilityChangedEvent(dht, evt)
+				} else {
+					// something has gone really wrong if we get an event we did not subscribe to
+					logger.Errorf("received LocalReachabilityChanged event that was not subscribed to")
 				}
+			default:
+				// something has gone really wrong if we get an event for another type
+				logger.Errorf("got wrong type from subscription: %T", e)
 			}
-			dht.plk.Unlock()
-
 		case <-proc.Closing():
 			return
 		}
 	}
 }
 
+func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentificationCompleted) {
+	dht.plk.Lock()
+	defer dht.plk.Unlock()
+	if dht.host.Network().Connectedness(e.Peer) != network.Connected {
+		return
+	}
+
+	// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
+	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+	if err != nil {
+		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
+		return
+	}
+	if len(protos) != 0 {
+		dht.Update(dht.ctx, e.Peer)
+		fixLowPeers(dht)
+	}
+}
+
+func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {
+	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+	if err != nil {
+		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
+		return
+	}
+
+	if len(protos) > 0 {
+		dht.routingTable.Update(e.Peer)
+	} else {
+		dht.routingTable.Remove(e.Peer)
+	}
+
+	fixLowPeers(dht)
+}
+
+func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {
+	var target mode
+
+	switch e.Reachability {
+	case network.ReachabilityPrivate, network.ReachabilityUnknown:
+		target = modeClient
+	case network.ReachabilityPublic:
+		target = modeServer
+	}
+
+	logger.Infof("processed event %T; performing dht mode switch", e)
+
+	err := dht.setMode(target)
+	// NOTE: the mode will be printed out as a decimal.
+	if err == nil {
+		logger.Infof("switched DHT mode successfully; new mode: %d", target)
+	} else {
+		logger.Warningf("switching DHT mode failed; new mode: %d, err: %s", target, err)
+	}
+}
+
+// fixLowPeers tries to get more peers into the routing table if we're below the threshold
+func fixLowPeers(dht *IpfsDHT) {
+	if dht.routingTable.Size() > minRTRefreshThreshold {
+		return
+	}
+
+	// Passively add peers we already know about
+	for _, p := range dht.host.Network().Peers() {
+		// Don't bother probing, we do that on connect.
+		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+		if err == nil && len(protos) != 0 {
+			dht.Update(dht.Context(), p)
+		}
+	}
+
+	if dht.autoRefresh {
+		select {
+		case dht.triggerRtRefresh <- nil:
+		default:
+		}
+	}
+}
+
 func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
-	dht := nn.DHT()
+	dht := nn.dht
 	select {
 	case <-dht.Process().Closing():
 		return
@@ -109,16 +202,7 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 
 	dht.routingTable.Remove(p)
 
-	if dht.routingTable.Size() < minRTRefreshThreshold {
-		// TODO: Actively bootstrap. For now, just try to add the currently connected peers.
-		for _, p := range dht.host.Network().Peers() {
-			// Don't bother probing, we do that on connect.
-			protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
-			if err == nil && len(protos) != 0 {
-				dht.Update(dht.Context(), p)
-			}
-		}
-	}
+	fixLowPeers(dht)
 
 	dht.smlk.Lock()
 	defer dht.smlk.Unlock()

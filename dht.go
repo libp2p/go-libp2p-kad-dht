@@ -40,6 +40,13 @@ var logger = logging.Logger("dht")
 
 const BaseConnMgrScore = 5
 
+type mode int
+
+const (
+	modeServer mode = 1
+	modeClient      = 2
+)
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -68,6 +75,10 @@ type IpfsDHT struct {
 	stripedPutLocks [256]sync.Mutex
 
 	protocols []protocol.ID // DHT protocols
+
+	auto   bool
+	mode   mode
+	modeLk sync.Mutex
 
 	bucketSize int
 	alpha      int // The concurrency parameter per path
@@ -114,17 +125,37 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
 
-	// register for network notifs.
-	dht.proc.Go((*subscriberNotifee)(dht).subscribe)
-	// handle providers
-	dht.proc.AddChild(dht.providers.Process())
 	dht.Validator = cfg.Validator
 
-	if !cfg.Client {
-		for _, p := range cfg.Protocols {
-			h.SetStreamHandler(p, dht.handleNewStream)
+	switch cfg.Mode {
+	case opts.ModeAuto:
+		dht.auto = true
+		dht.mode = modeClient
+	case opts.ModeClient:
+		dht.auto = false
+		dht.mode = modeClient
+	case opts.ModeServer:
+		dht.auto = false
+		dht.mode = modeServer
+	default:
+		return nil, fmt.Errorf("invalid dht mode %d", cfg.Mode)
+	}
+
+	if dht.mode == modeServer {
+		if err := dht.moveToServerMode(); err != nil {
+			return nil, err
 		}
 	}
+
+	// register for event bus and network notifications
+	sn, err := newSubscriberNotifiee(dht)
+	if err != nil {
+		return nil, err
+	}
+	dht.proc.Go(sn.subscribe)
+	// handle providers
+	dht.proc.AddChild(dht.providers.Process())
+
 	dht.startRefreshing()
 	return dht, nil
 }
@@ -433,6 +464,61 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 
 	// ok seems like closer nodes
 	return filtered
+}
+
+func (dht *IpfsDHT) setMode(m mode) error {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+
+	if m == dht.mode {
+		return nil
+	}
+
+	switch m {
+	case modeServer:
+		return dht.moveToServerMode()
+	case modeClient:
+		return dht.moveToClientMode()
+	default:
+		return fmt.Errorf("unrecognized dht mode: %d", m)
+	}
+}
+
+func (dht *IpfsDHT) moveToServerMode() error {
+	dht.mode = modeServer
+	for _, p := range dht.protocols {
+		dht.host.SetStreamHandler(p, dht.handleNewStream)
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) moveToClientMode() error {
+	dht.mode = modeClient
+	for _, p := range dht.protocols {
+		dht.host.RemoveStreamHandler(p)
+	}
+
+	pset := make(map[protocol.ID]bool)
+	for _, p := range dht.protocols {
+		pset[p] = true
+	}
+
+	for _, c := range dht.host.Network().Conns() {
+		for _, s := range c.GetStreams() {
+			if pset[s.Protocol()] {
+				if s.Stat().Direction == network.DirInbound {
+					s.Reset()
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (dht *IpfsDHT) getMode() mode {
+	dht.modeLk.Lock()
+	defer dht.modeLk.Unlock()
+	return dht.mode
 }
 
 // Context return dht's context

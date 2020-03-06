@@ -174,7 +174,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		if err == msmux.ErrNotSupported {
-			dht.RoutingTable().Remove(p)
+			dht.peerStoppedDHT(ctx, p)
 		}
 		stats.Record(ctx,
 			metrics.SentRequests.M(1),
@@ -188,7 +188,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 	rpmes, err := ms.SendRequest(ctx, pmes)
 	if err != nil {
 		if err == msmux.ErrNotSupported {
-			dht.RoutingTable().Remove(p)
+			dht.peerStoppedDHT(ctx, p)
 		}
 		stats.Record(ctx,
 			metrics.SentRequests.M(1),
@@ -214,7 +214,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	ms, err := dht.messageSenderForPeer(ctx, p)
 	if err != nil {
 		if err == msmux.ErrNotSupported {
-			dht.RoutingTable().Remove(p)
+			dht.peerStoppedDHT(ctx, p)
 		}
 		stats.Record(ctx,
 			metrics.SentMessages.M(1),
@@ -225,7 +225,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 
 	if err := ms.SendMessage(ctx, pmes); err != nil {
 		if err == msmux.ErrNotSupported {
-			dht.RoutingTable().Remove(p)
+			dht.peerStoppedDHT(ctx, p)
 		}
 		stats.Record(ctx,
 			metrics.SentMessages.M(1),

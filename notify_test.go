@@ -7,14 +7,16 @@ import (
 	"time"
 
 	tu "github.com/libp2p/go-libp2p-testing/etc"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNotifieeMultipleConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d1 := setupDHT(ctx, t, false)
-	d2 := setupDHT(ctx, t, false)
+	d1 := setupDHT(ctx, t, false, RoutingTableCheckInterval(50*time.Millisecond))
+	d2 := setupDHT(ctx, t, false, RoutingTableCheckInterval(50*time.Millisecond))
 
 	nn1, err := newSubscriberNotifiee(d1)
 	if err != nil {
@@ -36,6 +38,8 @@ func TestNotifieeMultipleConn(t *testing.T) {
 	if !checkRoutingTable(d1, d2) {
 		t.Fatal("no routes")
 	}
+
+	// we are still connected, so the disconnect notification should be a No-op
 	nn1.Disconnected(d1.host.Network(), c12)
 	nn2.Disconnected(d2.host.Network(), c21)
 
@@ -43,6 +47,8 @@ func TestNotifieeMultipleConn(t *testing.T) {
 		t.Fatal("no routes")
 	}
 
+	// the connection close should now mark the peer as missing in the RT for both peers
+	// because of the disconnect notification
 	for _, conn := range d1.host.Network().ConnsToPeer(d2.self) {
 		conn.Close()
 	}
@@ -50,20 +56,28 @@ func TestNotifieeMultipleConn(t *testing.T) {
 		conn.Close()
 	}
 
-	tu.WaitFor(ctx, func() error {
+	// close both the hosts so all connection attempts to them by RT Peer validation fail
+	d1.host.Close()
+	d2.host.Close()
+
+	// wait context will ensure that the RT cleanup completes
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	require.NoError(t, tu.WaitFor(waitCtx, func() error {
 		if checkRoutingTable(d1, d2) {
 			return fmt.Errorf("should not have routes")
 		}
 		return nil
-	})
+	}))
 }
 
 func TestNotifieeFuzz(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 
-	d1 := setupDHT(ctx, t, false)
-	d2 := setupDHT(ctx, t, false)
+	d1 := setupDHT(ctx, t, false, RoutingTableCheckInterval(50*time.Millisecond))
+	d2 := setupDHT(ctx, t, false, RoutingTableCheckInterval(50*time.Millisecond))
 
 	for i := 0; i < 10; i++ {
 		connectNoSync(t, ctx, d1, d2)
@@ -71,13 +85,16 @@ func TestNotifieeFuzz(t *testing.T) {
 			conn.Close()
 		}
 	}
-	tu.WaitFor(ctx, func() error {
+
+	// close both hosts so peer validation reconnect fails
+	d1.host.Close()
+	d2.host.Close()
+	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if checkRoutingTable(d1, d2) {
 			return fmt.Errorf("should not have routes")
 		}
 		return nil
-	})
-	connect(t, ctx, d1, d2)
+	}))
 }
 
 func checkRoutingTable(a, b *IpfsDHT) bool {

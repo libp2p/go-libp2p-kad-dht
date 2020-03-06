@@ -21,7 +21,9 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
-func TestHang(t *testing.T) {
+// Test that one hung request to a peer doesn't prevent another request
+// using that same peer from obeying its context.
+func TestHungRequest(t *testing.T) {
 	ctx := context.Background()
 	mn, err := mocknet.FullMeshConnected(ctx, 2)
 	if err != nil {

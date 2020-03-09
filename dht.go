@@ -510,6 +510,9 @@ func (dht *IpfsDHT) setMode(m mode) error {
 	}
 }
 
+// moveToServerMode advertises (via libp2p identify updates) that we are able to respond to DHT queries and sets the appropriate stream handlers.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
 func (dht *IpfsDHT) moveToServerMode() error {
 	dht.mode = modeServer
 	for _, p := range dht.serverProtocols {
@@ -518,6 +521,11 @@ func (dht *IpfsDHT) moveToServerMode() error {
 	return nil
 }
 
+// moveToClientMode stops advertising (and rescinds advertisements via libp2p identify updates) that we are able to
+// respond to DHT queries and removes the appropriate stream handlers. We also kill all inbound streams that were
+// utilizing the handled protocols.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
 func (dht *IpfsDHT) moveToClientMode() error {
 	dht.mode = modeClient
 	for _, p := range dht.serverProtocols {

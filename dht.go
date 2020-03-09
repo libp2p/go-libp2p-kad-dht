@@ -109,7 +109,7 @@ var (
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
 	var cfg config
-	if err := cfg.Apply(append([]Option{Defaults}, options...)...); err != nil {
+	if err := cfg.Apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
 	if cfg.disjointPaths == 0 {

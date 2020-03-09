@@ -13,15 +13,12 @@ import (
 
 // Deprecated: The old format did not support more than one message per stream, and is not supported
 // or relevant with stream pooling. ProtocolDHT should be used instead.
-const ProtocolDHTOld = dht.ProtocolDHTOld
+const ProtocolDHTOld = "/ipfs/dht"
 
 var (
 	ProtocolDHT      = dht.ProtocolDHT
 	DefaultProtocols = dht.DefaultProtocols
 )
-
-// Deprecated: use dht.Defaults
-var Defaults = dht.Defaults
 
 // Deprecated: use dht.RoutingTableLatencyTolerance
 func RoutingTableLatencyTolerance(latency time.Duration) dht.Option {
@@ -60,12 +57,6 @@ func Protocols(protocols ...protocol.ID) dht.Option { return dht.Protocols(proto
 
 // Deprecated: use dht.BucketSize
 func BucketSize(bucketSize int) dht.Option { return dht.BucketSize(bucketSize) }
-
-// Deprecated: use dht.Concurrency
-func Concurrency(alpha int) dht.Option { return dht.Concurrency(alpha) }
-
-// Deprecated: use dht.DisjointPaths
-func DisjointPaths(d int) dht.Option { return dht.DisjointPaths(d) }
 
 // Deprecated: use dht.MaxRecordAge
 func MaxRecordAge(maxAge time.Duration) dht.Option { return dht.MaxRecordAge(maxAge) }

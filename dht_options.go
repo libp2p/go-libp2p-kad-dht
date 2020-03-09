@@ -57,9 +57,9 @@ func (o *config) Apply(opts ...Option) error {
 // Option DHT option type.
 type Option func(*config) error
 
-// Defaults are the default DHT options. This option will be automatically
+// defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
-var Defaults = func(o *config) error {
+var defaults = func(o *config) error {
 	o.validator = record.NamespacedValidator{
 		"pk": record.PublicKeyValidator{},
 	}

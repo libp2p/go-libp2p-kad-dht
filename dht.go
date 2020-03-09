@@ -46,6 +46,11 @@ const (
 	modeClient      = 2
 )
 
+const (
+	kad1 protocol.ID = "/kad/1.0.0"
+	kad2 protocol.ID = "/kad/2.0.0"
+)
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -73,7 +78,11 @@ type IpfsDHT struct {
 
 	stripedPutLocks [256]sync.Mutex
 
-	protocols, clientProtocols []protocol.ID // DHT protocols
+	// Primary DHT protocols we query and respond to these protocols
+	protocols []protocol.ID
+
+	// DHT protocols we can respond to (may contain protocols in addition to the primary protocols)
+	serverProtocols []protocol.ID
 
 	auto   bool
 	mode   mode
@@ -112,7 +121,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	if err := cfg.Apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if err := opts.UnsetDefaults(&cfg); err != nil {
+	if err := applyFallbacks(&cfg); err != nil {
 		return nil, err
 	}
 
@@ -183,6 +192,33 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
+// applyFallbacks sets default DHT options. It is applied after Defaults and any options passed to the constructor in
+// order to allow for defaults that are based on other set options.
+func applyFallbacks(o *opts.Options) error {
+	if o.DisjointPaths == 0 {
+		o.DisjointPaths = o.BucketSize / 2
+	}
+
+	if o.ProtocolPrefix == opts.DefaultPrefix {
+		if o.BucketSize != opts.DefaultBucketSize {
+			return fmt.Errorf("protocol prefix %s must use bucket size %d", opts.DefaultPrefix, opts.DefaultBucketSize)
+		}
+		if !o.EnableProviders {
+			return fmt.Errorf("protocol prefix %s must have providers enabled", opts.DefaultPrefix)
+		}
+		if !o.EnableValues {
+			return fmt.Errorf("protocol prefix %s must have values enabled", opts.DefaultPrefix)
+		}
+		if nsval, ok := o.Validator.(record.NamespacedValidator); !ok {
+			return fmt.Errorf("protocol prefix %s must use a namespaced validator", opts.DefaultPrefix)
+		} else if len(nsval) > 2 || nsval["pk"] == nil || nsval["ipns"] == nil {
+			return fmt.Errorf("protocol prefix %s must support only the /pk and /ipns namespaces", opts.DefaultPrefix)
+		}
+		return nil
+	}
+
+	return nil
+}
 func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 	self := kb.ConvertPeerID(h.ID())
 	rt := kb.NewRoutingTable(cfg.bucketSize, self, cfg.routingTable.latencyTolerance, h.Peerstore())
@@ -197,6 +233,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
+	protocols := []protocol.ID{cfg.ProtocolPrefix + kad2}
+	serverProtocols := []protocol.ID{cfg.ProtocolPrefix + kad2, cfg.ProtocolPrefix + kad1}
+
 	dht := &IpfsDHT{
 		datastore:        cfg.datastore,
 		self:             h.ID(),
@@ -206,8 +245,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		birth:            time.Now(),
 		rng:              rand.New(rand.NewSource(rand.Int63())),
 		routingTable:     rt,
-		protocols:        cfg.Protocols,
-		clientProtocols:  cfg.ClientProtocols,
+		protocols:        protocols,
+		serverProtocols:  serverProtocols,
 		bucketSize:       cfg.BucketSize,
 		alpha:            cfg.Concurrency,
 		d:                cfg.DisjointPaths,
@@ -487,7 +526,7 @@ func (dht *IpfsDHT) setMode(m mode) error {
 
 func (dht *IpfsDHT) moveToServerMode() error {
 	dht.mode = modeServer
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		dht.host.SetStreamHandler(p, dht.handleNewStream)
 	}
 	return nil
@@ -495,12 +534,12 @@ func (dht *IpfsDHT) moveToServerMode() error {
 
 func (dht *IpfsDHT) moveToClientMode() error {
 	dht.mode = modeClient
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		dht.host.RemoveStreamHandler(p)
 	}
 
 	pset := make(map[protocol.ID]bool)
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		pset[p] = true
 	}
 
@@ -542,9 +581,9 @@ func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
 }
 
-func (dht *IpfsDHT) clientProtocolStrs() []string {
-	pstrs := make([]string, len(dht.clientProtocols))
-	for idx, proto := range dht.clientProtocols {
+func (dht *IpfsDHT) protocolStrs() []string {
+	pstrs := make([]string, len(dht.protocols))
+	for idx, proto := range dht.protocols {
 		pstrs[idx] = string(proto)
 	}
 

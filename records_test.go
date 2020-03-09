@@ -318,8 +318,8 @@ func TestValuesDisabled(t *testing.T) {
 			var (
 				optsA, optsB []Option
 			)
-			optsA = append(optsA, dhtopt.Protocols("/dht/valuesMaybeDisabled"))
-			optsB = append(optsB, dhtopt.Protocols("/dht/valuesMaybeDisabled"))
+			optsA = append(optsA, dhtopt.ProtocolPrefix("/valuesMaybeDisabled"))
+			optsB = append(optsB, dhtopt.ProtocolPrefix("/valuesMaybeDisabled"))
 
 			if !enabledA {
 				optsA = append(optsA, DisableValues())

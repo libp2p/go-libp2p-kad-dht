@@ -1559,8 +1559,8 @@ func TestProvideDisabled(t *testing.T) {
 			var (
 				optsA, optsB []Option
 			)
-			optsA = append(optsA, opts.Protocols("/dht/provMaybeDisabled"))
-			optsB = append(optsB, opts.Protocols("/dht/provMaybeDisabled"))
+			optsA = append(optsA, opts.ProtocolPrefix("/provMaybeDisabled"))
+			optsB = append(optsB, opts.ProtocolPrefix("/provMaybeDisabled"))
 
 			if !enabledA {
 				optsA = append(optsA, DisableProviders())
@@ -1617,10 +1617,9 @@ func TestProvideDisabled(t *testing.T) {
 }
 
 func TestHandleRemotePeerProtocolChanges(t *testing.T) {
-	proto := protocol.ID("/v1/dht")
 	ctx := context.Background()
 	os := []Option{
-		Protocols(proto),
+		ProtocolPrefix("/test"),
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
@@ -1660,7 +1659,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		defer cancel()
 
 		os := []Option{
-			Protocols("/esh/dht"),
+			ProtocolPrefix("/esh"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
 			DisableAutoRefresh(),
@@ -1699,7 +1698,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		defer cancel()
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
-			Protocols("/esh/dht"),
+			ProtocolPrefix("/esh"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
 			DisableAutoRefresh(),
@@ -1709,7 +1708,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		}
 
 		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
-			Protocols("/lsr/dht"),
+			ProtocolPrefix("/lsr"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
 			DisableAutoRefresh(),
@@ -1837,23 +1836,22 @@ func TestProtocolUpgrade(t *testing.T) {
 	// DHT, but only act as a client of the new DHT. In it's capacity as a server it should also only tell queriers
 	// about other DHT servers in the new DHT.
 
-	protoNew := protocol.ID("/dht/B")
-	protoOld := protocol.ID("/dht/C")
+	prefix := opts.ProtocolPrefix(protocol.ID("/test"))
 
 	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{opts.Protocols(protoNew, protoOld), opts.ClientProtocols(protoNew)}, os...)...)
+		append([]opts.Option{prefix}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{opts.Protocols(protoNew, protoOld), opts.ClientProtocols(protoNew)}, os...)...)
+		append([]opts.Option{prefix}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dhtC, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{opts.Protocols(protoOld)}, os...)...)
+		append([]opts.Option{prefix}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

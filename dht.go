@@ -567,15 +567,6 @@ func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
 }
 
-func (dht *IpfsDHT) protocolStrs() []string {
-	pstrs := make([]string, len(dht.protocols))
-	for idx, proto := range dht.protocols {
-		pstrs[idx] = string(proto)
-	}
-
-	return pstrs
-}
-
 func mkDsKey(s string) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }

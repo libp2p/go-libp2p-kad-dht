@@ -19,7 +19,6 @@ import (
 	"go.opencensus.io/tag"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
-	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
@@ -108,37 +107,37 @@ var (
 )
 
 // New creates a new DHT with the specified host and options.
-func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
-	var cfg opts.Options
-	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
+func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
+	var cfg config
+	if err := cfg.Apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if cfg.DisjointPaths == 0 {
-		cfg.DisjointPaths = cfg.BucketSize / 2
+	if cfg.disjointPaths == 0 {
+		cfg.disjointPaths = cfg.bucketSize / 2
 	}
 	dht := makeDHT(ctx, h, cfg)
-	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
-	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
-	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
+	dht.autoRefresh = cfg.routingTable.autoRefresh
+	dht.rtRefreshPeriod = cfg.routingTable.refreshPeriod
+	dht.rtRefreshQueryTimeout = cfg.routingTable.refreshQueryTimeout
 
-	dht.maxRecordAge = cfg.MaxRecordAge
-	dht.enableProviders = cfg.EnableProviders
-	dht.enableValues = cfg.EnableValues
+	dht.maxRecordAge = cfg.maxRecordAge
+	dht.enableProviders = cfg.enableProviders
+	dht.enableValues = cfg.enableValues
 
-	dht.Validator = cfg.Validator
+	dht.Validator = cfg.validator
 
-	switch cfg.Mode {
-	case opts.ModeAuto:
+	switch cfg.mode {
+	case ModeAuto:
 		dht.auto = true
 		dht.mode = modeClient
-	case opts.ModeClient:
+	case ModeClient:
 		dht.auto = false
 		dht.mode = modeClient
-	case opts.ModeServer:
+	case ModeServer:
 		dht.auto = false
 		dht.mode = modeServer
 	default:
-		return nil, fmt.Errorf("invalid dht mode %d", cfg.Mode)
+		return nil, fmt.Errorf("invalid dht mode %d", cfg.mode)
 	}
 
 	if dht.mode == modeServer {
@@ -164,7 +163,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 // IpfsDHT's initialized with this function will respond to DHT requests,
 // whereas IpfsDHT's initialized with NewDHTClient will not.
 func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, opts.Datastore(dstore))
+	dht, err := New(ctx, h, Datastore(dstore))
 	if err != nil {
 		panic(err)
 	}
@@ -176,16 +175,16 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
 // NewDHTClient creates a new DHT object with the given peer as the 'local' host
 func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, opts.Datastore(dstore), opts.Client(true))
+	dht, err := New(ctx, h, Datastore(dstore), Client(true))
 	if err != nil {
 		panic(err)
 	}
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
+func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 	self := kb.ConvertPeerID(h.ID())
-	rt := kb.NewRoutingTable(cfg.BucketSize, self, cfg.RoutingTable.LatencyTolerance, h.Peerstore())
+	rt := kb.NewRoutingTable(cfg.bucketSize, self, cfg.routingTable.latencyTolerance, h.Peerstore())
 	cmgr := h.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -198,7 +197,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 	}
 
 	dht := &IpfsDHT{
-		datastore:        cfg.Datastore,
+		datastore:        cfg.datastore,
 		self:             h.ID(),
 		peerstore:        h.Peerstore(),
 		host:             h,
@@ -206,10 +205,10 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 		birth:            time.Now(),
 		rng:              rand.New(rand.NewSource(rand.Int63())),
 		routingTable:     rt,
-		protocols:        cfg.Protocols,
-		bucketSize:       cfg.BucketSize,
-		alpha:            cfg.Concurrency,
-		d:                cfg.DisjointPaths,
+		protocols:        cfg.protocols,
+		bucketSize:       cfg.bucketSize,
+		alpha:            cfg.concurrency,
+		d:                cfg.disjointPaths,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 
@@ -221,7 +220,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	dht.ProviderManager = providers.NewProviderManager(dht.ctx, h.ID(), cfg.Datastore)
+	dht.ProviderManager = providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore)
 
 	return dht
 }

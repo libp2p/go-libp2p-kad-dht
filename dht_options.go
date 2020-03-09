@@ -1,0 +1,262 @@
+package dht
+
+import (
+	"fmt"
+	"time"
+
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p-record"
+)
+
+// ModeOpt describes what mode the dht should operate in
+type ModeOpt int
+
+const (
+	// ModeAuto utilizes EvtLocalReachabilityChanged events sent over the event bus to dynamically switch the DHT
+	// between Client and Server modes based on network conditions
+	ModeAuto ModeOpt = iota
+	// ModeClient operates the DHT as a client only, it cannot respond to incoming queries
+	ModeClient
+	// ModeServer operates the DHT as a server, it can both send and respond to queries
+	ModeServer
+)
+
+// Options is a structure containing all the options that can be used when constructing a DHT.
+type config struct {
+	datastore       ds.Batching
+	validator       record.Validator
+	mode            ModeOpt
+	protocols       []protocol.ID
+	bucketSize      int
+	disjointPaths   int
+	concurrency     int
+	maxRecordAge    time.Duration
+	enableProviders bool
+	enableValues    bool
+
+	routingTable struct {
+		refreshQueryTimeout time.Duration
+		refreshPeriod       time.Duration
+		autoRefresh         bool
+		latencyTolerance    time.Duration
+	}
+}
+
+// Apply applies the given options to this Option
+func (o *config) Apply(opts ...Option) error {
+	for i, opt := range opts {
+		if err := opt(o); err != nil {
+			return fmt.Errorf("dht option %d failed: %s", i, err)
+		}
+	}
+	return nil
+}
+
+// Option DHT option type.
+type Option func(*config) error
+
+// defaults are the default DHT options. This option will be automatically
+// prepended to any options you pass to the DHT constructor.
+var defaults = func(o *config) error {
+	o.validator = record.NamespacedValidator{
+		"pk": record.PublicKeyValidator{},
+	}
+	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
+	o.protocols = DefaultProtocols
+	o.enableProviders = true
+	o.enableValues = true
+
+	o.routingTable.latencyTolerance = time.Minute
+	o.routingTable.refreshQueryTimeout = 10 * time.Second
+	o.routingTable.refreshPeriod = 1 * time.Hour
+	o.routingTable.autoRefresh = true
+	o.maxRecordAge = time.Hour * 36
+
+	o.bucketSize = 20
+	o.concurrency = 3
+
+	return nil
+}
+
+// RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
+// in the routing table's cluster.
+func RoutingTableLatencyTolerance(latency time.Duration) Option {
+	return func(o *config) error {
+		o.routingTable.latencyTolerance = latency
+		return nil
+	}
+}
+
+// RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh
+// queries.
+func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
+	return func(o *config) error {
+		o.routingTable.refreshQueryTimeout = timeout
+		return nil
+	}
+}
+
+// RoutingTableRefreshPeriod sets the period for refreshing buckets in the
+// routing table. The DHT will refresh buckets every period by:
+//
+// 1. First searching for nearby peers to figure out how many buckets we should try to fill.
+// 1. Then searching for a random key in each bucket that hasn't been queried in
+//    the last refresh period.
+func RoutingTableRefreshPeriod(period time.Duration) Option {
+	return func(o *config) error {
+		o.routingTable.refreshPeriod = period
+		return nil
+	}
+}
+
+// Datastore configures the DHT to use the specified datastore.
+//
+// Defaults to an in-memory (temporary) map.
+func Datastore(ds ds.Batching) Option {
+	return func(o *config) error {
+		o.datastore = ds
+		return nil
+	}
+}
+
+// Client configures whether or not the DHT operates in client-only mode.
+//
+// Defaults to false.
+func Client(only bool) Option {
+	return func(o *config) error {
+		if only {
+			o.mode = ModeClient
+		}
+		return nil
+	}
+}
+
+// Mode configures which mode the DHT operates in (Client, Server, Auto).
+//
+// Defaults to ModeAuto.
+func Mode(m ModeOpt) Option {
+	return func(o *config) error {
+		o.mode = m
+		return nil
+	}
+}
+
+// Validator configures the DHT to use the specified validator.
+//
+// Defaults to a namespaced validator that can only validate public keys.
+func Validator(v record.Validator) Option {
+	return func(o *config) error {
+		o.validator = v
+		return nil
+	}
+}
+
+// NamespacedValidator adds a validator namespaced under `ns`. This option fails
+// if the DHT is not using a `record.NamespacedValidator` as it's validator (it
+// uses one by default but this can be overridden with the `Validator` option).
+//
+// Example: Given a validator registered as `NamespacedValidator("ipns",
+// myValidator)`, all records with keys starting with `/ipns/` will be validated
+// with `myValidator`.
+func NamespacedValidator(ns string, v record.Validator) Option {
+	return func(o *config) error {
+		nsval, ok := o.validator.(record.NamespacedValidator)
+		if !ok {
+			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
+		}
+		nsval[ns] = v
+		return nil
+	}
+}
+
+// Protocols sets the protocols for the DHT
+//
+// Defaults to dht.DefaultProtocols
+func Protocols(protocols ...protocol.ID) Option {
+	return func(o *config) error {
+		o.protocols = protocols
+		return nil
+	}
+}
+
+// BucketSize configures the bucket size (k in the Kademlia paper) of the routing table.
+//
+// The default value is 20.
+func BucketSize(bucketSize int) Option {
+	return func(o *config) error {
+		o.bucketSize = bucketSize
+		return nil
+	}
+}
+
+// Concurrency configures the number of concurrent requests (alpha in the Kademlia paper) for a given query path.
+//
+// The default value is 3.
+func Concurrency(alpha int) Option {
+	return func(o *config) error {
+		o.concurrency = alpha
+		return nil
+	}
+}
+
+// DisjointPaths configures the number of disjoint paths (d in the S/Kademlia paper) taken per query.
+//
+// The default value is BucketSize/2.
+func DisjointPaths(d int) Option {
+	return func(o *config) error {
+		o.disjointPaths = d
+		return nil
+	}
+}
+
+// MaxRecordAge specifies the maximum time that any node will hold onto a record ("PutValue record")
+// from the time its received. This does not apply to any other forms of validity that
+// the record may contain.
+// For example, a record may contain an ipns entry with an EOL saying its valid
+// until the year 2020 (a great time in the future). For that record to stick around
+// it must be rebroadcasted more frequently than once every 'MaxRecordAge'
+func MaxRecordAge(maxAge time.Duration) Option {
+	return func(o *config) error {
+		o.maxRecordAge = maxAge
+		return nil
+	}
+}
+
+// DisableAutoRefresh completely disables 'auto-refresh' on the DHT routing
+// table. This means that we will neither refresh the routing table periodically
+// nor when the routing table size goes below the minimum threshold.
+func DisableAutoRefresh() Option {
+	return func(o *config) error {
+		o.routingTable.autoRefresh = false
+		return nil
+	}
+}
+
+// DisableProviders disables storing and retrieving provider records.
+//
+// Defaults to enabled.
+//
+// WARNING: do not change this unless you're using a forked DHT (i.e., a private
+// network and/or distinct DHT protocols with the `Protocols` option).
+func DisableProviders() Option {
+	return func(o *config) error {
+		o.enableProviders = false
+		return nil
+	}
+}
+
+// DisableProviders disables storing and retrieving value records (including
+// public keys).
+//
+// Defaults to enabled.
+//
+// WARNING: do not change this unless you're using a forked DHT (i.e., a private
+// network and/or distinct DHT protocols with the `Protocols` option).
+func DisableValues() Option {
+	return func(o *config) error {
+		o.enableValues = false
+		return nil
+	}
+}

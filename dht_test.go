@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	"github.com/ipfs/go-cid"
@@ -130,16 +129,16 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 
-func setupDHT(ctx context.Context, t *testing.T, client bool, options ...opts.Option) *IpfsDHT {
-	baseOpts := []opts.Option{
-		opts.NamespacedValidator("v", blankValidator{}),
-		opts.DisableAutoRefresh(),
+func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *IpfsDHT {
+	baseOpts := []Option{
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
 	}
 
 	if client {
-		baseOpts = append(baseOpts, opts.Mode(opts.ModeClient))
+		baseOpts = append(baseOpts, Mode(ModeClient))
 	} else {
-		baseOpts = append(baseOpts, opts.Mode(opts.ModeServer))
+		baseOpts = append(baseOpts, Mode(ModeServer))
 	}
 
 	d, err := New(
@@ -801,8 +800,8 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	dhtA, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		opts.Mode(opts.ModeServer),
-		opts.NamespacedValidator("v", blankValidator{}),
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1558,13 +1557,13 @@ func TestProvideDisabled(t *testing.T) {
 			defer cancel()
 
 			var (
-				optsA, optsB []opts.Option
+				optsA, optsB []Option
 			)
 			if !enabledA {
-				optsA = append(optsA, opts.DisableProviders())
+				optsA = append(optsA, DisableProviders())
 			}
 			if !enabledB {
-				optsB = append(optsB, opts.DisableProviders())
+				optsB = append(optsB, DisableProviders())
 			}
 
 			dhtA := setupDHT(ctx, t, false, optsA...)
@@ -1617,11 +1616,11 @@ func TestProvideDisabled(t *testing.T) {
 func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	proto := protocol.ID("/v1/dht")
 	ctx := context.Background()
-	os := []opts.Option{
-		opts.Protocols(proto),
-		opts.Mode(opts.ModeServer),
-		opts.NamespacedValidator("v", blankValidator{}),
-		opts.DisableAutoRefresh(),
+	os := []Option{
+		Protocols(proto),
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
 	}
 
 	// start host 1 that speaks dht v1
@@ -1657,11 +1656,11 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		os := []opts.Option{
-			opts.Protocols("/esh/dht"),
-			opts.Mode(opts.ModeServer),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
+		os := []Option{
+			Protocols("/esh/dht"),
+			Mode(ModeServer),
+			NamespacedValidator("v", blankValidator{}),
+			DisableAutoRefresh(),
 		}
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
@@ -1696,21 +1695,21 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
-			opts.Protocols("/esh/dht"),
-			opts.Mode(opts.ModeServer),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
+		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
+			Protocols("/esh/dht"),
+			Mode(ModeServer),
+			NamespacedValidator("v", blankValidator{}),
+			DisableAutoRefresh(),
 		}...)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
-			opts.Protocols("/lsr/dht"),
-			opts.Mode(opts.ModeServer),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
+		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
+			Protocols("/lsr/dht"),
+			Mode(ModeServer),
+			NamespacedValidator("v", blankValidator{}),
+			DisableAutoRefresh(),
 		}...)
 		if err != nil {
 			t.Fatal(err)
@@ -1776,8 +1775,8 @@ func TestDynamicModeSwitching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	prober := setupDHT(ctx, t, true)                         // our test harness
-	node := setupDHT(ctx, t, true, opts.Mode(opts.ModeAuto)) // the node under test
+	prober := setupDHT(ctx, t, true)               // our test harness
+	node := setupDHT(ctx, t, true, Mode(ModeAuto)) // the node under test
 	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
 	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
 		t.Fatal(err)

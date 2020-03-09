@@ -30,7 +30,7 @@ func TestHungRequest(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestGetFailures(t *testing.T) {
 	host1 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 	host2 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 
-	d, err := New(ctx, host1, DisableAutoRefresh(), Mode(ModeServer))
+	d, err := New(ctx, host1, testPrefix, DisableAutoRefresh(), Mode(ModeServer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestNotFound(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +357,7 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	os := []Option{DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)

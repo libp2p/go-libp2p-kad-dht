@@ -78,7 +78,7 @@ type IpfsDHT struct {
 
 	stripedPutLocks [256]sync.Mutex
 
-	// Primary DHT protocols we query and respond to these protocols
+	// Primary DHT protocols - we query and respond to these protocols
 	protocols []protocol.ID
 
 	// DHT protocols we can respond to (may contain protocols in addition to the primary protocols)
@@ -118,10 +118,13 @@ var (
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
 	var cfg config
-	if err := cfg.Apply(append([]Option{defaults}, options...)...); err != nil {
+	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if err := applyFallbacks(&cfg); err != nil {
+	if err := cfg.applyFallbacks(); err != nil {
+		return nil, err
+	}
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
@@ -192,33 +195,6 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-// applyFallbacks sets default DHT options. It is applied after Defaults and any options passed to the constructor in
-// order to allow for defaults that are based on other set options.
-func applyFallbacks(o *opts.Options) error {
-	if o.DisjointPaths == 0 {
-		o.DisjointPaths = o.BucketSize / 2
-	}
-
-	if o.ProtocolPrefix == opts.DefaultPrefix {
-		if o.BucketSize != opts.DefaultBucketSize {
-			return fmt.Errorf("protocol prefix %s must use bucket size %d", opts.DefaultPrefix, opts.DefaultBucketSize)
-		}
-		if !o.EnableProviders {
-			return fmt.Errorf("protocol prefix %s must have providers enabled", opts.DefaultPrefix)
-		}
-		if !o.EnableValues {
-			return fmt.Errorf("protocol prefix %s must have values enabled", opts.DefaultPrefix)
-		}
-		if nsval, ok := o.Validator.(record.NamespacedValidator); !ok {
-			return fmt.Errorf("protocol prefix %s must use a namespaced validator", opts.DefaultPrefix)
-		} else if len(nsval) > 2 || nsval["pk"] == nil || nsval["ipns"] == nil {
-			return fmt.Errorf("protocol prefix %s must support only the /pk and /ipns namespaces", opts.DefaultPrefix)
-		}
-		return nil
-	}
-
-	return nil
-}
 func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 	self := kb.ConvertPeerID(h.ID())
 	rt := kb.NewRoutingTable(cfg.bucketSize, self, cfg.routingTable.latencyTolerance, h.Peerstore())
@@ -233,8 +209,18 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
-	protocols := []protocol.ID{cfg.ProtocolPrefix + kad2}
-	serverProtocols := []protocol.ID{cfg.ProtocolPrefix + kad2, cfg.ProtocolPrefix + kad1}
+	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
+	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
+
+	// check if custom test protocols were set
+	if len(cfg.testProtocols) > 0 {
+		protocols = make([]protocol.ID, len(cfg.testProtocols))
+		serverProtocols = make([]protocol.ID, len(cfg.testProtocols))
+		for i, p := range cfg.testProtocols {
+			protocols[i] = cfg.protocolPrefix + p
+			serverProtocols[i] = cfg.protocolPrefix + p
+		}
+	}
 
 	dht := &IpfsDHT{
 		datastore:        cfg.datastore,
@@ -247,9 +233,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		routingTable:     rt,
 		protocols:        protocols,
 		serverProtocols:  serverProtocols,
-		bucketSize:       cfg.BucketSize,
-		alpha:            cfg.Concurrency,
-		d:                cfg.DisjointPaths,
+		bucketSize:       cfg.bucketSize,
+		alpha:            cfg.concurrency,
+		d:                cfg.disjointPaths,
 		triggerRtRefresh: make(chan chan<- error),
 	}
 

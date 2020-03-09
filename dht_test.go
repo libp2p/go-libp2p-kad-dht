@@ -17,7 +17,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
@@ -129,8 +128,11 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 
+var testPrefix = ProtocolPrefix("/test")
+
 func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *IpfsDHT {
 	baseOpts := []Option{
+		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
 	}
@@ -800,6 +802,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	dhtA, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		testPrefix,
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 	)
@@ -1559,8 +1562,8 @@ func TestProvideDisabled(t *testing.T) {
 			var (
 				optsA, optsB []Option
 			)
-			optsA = append(optsA, opts.ProtocolPrefix("/provMaybeDisabled"))
-			optsB = append(optsB, opts.ProtocolPrefix("/provMaybeDisabled"))
+			optsA = append(optsA, ProtocolPrefix("/provMaybeDisabled"))
+			optsB = append(optsB, ProtocolPrefix("/provMaybeDisabled"))
 
 			if !enabledA {
 				optsA = append(optsA, DisableProviders())
@@ -1619,7 +1622,7 @@ func TestProvideDisabled(t *testing.T) {
 func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	ctx := context.Background()
 	os := []Option{
-		ProtocolPrefix("/test"),
+		testPrefix,
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
@@ -1825,33 +1828,31 @@ func TestProtocolUpgrade(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	os := []opts.Option{
-		opts.Mode(opts.ModeServer),
-		opts.NamespacedValidator("v", blankValidator{}),
-		opts.DisableAutoRefresh(),
-		opts.DisjointPaths(1),
+	os := []Option{
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
+		DisjointPaths(1),
 	}
 
 	// This test verifies that we can have a node serving both old and new DHTs that will respond as a server to the old
 	// DHT, but only act as a client of the new DHT. In it's capacity as a server it should also only tell queriers
 	// about other DHT servers in the new DHT.
 
-	prefix := opts.ProtocolPrefix(protocol.ID("/test"))
-
 	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{prefix}, os...)...)
+		append([]Option{testPrefix}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{prefix}, os...)...)
+		append([]Option{testPrefix}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dhtC, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{prefix}, os...)...)
+		append([]Option{testPrefix, customProtocols(kad1)}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

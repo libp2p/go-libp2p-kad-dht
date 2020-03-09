@@ -11,13 +11,6 @@ import (
 	"github.com/libp2p/go-libp2p-record"
 )
 
-const DefaultPrefix protocol.ID = "/ipfs"
-
-var (
-	ProtocolDHT      protocol.ID = "/ipfs/kad/2.0.0"
-	DefaultProtocols             = []protocol.ID{ProtocolDHT, "/ipfs/kad/1.0.0"}
-)
-
 // Deprecated: use dht.RoutingTableLatencyTolerance
 func RoutingTableLatencyTolerance(latency time.Duration) dht.Option {
 	return dht.RoutingTableLatencyTolerance(latency)

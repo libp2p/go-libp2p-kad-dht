@@ -318,6 +318,9 @@ func (ms *messageSender) prep(ctx context.Context) error {
 		return nil
 	}
 
+	// We only want to speak to peers using our primary protocols. We do not want to query any peer that only speaks
+	// one of the secondary "server" protocols that we happen to support (e.g. older nodes that we can respond to for
+	// backwards compatibility reasons).
 	nstr, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.protocols...)
 	if err != nil {
 		return err

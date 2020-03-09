@@ -161,18 +161,6 @@ func Datastore(ds ds.Batching) Option {
 	}
 }
 
-// Client configures whether or not the DHT operates in client-only mode.
-//
-// Defaults to false.
-func Client(only bool) Option {
-	return func(c *config) error {
-		if only {
-			c.mode = ModeClient
-		}
-		return nil
-	}
-}
-
 // Mode configures which mode the DHT operates in (Client, Server, Auto).
 //
 // Defaults to ModeAuto.

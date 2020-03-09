@@ -6,7 +6,6 @@ import (
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-record"
 )
@@ -29,8 +28,16 @@ func RoutingTableRefreshPeriod(period time.Duration) dht.Option {
 // Deprecated: use dht.Datastore
 func Datastore(ds ds.Batching) dht.Option { return dht.Datastore(ds) }
 
-// Deprecated: use dht.Client
-func Client(only bool) dht.Option { return dht.Client(only) }
+// Client configures whether or not the DHT operates in client-only mode.
+//
+// Defaults to false (which is ModeAuto).
+// Deprecated: use dht.Mode(ModeClient)
+func Client(only bool) dht.Option {
+	if only {
+		return dht.Mode(dht.ModeClient)
+	}
+	return dht.Mode(dht.ModeAuto)
+}
 
 // Deprecated: use dht.Mode
 func Mode(m dht.ModeOpt) dht.Option { return dht.Mode(m) }
@@ -42,9 +49,6 @@ func Validator(v record.Validator) dht.Option { return dht.Validator(v) }
 func NamespacedValidator(ns string, v record.Validator) dht.Option {
 	return dht.NamespacedValidator(ns, v)
 }
-
-// Deprecated: use dht.Protocols
-func Protocols(protocols ...protocol.ID) dht.Option { return dht.Protocols(protocols...) }
 
 // Deprecated: use dht.BucketSize
 func BucketSize(bucketSize int) dht.Option { return dht.BucketSize(bucketSize) }

@@ -318,6 +318,9 @@ func TestValuesDisabled(t *testing.T) {
 			var (
 				optsA, optsB []Option
 			)
+			optsA = append(optsA, ProtocolPrefix("/valuesMaybeDisabled"))
+			optsB = append(optsB, ProtocolPrefix("/valuesMaybeDisabled"))
+
 			if !enabledA {
 				optsA = append(optsA, DisableValues())
 			}

@@ -45,6 +45,11 @@ const (
 	modeClient      = 2
 )
 
+const (
+	kad1 protocol.ID = "/kad/1.0.0"
+	kad2 protocol.ID = "/kad/2.0.0"
+)
+
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type IpfsDHT struct {
@@ -73,7 +78,11 @@ type IpfsDHT struct {
 
 	stripedPutLocks [256]sync.Mutex
 
-	protocols []protocol.ID // DHT protocols
+	// Primary DHT protocols - we query and respond to these protocols
+	protocols []protocol.ID
+
+	// DHT protocols we can respond to (may contain protocols in addition to the primary protocols)
+	serverProtocols []protocol.ID
 
 	auto   bool
 	mode   mode
@@ -109,12 +118,16 @@ var (
 // New creates a new DHT with the specified host and options.
 func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
 	var cfg config
-	if err := cfg.Apply(append([]Option{defaults}, options...)...); err != nil {
+	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if cfg.disjointPaths == 0 {
-		cfg.disjointPaths = cfg.bucketSize / 2
+	if err := cfg.applyFallbacks(); err != nil {
+		return nil, err
 	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
 	dht := makeDHT(ctx, h, cfg)
 	dht.autoRefresh = cfg.routingTable.autoRefresh
 	dht.rtRefreshPeriod = cfg.routingTable.refreshPeriod
@@ -175,7 +188,7 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
 // NewDHTClient creates a new DHT object with the given peer as the 'local' host
 func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, Datastore(dstore), Client(true))
+	dht, err := New(ctx, h, Datastore(dstore), Mode(ModeClient))
 	if err != nil {
 		panic(err)
 	}
@@ -196,6 +209,19 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		cmgr.UntagPeer(p, "kbucket")
 	}
 
+	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
+	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
+
+	// check if custom test protocols were set
+	if len(cfg.testProtocols) > 0 {
+		protocols = make([]protocol.ID, len(cfg.testProtocols))
+		serverProtocols = make([]protocol.ID, len(cfg.testProtocols))
+		for i, p := range cfg.testProtocols {
+			protocols[i] = cfg.protocolPrefix + p
+			serverProtocols[i] = cfg.protocolPrefix + p
+		}
+	}
+
 	dht := &IpfsDHT{
 		datastore:        cfg.datastore,
 		self:             h.ID(),
@@ -205,7 +231,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) *IpfsDHT {
 		birth:            time.Now(),
 		rng:              rand.New(rand.NewSource(rand.Int63())),
 		routingTable:     rt,
-		protocols:        cfg.protocols,
+		protocols:        protocols,
+		serverProtocols:  serverProtocols,
 		bucketSize:       cfg.bucketSize,
 		alpha:            cfg.concurrency,
 		d:                cfg.disjointPaths,
@@ -483,22 +510,30 @@ func (dht *IpfsDHT) setMode(m mode) error {
 	}
 }
 
+// moveToServerMode advertises (via libp2p identify updates) that we are able to respond to DHT queries and sets the appropriate stream handlers.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
 func (dht *IpfsDHT) moveToServerMode() error {
 	dht.mode = modeServer
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		dht.host.SetStreamHandler(p, dht.handleNewStream)
 	}
 	return nil
 }
 
+// moveToClientMode stops advertising (and rescinds advertisements via libp2p identify updates) that we are able to
+// respond to DHT queries and removes the appropriate stream handlers. We also kill all inbound streams that were
+// utilizing the handled protocols.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
 func (dht *IpfsDHT) moveToClientMode() error {
 	dht.mode = modeClient
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		dht.host.RemoveStreamHandler(p)
 	}
 
 	pset := make(map[protocol.ID]bool)
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		pset[p] = true
 	}
 
@@ -538,15 +573,6 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
-}
-
-func (dht *IpfsDHT) protocolStrs() []string {
-	pstrs := make([]string, len(dht.protocols))
-	for idx, proto := range dht.protocols {
-		pstrs[idx] = string(proto)
-	}
-
-	return pstrs
 }
 
 func mkDsKey(s string) ds.Key {

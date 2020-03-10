@@ -17,7 +17,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
@@ -127,8 +126,11 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 
+var testPrefix = ProtocolPrefix("/test")
+
 func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *IpfsDHT {
 	baseOpts := []Option{
+		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
 	}
@@ -798,6 +800,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	dhtA, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		testPrefix,
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 	)
@@ -1557,6 +1560,9 @@ func TestProvideDisabled(t *testing.T) {
 			var (
 				optsA, optsB []Option
 			)
+			optsA = append(optsA, ProtocolPrefix("/provMaybeDisabled"))
+			optsB = append(optsB, ProtocolPrefix("/provMaybeDisabled"))
+
 			if !enabledA {
 				optsA = append(optsA, DisableProviders())
 			}
@@ -1612,10 +1618,9 @@ func TestProvideDisabled(t *testing.T) {
 }
 
 func TestHandleRemotePeerProtocolChanges(t *testing.T) {
-	proto := protocol.ID("/v1/dht")
 	ctx := context.Background()
 	os := []Option{
-		Protocols(proto),
+		testPrefix,
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
@@ -1655,7 +1660,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		defer cancel()
 
 		os := []Option{
-			Protocols("/esh/dht"),
+			ProtocolPrefix("/esh"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
 			DisableAutoRefresh(),
@@ -1694,7 +1699,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		defer cancel()
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
-			Protocols("/esh/dht"),
+			ProtocolPrefix("/esh"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
 			DisableAutoRefresh(),
@@ -1704,7 +1709,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		}
 
 		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
-			Protocols("/lsr/dht"),
+			ProtocolPrefix("/lsr"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
 			DisableAutoRefresh(),
@@ -1815,4 +1820,108 @@ func TestDynamicModeSwitching(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTClient()
+}
+
+func TestProtocolUpgrade(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	os := []Option{
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
+		DisjointPaths(1),
+	}
+
+	// This test verifies that we can have a node serving both old and new DHTs that will respond as a server to the old
+	// DHT, but only act as a client of the new DHT. In it's capacity as a server it should also only tell queriers
+	// about other DHT servers in the new DHT.
+
+	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		append([]Option{testPrefix}, os...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		append([]Option{testPrefix}, os...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dhtC, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		append([]Option{testPrefix, customProtocols(kad1)}, os...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connect(t, ctx, dhtA, dhtB)
+	connectNoSync(t, ctx, dhtA, dhtC)
+	wait(t, ctx, dhtC, dhtA)
+
+	if sz := dhtA.RoutingTable().Size(); sz != 1 {
+		t.Fatalf("Expected routing table to be of size %d got %d", 1, sz)
+	}
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := dhtB.PutValue(ctxT, "/v/bat", []byte("screech")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := dhtC.GetValue(ctxT, "/v/bat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "screech" {
+		t.Fatalf("Expected 'screech' got '%s'", string(value))
+	}
+
+	if err := dhtC.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = dhtB.GetValue(ctxT, "/v/cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "meow" {
+		t.Fatalf("Expected 'meow' got '%s'", string(value))
+	}
+
+	// Add record into local DHT only
+	rec := record.MakePutRecord("/v/crow", []byte("caw"))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	err = dhtC.putLocal(string(rec.Key), rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = dhtB.GetValue(ctxT, "/v/crow")
+	switch err {
+	case nil:
+		t.Fatalf("should not have been able to find value for %s", "/v/crow")
+	case routing.ErrNotFound:
+	default:
+		t.Fatal(err)
+	}
+
+	// Add record into local DHT only
+	rec = record.MakePutRecord("/v/bee", []byte("buzz"))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	err = dhtB.putLocal(string(rec.Key), rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = dhtC.GetValue(ctxT, "/v/bee")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "buzz" {
+		t.Fatalf("Expected 'buzz' got '%s'", string(value))
+	}
 }

@@ -23,12 +23,14 @@ const (
 	ModeServer
 )
 
+const DefaultPrefix protocol.ID = "/ipfs"
+
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type config struct {
 	datastore       ds.Batching
 	validator       record.Validator
 	mode            ModeOpt
-	protocols       []protocol.ID
+	protocolPrefix  protocol.ID
 	bucketSize      int
 	disjointPaths   int
 	concurrency     int
@@ -42,12 +44,18 @@ type config struct {
 		autoRefresh         bool
 		latencyTolerance    time.Duration
 	}
+
+	// internal parameters, not publicly exposed
+	protocols, serverProtocols []protocol.ID
+
+	// test parameters
+	testProtocols []protocol.ID
 }
 
-// Apply applies the given options to this Option
-func (o *config) Apply(opts ...Option) error {
+// apply applies the given options to this Option
+func (c *config) apply(opts ...Option) error {
 	for i, opt := range opts {
-		if err := opt(o); err != nil {
+		if err := opt(c); err != nil {
 			return fmt.Errorf("dht option %d failed: %s", i, err)
 		}
 	}
@@ -57,6 +65,8 @@ func (o *config) Apply(opts ...Option) error {
 // Option DHT option type.
 type Option func(*config) error
 
+const defaultBucketSize = 20
+
 // defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
 var defaults = func(o *config) error {
@@ -64,7 +74,7 @@ var defaults = func(o *config) error {
 		"pk": record.PublicKeyValidator{},
 	}
 	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
-	o.protocols = DefaultProtocols
+	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true
 	o.enableValues = true
 
@@ -74,17 +84,47 @@ var defaults = func(o *config) error {
 	o.routingTable.autoRefresh = true
 	o.maxRecordAge = time.Hour * 36
 
-	o.bucketSize = 20
+	o.bucketSize = defaultBucketSize
 	o.concurrency = 3
 
+	return nil
+}
+
+// applyFallbacks sets default DHT options. It is applied after Defaults and any options passed to the constructor in
+// order to allow for defaults that are based on other set options.
+func (c *config) applyFallbacks() error {
+	if c.disjointPaths == 0 {
+		c.disjointPaths = c.bucketSize / 2
+	}
+	return nil
+}
+
+func (c *config) validate() error {
+	if c.protocolPrefix == DefaultPrefix {
+		if c.bucketSize != defaultBucketSize {
+			return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
+		}
+		if !c.enableProviders {
+			return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)
+		}
+		if !c.enableValues {
+			return fmt.Errorf("protocol prefix %s must have values enabled", DefaultPrefix)
+		}
+		if nsval, ok := c.validator.(record.NamespacedValidator); !ok {
+			return fmt.Errorf("protocol prefix %s must use a namespaced validator", DefaultPrefix)
+		} else if len(nsval) > 2 || nsval["pk"] == nil || nsval["ipns"] == nil {
+			return fmt.Errorf("protocol prefix %s must support only the /pk and /ipns namespaces", DefaultPrefix)
+		}
+		return nil
+	}
 	return nil
 }
 
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
 func RoutingTableLatencyTolerance(latency time.Duration) Option {
-	return func(o *config) error {
-		o.routingTable.latencyTolerance = latency
+	return func(c *config) error {
+		c.routingTable.latencyTolerance = latency
 		return nil
 	}
 }
@@ -92,8 +132,8 @@ func RoutingTableLatencyTolerance(latency time.Duration) Option {
 // RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh
 // queries.
 func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
-	return func(o *config) error {
-		o.routingTable.refreshQueryTimeout = timeout
+	return func(c *config) error {
+		c.routingTable.refreshQueryTimeout = timeout
 		return nil
 	}
 }
@@ -105,8 +145,8 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 // 1. Then searching for a random key in each bucket that hasn't been queried in
 //    the last refresh period.
 func RoutingTableRefreshPeriod(period time.Duration) Option {
-	return func(o *config) error {
-		o.routingTable.refreshPeriod = period
+	return func(c *config) error {
+		c.routingTable.refreshPeriod = period
 		return nil
 	}
 }
@@ -115,20 +155,8 @@ func RoutingTableRefreshPeriod(period time.Duration) Option {
 //
 // Defaults to an in-memory (temporary) map.
 func Datastore(ds ds.Batching) Option {
-	return func(o *config) error {
-		o.datastore = ds
-		return nil
-	}
-}
-
-// Client configures whether or not the DHT operates in client-only mode.
-//
-// Defaults to false.
-func Client(only bool) Option {
-	return func(o *config) error {
-		if only {
-			o.mode = ModeClient
-		}
+	return func(c *config) error {
+		c.datastore = ds
 		return nil
 	}
 }
@@ -137,8 +165,8 @@ func Client(only bool) Option {
 //
 // Defaults to ModeAuto.
 func Mode(m ModeOpt) Option {
-	return func(o *config) error {
-		o.mode = m
+	return func(c *config) error {
+		c.mode = m
 		return nil
 	}
 }
@@ -147,8 +175,8 @@ func Mode(m ModeOpt) Option {
 //
 // Defaults to a namespaced validator that can only validate public keys.
 func Validator(v record.Validator) Option {
-	return func(o *config) error {
-		o.validator = v
+	return func(c *config) error {
+		c.validator = v
 		return nil
 	}
 }
@@ -161,8 +189,8 @@ func Validator(v record.Validator) Option {
 // myValidator)`, all records with keys starting with `/ipns/` will be validated
 // with `myValidator`.
 func NamespacedValidator(ns string, v record.Validator) Option {
-	return func(o *config) error {
-		nsval, ok := o.validator.(record.NamespacedValidator)
+	return func(c *config) error {
+		nsval, ok := c.validator.(record.NamespacedValidator)
 		if !ok {
 			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
 		}
@@ -171,12 +199,13 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 	}
 }
 
-// Protocols sets the protocols for the DHT
+// ProtocolPrefix sets an application specific prefix to be attached to all DHT protocols. For example,
+// /myapp/kad/1.0.0 instead of /ipfs/kad/1.0.0. Prefix should be of the form /myapp.
 //
-// Defaults to dht.DefaultProtocols
-func Protocols(protocols ...protocol.ID) Option {
-	return func(o *config) error {
-		o.protocols = protocols
+// Defaults to dht.DefaultPrefix
+func ProtocolPrefix(prefix protocol.ID) Option {
+	return func(c *config) error {
+		c.protocolPrefix = prefix
 		return nil
 	}
 }
@@ -185,8 +214,8 @@ func Protocols(protocols ...protocol.ID) Option {
 //
 // The default value is 20.
 func BucketSize(bucketSize int) Option {
-	return func(o *config) error {
-		o.bucketSize = bucketSize
+	return func(c *config) error {
+		c.bucketSize = bucketSize
 		return nil
 	}
 }
@@ -195,8 +224,8 @@ func BucketSize(bucketSize int) Option {
 //
 // The default value is 3.
 func Concurrency(alpha int) Option {
-	return func(o *config) error {
-		o.concurrency = alpha
+	return func(c *config) error {
+		c.concurrency = alpha
 		return nil
 	}
 }
@@ -205,8 +234,8 @@ func Concurrency(alpha int) Option {
 //
 // The default value is BucketSize/2.
 func DisjointPaths(d int) Option {
-	return func(o *config) error {
-		o.disjointPaths = d
+	return func(c *config) error {
+		c.disjointPaths = d
 		return nil
 	}
 }
@@ -218,8 +247,8 @@ func DisjointPaths(d int) Option {
 // until the year 2020 (a great time in the future). For that record to stick around
 // it must be rebroadcasted more frequently than once every 'MaxRecordAge'
 func MaxRecordAge(maxAge time.Duration) Option {
-	return func(o *config) error {
-		o.maxRecordAge = maxAge
+	return func(c *config) error {
+		c.maxRecordAge = maxAge
 		return nil
 	}
 }
@@ -228,8 +257,8 @@ func MaxRecordAge(maxAge time.Duration) Option {
 // table. This means that we will neither refresh the routing table periodically
 // nor when the routing table size goes below the minimum threshold.
 func DisableAutoRefresh() Option {
-	return func(o *config) error {
-		o.routingTable.autoRefresh = false
+	return func(c *config) error {
+		c.routingTable.autoRefresh = false
 		return nil
 	}
 }
@@ -241,8 +270,8 @@ func DisableAutoRefresh() Option {
 // WARNING: do not change this unless you're using a forked DHT (i.e., a private
 // network and/or distinct DHT protocols with the `Protocols` option).
 func DisableProviders() Option {
-	return func(o *config) error {
-		o.enableProviders = false
+	return func(c *config) error {
+		c.enableProviders = false
 		return nil
 	}
 }
@@ -255,8 +284,17 @@ func DisableProviders() Option {
 // WARNING: do not change this unless you're using a forked DHT (i.e., a private
 // network and/or distinct DHT protocols with the `Protocols` option).
 func DisableValues() Option {
-	return func(o *config) error {
-		o.enableValues = false
+	return func(c *config) error {
+		c.enableValues = false
+		return nil
+	}
+}
+
+// customProtocols is only to be used for testing. It sets the protocols that the DHT listens on and queries with to be
+// the ones passed in. The custom protocols are still augmented by the Prefix.
+func customProtocols(protos ...protocol.ID) Option {
+	return func(c *config) error {
+		c.testProtocols = protos
 		return nil
 	}
 }

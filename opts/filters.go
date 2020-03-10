@@ -1,9 +1,12 @@
 package dhtopts
 
 import (
+	"net"
+
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	netroute "github.com/libp2p/go-netroute"
 
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr-net"
@@ -14,7 +17,7 @@ type QueryFilterFunc func(h host.Host, ai peer.AddrInfo) bool
 
 // RouteTableFilterFunc is a filter applied when considering connections to keep in
 // the local route table.
-type RouteTableFilterFunc func(conns []network.Conn) bool
+type RouteTableFilterFunc func(h host.Host, conns []network.Conn) bool
 
 // PublicQueryFilter returns true if the peer is suspected of being publicly accessible
 func PublicQueryFilter(h host.Host, ai peer.AddrInfo) bool {
@@ -36,7 +39,7 @@ func PublicQueryFilter(h host.Host, ai peer.AddrInfo) bool {
 
 // PublicRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a public network
-func PublicRoutingTableFilter(conns []network.Conn) bool {
+func PublicRoutingTableFilter(_ host.Host, conns []network.Conn) bool {
 	for _, c := range conns {
 		addr := c.RemoteMultiaddr()
 		if !isRelayAddr(addr) && manet.IsPublicAddr(addr) {
@@ -78,12 +81,42 @@ func PrivateQueryFilter(h host.Host, ai peer.AddrInfo) bool {
 
 // PrivateRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a private network
-func PrivateRoutingTableFilter(conns []network.Conn) bool {
+func PrivateRoutingTableFilter(h host.Host, conns []network.Conn) bool {
+	router, _ := netroute.New()
+	myAdvertisedIPs := make([]net.IP, 0)
+	for _, a := range h.Addrs() {
+		if manet.IsPublicAddr(a) {
+			ip, _ := manet.ToIP(a)
+			myAdvertisedIPs = append(myAdvertisedIPs, ip)
+		}
+	}
+
 	for _, c := range conns {
 		if manet.IsPrivateAddr(c.RemoteMultiaddr()) {
 			return true
 		}
+
+		if manet.IsPublicAddr(c.RemoteMultiaddr()) {
+			ip, _ := manet.ToIP(c.RemoteMultiaddr())
+
+			// if the ip is the same as one of the local host's public advertised IPs - then consider it local
+			for _, i := range myAdvertisedIPs {
+				if i.Equal(ip) {
+					return true
+				}
+			}
+			// TODO: if the first 64 bits of an IPv6 match the host, and the last 64 bits are in EUI format - then consider it local
+
+			// if there's no gateway - a direct host in the OS routing table - then consider it local
+			if router != nil {
+				_, gw, _, err := router.Route(ip)
+				if gw == nil && err == nil {
+					return true
+				}
+			}
+		}
 	}
+
 	return false
 }
 

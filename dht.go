@@ -381,7 +381,7 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // on the given peer.
 func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "updatePeer", p)
-	if dht.routingTablePeerFilter(dht.host.Network().ConnsToPeer(p)) {
+	if dht.routingTablePeerFilter(dht.host, dht.host.Network().ConnsToPeer(p)) {
 		dht.routingTable.Update(p)
 	}
 }

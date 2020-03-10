@@ -20,11 +20,12 @@ require (
 	github.com/libp2p/go-libp2p-swarm v0.2.2
 	github.com/libp2p/go-libp2p-testing v0.1.1
 	github.com/libp2p/go-msgio v0.0.4
+	github.com/libp2p/go-netroute v0.0.0-20200310024203-5e4206756dff
 	github.com/mr-tron/base58 v1.1.3
 	github.com/multiformats/go-base32 v0.0.3
 	github.com/multiformats/go-multiaddr v0.2.1
 	github.com/multiformats/go-multiaddr-dns v0.2.0
-	github.com/multiformats/go-multiaddr-net v0.1.2
+	github.com/multiformats/go-multiaddr-net v0.1.3
 	github.com/multiformats/go-multihash v0.0.13
 	github.com/multiformats/go-multistream v0.1.1
 	github.com/stretchr/testify v1.5.1

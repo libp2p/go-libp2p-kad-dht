@@ -97,8 +97,8 @@ var Defaults = func(o *Options) error {
 	return nil
 }
 
-func emptyQueryFilter(h host.Host, ai peer.AddrInfo) bool { return true }
-func emptyRTFilter(conns []network.Conn) bool             { return true }
+func emptyQueryFilter(h host.Host, ai peer.AddrInfo) bool  { return true }
+func emptyRTFilter(h host.Host, conns []network.Conn) bool { return true }
 
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
@@ -267,7 +267,7 @@ func DisableProviders() Option {
 	}
 }
 
-// DisableProviders disables storing and retrieving value records (including
+// DisableValues disables storing and retrieving value records (including
 // public keys).
 //
 // Defaults to enabled.
@@ -282,7 +282,7 @@ func DisableValues() Option {
 }
 
 // QueryFilter sets a function that approves which peers may be dialed in a query
-func QueryFilter(filter func(h host.Host, ai peer.AddrInfo) bool) Option {
+func QueryFilter(filter QueryFilterFunc) Option {
 	return func(o *Options) error {
 		o.QueryPeerFilter = filter
 		return nil
@@ -291,7 +291,7 @@ func QueryFilter(filter func(h host.Host, ai peer.AddrInfo) bool) Option {
 
 // RoutingTableFilter sets a function that approves which peers may be added to the routing table. The host should
 // already have at least one connection to the peer under consideration.
-func RoutingTableFilter(filter func(conns []network.Conn) bool) Option {
+func RoutingTableFilter(filter RouteTableFilterFunc) Option {
 	return func(o *Options) error {
 		o.RoutingTable.PeerFilter = filter
 		return nil

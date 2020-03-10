@@ -10,7 +10,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 
@@ -31,7 +30,7 @@ func TestHungRequest(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []opts.Option{opts.DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +40,7 @@ func TestHungRequest(t *testing.T) {
 		defer s.Reset()
 		<-ctx.Done()
 	})
-	d.Update(ctx, hosts[1].ID())
+	d.peerFound(ctx, hosts[1].ID())
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()
@@ -81,7 +80,7 @@ func TestGetFailures(t *testing.T) {
 	host1 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 	host2 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 
-	d, err := New(ctx, host1, opts.DisableAutoRefresh(), opts.Mode(opts.ModeServer))
+	d, err := New(ctx, host1, testPrefix, DisableAutoRefresh(), Mode(ModeServer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,14 +207,14 @@ func TestNotFound(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []opts.Option{opts.DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for _, p := range hosts {
-		d.Update(ctx, p.ID())
+		d.peerFound(ctx, p.ID())
 	}
 
 	// Reply with random peers to every message
@@ -288,14 +287,14 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []opts.Option{opts.DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 1; i < 5; i++ {
-		d.Update(ctx, hosts[i].ID())
+		d.peerFound(ctx, hosts[i].ID())
 	}
 
 	// Reply with random peers to every message
@@ -358,13 +357,13 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	os := []opts.Option{opts.DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh()}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	d.Update(ctx, hosts[1].ID())
+	d.peerFound(ctx, hosts[1].ID())
 
 	// It would be nice to be able to just get a value and succeed but then
 	// we'd need to deal with selectors and validators...

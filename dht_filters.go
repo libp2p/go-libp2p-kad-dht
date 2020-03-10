@@ -1,4 +1,4 @@
-package dhtopts
+package dht
 
 import (
 	"net"

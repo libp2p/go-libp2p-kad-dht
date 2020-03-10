@@ -20,7 +20,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
-	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
@@ -37,6 +36,7 @@ import (
 )
 
 var logger = logging.Logger("dht")
+var rtPvLogger = logging.Logger("dht/rt/peer-validation")
 
 const BaseConnMgrScore = 5
 
@@ -45,6 +45,11 @@ type mode int
 const (
 	modeServer mode = 1
 	modeClient      = 2
+)
+
+const (
+	kad1 protocol.ID = "/kad/1.0.0"
+	kad2 protocol.ID = "/kad/2.0.0"
 )
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -74,7 +79,11 @@ type IpfsDHT struct {
 
 	stripedPutLocks [256]sync.Mutex
 
-	protocols []protocol.ID // DHT protocols
+	// Primary DHT protocols - we query and respond to these protocols
+	protocols []protocol.ID
+
+	// DHT protocols we can respond to (may contain protocols in addition to the primary protocols)
+	serverProtocols []protocol.ID
 
 	auto   bool
 	mode   mode
@@ -84,13 +93,14 @@ type IpfsDHT struct {
 	alpha      int // The concurrency parameter per path
 	d          int // Number of Disjoint Paths to query
 
-	queryPeerFilter        opts.QueryFilterFunc
-	routingTablePeerFilter opts.RouteTableFilterFunc
+	queryPeerFilter        QueryFilterFunc
+	routingTablePeerFilter RouteTableFilterFunc
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
 	triggerRtRefresh      chan chan<- error
+	triggerSelfLookup     chan chan<- error
 
 	maxRecordAge time.Duration
 
@@ -111,37 +121,44 @@ var (
 )
 
 // New creates a new DHT with the specified host and options.
-func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, error) {
-	var cfg opts.Options
-	if err := cfg.Apply(append([]opts.Option{opts.Defaults}, options...)...); err != nil {
+func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
+	var cfg config
+	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if cfg.DisjointPaths == 0 {
-		cfg.DisjointPaths = cfg.BucketSize / 2
+	if err := cfg.applyFallbacks(); err != nil {
+		return nil, err
 	}
-	dht := makeDHT(ctx, h, cfg)
-	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
-	dht.rtRefreshPeriod = cfg.RoutingTable.RefreshPeriod
-	dht.rtRefreshQueryTimeout = cfg.RoutingTable.RefreshQueryTimeout
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	dht, err := makeDHT(ctx, h, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
+	}
 
-	dht.maxRecordAge = cfg.MaxRecordAge
-	dht.enableProviders = cfg.EnableProviders
-	dht.enableValues = cfg.EnableValues
+	dht.autoRefresh = cfg.routingTable.autoRefresh
+	dht.rtRefreshPeriod = cfg.routingTable.refreshPeriod
+	dht.rtRefreshQueryTimeout = cfg.routingTable.refreshQueryTimeout
 
-	dht.Validator = cfg.Validator
+	dht.maxRecordAge = cfg.maxRecordAge
+	dht.enableProviders = cfg.enableProviders
+	dht.enableValues = cfg.enableValues
 
-	switch cfg.Mode {
-	case opts.ModeAuto:
+	dht.Validator = cfg.validator
+
+	switch cfg.mode {
+	case ModeAuto:
 		dht.auto = true
 		dht.mode = modeClient
-	case opts.ModeClient:
+	case ModeClient:
 		dht.auto = false
 		dht.mode = modeClient
-	case opts.ModeServer:
+	case ModeServer:
 		dht.auto = false
 		dht.mode = modeServer
 	default:
-		return nil, fmt.Errorf("invalid dht mode %d", cfg.Mode)
+		return nil, fmt.Errorf("invalid dht mode %d", cfg.mode)
 	}
 
 	if dht.mode == modeServer {
@@ -159,6 +176,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// handle providers
 	dht.proc.AddChild(dht.providers.Process())
 
+	dht.startSelfLookup()
 	dht.startRefreshing()
 	return dht, nil
 }
@@ -167,7 +185,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 // IpfsDHT's initialized with this function will respond to DHT requests,
 // whereas IpfsDHT's initialized with NewDHTClient will not.
 func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, opts.Datastore(dstore))
+	dht, err := New(ctx, h, Datastore(dstore))
 	if err != nil {
 		panic(err)
 	}
@@ -179,29 +197,34 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
 // NewDHTClient creates a new DHT object with the given peer as the 'local' host
 func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, opts.Datastore(dstore), opts.Client(true))
+	dht, err := New(ctx, h, Datastore(dstore), Mode(ModeClient))
 	if err != nil {
 		panic(err)
 	}
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
-	self := kb.ConvertPeerID(h.ID())
-	rt := kb.NewRoutingTable(cfg.BucketSize, self, cfg.RoutingTable.LatencyTolerance, h.Peerstore())
-	cmgr := h.ConnManager()
-
-	rt.PeerAdded = func(p peer.ID) {
-		commonPrefixLen := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))
-		cmgr.TagPeer(p, "kbucket", BaseConnMgrScore+commonPrefixLen)
+func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
+	rt, err := makeRoutingTable(h, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}
 
-	rt.PeerRemoved = func(p peer.ID) {
-		cmgr.UntagPeer(p, "kbucket")
+	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
+	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
+
+	// check if custom test protocols were set
+	if len(cfg.testProtocols) > 0 {
+		protocols = make([]protocol.ID, len(cfg.testProtocols))
+		serverProtocols = make([]protocol.ID, len(cfg.testProtocols))
+		for i, p := range cfg.testProtocols {
+			protocols[i] = cfg.protocolPrefix + p
+			serverProtocols[i] = cfg.protocolPrefix + p
+		}
 	}
 
 	dht := &IpfsDHT{
-		datastore:              cfg.Datastore,
+		datastore:              cfg.datastore,
 		self:                   h.ID(),
 		peerstore:              h.Peerstore(),
 		host:                   h,
@@ -209,13 +232,15 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 		birth:                  time.Now(),
 		rng:                    rand.New(rand.NewSource(rand.Int63())),
 		routingTable:           rt,
-		protocols:              cfg.Protocols,
-		bucketSize:             cfg.BucketSize,
-		alpha:                  cfg.Concurrency,
-		d:                      cfg.DisjointPaths,
+		protocols:              protocols,
+		serverProtocols:        serverProtocols,
+		bucketSize:             cfg.bucketSize,
+		alpha:                  cfg.concurrency,
+		d:                      cfg.disjointPaths,
 		triggerRtRefresh:       make(chan chan<- error),
-		queryPeerFilter:        cfg.QueryPeerFilter,
-		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
+		triggerSelfLookup:      make(chan chan<- error),
+		queryPeerFilter:        cfg.queryPeerFilter,
+		routingTablePeerFilter: cfg.routingTable.peerFilter,
 	}
 
 	// create a DHT proc with the given context
@@ -226,45 +251,44 @@ func makeDHT(ctx context.Context, h host.Host, cfg opts.Options) *IpfsDHT {
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	dht.providers = providers.NewProviderManager(dht.ctx, h.ID(), cfg.Datastore)
+	dht.providers = providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore)
 
-	return dht
+	return dht, nil
 }
 
-// TODO Implement RT seeding as described in https://github.com/libp2p/go-libp2p-kad-dht/pull/384#discussion_r320994340 OR
-// come up with an alternative solution.
-// issue is being tracked at https://github.com/libp2p/go-libp2p-kad-dht/issues/387
-/*func (dht *IpfsDHT) rtRecovery(proc goprocess.Process) {
-	writeResp := func(errorChan chan error, err error) {
-		select {
-		case <-proc.Closing():
-		case errorChan <- errChan:
+func makeRoutingTable(h host.Host, cfg config) (*kb.RoutingTable, error) {
+	self := kb.ConvertPeerID(h.ID())
+	// construct the routing table with a peer validation function
+	pvF := func(c context.Context, p peer.ID) bool {
+		if err := h.Connect(c, peer.AddrInfo{ID: p}); err != nil {
+			rtPvLogger.Errorf("failed to connect to peer %s for validation, err=%s", p, err)
+			return false
 		}
-		close(errorChan)
+		if !cfg.routingTable.peerFilter(h, h.Network().ConnsToPeer(p)) {
+			return false
+		}
+		return true
 	}
 
-	for {
-		select {
-		case req := <-dht.rtRecoveryChan:
-			if dht.routingTable.Size() == 0 {
-				logger.Infof("rt recovery proc: received request with reqID=%s, RT is empty. initiating recovery", req.id)
-				// TODO Call Seeder with default bootstrap peers here once #383 is merged
-				if dht.routingTable.Size() > 0 {
-					logger.Infof("rt recovery proc: successfully recovered RT for reqID=%s, RT size is now %d", req.id, dht.routingTable.Size())
-					go writeResp(req.errorChan, nil)
-				} else {
-					logger.Errorf("rt recovery proc: failed to recover RT for reqID=%s, RT is still empty", req.id)
-					go writeResp(req.errorChan, errors.New("RT empty after seed attempt"))
-				}
-			} else {
-				logger.Infof("rt recovery proc: RT is not empty, no need to act on request with reqID=%s", req.id)
-				go writeResp(req.errorChan, nil)
-			}
-		case <-proc.Closing():
-			return
-		}
+	rtOpts := []kb.Option{kb.PeerValidationFnc(pvF)}
+	if !(cfg.routingTable.checkInterval == 0) {
+		rtOpts = append(rtOpts, kb.TableCleanupInterval(cfg.routingTable.checkInterval))
 	}
-}*/
+
+	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, h.Peerstore(),
+		rtOpts...)
+	cmgr := h.ConnManager()
+
+	rt.PeerAdded = func(p peer.ID) {
+		commonPrefixLen := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))
+		cmgr.TagPeer(p, "kbucket", BaseConnMgrScore+commonPrefixLen)
+	}
+	rt.PeerRemoved = func(p peer.ID) {
+		cmgr.UntagPeer(p, "kbucket")
+	}
+
+	return rt, err
+}
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
 func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
@@ -377,13 +401,25 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	return dht.datastore.Put(mkDsKey(key), data)
 }
 
-// Update signals the routingTable to Update its last-seen status
-// on the given peer.
-func (dht *IpfsDHT) Update(ctx context.Context, p peer.ID) {
-	logger.Event(ctx, "updatePeer", p)
-	if dht.routingTablePeerFilter(dht.host, dht.host.Network().ConnsToPeer(p)) {
-		dht.routingTable.Update(p)
-	}
+// peerFound signals the routingTable that we've found a peer that
+// supports the DHT protocol.
+func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
+	logger.Event(ctx, "peerFound", p)
+	dht.routingTable.HandlePeerAlive(p)
+}
+
+// peerStoppedDHT signals the routing table that a peer has stopped supporting the DHT protocol.
+func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
+	logger.Event(ctx, "peerStoppedDHT", p)
+	// A peer that does not support the DHT protocol is dead for us.
+	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
+	dht.routingTable.HandlePeerDead(p)
+}
+
+// peerDisconnected signals the routing table that a peer is not connected anymore.
+func (dht *IpfsDHT) peerDisconnected(ctx context.Context, p peer.ID) {
+	logger.Event(ctx, "peerDisconnected", p)
+	dht.routingTable.HandlePeerDisconnect(p)
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
@@ -491,22 +527,30 @@ func (dht *IpfsDHT) setMode(m mode) error {
 	}
 }
 
+// moveToServerMode advertises (via libp2p identify updates) that we are able to respond to DHT queries and sets the appropriate stream handlers.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
 func (dht *IpfsDHT) moveToServerMode() error {
 	dht.mode = modeServer
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		dht.host.SetStreamHandler(p, dht.handleNewStream)
 	}
 	return nil
 }
 
+// moveToClientMode stops advertising (and rescinds advertisements via libp2p identify updates) that we are able to
+// respond to DHT queries and removes the appropriate stream handlers. We also kill all inbound streams that were
+// utilizing the handled protocols.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
 func (dht *IpfsDHT) moveToClientMode() error {
 	dht.mode = modeClient
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		dht.host.RemoveStreamHandler(p)
 	}
 
 	pset := make(map[protocol.ID]bool)
-	for _, p := range dht.protocols {
+	for _, p := range dht.serverProtocols {
 		pset[p] = true
 	}
 
@@ -546,15 +590,6 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 // Close calls Process Close
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
-}
-
-func (dht *IpfsDHT) protocolStrs() []string {
-	pstrs := make([]string, len(dht.protocols))
-	for idx, proto := range dht.protocols {
-		pstrs[idx] = string(proto)
-	}
-
-	return pstrs
 }
 
 func mkDsKey(s string) ds.Key {

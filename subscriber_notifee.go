@@ -5,6 +5,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	"github.com/libp2p/go-eventbus"
 
@@ -31,6 +32,10 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 
 		// register for event bus protocol ID changes in order to update the routing table
 		new(event.EvtPeerProtocolsUpdated),
+
+		// register for event bus notifications for when our local address/addresses change so we can
+		// advertise those to the network
+		new(event.EvtLocalAddressesUpdated),
 	}
 
 	// register for event bus local routability changes in order to trigger switching between client and server modes
@@ -56,12 +61,12 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
 	for _, p := range dht.host.Network().Peers() {
-		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
+		valid, err := dht.validRTPeer(p)
 		if err != nil {
 			return nil, fmt.Errorf("could not check peerstore for protocol support: err: %s", err)
 		}
-		if len(protos) != 0 {
-			dht.Update(dht.ctx, p)
+		if valid {
+			dht.peerFound(dht.ctx, p)
 		}
 	}
 
@@ -81,6 +86,16 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 			}
 
 			switch evt := e.(type) {
+			case event.EvtLocalAddressesUpdated:
+				// when our address changes, we should proactively tell our closest peers about it so
+				// we become discoverable quickly. The Identify protocol will push a signed peer record
+				// with our new address to all peers we are connected to. However, we might not necessarily be connected
+				// to our closet peers & so in the true spirit of Zen, searching for ourself in the network really is the best way
+				// to to forge connections with those matter.
+				select {
+				case dht.triggerSelfLookup <- nil:
+				default:
+				}
 			case event.EvtPeerIdentificationCompleted:
 				handlePeerIdentificationCompletedEvent(dht, evt)
 			case event.EvtPeerProtocolsUpdated:
@@ -110,28 +125,28 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentif
 	}
 
 	// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
-	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+	valid, err := dht.validRTPeer(e.Peer)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
 		return
 	}
-	if len(protos) != 0 {
-		dht.Update(dht.ctx, e.Peer)
+	if valid {
+		dht.peerFound(dht.ctx, e.Peer)
 		fixLowPeers(dht)
 	}
 }
 
 func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {
-	protos, err := dht.peerstore.SupportsProtocols(e.Peer, dht.protocolStrs()...)
+	valid, err := dht.validRTPeer(e.Peer)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
 		return
 	}
 
-	if len(protos) > 0 {
-		dht.routingTable.Update(e.Peer)
+	if valid {
+		dht.peerFound(dht.ctx, e.Peer)
 	} else {
-		dht.routingTable.Remove(e.Peer)
+		dht.peerStoppedDHT(dht.ctx, e.Peer)
 	}
 
 	fixLowPeers(dht)
@@ -158,6 +173,23 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 	}
 }
 
+// validRTPeer returns true if the peer supports the DHT protocol and false otherwise. Supporting the DHT protocol means
+// supporting the primary protocols, we do not want to add peers that are speaking obsolete secondary protocols to our
+// routing table
+func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
+	pstrs := make([]string, len(dht.protocols))
+	for idx, proto := range dht.protocols {
+		pstrs[idx] = string(proto)
+	}
+
+	protos, err := dht.peerstore.SupportsProtocols(p, pstrs...)
+	if err != nil {
+		return false, err
+	}
+
+	return len(protos) > 0, nil
+}
+
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold
 func fixLowPeers(dht *IpfsDHT) {
 	if dht.routingTable.Size() > minRTRefreshThreshold {
@@ -167,9 +199,9 @@ func fixLowPeers(dht *IpfsDHT) {
 	// Passively add peers we already know about
 	for _, p := range dht.host.Network().Peers() {
 		// Don't bother probing, we do that on connect.
-		protos, err := dht.peerstore.SupportsProtocols(p, dht.protocolStrs()...)
-		if err == nil && len(protos) != 0 {
-			dht.Update(dht.Context(), p)
+		valid, _ := dht.validRTPeer(p)
+		if valid {
+			dht.peerFound(dht.Context(), p)
 		}
 	}
 
@@ -200,7 +232,7 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		return
 	}
 
-	dht.routingTable.Remove(p)
+	dht.peerDisconnected(dht.ctx, p)
 
 	fixLowPeers(dht)
 

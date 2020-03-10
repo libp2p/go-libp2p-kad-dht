@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"bytes"
 	"net"
 
 	"github.com/libp2p/go-libp2p-core/host"
@@ -104,8 +105,12 @@ func PrivateRoutingTableFilter(h host.Host, conns []network.Conn) bool {
 				if i.Equal(ip) {
 					return true
 				}
+				if ip.To4() == nil {
+					if i.To4() == nil && isEUI(ip) && sameV6Net(i, ip) {
+						return true
+					}
+				}
 			}
-			// TODO: if the first 64 bits of an IPv6 match the host, and the last 64 bits are in EUI format - then consider it local
 
 			// if there's no gateway - a direct host in the OS routing table - then consider it local
 			if router != nil {
@@ -118,6 +123,15 @@ func PrivateRoutingTableFilter(h host.Host, conns []network.Conn) bool {
 	}
 
 	return false
+}
+
+func isEUI(ip net.IP) bool {
+	// per rfc 2373
+	return ip[11] == 0xff && ip[12] == 0xfe
+}
+
+func sameV6Net(a, b net.IP) bool {
+	return bytes.Equal(a[0:8], b[0:8])
 }
 
 func isRelayAddr(a ma.Multiaddr) bool {

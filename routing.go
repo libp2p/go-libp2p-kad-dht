@@ -400,7 +400,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 		shortcutTaken := false
 		for _, q := range queries {
-			if len(q.localPeers.KUnqueried()) > 0 {
+			if len(q.localPeers.UnqueriedFromKClosest()) > 0 {
 				shortcutTaken = true
 				break
 			}
@@ -684,7 +684,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	if dht.host.Network().Connectedness(id) == network.Connected {
 		shortcutTaken := false
 		for _, q := range queries {
-			if len(q.localPeers.KUnqueried()) > 0 {
+			if len(q.localPeers.UnqueriedFromKClosest()) > 0 {
 				shortcutTaken = true
 				break
 			}

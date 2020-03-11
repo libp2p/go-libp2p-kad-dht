@@ -57,7 +57,7 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 			ctx:                  queryCtx,
 			cancel:               cancelQuery,
 			dht:                  dht,
-			localPeers:           kpeerset.NewSortedPeerset(dht.bucketSize, target, dht.sortPeers),
+			localPeers:           kpeerset.NewSortedPeerset(dht.bucketSize, target),
 			globallyQueriedPeers: peersQueried,
 			queryFn:              queryFn,
 			stopFn:               stopFn,
@@ -94,10 +94,6 @@ loop:
 	return queries, nil
 }
 
-func (dht *IpfsDHT) sortPeers(peers []kpeerset.IPeerMetric) kpeerset.SortablePeers {
-	return kpeerset.PeersSortedByLatency(peers, dht.host.Network(), dht.peerstore)
-}
-
 func strictParallelismQuery(q *query) {
 	/*
 		start with K closest peers (some queried already some not)
@@ -110,7 +106,7 @@ func strictParallelismQuery(q *query) {
 
 	foundCloser := false
 	for {
-		peersToQuery := q.localPeers.KUnqueried()
+		peersToQuery := q.localPeers.UnqueriedFromKClosest()
 
 		if len(peersToQuery) == 0 {
 			return
@@ -142,119 +138,6 @@ func strictParallelismQuery(q *query) {
 				resultsReceived++
 				if resultsReceived == numQuery {
 					break loop
-				}
-			case <-q.ctx.Done():
-				return
-			}
-		}
-	}
-}
-
-func simpleQuery(q *query) {
-	/*
-		start with K closest peers (some queried already some not)
-		take best alpha (sorted by some metric)
-		query those alpha
-		   - if a query fails then take the next one
-		once they complete:
-			if the alpha requests did not add any new peers to top K, repeat with unqueried top K
-			else repeat
-	*/
-
-	var lastPeers []peer.ID
-	for {
-		peersToQuery := q.localPeers.KUnqueried()
-
-		if len(peersToQuery) == 0 {
-			return
-		}
-
-		numQuery := q.dht.alpha
-		if lastPeers != nil && peerSlicesEqual(lastPeers, peersToQuery) {
-			numQuery = len(peersToQuery)
-		} else if pqLen := len(peersToQuery); pqLen < numQuery {
-			numQuery = pqLen
-		}
-
-		peersToQueryCh := make(chan peer.ID, numQuery)
-		for _, p := range peersToQuery[:numQuery] {
-			peersToQueryCh <- p
-		}
-		queryResCh := make(chan *queryResult, numQuery)
-		queriesSucceeded, queriesSent := 0, numQuery
-
-	dialPeers:
-		for {
-			select {
-			case p := <-peersToQueryCh:
-				go func() {
-					queryResCh <- q.queryPeer(q.ctx, p)
-				}()
-			case res := <-queryResCh:
-				if res.success {
-					queriesSucceeded++
-					if queriesSucceeded == numQuery {
-						break dialPeers
-					}
-				} else {
-					queriesSent++
-					if queriesSent >= len(peersToQuery) {
-						break dialPeers
-					}
-					peersToQueryCh <- peersToQuery[queriesSent]
-				}
-			case <-q.ctx.Done():
-				return
-			}
-		}
-	}
-}
-
-func boundedDialQuery(q *query) {
-	/*
-		start with K closest peers (some queried already some not)
-		take best alpha (sorted by some metric)
-		query those alpha
-		-- if queried peer falls out of top K we've heard of + top alpha we've received responses from
-			+ others like percentage of way through the timeout, their reputation, etc.
-			1) Cancel dial 2) Cancel query but not dial 3) Continue with query
-	*/
-
-	var lastPeers []peer.ID
-	for {
-		peersToQuery := q.localPeers.KUnqueried()
-
-		if len(peersToQuery) == 0 {
-			return
-		}
-
-		numQuery := q.dht.alpha
-		if lastPeers != nil && peerSlicesEqual(lastPeers, peersToQuery) {
-			numQuery = len(peersToQuery)
-		}
-
-		peersToQueryCh := make(chan peer.ID, numQuery)
-		for _, p := range peersToQuery[:numQuery] {
-			peersToQueryCh <- p
-		}
-		queryResCh := make(chan *queryResult, numQuery)
-		queriesSucceeded, queriesSent := 0, 0
-
-		for {
-			select {
-			case p := <-peersToQueryCh:
-				go func() {
-					queryResCh <- q.queryPeer(q.ctx, p)
-				}()
-			case res := <-queryResCh:
-				if res.success {
-					queriesSucceeded++
-				} else {
-					queriesSent++
-					if queriesSent >= len(peersToQuery) {
-						return
-					}
-					peersToQueryCh <- peersToQuery[queriesSent]
 				}
 			case <-q.ctx.Done():
 				return
@@ -347,18 +230,4 @@ func (dht *IpfsDHT) dialPeer(ctx context.Context, p peer.ID) error {
 	}
 	logger.Debugf("connected. dial success.")
 	return nil
-}
-
-// Equal tells whether a and b contain the same elements.
-// A nil argument is equivalent to an empty slice.
-func peerSlicesEqual(a, b []peer.ID) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
 }

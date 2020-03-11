@@ -405,7 +405,15 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // supports the DHT protocol.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "peerFound", p)
-	dht.routingTable.HandlePeerAlive(p)
+	currentConns := dht.host.Network().ConnsToPeer(p)
+	if len(currentConns) > 0 {
+		if dht.routingTablePeerFilter(dht.host, currentConns) {
+			dht.routingTable.HandlePeerAlive(p)
+		}
+	} else {
+		// speculative addition; validated by PeerValidationFunction upon connectedness.
+		dht.routingTable.HandlePeerAlive(p)
+	}
 }
 
 // peerStoppedDHT signals the routing table that a peer has stopped supporting the DHT protocol.

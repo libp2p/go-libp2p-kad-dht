@@ -27,11 +27,13 @@ var lruCacheSize = 256
 var ProvideValidity = time.Hour * 24
 var defaultCleanupInterval = time.Hour
 
+const providersKeyPrefix = "/providers/"
+
 type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
 	// the run method
-	providers *lru.LRU
-	dstore    *autobatch.Datastore
+	cache  *lru.LRU
+	dstore *autobatch.Datastore
 
 	newprovs chan *addProv
 	getprovs chan *getProv
@@ -64,7 +66,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 	if err != nil {
 		panic(err) //only happens if negative value is passed to lru constructor
 	}
-	pm.providers = cache
+	pm.cache = cache
 
 	pm.proc = goprocessctx.WithContext(ctx)
 	pm.cleanupInterval = defaultCleanupInterval
@@ -72,8 +74,6 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 
 	return pm
 }
-
-const providersKeyPrefix = "/providers/"
 
 func mkProvKey(k []byte) string {
 	return providersKeyPrefix + base32.RawStdEncoding.EncodeToString(k)
@@ -83,6 +83,7 @@ func (pm *ProviderManager) Process() goprocess.Process {
 	return pm.proc
 }
 
+// Yields providers from the datastore for for a given key
 func (pm *ProviderManager) providersForKey(k []byte) ([]peer.ID, error) {
 	pset, err := pm.getProvSet(k)
 	if err != nil {
@@ -92,7 +93,7 @@ func (pm *ProviderManager) providersForKey(k []byte) ([]peer.ID, error) {
 }
 
 func (pm *ProviderManager) getProvSet(k []byte) (*providerSet, error) {
-	cached, ok := pm.providers.Get(string(k))
+	cached, ok := pm.cache.Get(string(k))
 	if ok {
 		return cached.(*providerSet), nil
 	}
@@ -103,16 +104,27 @@ func (pm *ProviderManager) getProvSet(k []byte) (*providerSet, error) {
 	}
 
 	if len(pset.providers) > 0 {
-		pm.providers.Add(string(k), pset)
+		pm.cache.Add(string(k), pset)
 	}
 
 	return pset, nil
 }
 
+// Load local providers into cache
 func loadProvSet(dstore ds.Datastore, k []byte) (*providerSet, error) {
-	res, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
-	if err != nil {
-		return nil, err
+	var res dsq.Results
+	if k != nil {
+		r, err := dstore.Query(dsq.Query{Prefix: mkProvKey(k)})
+		if err != nil {
+			return nil, err
+		}
+		res = r
+	} else { // Return all providers
+		r, err := dstore.Query(dsq.Query{Prefix: providersKeyPrefix})
+		if err != nil {
+			return nil, err
+		}
+		res = r
 	}
 	defer res.Close()
 
@@ -171,15 +183,6 @@ func readTimeValue(data []byte) (time.Time, error) {
 	}
 
 	return time.Unix(0, nsec), nil
-}
-
-func (pm *ProviderManager) addProv(k []byte, p peer.ID) error {
-	now := time.Now()
-	if provs, ok := pm.providers.Get(string(k)); ok {
-		provs.(*providerSet).setVal(p, now)
-	} // else not cached, just write through
-
-	return writeProviderEntry(pm.dstore, k, p, now)
 }
 
 func mkProvKeyFor(k []byte, p peer.ID) string {
@@ -279,7 +282,7 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 			// drop them.
 			//
 			// Much faster than GCing.
-			pm.providers.Purge()
+			pm.cache.Purge()
 
 			// Now, kick off a GC of the datastore.
 			q, err := pm.dstore.Query(dsq.Query{
@@ -308,6 +311,15 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, val peer.I
 	case pm.newprovs <- prov:
 	case <-ctx.Done():
 	}
+}
+
+func (pm *ProviderManager) addProv(k []byte, p peer.ID) error {
+	now := time.Now()
+	if provs, ok := pm.cache.Get(string(k)); ok {
+		provs.(*providerSet).setVal(p, now)
+	} // else not cached, just write through
+
+	return writeProviderEntry(pm.dstore, k, p, now)
 }
 
 // GetProviders returns the set of providers for the given key.

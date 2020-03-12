@@ -44,6 +44,40 @@ func TestProviderManager(t *testing.T) {
 	p.proc.Close()
 }
 
+func TestProviderManagerGetAllProviderRecords(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mid := peer.ID("testing")
+	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	a := u.Hash([]byte("a"))
+	p.AddProvider(ctx, a, peer.ID("testingprovider1"))
+	p.AddProvider(ctx, a, peer.ID("testingprovider2"))
+	p.AddProvider(ctx, a, peer.ID("testingprovider3"))
+
+	// Not cached
+	resp := p.GetProviders(ctx, nil)
+	if len(resp) != 3 {
+		t.Fatalf("Could not retrieve all providers, got %d", len(resp))
+	}
+
+	// Cached
+	resp = p.GetProviders(ctx, nil)
+	if len(resp) != 3 {
+		t.Fatalf("Could not retrieve all providers, got %d", len(resp))
+	}
+
+	// Add more
+	p.cache.Purge()
+	p.AddProvider(ctx, a, peer.ID("testingprovider4"))
+	resp = p.GetProviders(ctx, nil)
+	if len(resp) != 4 {
+		t.Fatalf("Could not retrieve all providers, got %d", len(resp))
+	}
+
+	p.proc.Close()
+}
+
 func TestProvidersDatastore(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 10
@@ -182,8 +216,8 @@ func TestProvidesExpire(t *testing.T) {
 	// Stop to prevent data races
 	p.Process().Close()
 
-	if p.providers.Len() != 0 {
-		t.Fatal("providers map not cleaned up")
+	if p.cache.Len() != 0 {
+		t.Fatal("providers cache wasn't cleaned up")
 	}
 
 	res, err := ds.Query(dsq.Query{Prefix: providersKeyPrefix})

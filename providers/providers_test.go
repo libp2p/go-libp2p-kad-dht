@@ -26,56 +26,61 @@ func TestProviderManager(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
-	a := u.Hash([]byte("test"))
-	p.AddProvider(ctx, a, peer.ID("testingprovider"))
+	pm := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	key := u.Hash([]byte("test"))
+	pm.AddProvider(ctx, key, peer.ID("first provider"))
 
 	// Not cached
-	resp := p.GetProviders(ctx, a)
+	resp := pm.GetProviders(ctx, key)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
 
 	// Cached
-	resp = p.GetProviders(ctx, a)
+	// TODO: This test should verify that the cache got populated
+	resp = pm.GetProviders(ctx, key)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
-	p.proc.Close()
+
+	// Make sure that cache gets updated on write
+	pm.AddProvider(ctx, key, peer.ID("second provider"))
+	pm.AddProvider(ctx, key, peer.ID("third provider"))
+	pm.AddProvider(ctx, key, peer.ID("fourth provider"))
+
+	resp = pm.GetProviders(ctx, key)
+	if len(resp) != 4 {
+		t.Fatalf("Should have 4 providers. Got %d\n", len(resp))
+	}
+
+	pm.proc.Close()
 }
 
-func TestProviderManagerGetAllProviderRecords(t *testing.T) {
+func TestGetAllProviders(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
-	a := u.Hash([]byte("a"))
-	p.AddProvider(ctx, a, peer.ID("testingprovider1"))
-	p.AddProvider(ctx, a, peer.ID("testingprovider2"))
-	p.AddProvider(ctx, a, peer.ID("testingprovider3"))
+	pm := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	key1 := u.Hash([]byte("a"))
+	key2 := u.Hash([]byte("b"))
+	pm.AddProvider(ctx, key1, peer.ID("a"))
+	pm.AddProvider(ctx, key1, peer.ID("b"))
+	pm.AddProvider(ctx, key1, peer.ID("c"))
 
-	// Not cached
-	resp := p.GetProviders(ctx, nil)
-	if len(resp) != 3 {
-		t.Fatalf("Could not retrieve all providers, got %d", len(resp))
+	pm.AddProvider(ctx, key2, peer.ID("x"))
+	pm.AddProvider(ctx, key2, peer.ID("y"))
+	pm.AddProvider(ctx, key2, peer.ID("z"))
+
+	getProvs, err := pm.GetAllProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(getProvs) != 2 {
+		t.Fatalf("Could not retrieve all providers, got %d", len(getProvs))
 	}
 
-	// Cached
-	resp = p.GetProviders(ctx, nil)
-	if len(resp) != 3 {
-		t.Fatalf("Could not retrieve all providers, got %d", len(resp))
-	}
-
-	// Add more
-	p.cache.Purge()
-	p.AddProvider(ctx, a, peer.ID("testingprovider4"))
-	resp = p.GetProviders(ctx, nil)
-	if len(resp) != 4 {
-		t.Fatalf("Could not retrieve all providers, got %d", len(resp))
-	}
-
-	p.proc.Close()
+	pm.proc.Close()
 }
 
 func TestProvidersDatastore(t *testing.T) {
@@ -87,19 +92,19 @@ func TestProvidersDatastore(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
-	defer p.proc.Close()
+	pm := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	defer pm.proc.Close()
 
 	friend := peer.ID("friend")
 	var mhs []mh.Multihash
 	for i := 0; i < 100; i++ {
 		h := u.Hash([]byte(fmt.Sprint(i)))
 		mhs = append(mhs, h)
-		p.AddProvider(ctx, h, friend)
+		pm.AddProvider(ctx, h, friend)
 	}
 
 	for _, c := range mhs {
-		resp := p.GetProviders(ctx, c)
+		resp := pm.GetProviders(ctx, c)
 		if len(resp) != 1 {
 			t.Fatal("Could not retrieve provider.")
 		}
@@ -128,7 +133,7 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pset, err := loadProvSet(dstore, k)
+	pset, err := loadProviderSet(dstore, k)
 	if err != nil {
 		t.Fatal(err)
 	}

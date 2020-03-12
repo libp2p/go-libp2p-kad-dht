@@ -2,19 +2,23 @@ package kpeerset
 
 import (
 	"container/heap"
+	"math/big"
 	"sync"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 
 	"github.com/libp2p/go-libp2p-kad-dht/kpeerset/peerheap"
-	kb "github.com/libp2p/go-libp2p-kbucket"
+
+	ks "github.com/whyrusleeping/go-keyspace"
 )
 
-// SortedPeerset is a data-structure that maintains the set of peers for a query
+// SortedPeerset is a data-structure that maintains the queried & unqueried peers for a query
 // based on their distance from the key.
+// It's main use is to allow peer addition, removal & retrieval for the query as per the
+// semantics described in the Kad DHT paper.
 type SortedPeerset struct {
 	// the key being searched for
-	key string
+	key ks.Key
 
 	// the K parameter in the Kad DHT paper
 	kvalue int
@@ -36,17 +40,28 @@ type SortedPeerset struct {
 	// peers that have already been queried.
 	queried map[peer.ID]struct{}
 
+	// the closest peer to the key that we have heard about
+	closestKnownPeer peer.ID
+	// the distance of the closest known peer from the key
+	dClosestKnownPeer *big.Int
+
 	lock sync.Mutex
 }
 
 // NewSortedPeerset creates and returns a new SortedPeerset.
 func NewSortedPeerset(kvalue int, key string) *SortedPeerset {
-	compare := func(p1 peer.ID, p2 peer.ID) bool {
-		return kb.Closer(p1, p2, key)
+	compare := func(i1 peerheap.Item, i2 peerheap.Item) bool {
+		// distance of the first peer from the key
+		d1 := i1.Value.(*big.Int)
+		// distance of the second peer from the key
+		d2 := i2.Value.(*big.Int)
+
+		// Is the first peer closer to the key than the second peer ?
+		return d1.Cmp(d2) == -1
 	}
 
 	return &SortedPeerset{
-		key:               key,
+		key:               ks.XORKeySpace.Key([]byte(key)),
 		kvalue:            kvalue,
 		heapKClosestPeers: peerheap.New(true, compare),
 		heapRestOfPeers:   peerheap.New(false, compare),
@@ -68,7 +83,7 @@ func NewSortedPeerset(kvalue int, key string) *SortedPeerset {
 // 2. If this peer is further from the key than the peer furthest from the key in the
 //    K closest peers, we add it to the rest of peers.
 //
-// Returns true if the peer was newly added to the K closest peers, false otherwise.
+// Returns true if the peer is closer to key than the closet peer we've heard about.
 func (ps *SortedPeerset) Add(p peer.ID) bool {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -78,16 +93,15 @@ func (ps *SortedPeerset) Add(p peer.ID) bool {
 		return false
 	}
 
-	item := &peerheap.Item{Peer: p}
-	// add the peer to the K closest peers if we have space
+	// calculate the distance of the given peer from the key
+	distancePeer := ks.XORKeySpace.Key([]byte(p)).Distance(ps.key)
+	item := &peerheap.Item{Peer: p, Value: distancePeer}
+
 	if ps.heapKClosestPeers.Len() < ps.kvalue {
+		// add the peer to the K closest peers if we have space
 		heap.Push(ps.heapKClosestPeers, item)
 		ps.kClosestPeers[p] = item
-		return true
-	}
-
-	top := ps.heapKClosestPeers.PeekTop()
-	if kb.Closer(p, top.Peer, ps.key) {
+	} else if top := ps.heapKClosestPeers.PeekTop(); distancePeer.Cmp(top.Value.(*big.Int)) == -1 {
 		// peer is closer to the key than the top peer in the heap of K closest peers
 		// which is basically the peer furthest from the key because the K closest peers
 		// are stored in a maxHeap ordered by the distance from the key.
@@ -101,31 +115,62 @@ func (ps *SortedPeerset) Add(p peer.ID) bool {
 		// add the peer p to the K closest peers
 		heap.Push(ps.heapKClosestPeers, item)
 		ps.kClosestPeers[p] = item
+	} else {
+		// add the peer to the rest of peers.
+		heap.Push(ps.heapRestOfPeers, item)
+		ps.restOfPeers[p] = item
+	}
+
+	if ps.closestKnownPeer == "" || (distancePeer.Cmp(ps.dClosestKnownPeer) == -1) {
+		// given peer is closer to the key than the current closest known peer.
+		// So, let's update the closest known peer
+		ps.closestKnownPeer = p
+		ps.dClosestKnownPeer = distancePeer
 		return true
 	}
 
-	// add the peer to the rest of peers.
-	heap.Push(ps.heapRestOfPeers, item)
-	ps.restOfPeers[p] = item
 	return false
 }
 
-// UnqueriedFromKClosest returns the unqueried peers among the K closest peers.
-func (ps *SortedPeerset) UnqueriedFromKClosest() []peer.ID {
+// UnqueriedFromKClosest returns the unqueried peers among the K closest peers AFTER
+// sorting them in Ascending Order with the given comparator.
+func (ps *SortedPeerset) UnqueriedFromKClosest(sortWith peerheap.Comparator) []peer.ID {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
-	var peers []peer.ID
+	unqueriedPeerItems := ps.heapKClosestPeers.FilterItems(ps.isPeerItemQueried)
 
-	for _, p := range ps.heapKClosestPeers.Peers() {
-		if _, ok := ps.queried[p]; !ok {
-			peers = append(peers, p)
-		}
+	// create a min-heap to sort the unqueried peer Items using the given comparator
+	ph := peerheap.New(false, sortWith)
+	for _, i := range unqueriedPeerItems {
+		v := i
+		heap.Push(ph, &v)
+	}
+	// now pop so we get them in sorted order
+	peers := make([]peer.ID, 0, ph.Len())
+	for ph.Len() != 0 {
+		popped := heap.Pop(ph).(*peerheap.Item)
+		peers = append(peers, popped.Peer)
 	}
 
-	// TODO: SORT BY LATENCY
-
 	return peers
+}
+
+// LenUnqueriedFromKClosest returns the number of unqueried peers among
+// the K closest peers.
+func (ps *SortedPeerset) LenUnqueriedFromKClosest() int {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	unqueriedPeerItems := ps.heapKClosestPeers.FilterItems(ps.isPeerItemQueried)
+
+	return len(unqueriedPeerItems)
+}
+
+// caller is responsible for the locking
+func (ps *SortedPeerset) isPeerItemQueried(i peerheap.Item) bool {
+	_, ok := ps.queried[i.Peer]
+	return !ok
 }
 
 // MarkQueried marks the peer as queried.

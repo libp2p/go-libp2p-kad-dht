@@ -4,20 +4,24 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-// Comparator is the type of a function that compares two peers to determine the ordering between them.
-// It returns true if p1 is "less" than p2 and false otherwise.
-type Comparator func(p1 peer.ID, p2 peer.ID) bool
+// Comparator is the type of a function that compares two peer Heap items to determine the ordering between them.
+// It returns true if i1 is "less" than i2 and false otherwise.
+type Comparator func(i1 Item, i2 Item) bool
 
 // Item is one "item" in the Heap.
-// it contains the peer Id & the index of the "item" in the heap.
+// It contains the Id of the peer, an arbitrary value associated with the peer
+// and the index of the "item" in the Heap.
 type Item struct {
 	Peer  peer.ID
+	Value interface{}
 	Index int
 }
 
 // Heap implements a heap of peer Items.
 // It uses the "compare" member function to compare two peers to determine the order between them.
 // If isMaxHeap is set to true, this Heap is a maxHeap, otherwise it's a minHeap.
+//
+// Note: It is the responsibility of the caller to enforce locking & synchronization.
 type Heap struct {
 	items     []*Item
 	compare   Comparator
@@ -38,9 +42,22 @@ func (ph *Heap) PeekTop() Item {
 	return *ph.items[0]
 }
 
-// Peers returns all the peers in the heap.
+// FilterItems returns Copies of ALL Items in the Heap that satisfy the given predicate
+func (ph *Heap) FilterItems(p func(i Item) bool) []Item {
+	var items []Item
+
+	for _, i := range ph.items {
+		ih := *i
+		if p(ih) {
+			items = append(items, ih)
+		}
+	}
+	return items
+}
+
+// Peers returns all the peers currently in the heap
 func (ph *Heap) Peers() []peer.ID {
-	peers := make([]peer.ID, 0, ph.Len())
+	peers := make([]peer.ID, 0, len(ph.items))
 
 	for _, i := range ph.items {
 		peers = append(peers, i.Peer)
@@ -58,9 +75,9 @@ func (ph *Heap) Len() int {
 func (ph *Heap) Less(i, j int) bool {
 	h := ph.items
 
-	isLess := ph.compare(h[i].Peer, h[j].Peer)
+	isLess := ph.compare(*h[i], *h[j])
 
-	// because the "compare" function returns true if peer1 is less than peer2,
+	// because the "compare" function returns true if item1 is less than item2,
 	// we need to reverse it's result if the Heap is a maxHeap.
 	if ph.isMaxHeap {
 		return !isLess

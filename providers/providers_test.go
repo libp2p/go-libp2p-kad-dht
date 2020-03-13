@@ -31,16 +31,27 @@ func TestProviderManager(t *testing.T) {
 	p.AddProvider(ctx, a, peer.ID("testingprovider"))
 
 	// Not cached
+	// TODO verify that cache is empty
 	resp := p.GetProviders(ctx, a)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
 
 	// Cached
+	// TODO verify that cache is populated
 	resp = p.GetProviders(ctx, a)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
+
+	p.AddProvider(ctx, a, peer.ID("testingprovider2"))
+	p.AddProvider(ctx, a, peer.ID("testingprovider3"))
+	// TODO verify that cache is already up to date
+	resp = p.GetProviders(ctx, a)
+	if len(resp) != 3 {
+		t.Fatalf("Should have got 3 providers, got %d", len(resp))
+	}
+
 	p.proc.Close()
 }
 
@@ -182,7 +193,7 @@ func TestProvidesExpire(t *testing.T) {
 	// Stop to prevent data races
 	p.Process().Close()
 
-	if p.providers.Len() != 0 {
+	if p.cache.Len() != 0 {
 		t.Fatal("providers map not cleaned up")
 	}
 

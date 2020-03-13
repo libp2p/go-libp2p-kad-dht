@@ -49,7 +49,8 @@ type IpfsDHT struct {
 	datastore ds.Datastore // Local data
 
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
-	providers    *providers.ProviderManager
+	// ProviderManager stores & manages the provider records for this Dht peer.
+	ProviderManager *providers.ProviderManager
 
 	birth time.Time // When this peer started up
 
@@ -111,7 +112,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*IpfsDHT, er
 	// register for network notifs.
 	dht.host.Network().Notify((*netNotifiee)(dht))
 
-	dht.proc.AddChild(dht.providers.Process())
+	dht.proc.AddChild(dht.ProviderManager.Process())
 	dht.Validator = cfg.Validator
 
 	if !cfg.Client {
@@ -185,7 +186,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg *opts.Options) *IpfsDHT {
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	dht.providers = providers.NewProviderManager(dht.ctx, h.ID(), cfg.Datastore)
+	dht.ProviderManager = providers.NewProviderManager(dht.ctx, h.ID(), cfg.Datastore)
 
 	return dht
 }

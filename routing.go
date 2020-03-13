@@ -335,7 +335,9 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	}
 
 	go func() {
-		queries, _ := dht.runDisjointQueries(ctx, dht.d, key,
+		defer close(valCh)
+		defer close(queriesCh)
+		queries, err := dht.runDisjointQueries(ctx, dht.d, key,
 			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -394,26 +396,32 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 			},
 		)
 
-		close(valCh)
-		queriesCh <- queries
-		close(queriesCh)
-
-		shortcutTaken := false
-		for _, q := range queries {
-			if q.localPeers.LenUnqueriedFromKClosest() > 0 {
-				shortcutTaken = true
-				break
-			}
+		if err != nil {
+			return
 		}
+		queriesCh <- queries
 
-		if !shortcutTaken && ctx.Err() == nil {
-			kadID := kb.ConvertKey(key)
-			// refresh the cpl for this key as the query was successful
-			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+		if ctx.Err() == nil {
+			dht.refreshRTIfNoShortcut(kb.ConvertKey(key), queries)
 		}
 	}()
 
 	return valCh, queriesCh
+}
+
+func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, queries []*query) {
+	shortcutTaken := false
+	for _, q := range queries {
+		if q.localPeers.LenUnqueriedFromKClosest() > 0 {
+			shortcutTaken = true
+			break
+		}
+	}
+
+	if !shortcutTaken {
+		// refresh the cpl for this key as the query was successful
+		dht.routingTable.ResetCplRefreshedAtForID(key, time.Now())
+	}
 }
 
 // Provider abstraction for indirect stores.
@@ -570,7 +578,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	_, _ = dht.runDisjointQueries(ctx, dht.d, string(key),
+	queries, err := dht.runDisjointQueries(ctx, dht.d, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -626,9 +634,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		},
 	)
 
-	if ctx.Err() == nil {
-		// refresh the cpl for this key after the query is run
-		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(key)), time.Now())
+	if err != nil && ctx.Err() == nil {
+		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), queries)
 	}
 }
 
@@ -647,7 +654,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return pi, nil
 	}
 
-	queries, err := dht.runDisjointQueries(ctx, dht.d, string(id),
+	_, err = dht.runDisjointQueries(ctx, dht.d, string(id),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -680,30 +687,16 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
+	// refresh the cpl for this key as the query was successful
+	if ctx.Err() == nil {
+		kadID := kb.ConvertPeerID(id)
+		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+	}
+
 	// TODO: Consider unlucky disconnect timing and potentially utilizing network.CanConnect or something similar
 	if dht.host.Network().Connectedness(id) == network.Connected {
-		shortcutTaken := false
-		for _, q := range queries {
-			if q.localPeers.LenUnqueriedFromKClosest() > 0 {
-				shortcutTaken = true
-				break
-			}
-		}
-
-		if !shortcutTaken {
-			kadID := kb.ConvertPeerID(id)
-			// refresh the cpl for this key as the query was successful
-			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
-		}
-
 		return dht.peerstore.PeerInfo(id), nil
-	} else {
-		if ctx.Err() == nil {
-			kadID := kb.ConvertPeerID(id)
-			// refresh the cpl for this key as the query was successful
-			dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
-		}
-
-		return peer.AddrInfo{}, routing.ErrNotFound
 	}
+
+	return peer.AddrInfo{}, routing.ErrNotFound
 }

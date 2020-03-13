@@ -16,6 +16,7 @@ import (
 	dsq "github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
+	base32 "github.com/multiformats/go-base32"
 	//
 	// used by TestLargeProvidersSet: do not remove
 	// lds "github.com/ipfs/go-ds-leveldb"
@@ -53,6 +54,42 @@ func TestProviderManager(t *testing.T) {
 	}
 
 	p.proc.Close()
+}
+
+func TestGetAllProviders(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mid := peer.ID("testing")
+	pm := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	key1 := u.Hash([]byte("a"))
+	key2 := u.Hash([]byte("b"))
+	pm.AddProvider(ctx, key1, peer.ID("a"))
+	pm.AddProvider(ctx, key1, peer.ID("b"))
+	pm.AddProvider(ctx, key1, peer.ID("c"))
+
+	pm.AddProvider(ctx, key2, peer.ID("x"))
+	pm.AddProvider(ctx, key2, peer.ID("y"))
+	pm.AddProvider(ctx, key2, peer.ID("z"))
+	pm.AddProvider(ctx, key2, peer.ID("xyz"))
+
+	providersMap, err := pm.GetAllProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(providersMap) != 2 {
+		t.Fatalf("Could not retrieve all provider records, got %d", len(providersMap))
+	}
+
+	if len(providersMap[base32.RawStdEncoding.EncodeToString(key1)]) != 3 {
+		t.Fatalf("Should have 3 providers, got %d", len(providersMap))
+	}
+
+	if len(providersMap[base32.RawStdEncoding.EncodeToString(key2)]) != 4 {
+		t.Fatalf("Should have 4 providers, got %d", len(providersMap))
+	}
+
+	pm.proc.Close()
 }
 
 func TestProvidersDatastore(t *testing.T) {

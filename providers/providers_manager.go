@@ -250,6 +250,42 @@ func (pm *ProviderManager) getProvidersForKey(k []byte) ([]peer.ID, error) {
 	return pset.providers, nil
 }
 
+// GetAllProviders returns map of all providers where key is the provide key base32
+// encoded and the value is a slice of peerIDs that we know to be providing the key
+func (pm *ProviderManager) GetAllProviders() (map[string][]peer.ID, error) {
+	providerMap := make(map[string][]peer.ID)
+	now := time.Now()
+
+	// Collect all keys with providersKeyPrefix
+	results, err := pm.dstore.Query(dsq.Query{Prefix: ProvidersKeyPrefix})
+	defer results.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	for result := range results.Next() {
+		t, err := readTimeValue(result.Value)
+		if err != nil {
+			// could not parse time
+			continue
+		}
+		if now.Sub(t) > ProvideValidity {
+			// expired, do nothing
+			continue
+		}
+
+		// extract the providerKey
+		split := strings.Split(result.Key, "/")
+		providerKeyStr := split[2]
+		// extract the peerID
+		peerIDStr := split[3]
+		peerID := peer.ID(peerIDStr)
+		providerMap[providerKeyStr] = append(providerMap[providerKeyStr], peerID)
+	}
+
+	return providerMap, nil
+}
+
 // returns the ProviderSet if it already exists on cache, otherwise loads it from datasatore
 func (pm *ProviderManager) getProviderSetForKey(k []byte) (*providerSet, error) {
 	cached, ok := pm.cache.Get(string(k))

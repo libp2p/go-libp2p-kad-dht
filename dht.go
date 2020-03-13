@@ -49,6 +49,7 @@ type IpfsDHT struct {
 	datastore ds.Datastore // Local data
 
 	routingTable    *kb.RoutingTable // Array of routing tables for differently distanced nodes
+       // ProviderManager stores & manages the provider records for this Dht peer.
 	ProviderManager *providers.ProviderManager
 
 	birth time.Time // When this peer started up

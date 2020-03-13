@@ -73,6 +73,8 @@ func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) 
 	return pm
 }
 
+// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
+// keys stored in the data store.
 const ProvidersKeyPrefix = "/providers/"
 
 func mkProvKey(k []byte) string {

@@ -30,7 +30,7 @@ import (
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p-record"
+	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	"github.com/libp2p/go-libp2p-testing/ci"
 	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
@@ -677,7 +677,7 @@ func TestLocalProvides(t *testing.T) {
 
 	for _, c := range testCaseCids {
 		for i := 0; i < 3; i++ {
-			provs := dhts[i].providers.GetProviders(ctx, c.Hash())
+			provs := dhts[i].ProviderManager.GetProviders(ctx, c.Hash())
 			if len(provs) > 0 {
 				t.Fatal("shouldnt know this")
 			}
@@ -1418,7 +1418,7 @@ func TestClientModeConnect(t *testing.T) {
 
 	c := testCaseCids[0]
 	p := peer.ID("TestPeer")
-	a.providers.AddProvider(ctx, c.Hash(), p)
+	a.ProviderManager.AddProvider(ctx, c.Hash(), p)
 	time.Sleep(time.Millisecond * 5) // just in case...
 
 	provs, err := b.FindProviders(ctx, c)
@@ -1633,7 +1633,7 @@ func TestProvideDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				provs := dhtB.providers.GetProviders(ctx, kHash)
+				provs := dhtB.ProviderManager.GetProviders(ctx, kHash)
 				if len(provs) != 0 {
 					t.Fatal("node B should not have found local providers")
 				}
@@ -1649,7 +1649,7 @@ func TestProvideDisabled(t *testing.T) {
 					t.Fatal("node A should not have found providers")
 				}
 			}
-			provAddrs := dhtA.providers.GetProviders(ctx, kHash)
+			provAddrs := dhtA.ProviderManager.GetProviders(ctx, kHash)
 			if len(provAddrs) != 0 {
 				t.Fatal("node A should not have found local providers")
 			}

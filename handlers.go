@@ -335,7 +335,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	}
 
 	// setup providers
-	providers := dht.providers.GetProviders(ctx, key)
+	providers := dht.ProviderManager.GetProviders(ctx, key)
 	if has {
 		providers = append(providers, dht.self)
 		logger.Debugf("%s have the value. added self as provider", reqDesc)
@@ -393,7 +393,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)
 		}
-		dht.providers.AddProvider(ctx, key, p)
+		dht.ProviderManager.AddProvider(ctx, key, p)
 	}
 
 	return nil, nil

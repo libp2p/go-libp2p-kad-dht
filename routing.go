@@ -426,7 +426,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}()
 
 	// add self locally
-	dht.providers.AddProvider(ctx, keyMH, dht.self)
+	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
 	if !brdcst {
 		return nil
 	}
@@ -528,7 +528,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	defer close(peerOut)
 
 	ps := peer.NewLimitedSet(count)
-	provs := dht.providers.GetProviders(ctx, key)
+	provs := dht.ProviderManager.GetProviders(ctx, key)
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p) {

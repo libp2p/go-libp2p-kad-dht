@@ -56,7 +56,7 @@ func TestProviderManager(t *testing.T) {
 	pm.proc.Close()
 }
 
-func TestGetAllProviders(t *testing.T) {
+func TestGetAllProvidersByKey(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

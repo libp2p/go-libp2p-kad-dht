@@ -252,24 +252,58 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) []peer.ID
 // GetAllProviders returns the set of all providers
 // Warning: This method _does not_ copy the set. Do not modify it.
 func (pm *ProviderManager) GetAllProviders() ([]GetProv, error) {
-	// Return all providers
-	keys, err := pm.dstore.Query(dsq.Query{Prefix: providersKeyPrefix, KeysOnly: true})
+
+	// Collect all keys with providersKeyPrefix
+	dsKeys, err := pm.dstore.Query(dsq.Query{Prefix: providersKeyPrefix, KeysOnly: true})
 	if err != nil {
 		return nil, err
 	}
 
-	getProvs := []GetProv{}
+	pks := []string{}
+	for dsKey := range dsKeys.Next() {
+		// extract the providerKey
+		split := strings.Split(dsKey.Key, "/")
+		providerKeyStr := split[2]
+		pks = append(pks, providerKeyStr)
+	}
+	pks = removeDuplicatesUnordered(pks)
+	fmt.Println(pks)
 
-	for key := range keys.Next() {
+	getProvs := []GetProv{}
+	for _, providerKeyStr := range pks {
+		providerKeyByte, err := base32.RawStdEncoding.DecodeString(providerKeyStr)
+		if err != nil {
+			return nil, err
+
+		}
+		// ask for the PeerIds using standard process
 		gp := GetProv{
-			k:    key.Value,
+			k:    providerKeyByte,
 			resp: make(chan []peer.ID, 1),
 		}
 
 		getProvs = append(getProvs, gp)
 		pm.getprovs <- &gp
+
 	}
+
 	return getProvs, nil
+}
+
+func removeDuplicatesUnordered(elements []string) []string {
+	encountered := map[string]bool{}
+
+	// Create a map of all unique elements.
+	for v := range elements {
+		encountered[elements[v]] = true
+	}
+
+	// Place all keys from the map into a slice.
+	result := []string{}
+	for key, _ := range encountered {
+		result = append(result, key)
+	}
+	return result
 }
 
 // Yields the PeerIDs of the providers from local (cache or datastore) for a given key

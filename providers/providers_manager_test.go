@@ -105,7 +105,7 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pset, err := loadProvSet(dstore, k)
+	pset, err := loadProviderSet(dstore, k)
 	if err != nil {
 		t.Fatal(err)
 	}

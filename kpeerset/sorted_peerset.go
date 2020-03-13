@@ -134,7 +134,10 @@ func (ps *SortedPeerset) Add(p peer.ID) bool {
 
 // UnqueriedFromKClosest returns the unqueried peers among the K closest peers AFTER
 // sorting them in Ascending Order with the given comparator.
-func (ps *SortedPeerset) UnqueriedFromKClosest(sortWith peerheap.Comparator) []peer.ID {
+// It uses the `getValue` function to get the value with which to compare the peers for sorting
+// and the `sortWith` function to compare two peerHeap items to determine the ordering between them.
+func (ps *SortedPeerset) UnqueriedFromKClosest(getValue func(id peer.ID, distance *big.Int) interface{},
+	sortWith peerheap.Comparator) []peer.ID {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
@@ -143,8 +146,9 @@ func (ps *SortedPeerset) UnqueriedFromKClosest(sortWith peerheap.Comparator) []p
 	// create a min-heap to sort the unqueried peer Items using the given comparator
 	ph := peerheap.New(false, sortWith)
 	for _, i := range unqueriedPeerItems {
-		v := i
-		heap.Push(ph, &v)
+		p := i.Peer
+		d := i.Value.(*big.Int)
+		heap.Push(ph, &peerheap.Item{Peer: p, Value: getValue(p, d)})
 	}
 	// now pop so we get them in sorted order
 	peers := make([]peer.ID, 0, ph.Len())
@@ -200,6 +204,20 @@ func (ps *SortedPeerset) Remove(p peer.ID) {
 		// remove it from the K closest peers
 		heap.Remove(ps.heapKClosestPeers, item.Index)
 		delete(ps.kClosestPeers, p)
+		// if this peer was the closest peer we knew, we need to find the new closest peer.
+		if ps.closestKnownPeer == p {
+			var minDistance *big.Int
+			var closest peer.ID
+			for _, i := range ps.kClosestPeers {
+				d := i.Value.(*big.Int)
+				if minDistance == nil || (d.Cmp(minDistance) == -1) {
+					minDistance = d
+					closest = i.Peer
+				}
+			}
+			ps.closestKnownPeer = closest
+			ps.dClosestKnownPeer = minDistance
+		}
 
 		// we now need to add a peer to the K closest peers from the rest of peers
 		// to make up for the peer that was just removed

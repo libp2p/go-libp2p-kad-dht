@@ -654,7 +654,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return pi, nil
 	}
 
-	_, err = dht.runDisjointQueries(ctx, dht.d, string(id),
+	queries, err := dht.runDisjointQueries(ctx, dht.d, string(id),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -687,8 +687,8 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
-	// refresh the cpl for this key as the query was successful
-	if ctx.Err() == nil {
+	// refresh the cpl for this key if we discovered the peer because of the query
+	if ctx.Err() == nil && queries[0].globallyQueriedPeers.Contains(id) {
 		kadID := kb.ConvertPeerID(id)
 		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
 	}

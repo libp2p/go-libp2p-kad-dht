@@ -33,8 +33,7 @@ type query struct {
 	// localPeers is the set of peers that need to be queried or have already been queried for this query.
 	localPeers *kpeerset.SortedPeerset
 
-	// globallyQueriedPeers is the set of peers that have been queried across ALL queries.
-	// for now, this is the combined set of peers queried across ALL the disjoint queries.
+	// globallyQueriedPeers is the combined set of peers queried across ALL the disjoint queries.
 	globallyQueriedPeers *peer.Set
 
 	// the function that will be used to query a single peer.
@@ -112,42 +111,35 @@ loop:
 	return queries, nil
 }
 
-// compareByDistanceAndLatency compares two peerHeap Items using a scoring function
-// that considers metrics such as connectendness of the peer, it's distance from the key
+// TODO This function should be owned by the DHT as it dosen't really belong to "a query".
+// scorePeerByDistanceAndLatency scores a peer using metrics such as connectendness of the peer, it's distance from the key
 // and it's current known latency.
-// Returns true if i1 has a lower score than i2.
-func (q *query) compareByDistanceAndLatency(i1 peerheap.Item, i2 peerheap.Item) bool {
-	scorePeer := func(item peerheap.Item) *big.Int {
-		connectedness := q.dht.host.Network().Connectedness(item.Peer)
-		distanceFromKey := item.Value.(*big.Int)
-		latency := q.dht.host.Peerstore().LatencyEWMA(item.Peer)
+func (q query) scorePeerByDistanceAndLatency(p peer.ID, distanceFromKey *big.Int) interface{} {
+	connectedness := q.dht.host.Network().Connectedness(p)
+	latency := q.dht.host.Peerstore().LatencyEWMA(p)
 
-		var c int64
-		switch connectedness {
-		case network.Connected:
-			c = 1
-		case network.CanConnect:
-			c = 5
-		case network.CannotConnect:
-			c = 10000
-		default:
-			c = 20
-		}
-
-		l := int64(latency)
-		if l <= 0 {
-			l = int64(time.Second) * 10
-		}
-
-		res := big.NewInt(c)
-		tmp := big.NewInt(l)
-		res.Mul(res, tmp)
-		res.Mul(res, distanceFromKey)
-
-		return res
+	var c int64
+	switch connectedness {
+	case network.Connected:
+		c = 1
+	case network.CanConnect:
+		c = 5
+	case network.CannotConnect:
+		c = 10000
+	default:
+		c = 20
 	}
 
-	return scorePeer(i1).Cmp(scorePeer(i2)) == -1
+	l := int64(latency)
+	if l <= 0 {
+		l = int64(time.Second) * 10
+	}
+
+	res := big.NewInt(c)
+	res.Mul(res, big.NewInt(l))
+	res.Mul(res, distanceFromKey)
+
+	return res
 }
 
 // strictParallelismQuery concurrently sends the query RPC to all eligible peers
@@ -159,7 +151,10 @@ func strictParallelismQuery(q *query) {
 		// of their 'distance-latency` score.
 		// We sort peers like this so that "better" peers are chosen to be in the α peers
 		// which get queried from among the unqueried K  closet.
-		peersToQuery := q.localPeers.UnqueriedFromKClosest(q.compareByDistanceAndLatency)
+		peersToQuery := q.localPeers.UnqueriedFromKClosest(q.scorePeerByDistanceAndLatency,
+			func(i1 peerheap.Item, i2 peerheap.Item) bool {
+				return i1.Value.(*big.Int).Cmp(i2.Value.(*big.Int)) == -1
+			})
 
 		// The lookup terminates when the initiator has queried and gotten responses from the k
 		// closest nodes it has heard about.
@@ -212,7 +207,6 @@ func strictParallelismQuery(q *query) {
 }
 
 type queryResult struct {
-	success bool
 	// foundCloserPeer is true if the peer we're querying returns a peer
 	// closer than the closest we've already heard about
 	foundCloserPeer bool
@@ -251,11 +245,6 @@ func (q *query) queryPeer(p peer.ID) *queryResult {
 	// mark the peer as queried.
 	q.localPeers.MarkQueried(p)
 
-	// did the successful query RPC fulfill the query stop condition ?
-	if q.stopFn(q.localPeers) {
-		q.cancel()
-	}
-
 	if len(newPeers) == 0 {
 		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
 	}
@@ -273,8 +262,12 @@ func (q *query) queryPeer(p peer.ID) *queryResult {
 		foundCloserPeer = foundCloserPeer || closer
 	}
 
+	// did the successful query RPC fulfill the query stop condition ?
+	if q.stopFn(q.localPeers) {
+		q.cancel()
+	}
+
 	return &queryResult{
-		success:         true,
 		foundCloserPeer: foundCloserPeer,
 	}
 }

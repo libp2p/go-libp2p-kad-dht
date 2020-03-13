@@ -1,6 +1,7 @@
 package kpeerset
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -16,21 +17,25 @@ var noopCompare = func(i1 peerheap.Item, i2 peerheap.Item) bool {
 	return true
 }
 
+var noopGetValue = func(p peer.ID, d *big.Int) interface{} {
+	return d
+}
+
 func TestSortedPeerset(t *testing.T) {
 	key := "test"
 	sp := NewSortedPeerset(2, key)
-	require.Empty(t, sp.UnqueriedFromKClosest(noopCompare))
+	require.Empty(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare))
 
 	// -----------------Ordering between peers for the Test -----
-	// peer0 < peer3 < peer1 < peer4 < peer2 < peer5 by distance from key
+	// KEY < peer0 < peer3 < peer1 < peer4 < peer2 < peer5
 	// ----------------------------------------------------------
 	peer2 := test.RandPeerIDFatal(t)
 
 	// add peer 2 & assert
 	require.True(t, sp.Add(peer2))
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 1)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 1)
 	require.True(t, sp.LenUnqueriedFromKClosest() == 1)
-	require.Equal(t, sp.UnqueriedFromKClosest(noopCompare)[0], peer2)
+	require.Equal(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare)[0], peer2)
 	assertClosestKnownPeer(t, sp, peer2)
 
 	// add peer4 & assert
@@ -42,10 +47,10 @@ func TestSortedPeerset(t *testing.T) {
 		}
 	}
 	require.True(t, sp.Add(peer4))
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 2)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 2)
 	require.True(t, sp.LenUnqueriedFromKClosest() == 2)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer2)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer4)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer2)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer4)
 	assertClosestKnownPeer(t, sp, peer4)
 
 	// add peer1 which will displace peer2 in the kClosest
@@ -57,9 +62,9 @@ func TestSortedPeerset(t *testing.T) {
 		}
 	}
 	require.True(t, sp.Add(peer1))
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 2)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer1)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer4)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 2)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer1)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer4)
 	assertClosestKnownPeer(t, sp, peer1)
 
 	// add peer 3 which will displace peer4 in the kClosest
@@ -71,33 +76,34 @@ func TestSortedPeerset(t *testing.T) {
 		}
 	}
 	require.True(t, sp.Add(peer3))
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 2)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer1)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer3)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 2)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer1)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer3)
 	assertClosestKnownPeer(t, sp, peer3)
 
 	// removing peer1 moves peer4 to the KClosest
 	sp.Remove(peer1)
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 2)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer3)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer4)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 2)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer3)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer4)
 	sp.lock.Lock()
 	require.True(t, sp.heapRestOfPeers.Len() == 1)
 	require.Contains(t, sp.heapRestOfPeers.Peers(), peer2)
 	sp.lock.Unlock()
 
-	// mark a peer as queried
+	// mark a peer as queried so it's not returned as unqueried
 	sp.MarkQueried(peer4)
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 1)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer3)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 1)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer3)
 
-	// removing peer3 moves peer2 to the kClosest.
+	// removing peer3 moves peer2 to the kClosest & updates the closest known peer to peer4
 	sp.Remove(peer3)
-	require.Len(t, sp.UnqueriedFromKClosest(noopCompare), 1)
-	require.Contains(t, sp.UnqueriedFromKClosest(noopCompare), peer2)
+	require.Len(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), 1)
+	require.Contains(t, sp.UnqueriedFromKClosest(noopGetValue, noopCompare), peer2)
 	sp.lock.Lock()
 	require.Empty(t, sp.heapRestOfPeers.Peers())
 	sp.lock.Unlock()
+	assertClosestKnownPeer(t, sp, peer4)
 
 	// adding peer5 does not change the closest known peer
 	var peer5 peer.ID
@@ -108,7 +114,7 @@ func TestSortedPeerset(t *testing.T) {
 		}
 	}
 	require.False(t, sp.Add(peer5))
-	assertClosestKnownPeer(t, sp, peer3)
+	assertClosestKnownPeer(t, sp, peer4)
 
 	// adding peer0 changes the closest known peer
 	var peer0 peer.ID
@@ -133,7 +139,7 @@ func TestSortingUnqueriedFromKClosest(t *testing.T) {
 	sp.Add(p3)
 	sp.Add(p2)
 
-	ps := sp.UnqueriedFromKClosest(func(i1 peerheap.Item, i2 peerheap.Item) bool {
+	ps := sp.UnqueriedFromKClosest(noopGetValue, func(i1 peerheap.Item, i2 peerheap.Item) bool {
 		return len(i1.Peer) > len(i2.Peer)
 	})
 	require.Len(t, ps, 3)
@@ -142,9 +148,13 @@ func TestSortingUnqueriedFromKClosest(t *testing.T) {
 	require.Equal(t, p1, ps[2])
 
 	// mark one as queried
+	scoref := func(p peer.ID, d *big.Int) interface{} {
+		return len(p)
+	}
+
 	sp.MarkQueried(p3)
-	ps = sp.UnqueriedFromKClosest(func(i1 peerheap.Item, i2 peerheap.Item) bool {
-		return len(i1.Peer) > len(i2.Peer)
+	ps = sp.UnqueriedFromKClosest(scoref, func(i1 peerheap.Item, i2 peerheap.Item) bool {
+		return i1.Value.(int) > i2.Value.(int)
 	})
 	require.Len(t, ps, 2)
 	require.Equal(t, p2, ps[0])

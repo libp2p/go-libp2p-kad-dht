@@ -36,7 +36,7 @@ import (
 )
 
 var logger = logging.Logger("dht")
-var rtPvLogger = logging.Logger("dht/rt/peer-validation")
+var rtPvLogger = logging.Logger("dht/rt-validation")
 
 const BaseConnMgrScore = 5
 
@@ -256,7 +256,7 @@ func makeRoutingTable(h host.Host, cfg config) (*kb.RoutingTable, error) {
 	// construct the routing table with a peer validation function
 	pvF := func(c context.Context, p peer.ID) bool {
 		if err := h.Connect(c, peer.AddrInfo{ID: p}); err != nil {
-			rtPvLogger.Errorf("failed to connect to peer %s for validation, err=%s", p, err)
+			rtPvLogger.Infof("failed to connect to peer %s for validation, err=%s", p, err)
 			return false
 		}
 		return true

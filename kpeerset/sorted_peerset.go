@@ -160,6 +160,64 @@ func (ps *SortedPeerset) UnqueriedFromKClosest(getValue func(id peer.ID, distanc
 	return peers
 }
 
+func (ps *SortedPeerset) GetBestUnqueried(num int, getValue func(id peer.ID, distance *big.Int) interface{},
+	sortWith peerheap.Comparator) []peer.ID {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	unqueriedPeerItems := ps.heapKClosestPeers.FilterItems(ps.isPeerItemQueried)
+
+	// create a min-heap to sort the unqueried peer Items using the given comparator
+	ph := peerheap.New(false, sortWith)
+	for _, i := range unqueriedPeerItems {
+		p := i.Peer
+		d := i.Value.(*big.Int)
+		heap.Push(ph, &peerheap.Item{Peer: p, Value: getValue(p, d)})
+	}
+	// now pop so we get them in sorted order
+	peers := make([]peer.ID, 0, num)
+	for ph.Len() != 0 && len(peers) < num {
+		popped := heap.Pop(ph).(*peerheap.Item)
+		peers = append(peers, popped.Peer)
+	}
+
+	return peers
+}
+
+func (ps *SortedPeerset) GetClosestUnqueried(num int) []peer.ID {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	sortWith := func(i1 peerheap.Item, i2 peerheap.Item) bool {
+		return i1.Value.(*big.Int).Cmp(i2.Value.(*big.Int)) == -1
+	}
+
+	peerItems := ps.heapKClosestPeers.FilterItems(func(peerheap.Item) bool { return true })
+
+	// create a min-heap to sort the unqueried peer Items using the given comparator
+	ph := peerheap.New(false, sortWith)
+	for _, i := range peerItems {
+		p := i.Peer
+		d := i.Value.(*big.Int)
+		heap.Push(ph, &peerheap.Item{Peer: p, Value: d})
+	}
+	// now pop so we get them in sorted order
+	peers := make([]peer.ID, 0, num)
+	for ph.Len() != 0 && len(peers) < num {
+		popped := heap.Pop(ph).(*peerheap.Item)
+		peers = append(peers, popped.Peer)
+	}
+
+	unqueriedPeers := make([]peer.ID, 0, num)
+	for _, p := range peers {
+		if _, queried := ps.queried[p]; !queried {
+			unqueriedPeers = append(unqueriedPeers, p)
+		}
+	}
+
+	return unqueriedPeers
+}
+
 // LenUnqueriedFromKClosest returns the number of unqueried peers among
 // the K closest peers.
 func (ps *SortedPeerset) LenUnqueriedFromKClosest() int {

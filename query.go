@@ -9,6 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/kpeerset/peerheap"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
@@ -91,7 +92,8 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 	for i := 0; i < d; i++ {
 		query := queries[i]
 		go func() {
-			strictParallelismQuery(query)
+			looseBParallelismQuery(query)
+			//strictParallelismQuery(query)
 			queryDone <- struct{}{}
 		}()
 	}
@@ -204,6 +206,68 @@ func strictParallelismQuery(q *query) {
 			case <-q.ctx.Done():
 				return
 			}
+		}
+	}
+}
+
+// strictParallelismQuery concurrently sends the query RPC to all eligible peers
+// and waits for ALL the RPC's to complete before starting the next round of RPC's.
+func looseBParallelismQuery(q *query) {
+	alphaCh := make(chan bool, q.dht.alpha)
+	resultCh := make(chan *queryResult, q.dht.alpha)
+
+	pathCtx, cancelPath := context.WithCancel(q.ctx)
+	defer cancelPath()
+
+	scoreCmp := func(i1 peerheap.Item, i2 peerheap.Item) bool {
+		return i1.Value.(*big.Int).Cmp(i2.Value.(*big.Int)) == -1
+	}
+
+	alphaMx := sync.Mutex{}
+
+	for i := 0; i < q.dht.alpha; i++ {
+		go func() {
+			for {
+				if len(q.localPeers.GetClosestUnqueried(3)) == 0 {
+					cancelPath()
+				}
+
+				select {
+				case top := <-alphaCh:
+					alphaMx.Lock()
+					var peers []peer.ID
+					if !top {
+						peers = q.localPeers.GetBestUnqueried(1, q.scorePeerByDistanceAndLatency, scoreCmp)
+					} else {
+						peers = q.localPeers.GetClosestUnqueried(3)
+					}
+					var qp peer.ID
+					if len(peers) > 0 {
+						qp = peers[0]
+					} else {
+						continue
+					}
+					q.localPeers.MarkQueried(qp)
+					alphaMx.Unlock()
+					resultCh <- q.queryPeer(qp)
+				case <-pathCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	foundCloserCounter := 0
+	for closest := q.localPeers.GetClosestUnqueried(3); len(closest) > 0; {
+		select {
+		case alphaCh <- foundCloserCounter >= q.dht.alpha:
+		case res := <-resultCh:
+			if res.foundCloserPeer {
+				foundCloserCounter++
+			} else {
+				foundCloserCounter = 0
+			}
+		case <-pathCtx.Done():
 		}
 	}
 }

@@ -11,6 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TODO Debug test failures due to timing issue on windows
+// Both tests are timing dependent as can be seen in the 2 seconds timed context that we use in "tu.WaitFor".
+// While both tests work fine on OSX and complete in under a second,
+// they repeatedly fail to complete in the stipulated time on Windows.
+// However, increasing the timeout makes them pass on Windows.
+
 func TestNotifieeMultipleConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

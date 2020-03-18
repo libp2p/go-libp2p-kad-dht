@@ -219,8 +219,8 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
-	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
-	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
+	protocols := []protocol.ID{cfg.protocolPrefix + kad1}
+	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad1}
 
 	// check if custom test protocols were set
 	if len(cfg.testProtocols) > 0 {

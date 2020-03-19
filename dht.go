@@ -205,7 +205,10 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
-	rt, err := makeRoutingTable(h, cfg)
+	dht := new(IpfsDHT)
+	dht.host = h
+
+	rt, err := makeRoutingTable(dht, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}
@@ -223,7 +226,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		}
 	}
 
-	dht := &IpfsDHT{
+	*dht = IpfsDHT{
 		datastore:              cfg.datastore,
 		self:                   h.ID(),
 		peerstore:              h.Peerstore(),
@@ -256,7 +259,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	return dht, nil
 }
 
-func makeRoutingTable(h host.Host, cfg config) (*kb.RoutingTable, error) {
+func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
+	h := dht.Host()
 	self := kb.ConvertPeerID(h.ID())
 	// construct the routing table with a peer validation function
 	pvF := func(c context.Context, p peer.ID) bool {
@@ -264,7 +268,7 @@ func makeRoutingTable(h host.Host, cfg config) (*kb.RoutingTable, error) {
 			rtPvLogger.Errorf("failed to connect to peer %s for validation, err=%s", p, err)
 			return false
 		}
-		if !cfg.routingTable.peerFilter(h, h.Network().ConnsToPeer(p)) {
+		if !cfg.routingTable.peerFilter(dht, h.Network().ConnsToPeer(p)) {
 			return false
 		}
 		return true
@@ -407,7 +411,7 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "peerFound", p)
 	currentConns := dht.host.Network().ConnsToPeer(p)
 	if len(currentConns) > 0 {
-		if dht.routingTablePeerFilter(dht.host, currentConns) {
+		if dht.routingTablePeerFilter(dht, currentConns) {
 			dht.routingTable.HandlePeerAlive(p)
 		}
 	} else {

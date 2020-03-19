@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"errors"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -304,8 +305,12 @@ func (q *query) queryPeer(ctx context.Context, p peer.ID) *queryResult {
 			continue
 		}
 
+		// add any other know addresses for the candidate peer.
+		curInfo := q.dht.peerstore.PeerInfo(next.ID)
+		next.Addrs = append(next.Addrs, curInfo.Addrs...)
+
 		// add their addresses to the dialer's peerstore
-		if q.dht.queryPeerFilter(q.dht.host, *next) {
+		if q.dht.queryPeerFilter(q.dht, *next) {
 			q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
 			closer := q.localPeers.Add(next.ID)
 			foundCloserPeer = foundCloserPeer || closer

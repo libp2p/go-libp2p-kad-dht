@@ -9,7 +9,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
-	host "github.com/libp2p/go-libp2p-host"
 	record "github.com/libp2p/go-libp2p-record"
 )
 
@@ -58,8 +57,8 @@ type config struct {
 	testProtocols []protocol.ID
 }
 
-func emptyQueryFilter(h host.Host, ai peer.AddrInfo) bool  { return true }
-func emptyRTFilter(h host.Host, conns []network.Conn) bool { return true }
+func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
+func emptyRTFilter(_ *IpfsDHT, conns []network.Conn) bool { return true }
 
 // apply applies the given options to this Option
 func (c *config) apply(opts ...Option) error {

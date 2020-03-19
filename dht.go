@@ -267,6 +267,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 		b, err := dht.validRTPeer(p)
 		if err != nil {
 			rtPvLogger.Errorf("failed to check if peer %s supports DHT protocol, err=%s", p, err)
+			return false
 		}
 
 		return b

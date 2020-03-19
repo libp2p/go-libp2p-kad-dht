@@ -41,46 +41,36 @@ var _ QueryFilterFunc = PublicQueryFilter
 
 // PublicRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a public network
-func PublicRoutingTableFilter(_ *IpfsDHT, conns []network.Conn) bool {
+func PublicRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
+	if len(conns) == 0 {
+		return false
+	}
+
+	// Is one of these connections to a public address?
 	for _, c := range conns {
 		addr := c.RemoteMultiaddr()
 		if !isRelayAddr(addr) && manet.IsPublicAddr(addr) {
 			return true
 		}
 	}
+
+	// Do we have a public address for this peer?
+	id := conns[0].RemotePeer()
+	known := dht.peerstore.PeerInfo(id)
+	for _, a := range known.Addrs {
+		if !isRelayAddr(a) && manet.IsPublicAddr(a) {
+			return true
+		}
+	}
+
 	return false
 }
 
 var _ RouteTableFilterFunc = PublicRoutingTableFilter
 
-// PrivateQueryFilter returns true if the peer is suspected of being accessible over a shared private network
+// PrivateQueryFilter doens't currently restrict which peers we are willing to query from the local DHT.
 func PrivateQueryFilter(dht *IpfsDHT, ai peer.AddrInfo) bool {
-	conns := dht.Host().Network().ConnsToPeer(ai.ID)
-	if len(conns) > 0 {
-		for _, c := range conns {
-			if manet.IsPrivateAddr(c.RemoteMultiaddr()) {
-				return true
-			}
-		}
-		return false
-	}
-
-	if len(ai.Addrs) == 0 {
-		return false
-	}
-
-	var hasPrivateAddr bool
-	for _, a := range ai.Addrs {
-		if manet.IsPublicAddr(a) {
-			if !isRelayAddr(a) {
-				return false
-			}
-		} else {
-			hasPrivateAddr = true
-		}
-	}
-
-	return hasPrivateAddr
+	return len(ai.Addrs) > 0
 }
 
 var _ QueryFilterFunc = PrivateQueryFilter

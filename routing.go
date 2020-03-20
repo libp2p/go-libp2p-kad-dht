@@ -411,7 +411,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, queries []*query) {
 	shortcutTaken := false
 	for _, q := range queries {
-		if len(q.queryPeers.GetClosestNotUnreachable(3)) > 0 {
+		if len(q.queryPeers.GetClosestNotUnreachable(dht.beta)) > 0 {
 			shortcutTaken = true
 			break
 		}

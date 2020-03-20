@@ -12,10 +12,10 @@ require (
 	github.com/ipfs/go-log v1.0.2
 	github.com/jbenet/goprocess v0.1.3
 	github.com/libp2p/go-eventbus v0.1.0
-	github.com/libp2p/go-libp2p v0.6.1
+	github.com/libp2p/go-libp2p v0.6.2-0.20200323213923-1425d551c298
 	github.com/libp2p/go-libp2p-core v0.5.0
-	github.com/libp2p/go-libp2p-kbucket v0.3.2-0.20200319122627-7fa6dacb57ec
-	github.com/libp2p/go-libp2p-peerstore v0.2.0
+	github.com/libp2p/go-libp2p-kbucket v0.3.2-0.20200320132433-d1a1e9242e0c
+	github.com/libp2p/go-libp2p-peerstore v0.2.1
 	github.com/libp2p/go-libp2p-record v0.1.2
 	github.com/libp2p/go-libp2p-swarm v0.2.2
 	github.com/libp2p/go-libp2p-testing v0.1.1

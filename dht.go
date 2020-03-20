@@ -66,6 +66,7 @@ type IpfsDHT struct {
 
 	birth time.Time  // When this peer started up
 	rng   *rand.Rand // Source of randomness
+	rnglk sync.Mutex // Rand does not support concurrency
 
 	Validator record.Validator
 

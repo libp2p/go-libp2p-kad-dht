@@ -8,15 +8,22 @@ import (
 	ks "github.com/whyrusleeping/go-keyspace"
 )
 
+// PeerState describes the state of a peer ID during the lifecycle of an individual lookup.
 type PeerState int
 
 const (
-	PeerSeen PeerState = iota
+	// PeerHeard is applied to peers which have not been queried yet.
+	PeerHeard PeerState = iota
+	// PeerWaiting is applied to peers that are currently being queried.
 	PeerWaiting
+	// PeerQueried is applied to peers who have been queried and a response was retrieved successfully.
 	PeerQueried
+	// PeerUnreachable is applied to peers who have been queried and a response was not retrieved successfully.
 	PeerUnreachable
 )
 
+// QueryPeerset maintains the state of a Kademlia asynchronous lookup.
+// The lookup state is a set of peers, each labeled with a peer state.
 type QueryPeerset struct {
 	// the key being searched for
 	key ks.Key
@@ -29,8 +36,9 @@ type QueryPeerset struct {
 }
 
 type queryPeerState struct {
-	id    peer.ID
-	state PeerState
+	id       peer.ID
+	distance *big.Int
+	state    PeerState
 }
 
 type sortedQueryPeerset QueryPeerset
@@ -44,14 +52,12 @@ func (sqp *sortedQueryPeerset) Swap(i, j int) {
 }
 
 func (sqp *sortedQueryPeerset) Less(i, j int) bool {
-	di, dj := sqp.distanceToKey(i), sqp.distanceToKey(j)
+	di, dj := sqp.all[i].distance, sqp.all[j].distance
 	return di.Cmp(dj) == -1
 }
 
-func (sqp *sortedQueryPeerset) distanceToKey(i int) *big.Int {
-	return ks.XORKeySpace.Key([]byte(sqp.all[i].id)).Distance(sqp.key)
-}
-
+// NewQueryPeerset creates a new empty set of peers.
+// key is the target key of the lookup that this peer set is for.
 func NewQueryPeerset(key string) *QueryPeerset {
 	return &QueryPeerset{
 		key:    ks.XORKeySpace.Key([]byte(key)),
@@ -69,11 +75,19 @@ func (qp *QueryPeerset) find(p peer.ID) int {
 	return -1
 }
 
+func (qp *QueryPeerset) distanceToKey(p peer.ID) *big.Int {
+	return ks.XORKeySpace.Key([]byte(p)).Distance(qp.key)
+}
+
+// TryAdd adds the peer p to the peer set.
+// If the peer is already present, no action is taken.
+// Otherwise, the peer is added with state set to PeerHeard.
+// TryAdd returns true iff the peer was not already present.
 func (qp *QueryPeerset) TryAdd(p peer.ID) bool {
 	if qp.find(p) >= 0 {
 		return false
 	} else {
-		qp.all = append(qp.all, queryPeerState{id: p, state: PeerSeen})
+		qp.all = append(qp.all, queryPeerState{id: p, distance: q.distanceToKey(p), state: PeerHeard})
 		qp.sorted = false
 		return true
 	}
@@ -87,42 +101,24 @@ func (qp *QueryPeerset) sort() {
 	qp.sorted = true
 }
 
-func (qp *QueryPeerset) MarkSeen(p peer.ID) {
-	qp.all[qp.find(p)].state = PeerSeen
+// SetState sets the state of peer p to s.
+// If p is not in the peerset, SetState panics.
+func (qp *QueryPeerset) SetState(p peer.ID, s PeerState) {
+	qp.all[qp.find(p)].state = s
 }
 
-func (qp *QueryPeerset) MarkWaiting(p peer.ID) {
-	qp.all[qp.find(p)].state = PeerWaiting
+// GetState returns the state of peer p.
+// If p is not in the peerset, GetState panics.
+func (qp *QueryPeerset) GetState(p peer.ID) PeerState {
+	return qp.all[qp.find(p)].state
 }
 
-func (qp *QueryPeerset) MarkQueried(p peer.ID) {
-	qp.all[qp.find(p)].state = PeerQueried
-}
-
-func (qp *QueryPeerset) MarkUnreachable(p peer.ID) {
-	qp.all[qp.find(p)].state = PeerUnreachable
-}
-
-func (qp *QueryPeerset) IsSeen(p peer.ID) bool {
-	return qp.all[qp.find(p)].state == PeerSeen
-}
-
-func (qp *QueryPeerset) IsWaiting(p peer.ID) bool {
-	return qp.all[qp.find(p)].state == PeerWaiting
-}
-
-func (qp *QueryPeerset) IsQueried(p peer.ID) bool {
-	return qp.all[qp.find(p)].state == PeerQueried
-}
-
-func (qp *QueryPeerset) IsUnreachable(p peer.ID) bool {
-	return qp.all[qp.find(p)].state == PeerUnreachable
-}
-
+// NumWaiting returns the number of peers in state PeerWaiting.
 func (qp *QueryPeerset) NumWaiting() int {
 	return len(qp.GetWaitingPeers())
 }
 
+// GetWaitingPeers returns a slice of all peers in state PeerWaiting, in an undefined order.
 func (qp *QueryPeerset) GetWaitingPeers() (result []peer.ID) {
 	for _, p := range qp.all {
 		if p.state == PeerWaiting {
@@ -132,7 +128,9 @@ func (qp *QueryPeerset) GetWaitingPeers() (result []peer.ID) {
 	return
 }
 
-func (qp *QueryPeerset) GetClosestNotUnreachable(k int) (result []peer.ID) {
+// GetClosestNotUnreachable returns the closest to the key peers, which are not in state PeerUnreachable.
+// It returns count peers or less, if fewer peers meet the condition.
+func (qp *QueryPeerset) GetClosestNotUnreachable(count int) (result []peer.ID) {
 	qp.sort()
 	for _, p := range qp.all {
 		if p.state != PeerUnreachable {
@@ -145,20 +143,23 @@ func (qp *QueryPeerset) GetClosestNotUnreachable(k int) (result []peer.ID) {
 	return result
 }
 
-func (qp *QueryPeerset) NumSeen() int {
-	return len(qp.GetSeenPeers())
+// NumHeard returns the number of peers in state PeerHeard.
+func (qp *QueryPeerset) NumHeard() int {
+	return len(qp.GetHeardPeers())
 }
 
-func (qp *QueryPeerset) GetSeenPeers() (result []peer.ID) {
+// GetHeardPeers returns a slice of all peers in state PeerHeard, in an undefined order.
+func (qp *QueryPeerset) GetHeardPeers() (result []peer.ID) {
 	for _, p := range qp.all {
-		if p.state == PeerSeen {
+		if p.state == PeerHeard {
 			result = append(result, p.id)
 		}
 	}
 	return
 }
 
-func (qp *QueryPeerset) GetSortedSeen() (result []peer.ID) {
+// GetSortedHeard returns a slice of all peers in state PeerHeard, ordered by ascending distance to the target key.
+func (qp *QueryPeerset) GetSortedHeard() (result []peer.ID) {
 	qp.sort()
-	return qp.GetSeenPeers()
+	return qp.GetHeardPeers()
 }

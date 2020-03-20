@@ -46,7 +46,7 @@ type query struct {
 	queryFn queryFn
 
 	// stopFn is used to determine if we should stop the WHOLE disjoint query.
-	stopFn stopFn // TODO: can context cancel do the job? if, not abstract it like "cancel within the context"
+	stopFn stopFn
 }
 
 // d is the number of disjoint queries.
@@ -107,7 +107,9 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 
 loop:
 	// wait for all the "d" disjoint queries to complete before we return
-	// XXX: waiting until all queries are done is a security bug!!!
+	// XXX: Waiting until all queries are done is a vector for DoS attacks:
+	// The disjoint lookup paths that are taken over by adversarial peers
+	// can easily be fooled to go on forever.
 	for {
 		select {
 		case <-queryDone:
@@ -140,8 +142,8 @@ func (q *query) runWithGreedyParallelism() {
 
 	for {
 		select {
-		case sawPeers := <-ch:
-			q.populatePeers(sawPeers)
+		case update := <-ch:
+			q.updateState(update)
 		case <-pathCtx.Done():
 			q.terminate()
 			return
@@ -167,10 +169,10 @@ func (q *query) runWithGreedyParallelism() {
 
 // spawnQuery starts one query, if an available seen peer is found
 func (q *query) spawnQuery(ch chan<- *queryUpdate) {
-	if peers := q.queryPeers.GetSortedSeen(); len(peers) == 0 {
+	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
 		return
 	} else {
-		q.queryPeers.MarkWaiting(peers[0])
+		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
 		go q.queryPeer(ch, peers[0])
 	}
 }
@@ -200,7 +202,7 @@ func (q *query) isLookupTermination() bool {
 	var peers []peer.ID
 	peers = q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
 	for _, p := range peers {
-		if !q.queryPeers.IsQueried(p) {
+		if q.queryPeers.GetState(p) != qpeerset.PeerQueried {
 			return false
 		}
 	}
@@ -208,7 +210,7 @@ func (q *query) isLookupTermination() bool {
 }
 
 func (q *query) isStarvationTermination() bool {
-	return q.queryPeers.NumSeen() == 0 && q.queryPeers.NumWaiting() == 0
+	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
 }
 
 func (q *query) terminate() {
@@ -256,27 +258,27 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 	ch <- &queryUpdate{seen: saw, queried: []peer.ID{p}}
 }
 
-func (q *query) populatePeers(up *queryUpdate) {
+func (q *query) updateState(up *queryUpdate) {
 	for _, p := range up.seen {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
 		q.queryPeers.TryAdd(p)
-		q.queryPeers.MarkSeen(p)
+		q.queryPeers.SetState(p, qpeerset.PeerHeard)
 	}
 	for _, p := range up.queried {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
 		q.queryPeers.TryAdd(p)
-		q.queryPeers.MarkQueried(p)
+		q.queryPeers.SetState(p, qpeerset.PeerQueried)
 	}
 	for _, p := range up.unreachable {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
 		q.queryPeers.TryAdd(p)
-		q.queryPeers.MarkUnreachable(p)
+		q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
 	}
 }
 

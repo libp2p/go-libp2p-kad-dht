@@ -67,7 +67,7 @@ func TestNotifieeMultipleConn(t *testing.T) {
 	d2.host.Close()
 
 	// wait context will ensure that the RT cleanup completes
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	require.NoError(t, tu.WaitFor(waitCtx, func() error {
@@ -79,7 +79,7 @@ func TestNotifieeMultipleConn(t *testing.T) {
 }
 
 func TestNotifieeFuzz(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
 	d1 := setupDHT(ctx, t, false, RoutingTableCheckInterval(50*time.Millisecond))

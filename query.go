@@ -59,9 +59,11 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 		return nil, kb.ErrLookupFailure
 	}
 
+	dht.rnglk.Lock()
 	dht.rng.Shuffle(len(seedPeers), func(i, j int) {
 		seedPeers[i], seedPeers[j] = seedPeers[j], seedPeers[i]
 	})
+	dht.rnglk.Unlock()
 
 	// create "d" disjoint queries
 	queries := make([]*query, d)

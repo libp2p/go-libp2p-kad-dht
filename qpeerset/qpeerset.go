@@ -139,7 +139,10 @@ func (qp *QueryPeerset) GetClosestNotUnreachable(k int) (result []peer.ID) {
 			result = append(result, p.id)
 		}
 	}
-	return result[:max(len(result), k)]
+	if len(result) > k {
+		return result[:k]
+	}
+	return result
 }
 
 func (qp *QueryPeerset) NumSeen() int {
@@ -158,11 +161,4 @@ func (qp *QueryPeerset) GetSeenPeers() (result []peer.ID) {
 func (qp *QueryPeerset) GetSortedSeen() (result []peer.ID) {
 	qp.sort()
 	return qp.GetSeenPeers()
-}
-
-func max(x, y int) int {
-	if x > y {
-		return x
-	}
-	return y
 }

@@ -141,7 +141,7 @@ func (q *query) runWithGreedyParallelism() {
 	for {
 		select {
 		case sawPeers := <-ch:
-			q.populatePeers(<-ch)
+			q.populatePeers(sawPeers)
 		case <-pathCtx.Done():
 			q.terminate()
 			return

@@ -463,7 +463,7 @@ func TestSearchValue(t *testing.T) {
 
 	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
-	valCh, err := dhtA.SearchValue(ctxT, "/v/hello", Quorum(-1))
+	valCh, err := dhtA.SearchValue(ctxT, "/v/hello", Quorum(0))
 	if err != nil {
 		t.Fatal(err)
 	}

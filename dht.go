@@ -92,6 +92,7 @@ type IpfsDHT struct {
 
 	bucketSize int
 	alpha      int // The concurrency parameter per path
+	beta       int // The number of peers closest to a target that must have responded for a query path to terminate
 	d          int // Number of Disjoint Paths to query
 
 	autoRefresh           bool
@@ -234,6 +235,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		serverProtocols:   serverProtocols,
 		bucketSize:        cfg.bucketSize,
 		alpha:             cfg.concurrency,
+		beta:              cfg.resiliency,
 		d:                 cfg.disjointPaths,
 		triggerRtRefresh:  make(chan chan<- error),
 		triggerSelfLookup: make(chan chan<- error),

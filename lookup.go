@@ -11,7 +11,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/multiformats/go-base32"
@@ -100,7 +99,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 			return peers, err
 		},
-		func(peerset *kpeerset.SortedPeerset) bool { return false },
+		func() bool { return false },
 	)
 
 	if err != nil {

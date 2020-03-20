@@ -17,7 +17,7 @@ import (
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
 type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
-type stopFn func(*qpeerset.QueryPeerset) bool
+type stopFn func() bool
 
 // query represents a single disjoint query.
 type query struct {
@@ -182,7 +182,7 @@ func (q *query) readyToTerminate() bool {
 		return true
 	}
 	// give the application logic a chance to terminate
-	if q.stopFn(q.queryPeers) {
+	if q.stopFn() {
 		return true
 	}
 	if q.isStarvationTermination() {
@@ -194,14 +194,11 @@ func (q *query) readyToTerminate() bool {
 	return false
 }
 
-// Beta paramerizes the Kademlia terminatioin condition.
-var Beta = 3
-
 // From the set of all nodes that are not unreachable,
 // if the closest beta nodes are all queried, the lookup can terminate.
 func (q *query) isLookupTermination() bool {
 	var peers []peer.ID
-	peers = q.queryPeers.GetClosestNotUnreachable(Beta)
+	peers = q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
 	for _, p := range peers {
 		if !q.queryPeers.IsQueried(p) {
 			return false

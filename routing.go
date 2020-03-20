@@ -15,7 +15,6 @@ import (
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -386,7 +385,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 				return peers, err
 			},
-			func(peerset *kpeerset.SortedPeerset) bool {
+			func() bool {
 				select {
 				case <-stopQuery:
 					return true
@@ -412,7 +411,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, queries []*query) {
 	shortcutTaken := false
 	for _, q := range queries {
-		if q.localPeers.LenUnqueriedFromKClosest() > 0 {
+		if len(q.queryPeers.GetClosestNotUnreachable(3)) > 0 {
 			shortcutTaken = true
 			break
 		}
@@ -644,7 +643,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 			return peers, nil
 		},
-		func(peerset *kpeerset.SortedPeerset) bool {
+		func() bool {
 			return !findAll && ps.Size() >= count
 		},
 	)
@@ -693,7 +692,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 
 			return peers, err
 		},
-		func(peerset *kpeerset.SortedPeerset) bool {
+		func() bool {
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)

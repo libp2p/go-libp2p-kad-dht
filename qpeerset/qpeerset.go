@@ -87,7 +87,7 @@ func (qp *QueryPeerset) TryAdd(p peer.ID) bool {
 	if qp.find(p) >= 0 {
 		return false
 	} else {
-		qp.all = append(qp.all, queryPeerState{id: p, distance: q.distanceToKey(p), state: PeerHeard})
+		qp.all = append(qp.all, queryPeerState{id: p, distance: qp.distanceToKey(p), state: PeerHeard})
 		qp.sorted = false
 		return true
 	}
@@ -137,8 +137,8 @@ func (qp *QueryPeerset) GetClosestNotUnreachable(count int) (result []peer.ID) {
 			result = append(result, p.id)
 		}
 	}
-	if len(result) > k {
-		return result[:k]
+	if len(result) >= count {
+		return result[:count]
 	}
 	return result
 }

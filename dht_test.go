@@ -1403,10 +1403,6 @@ func testFindPeerQuery(t *testing.T,
 		connect(t, ctx, guy, others[i])
 	}
 
-	for _, d := range dhts {
-		d.RefreshRoutingTable()
-	}
-
 	var reachableIds []peer.ID
 	for i, d := range dhts {
 		lp := len(d.host.Network().Peers())
@@ -1471,8 +1467,8 @@ func TestFindClosestPeers(t *testing.T) {
 		out = append(out, p)
 	}
 
-	if len(out) != querier.bucketSize {
-		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), querier.bucketSize)
+	if len(out) < querier.beta {
+		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(out), querier.beta)
 	}
 }
 

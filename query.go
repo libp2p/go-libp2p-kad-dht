@@ -68,11 +68,6 @@ func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn
 		return nil, err
 	}
 
-	// return if the lookup has been externally stopped
-	if stopFn() || ctx.Err() != nil {
-		return lookupRes, nil
-	}
-
 	// query all of the top K peers we've either Heard about or have outstanding queries we're Waiting on.
 	// This ensures that all of the top K results have been queried which adds to resiliency against churn for query
 	// functions that carry state (e.g. FindProviders and GetValue) as well as establish connections that are needed
@@ -82,6 +77,16 @@ func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn
 		if state := lookupRes.state[i]; state == qpeerset.PeerHeard || state == qpeerset.PeerWaiting {
 			queryPeers = append(queryPeers, p)
 		}
+	}
+
+	if len(queryPeers) == 0 {
+		return lookupRes, nil
+	}
+
+	// return if the lookup has been externally stopped
+	if ctx.Err() != nil || stopFn()  {
+		lookupRes.completed = false
+		return lookupRes, nil
 	}
 
 	doneCh := make(chan struct{}, 1)
@@ -96,17 +101,22 @@ func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn
 
 	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
 	processFollowUp:
-	for i := 0; i < len(queryPeers); i++ {
-		select{
-		case <-doneCh:
-			if stopFn() {
-				cancelFollowUp()
+		for i := 0; i < len(queryPeers); i++ {
+			select{
+			case <-doneCh:
+				if stopFn() {
+					cancelFollowUp()
+					if i < len(queryPeers) - 1 {
+						lookupRes.completed = false
+					}
+					break processFollowUp
+				}
+			case <-ctx.Done():
+				lookupRes.completed = false
 				break processFollowUp
 			}
-		case <-ctx.Done():
-			break processFollowUp
 		}
-	}
+
 
 	return lookupRes, nil
 }
@@ -114,9 +124,6 @@ func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn
 // d is the number of disjoint queries.
 func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupResult, error) {
 	queryCtx, cancelQuery := context.WithCancel(ctx)
-
-	numQueriesComplete := 0
-	queryDone := make(chan struct{}, d)
 
 	// pick the K closest peers to the key in our Routing table and shuffle them.
 	seedPeers := dht.routingTable.NearestPeers(kb.ConvertKey(target), dht.bucketSize)
@@ -159,6 +166,7 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 	}
 
 	// start the "d"  disjoint queries
+	queryDone := make(chan struct{}, d)
 	for i := 0; i < d; i++ {
 		query := queries[i]
 		go func() {
@@ -167,20 +175,16 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 		}()
 	}
 
-loop:
 	// wait for all the "d" disjoint queries to complete before we return
 	// XXX: Waiting until all queries are done is a vector for DoS attacks:
 	// The disjoint lookup paths that are taken over by adversarial peers
 	// can easily be fooled to go on forever.
+	numQueriesComplete := 0
 	for {
-		select {
-		case <-queryDone:
-			numQueriesComplete++
-			if numQueriesComplete == d {
-				break loop
-			}
-		case <-ctx.Done():
-			break loop
+		<-queryDone
+		numQueriesComplete++
+		if numQueriesComplete == d {
+			break
 		}
 	}
 
@@ -199,9 +203,20 @@ loop:
 	for _, q := range queries {
 		qp := q.queryPeers.GetClosestNotUnreachable(dht.bucketSize)
 		for _, p := range qp {
-			peerState[p] = q.queryPeers.GetState(p)
+			// Since the same peer can be seen in multiple queries use the "best" state for the peer
+			// Note: It's possible that a peer was marked undialable in one path, but wasn't yet tried in another path
+			// for now we're going to return that peer as long as some path does not think it is undialable. This may
+			// change in the future if we track addresses dialed per path.
+			state := q.queryPeers.GetState(p)
+			if currState, ok := peerState[p]; ok {
+				if state > currState {
+					peerState[p] = state
+				}
+			} else {
+				peerState[p] = state
+				peers = append(peers, p)
+			}
 		}
-		peers = append(peers , qp...)
 	}
 
 	// get the top K overall peers
@@ -244,13 +259,17 @@ func (q *query) runWithGreedyParallelism() {
 			q.updateState(update)
 		case <-pathCtx.Done():
 			q.terminate()
-			return
 		}
 
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
 		if q.readyToTerminate() {
 			q.terminate()
-			return
+
+			// exit once all goroutines have been cleaned up
+			if q.queryPeers.NumWaiting() == 0 {
+				return
+			}
+			continue
 		}
 
 		// if all "threads" are busy, wait until someone finishes
@@ -362,21 +381,24 @@ func (q *query) updateState(up *queryUpdate) {
 			continue
 		}
 		q.queryPeers.TryAdd(p)
-		q.queryPeers.SetState(p, qpeerset.PeerHeard)
 	}
 	for _, p := range up.queried {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
 		q.queryPeers.TryAdd(p)
-		q.queryPeers.SetState(p, qpeerset.PeerQueried)
+		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
+			q.queryPeers.SetState(p, qpeerset.PeerQueried)
+		}
 	}
 	for _, p := range up.unreachable {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
 		q.queryPeers.TryAdd(p)
-		q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
+		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
+			q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
+		}
 	}
 }
 

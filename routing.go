@@ -579,7 +579,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	queries, err := dht.runLookup(ctx, dht.d, string(key),
+	lookupRes, err := dht.runLookup(ctx, dht.d, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -636,7 +636,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	)
 
 	if err != nil && ctx.Err() == nil {
-		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), queries)
+		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
 	}
 }
 
@@ -697,7 +697,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 				break
 			}
 		}
-		if discoveredPeerDuringQuery {
+		if discoveredPeerDuringQuery || lookupRes.completed{
 			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
 		}
 	}

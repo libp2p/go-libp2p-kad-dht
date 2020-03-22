@@ -19,8 +19,6 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
 
-	"golang.org/x/xerrors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1755,5 +1753,5 @@ func TestClientModeAtInit(t *testing.T) {
 	client := setupDHT(ctx, t, true)
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
-	assert.True(t, xerrors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
 }

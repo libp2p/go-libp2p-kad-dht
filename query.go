@@ -3,7 +3,6 @@ package dht
 import (
 	"context"
 	"errors"
-
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
@@ -49,8 +48,71 @@ type query struct {
 	stopFn stopFn
 }
 
+type lookupResult struct {
+	peers []peer.ID
+	state []qpeerset.PeerState
+	completed bool
+}
+
+// runLookup executes the lookup on the target using the given query function and stopping when either the context is
+// cancelled or the stop function returns true (if the stop function is not sticky it is not guaranteed to cause a stop
+// to occur just because it momentarily returns true). Returns the top K peers that have not failed as well as their
+// state at the end of the lookup.
+//
+// After the lookup is complete the query function is run (unless stopped) against all of the top K peers that have not
+// already been successfully queried.
+func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupResult, error) {
+	// run the query
+	lookupRes, err := dht.runDisjointQueries(ctx, d, target, queryFn, stopFn)
+	if err != nil {
+		return nil, err
+	}
+
+	// return if the lookup has been externally stopped
+	if stopFn() || ctx.Err() != nil {
+		return lookupRes, nil
+	}
+
+	// query all of the top K peers we've either Heard about or have outstanding queries we're Waiting on.
+	// This ensures that all of the top K results have been queried which adds to resiliency against churn for query
+	// functions that carry state (e.g. FindProviders and GetValue) as well as establish connections that are needed
+	// by stateless query functions (e.g. GetClosestPeers and therefore Provide and PutValue)
+	queryPeers := make([]peer.ID, 0, len(lookupRes.peers))
+	for i, p := range lookupRes.peers {
+		if state := lookupRes.state[i]; state == qpeerset.PeerHeard || state == qpeerset.PeerWaiting {
+			queryPeers = append(queryPeers, p)
+		}
+	}
+
+	doneCh := make(chan struct{}, 1)
+	followUpCtx, cancelFollowUp := context.WithCancel(ctx)
+	for _, p := range queryPeers {
+		qp := p
+		go func() {
+			_, _ = queryFn(followUpCtx, qp)
+			doneCh <- struct{}{}
+		}()
+	}
+
+	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
+	processFollowUp:
+	for i := 0; i < len(queryPeers); i++ {
+		select{
+		case <-doneCh:
+			if stopFn() {
+				cancelFollowUp()
+				break processFollowUp
+			}
+		case <-ctx.Done():
+			break processFollowUp
+		}
+	}
+
+	return lookupRes, nil
+}
+
 // d is the number of disjoint queries.
-func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) ([]*query, error) {
+func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupResult, error) {
 	queryCtx, cancelQuery := context.WithCancel(ctx)
 
 	numQueriesComplete := 0
@@ -122,7 +184,43 @@ loop:
 		}
 	}
 
-	return queries, nil
+	// determine if any queries terminated early
+	completed := true
+	for _, q := range queries {
+		if !(q.isLookupTermination() || q.isStarvationTermination()){
+			completed = false
+			break
+		}
+	}
+
+	// extract the top K not unreachable peers from each query path, as well as their states at the end of the queries
+	var peers []peer.ID
+	peerState := make(map[peer.ID]qpeerset.PeerState)
+	for _, q := range queries {
+		qp := q.queryPeers.GetClosestNotUnreachable(dht.bucketSize)
+		for _, p := range qp {
+			peerState[p] = q.queryPeers.GetState(p)
+		}
+		peers = append(peers , qp...)
+	}
+
+	// get the top K overall peers
+	sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(target))
+	if len(sortedPeers) > dht.bucketSize {
+		sortedPeers = sortedPeers[:dht.bucketSize]
+	}
+
+	// return the top K not unreachable peers across all query paths as well as their states at the end of the queries
+	res := &lookupResult{
+		peers:     sortedPeers,
+		state:     make([]qpeerset.PeerState, len(sortedPeers)),
+		completed: completed,
+	}
+
+	for i, p := range sortedPeers {
+		res.state[i] = peerState[p]
+	}
+	return res, nil
 }
 
 type queryUpdate struct {

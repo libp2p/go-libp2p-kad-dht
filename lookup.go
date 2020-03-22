@@ -75,7 +75,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	defer e.Done()
 
-	queries, err := dht.runDisjointQueries(ctx, dht.d, key,
+	lookupRes, err := dht.runLookup(ctx, dht.d, key,
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -109,18 +109,13 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	out := make(chan peer.ID, dht.bucketSize)
 	defer close(out)
 
-	kadID := kb.ConvertKey(key)
-	allPeers := kb.SortClosestPeers(queries[0].globallyQueriedPeers.Peers(), kadID)
-	for i, p := range allPeers {
-		if i == dht.bucketSize {
-			break
-		}
+	for _, p := range lookupRes.peers {
 		out <- p
 	}
 
 	if ctx.Err() == nil {
 		// refresh the cpl for this key as the query was successful
-		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}
 
 	return out, ctx.Err()

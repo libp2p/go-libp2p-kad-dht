@@ -16,7 +16,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"go.opencensus.io/tag"
-	"golang.org/x/xerrors"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
@@ -482,10 +481,10 @@ func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 	req := pb.NewMessage(pb.Message_PING, nil, 0)
 	resp, err := dht.sendRequest(ctx, p, req)
 	if err != nil {
-		return xerrors.Errorf("sending request: %w", err)
+		return fmt.Errorf("sending request: %w", err)
 	}
 	if resp.Type != pb.Message_PING {
-		return xerrors.Errorf("got unexpected response type: %v", resp.Type)
+		return fmt.Errorf("got unexpected response type: %v", resp.Type)
 	}
 	return nil
 }

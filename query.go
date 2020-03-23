@@ -126,7 +126,8 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 	queryCtx, cancelQuery := context.WithCancel(ctx)
 
 	// pick the K closest peers to the key in our Routing table and shuffle them.
-	seedPeers := dht.routingTable.NearestPeers(kb.ConvertKey(target), dht.bucketSize)
+	targetKadID := kb.ConvertKey(target)
+	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
 	if len(seedPeers) == 0 {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,
@@ -188,6 +189,12 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 		}
 	}
 
+	res := dht.constructLookupResult(queries, targetKadID)
+	return res, nil
+}
+
+// constructLookupResult takes the query information and uses it to construct the lookup result
+func (dht *IpfsDHT) constructLookupResult(queries []*query, target kb.ID) *lookupResult {
 	// determine if any queries terminated early
 	completed := true
 	for _, q := range queries {
@@ -220,7 +227,7 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 	}
 
 	// get the top K overall peers
-	sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(target))
+	sortedPeers := kb.SortClosestPeers(peers, target)
 	if len(sortedPeers) > dht.bucketSize {
 		sortedPeers = sortedPeers[:dht.bucketSize]
 	}
@@ -235,7 +242,8 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 	for i, p := range sortedPeers {
 		res.state[i] = peerState[p]
 	}
-	return res, nil
+
+	return res
 }
 
 type queryUpdate struct {

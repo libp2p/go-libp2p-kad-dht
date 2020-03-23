@@ -49,8 +49,8 @@ type query struct {
 }
 
 type lookupResult struct {
-	peers []peer.ID
-	state []qpeerset.PeerState
+	peers     []peer.ID
+	state     []qpeerset.PeerState
 	completed bool
 }
 
@@ -84,7 +84,7 @@ func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn
 	}
 
 	// return if the lookup has been externally stopped
-	if ctx.Err() != nil || stopFn()  {
+	if ctx.Err() != nil || stopFn() {
 		lookupRes.completed = false
 		return lookupRes, nil
 	}
@@ -100,23 +100,22 @@ func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn
 	}
 
 	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
-	processFollowUp:
-		for i := 0; i < len(queryPeers); i++ {
-			select{
-			case <-doneCh:
-				if stopFn() {
-					cancelFollowUp()
-					if i < len(queryPeers) - 1 {
-						lookupRes.completed = false
-					}
-					break processFollowUp
+processFollowUp:
+	for i := 0; i < len(queryPeers); i++ {
+		select {
+		case <-doneCh:
+			if stopFn() {
+				cancelFollowUp()
+				if i < len(queryPeers)-1 {
+					lookupRes.completed = false
 				}
-			case <-ctx.Done():
-				lookupRes.completed = false
 				break processFollowUp
 			}
+		case <-ctx.Done():
+			lookupRes.completed = false
+			break processFollowUp
 		}
-
+	}
 
 	return lookupRes, nil
 }
@@ -198,7 +197,7 @@ func (dht *IpfsDHT) constructLookupResult(queries []*query, target kb.ID) *looku
 	// determine if any queries terminated early
 	completed := true
 	for _, q := range queries {
-		if !(q.isLookupTermination() || q.isStarvationTermination()){
+		if !(q.isLookupTermination() || q.isStarvationTermination()) {
 			completed = false
 			break
 		}

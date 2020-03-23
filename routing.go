@@ -697,7 +697,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 				break
 			}
 		}
-		if discoveredPeerDuringQuery || lookupRes.completed{
+		if discoveredPeerDuringQuery || lookupRes.completed {
 			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
 		}
 	}

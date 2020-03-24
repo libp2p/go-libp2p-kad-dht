@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
+	kbucket "github.com/libp2p/go-libp2p-kbucket"
 
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -22,6 +25,12 @@ type stopFn func() bool
 
 // query represents a single DHT query.
 type query struct {
+	// unique identifier for the lookup instance
+	id uuid.UUID
+
+	// target key for the lookup
+	key kbucket.ID
+
 	// the query context.
 	ctx context.Context
 
@@ -137,6 +146,8 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	q := &query{
+		id:         uuid.New(),
+		key:        targetKadID,
 		ctx:        queryCtx,
 		cancel:     cancelQuery,
 		dht:        dht,
@@ -194,7 +205,8 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 }
 
 type queryUpdate struct {
-	seen        []peer.ID
+	cause       peer.ID
+	heard       []peer.ID
 	queried     []peer.ID
 	unreachable []peer.ID
 }
@@ -206,20 +218,24 @@ func (q *query) runWithGreedyParallelism() {
 	alpha := q.dht.alpha
 
 	ch := make(chan *queryUpdate, alpha)
-	ch <- &queryUpdate{seen: q.seedPeers}
+	ch <- &queryUpdate{heard: q.seedPeers}
 
 	for {
+		var cause peer.ID
 		select {
 		case update := <-ch:
-			q.updateState(update)
+			q.updateState(pathCtx, update)
+			cause = update.cause
 		case <-pathCtx.Done():
-			q.terminate()
+			q.terminate(pathCtx, AsyncCancelled)
 		}
 
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
-		if q.readyToTerminate() {
-			q.terminate()
+		if ready, reason := q.isReadyToTerminate(); ready {
+			q.terminate(pathCtx, reason)
+		}
 
+		if q.terminated {
 			// exit once all goroutines have been cleaned up
 			if q.queryPeers.NumWaiting() == 0 {
 				return
@@ -234,38 +250,41 @@ func (q *query) runWithGreedyParallelism() {
 
 		// spawn new queries, up to the parallelism allowance
 		for j := 0; j < alpha-q.queryPeers.NumWaiting(); j++ {
-			q.spawnQuery(ch)
+			q.spawnQuery(pathCtx, cause, ch)
 		}
 	}
 }
 
-// spawnQuery starts one query, if an available seen peer is found
-func (q *query) spawnQuery(ch chan<- *queryUpdate) {
+// spawnQuery starts one query, if an available heard peer is found
+func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
 	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
 		return
 	} else {
+		PublishAsyncEvent(ctx, &AsyncEvent{
+			ID:  q.id,
+			Key: q.key,
+			Update: &AsyncUpdateEvent{
+				Cause:   cause,
+				Waiting: []peer.ID{peers[0]},
+			},
+		})
 		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
 		go q.queryPeer(ch, peers[0])
 	}
 }
 
-func (q *query) readyToTerminate() bool {
-	// if termination has already been determined, the query is considered terminated forever,
-	// regardless of any change to queryPeers that might occur after the initial termination.
-	if q.terminated {
-		return true
-	}
+func (q *query) isReadyToTerminate() (bool, AsyncTerminationReason) {
 	// give the application logic a chance to terminate
 	if q.stopFn() {
-		return true
+		return true, AsyncStopped
 	}
 	if q.isStarvationTermination() {
-		return true
+		return true, AsyncStarvation
 	}
 	if q.isLookupTermination() {
-		return true
+		return true, AsyncCompleted
 	}
-	return false
+	return false, -1
 }
 
 // From the set of all nodes that are not unreachable,
@@ -285,8 +304,17 @@ func (q *query) isStarvationTermination() bool {
 	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
 }
 
-func (q *query) terminate() {
-	q.terminated = true
+func (q *query) terminate(ctx context.Context, reason AsyncTerminationReason) {
+	if q.terminated {
+		return
+	} else {
+		PublishAsyncEvent(ctx, &AsyncEvent{
+			ID:        q.id,
+			Key:       q.key,
+			Terminate: &AsyncTerminateEvent{Reason: reason},
+		})
+		q.terminated = true
+	}
 }
 
 // queryPeer queries a single peer and reports its findings on the channel.
@@ -296,14 +324,14 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
-		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
 
 	// send query RPC to the remote peer
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {
-		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
 
@@ -326,11 +354,21 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 		}
 	}
 
-	ch <- &queryUpdate{seen: saw, queried: []peer.ID{p}}
+	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}}
 }
 
-func (q *query) updateState(up *queryUpdate) {
-	for _, p := range up.seen {
+func (q *query) updateState(ctx context.Context, up *queryUpdate) {
+	PublishAsyncEvent(ctx, &AsyncEvent{
+		ID:  q.id,
+		Key: q.key,
+		Update: &AsyncUpdateEvent{
+			Cause:       up.cause,
+			Heard:       up.heard,
+			Queried:     up.queried,
+			Unreachable: up.unreachable,
+		},
+	})
+	for _, p := range up.heard {
 		if p == q.dht.self { // don't add self.
 			continue
 		}

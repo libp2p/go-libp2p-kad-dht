@@ -8,7 +8,6 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
-	"github.com/libp2p/go-libp2p-core/routing"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/multiformats/go-multiaddr"
 	_ "github.com/multiformats/go-multiaddr-dns"
@@ -58,8 +57,8 @@ func (dht *IpfsDHT) startSelfLookup() error {
 
 			// Do a self walk
 			queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
-			_, err := dht.FindPeer(queryCtx, dht.self)
-			if err == routing.ErrNotFound || err == kbucket.ErrLookupFailure {
+			_, err := dht.GetClosestPeers(queryCtx, string(dht.self))
+			if err == kbucket.ErrLookupFailure {
 				err = nil
 			} else if err != nil {
 				err = fmt.Errorf("failed to query self during routing table refresh: %s", err)
@@ -207,10 +206,7 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 
 		// walk to the generated peer
 		walkFnc := func(c context.Context) error {
-			_, err := dht.FindPeer(c, randPeer)
-			if err == routing.ErrNotFound {
-				return nil
-			}
+			_, err := dht.GetClosestPeers(c, string(randPeer))
 			return err
 		}
 

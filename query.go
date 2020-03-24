@@ -3,15 +3,14 @@ package dht
 import (
 	"context"
 	"errors"
+	"fmt"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-	"github.com/libp2p/go-libp2p-kad-dht/kpeerset/peerheap"
-	"math/big"
-	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
+	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 )
 
@@ -19,22 +18,30 @@ import (
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
 type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
-type stopFn func(*kpeerset.SortedPeerset) bool
+type stopFn func() bool
 
 // query represents a single disjoint query.
 type query struct {
 	// the query context.
 	ctx context.Context
+
 	// the cancellation function for the query context.
 	cancel context.CancelFunc
 
 	dht *IpfsDHT
 
-	// localPeers is the set of peers that need to be queried or have already been queried for this query.
-	localPeers *kpeerset.SortedPeerset
+	// seedPeers is the set of peers that seed the query
+	seedPeers []peer.ID
+
+	// queryPeers is the set of peers known by this query and their respective states.
+	queryPeers *qpeerset.QueryPeerset
+
+	// terminated is set when the first worker thread encounters the termination condition.
+	// Its role is to make sure that once termination is determined, it is sticky.
+	terminated bool
 
 	// globallyQueriedPeers is the combined set of peers queried across ALL the disjoint queries.
-	globallyQueriedPeers *peer.Set
+	globallyQueriedPeers *peer.Set // TODO: abstract this away from specifics of disjoint paths
 
 	// the function that will be used to query a single peer.
 	queryFn queryFn
@@ -43,14 +50,88 @@ type query struct {
 	stopFn stopFn
 }
 
-func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) ([]*query, error) {
+type lookupWithFollowupResult struct {
+	peers []peer.ID            // the top K not unreachable peers across all query paths
+	state []qpeerset.PeerState // the peer states at the end of the queries
+
+	// indicates that neither the lookup nor the followup has been prematurely terminated by an external condition such
+	// as context cancellation or the stop function being called.
+	completed bool
+}
+
+// runLookupWithFollowup executes the lookup on the target using the given query function and stopping when either the
+// context is cancelled or the stop function returns true. Note: if the stop function is not sticky, i.e. it does not
+// return true every time after the first time it returns true, it is not guaranteed to cause a stop to occur just
+// because it momentarily returns true.
+//
+// After the lookup is complete the query function is run (unless stopped) against all of the top K peers from the
+// lookup that have not already been successfully queried.
+func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
+	// run the query
+	lookupRes, err := dht.runDisjointQueries(ctx, d, target, queryFn, stopFn)
+	if err != nil {
+		return nil, err
+	}
+
+	// query all of the top K peers we've either Heard about or have outstanding queries we're Waiting on.
+	// This ensures that all of the top K results have been queried which adds to resiliency against churn for query
+	// functions that carry state (e.g. FindProviders and GetValue) as well as establish connections that are needed
+	// by stateless query functions (e.g. GetClosestPeers and therefore Provide and PutValue)
+	queryPeers := make([]peer.ID, 0, len(lookupRes.peers))
+	for i, p := range lookupRes.peers {
+		if state := lookupRes.state[i]; state == qpeerset.PeerHeard || state == qpeerset.PeerWaiting {
+			queryPeers = append(queryPeers, p)
+		}
+	}
+
+	if len(queryPeers) == 0 {
+		return lookupRes, nil
+	}
+
+	// return if the lookup has been externally stopped
+	if ctx.Err() != nil || stopFn() {
+		lookupRes.completed = false
+		return lookupRes, nil
+	}
+
+	doneCh := make(chan struct{}, len(queryPeers))
+	followUpCtx, cancelFollowUp := context.WithCancel(ctx)
+	for _, p := range queryPeers {
+		qp := p
+		go func() {
+			_, _ = queryFn(followUpCtx, qp)
+			doneCh <- struct{}{}
+		}()
+	}
+
+	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
+processFollowUp:
+	for i := 0; i < len(queryPeers); i++ {
+		select {
+		case <-doneCh:
+			if stopFn() {
+				cancelFollowUp()
+				if i < len(queryPeers)-1 {
+					lookupRes.completed = false
+				}
+				break processFollowUp
+			}
+		case <-ctx.Done():
+			lookupRes.completed = false
+			break processFollowUp
+		}
+	}
+
+	return lookupRes, nil
+}
+
+// d is the number of disjoint queries.
+func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
 	queryCtx, cancelQuery := context.WithCancel(ctx)
 
-	numQueriesComplete := 0
-	queryDone := make(chan struct{}, d)
-
 	// pick the K closest peers to the key in our Routing table and shuffle them.
-	seedPeers := dht.routingTable.NearestPeers(kb.ConvertKey(target), dht.bucketSize)
+	targetKadID := kb.ConvertKey(target)
+	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
 	if len(seedPeers) == 0 {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,
@@ -73,7 +154,9 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 			ctx:                  queryCtx,
 			cancel:               cancelQuery,
 			dht:                  dht,
-			localPeers:           kpeerset.NewSortedPeerset(dht.bucketSize, target),
+			queryPeers:           qpeerset.NewQueryPeerset(target),
+			seedPeers:            []peer.ID{},
+			terminated:           false,
 			globallyQueriedPeers: peersQueried,
 			queryFn:              queryFn,
 			stopFn:               stopFn,
@@ -84,174 +167,212 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 
 	// distribute the shuffled K closest peers as seeds among the "d" disjoint queries
 	for i := 0; i < len(seedPeers); i++ {
-		queries[i%d].localPeers.Add(seedPeers[i])
+		queries[i%d].seedPeers = append(queries[i%d].seedPeers, seedPeers[i])
 	}
 
 	// start the "d"  disjoint queries
+	queryDone := make(chan struct{}, d)
 	for i := 0; i < d; i++ {
 		query := queries[i]
 		go func() {
-			strictParallelismQuery(query)
+			query.runWithGreedyParallelism()
 			queryDone <- struct{}{}
 		}()
 	}
 
-loop:
 	// wait for all the "d" disjoint queries to complete before we return
+	// XXX: Waiting until all queries are done is a vector for DoS attacks:
+	// The disjoint lookup paths that are taken over by adversarial peers
+	// can easily be fooled to go on forever.
+	numQueriesComplete := 0
 	for {
-		select {
-		case <-queryDone:
-			numQueriesComplete++
-			if numQueriesComplete == d {
-				break loop
-			}
-		case <-ctx.Done():
-			break loop
+		<-queryDone
+		numQueriesComplete++
+		if numQueriesComplete == d {
+			break
 		}
 	}
 
-	return queries, nil
+	res := dht.constructLookupResult(queries, targetKadID)
+	return res, nil
 }
 
-// TODO This function should be owned by the DHT as it dosen't really belong to "a query".
-// scorePeerByDistanceAndLatency scores a peer using metrics such as connectendness of the peer, it's distance from the key
-// and it's current known latency.
-func (q query) scorePeerByDistanceAndLatency(p peer.ID, distanceFromKey *big.Int) interface{} {
-	connectedness := q.dht.host.Network().Connectedness(p)
-	latency := q.dht.host.Peerstore().LatencyEWMA(p)
-
-	var c int64
-	switch connectedness {
-	case network.Connected:
-		c = 1
-	case network.CanConnect:
-		c = 5
-	case network.CannotConnect:
-		c = 10000
-	default:
-		c = 20
+// constructLookupResult takes the query information and uses it to construct the lookup result
+func (dht *IpfsDHT) constructLookupResult(queries []*query, target kb.ID) *lookupWithFollowupResult {
+	// determine if any queries terminated early
+	completed := true
+	for _, q := range queries {
+		if !(q.isLookupTermination() || q.isStarvationTermination()) {
+			completed = false
+			break
+		}
 	}
 
-	l := int64(latency)
-	if l <= 0 {
-		l = int64(time.Second) * 10
+	// extract the top K not unreachable peers from each query path, as well as their states at the end of the queries
+	var peers []peer.ID
+	peerState := make(map[peer.ID]qpeerset.PeerState)
+	for _, q := range queries {
+		qp := q.queryPeers.GetClosestNotUnreachable(dht.bucketSize)
+		for _, p := range qp {
+			// Since the same peer can be seen in multiple queries use the "best" state for the peer
+			// Note: It's possible that a peer was marked undialable in one path, but wasn't yet tried in another path
+			// for now we're going to return that peer as long as some path does not think it is undialable. This may
+			// change in the future if we track addresses dialed per path.
+			state := q.queryPeers.GetState(p)
+			if currState, ok := peerState[p]; ok {
+				if state > currState {
+					peerState[p] = state
+				}
+			} else {
+				peerState[p] = state
+				peers = append(peers, p)
+			}
+		}
 	}
 
-	res := big.NewInt(c)
-	res.Mul(res, big.NewInt(l))
-	res.Mul(res, distanceFromKey)
+	// get the top K overall peers
+	sortedPeers := kb.SortClosestPeers(peers, target)
+	if len(sortedPeers) > dht.bucketSize {
+		sortedPeers = sortedPeers[:dht.bucketSize]
+	}
+
+	// return the top K not unreachable peers across all query paths as well as their states at the end of the queries
+	res := &lookupWithFollowupResult{
+		peers:     sortedPeers,
+		state:     make([]qpeerset.PeerState, len(sortedPeers)),
+		completed: completed,
+	}
+
+	for i, p := range sortedPeers {
+		res.state[i] = peerState[p]
+	}
 
 	return res
 }
 
-// strictParallelismQuery concurrently sends the query RPC to all eligible peers
-// and waits for ALL the RPC's to complete before starting the next round of RPC's.
-func strictParallelismQuery(q *query) {
-	foundCloser := false
+type queryUpdate struct {
+	seen        []peer.ID
+	queried     []peer.ID
+	unreachable []peer.ID
+}
+
+func (q *query) runWithGreedyParallelism() {
+	pathCtx, cancelPath := context.WithCancel(q.ctx)
+	defer cancelPath()
+
+	alpha := q.dht.alpha
+
+	ch := make(chan *queryUpdate, alpha)
+	ch <- &queryUpdate{seen: q.seedPeers}
+
 	for {
-		// get the unqueried peers from among the K closest peers to the key sorted in ascending order
-		// of their 'distance-latency` score.
-		// We sort peers like this so that "better" peers are chosen to be in the α peers
-		// which get queried from among the unqueried K  closet.
-		peersToQuery := q.localPeers.UnqueriedFromKClosest(q.scorePeerByDistanceAndLatency,
-			func(i1 peerheap.Item, i2 peerheap.Item) bool {
-				return i1.Value.(*big.Int).Cmp(i2.Value.(*big.Int)) == -1
-			})
-
-		// The lookup terminates when the initiator has queried and gotten responses from the k
-		// closest nodes it has heard about.
-		if len(peersToQuery) == 0 {
-			return
+		select {
+		case update := <-ch:
+			q.updateState(update)
+		case <-pathCtx.Done():
+			q.terminate()
 		}
 
-		// Of the k nodes the initiator has heard of closest to the target,
-		// it picks α that it has not yet queried and resends the FIND NODE RPC to them.
-		numQuery := q.dht.alpha
+		// termination is triggered on end-of-lookup conditions or starvation of unused peers
+		if q.readyToTerminate() {
+			q.terminate()
 
-		// However, If a round of RPC's fails to return a node any closer than the closest already heard about,
-		// the initiator resends the RPC'S to all of the k closest nodes it has
-		// not already queried.
-		if !foundCloser {
-			numQuery = len(peersToQuery)
-		} else if pqLen := len(peersToQuery); pqLen < numQuery {
-			// if we don't have α peers, pick whatever number we have.
-			numQuery = pqLen
-		}
-
-		// reset foundCloser to false for the next round of RPC's
-		foundCloser = false
-
-		queryResCh := make(chan *queryResult, numQuery)
-		resultsReceived := 0
-
-		// send RPC's to all the chosen peers concurrently
-		for _, p := range peersToQuery[:numQuery] {
-			go func(p peer.ID) {
-				queryResCh <- q.queryPeer(p)
-			}(p)
-		}
-
-	loop:
-		// wait for all outstanding RPC's to complete before we start the next round.
-		for {
-			select {
-			case res := <-queryResCh:
-				foundCloser = foundCloser || res.foundCloserPeer
-				resultsReceived++
-				if resultsReceived == numQuery {
-					break loop
-				}
-			case <-q.ctx.Done():
+			// exit once all goroutines have been cleaned up
+			if q.queryPeers.NumWaiting() == 0 {
 				return
 			}
+			continue
+		}
+
+		// if all "threads" are busy, wait until someone finishes
+		if q.queryPeers.NumWaiting() >= alpha {
+			continue
+		}
+
+		// spawn new queries, up to the parallelism allowance
+		for j := 0; j < alpha-q.queryPeers.NumWaiting(); j++ {
+			q.spawnQuery(ch)
 		}
 	}
 }
 
-type queryResult struct {
-	// foundCloserPeer is true if the peer we're querying returns a peer
-	// closer than the closest we've already heard about
-	foundCloserPeer bool
+// spawnQuery starts one query, if an available seen peer is found
+func (q *query) spawnQuery(ch chan<- *queryUpdate) {
+	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
+		return
+	} else {
+		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
+		go q.queryPeer(ch, peers[0])
+	}
 }
 
-// queryPeer queries a single peer.
-func (q *query) queryPeer(p peer.ID) *queryResult {
+func (q *query) readyToTerminate() bool {
+	// if termination has already been determined, the query is considered terminated forever,
+	// regardless of any change to queryPeers that might occur after the initial termination.
+	if q.terminated {
+		return true
+	}
+	// give the application logic a chance to terminate
+	if q.stopFn() {
+		return true
+	}
+	if q.isStarvationTermination() {
+		return true
+	}
+	if q.isLookupTermination() {
+		return true
+	}
+	return false
+}
+
+// From the set of all nodes that are not unreachable,
+// if the closest beta nodes are all queried, the lookup can terminate.
+func (q *query) isLookupTermination() bool {
+	var peers []peer.ID
+	peers = q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
+	for _, p := range peers {
+		if q.queryPeers.GetState(p) != qpeerset.PeerQueried {
+			return false
+		}
+	}
+	return true
+}
+
+func (q *query) isStarvationTermination() bool {
+	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
+}
+
+func (q *query) terminate() {
+	q.terminated = true
+}
+
+// queryPeer queries a single peer and reports its findings on the channel.
+// queryPeer does not access the query state in queryPeers!
+func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 	dialCtx, queryCtx := q.ctx, q.ctx
 
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
-		q.localPeers.Remove(p)
-		return &queryResult{}
+		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		return
 	}
 
 	// add the peer to the global set of queried peers since the dial was successful
 	// so that no other disjoint query tries sending an RPC to the same peer
 	if !q.globallyQueriedPeers.TryAdd(p) {
-		q.localPeers.Remove(p)
-		return &queryResult{}
-	}
-
-	// did the dial fulfill the stop condition ?
-	if q.stopFn(q.localPeers) {
-		q.cancel()
-		return &queryResult{}
+		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		return
 	}
 
 	// send query RPC to the remote peer
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {
-		q.localPeers.Remove(p)
-		return &queryResult{}
+		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		return
 	}
 
-	// mark the peer as queried.
-	q.localPeers.MarkQueried(p)
-
-	if len(newPeers) == 0 {
-		logger.Debugf("QUERY worker for: %v - not found, and no closer peers.", p)
-	}
-
-	foundCloserPeer := false
+	// process new peers
+	saw := []peer.ID{}
 	for _, next := range newPeers {
 		if next.ID == q.dht.self { // don't add self.
 			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
@@ -260,17 +381,38 @@ func (q *query) queryPeer(p peer.ID) *queryResult {
 
 		// add their addresses to the dialer's peerstore
 		q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-		closer := q.localPeers.Add(next.ID)
-		foundCloserPeer = foundCloserPeer || closer
+		saw = append(saw, next.ID)
 	}
 
-	// did the successful query RPC fulfill the query stop condition ?
-	if q.stopFn(q.localPeers) {
-		q.cancel()
-	}
+	ch <- &queryUpdate{seen: saw, queried: []peer.ID{p}}
+}
 
-	return &queryResult{
-		foundCloserPeer: foundCloserPeer,
+func (q *query) updateState(up *queryUpdate) {
+	for _, p := range up.seen {
+		if p == q.dht.self { // don't add self.
+			continue
+		}
+		q.queryPeers.TryAdd(p)
+	}
+	for _, p := range up.queried {
+		if p == q.dht.self { // don't add self.
+			continue
+		}
+		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
+			q.queryPeers.SetState(p, qpeerset.PeerQueried)
+		} else {
+			panic(fmt.Errorf("kademlia protocol error: tried to transition to the queried state from state %v", st))
+		}
+	}
+	for _, p := range up.unreachable {
+		if p == q.dht.self { // don't add self.
+			continue
+		}
+		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
+			q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
+		} else {
+			panic(fmt.Errorf("kademlia protocol error: tried to transition to the unreachable state from state %v", st))
+		}
 	}
 }
 

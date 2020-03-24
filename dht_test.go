@@ -1467,8 +1467,8 @@ func TestFindClosestPeers(t *testing.T) {
 		out = append(out, p)
 	}
 
-	if len(out) != querier.bucketSize {
-		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), querier.bucketSize)
+	if len(out) < querier.beta {
+		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(out), querier.beta)
 	}
 }
 

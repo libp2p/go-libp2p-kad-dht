@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/libp2p/go-libp2p-core/network"
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -15,8 +15,8 @@ import (
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/multiformats/go-multihash"
@@ -172,7 +172,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	}
 
 	stopCh := make(chan struct{})
-	valCh, queries := dht.getValues(ctx, key, stopCh)
+	valCh, lookupRes := dht.getValues(ctx, key, stopCh)
 
 	out := make(chan []byte)
 	go func() {
@@ -184,17 +184,12 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 		updatePeers := make([]peer.ID, 0, dht.bucketSize)
 		select {
-		case q := <-queries:
-			if len(q) < 1 {
+		case l := <-lookupRes:
+			if l == nil {
 				return
 			}
 
-			peers := q[0].globallyQueriedPeers.Peers()
-			peers = kb.SortClosestPeers(peers, kb.ConvertKey(key))
-			for i, p := range peers {
-				if i == dht.bucketSize {
-					break
-				}
+			for _, p := range l.peers {
 				if _, ok := peersWithBest[p]; !ok {
 					updatePeers = append(updatePeers, p)
 				}
@@ -320,9 +315,9 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan []*query) {
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
-	queriesCh := make(chan []*query, 1)
+	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {
@@ -336,8 +331,8 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 	go func() {
 		defer close(valCh)
-		defer close(queriesCh)
-		queries, err := dht.runDisjointQueries(ctx, dht.d, key,
+		defer close(lookupResCh)
+		lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, key,
 			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -386,7 +381,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 				return peers, err
 			},
-			func(peerset *kpeerset.SortedPeerset) bool {
+			func() bool {
 				select {
 				case <-stopQuery:
 					return true
@@ -399,26 +394,18 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 		if err != nil {
 			return
 		}
-		queriesCh <- queries
+		lookupResCh <- lookupRes
 
 		if ctx.Err() == nil {
-			dht.refreshRTIfNoShortcut(kb.ConvertKey(key), queries)
+			dht.refreshRTIfNoShortcut(kb.ConvertKey(key), lookupRes)
 		}
 	}()
 
-	return valCh, queriesCh
+	return valCh, lookupResCh
 }
 
-func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, queries []*query) {
-	shortcutTaken := false
-	for _, q := range queries {
-		if q.localPeers.LenUnqueriedFromKClosest() > 0 {
-			shortcutTaken = true
-			break
-		}
-	}
-
-	if !shortcutTaken {
+func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollowupResult) {
+	if lookupRes.completed {
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(key, time.Now())
 	}
@@ -593,7 +580,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	queries, err := dht.runDisjointQueries(ctx, dht.d, string(key),
+	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -644,13 +631,13 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 			return peers, nil
 		},
-		func(peerset *kpeerset.SortedPeerset) bool {
+		func() bool {
 			return !findAll && ps.Size() >= count
 		},
 	)
 
 	if err != nil && ctx.Err() == nil {
-		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), queries)
+		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
 	}
 }
 
@@ -669,7 +656,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return pi, nil
 	}
 
-	queries, err := dht.runDisjointQueries(ctx, dht.d, string(id),
+	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, string(id),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -693,7 +680,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 
 			return peers, err
 		},
-		func(peerset *kpeerset.SortedPeerset) bool {
+		func() bool {
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)
@@ -702,14 +689,21 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
-	// refresh the cpl for this key if we discovered the peer because of the query
-	if ctx.Err() == nil && queries[0].globallyQueriedPeers.Contains(id) {
-		kadID := kb.ConvertPeerID(id)
-		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+	dialedPeerDuringQuery := false
+	for i, p := range lookupRes.peers {
+		if p == id {
+			// Note: we consider PeerUnreachable to be a valid state because the peer may not support the DHT protocol
+			// and therefore the peer would fail the query. The fact that a peer that is returned can be a non-DHT
+			// server peer and is not identified as such is a bug.
+			dialedPeerDuringQuery = lookupRes.state[i] != qpeerset.PeerHeard
+			break
+		}
 	}
 
-	// TODO: Consider unlucky disconnect timing and potentially utilizing network.CanConnect or something similar
-	if dht.host.Network().Connectedness(id) == network.Connected {
+	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
+	// to the peer.
+	connectedness := dht.host.Network().Connectedness(id)
+	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
 		return dht.peerstore.PeerInfo(id), nil
 	}
 

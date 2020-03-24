@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
@@ -50,8 +51,8 @@ type query struct {
 }
 
 type lookupWithFollowupResult struct {
-	peers     []peer.ID // the top K not unreachable peers across all query paths
-	state     []qpeerset.PeerState // the peer states at the end of the queries
+	peers []peer.ID            // the top K not unreachable peers across all query paths
+	state []qpeerset.PeerState // the peer states at the end of the queries
 
 	// indicates that neither the lookup nor the followup has been prematurely terminated by an external condition such
 	// as context cancellation or the stop function being called.

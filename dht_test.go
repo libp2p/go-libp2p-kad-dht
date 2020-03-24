@@ -1755,7 +1755,6 @@ func TestProtocolUpgrade(t *testing.T) {
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
-		DisjointPaths(1),
 	}
 
 	// This test verifies that we can have a node serving both old and new DHTs that will respond as a server to the old

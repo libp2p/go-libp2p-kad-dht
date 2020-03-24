@@ -93,7 +93,6 @@ type IpfsDHT struct {
 	bucketSize int
 	alpha      int // The concurrency parameter per path
 	beta       int // The number of peers closest to a target that must have responded for a query path to terminate
-	d          int // Number of Disjoint Paths to query
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
@@ -125,9 +124,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if err := cfg.applyFallbacks(); err != nil {
-		return nil, err
-	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -231,7 +228,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		bucketSize:        cfg.bucketSize,
 		alpha:             cfg.concurrency,
 		beta:              cfg.resiliency,
-		d:                 cfg.disjointPaths,
 		triggerRtRefresh:  make(chan chan<- error),
 		triggerSelfLookup: make(chan chan<- error),
 	}

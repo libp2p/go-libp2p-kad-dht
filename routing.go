@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	"sync"
 	"time"
 
@@ -688,22 +689,21 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
-	// refresh the cpl for this key if we discovered the peer because of the query
-	if ctx.Err() == nil {
-		discoveredPeerDuringQuery := false
-		for _, p := range lookupRes.peers {
-			if p == id {
-				discoveredPeerDuringQuery = true
-				break
-			}
-		}
-		if discoveredPeerDuringQuery || lookupRes.completed {
-			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertPeerID(id), time.Now())
+	dialedPeerDuringQuery := false
+	for i, p := range lookupRes.peers {
+		if p == id {
+			// Note: we consider PeerUnreachable to be a valid state because the peer may not support the DHT protocol
+			// and therefore the peer would fail the query. The fact that a peer that is returned can be a non-DHT
+			// server peer and is not identified as such is a bug.
+			dialedPeerDuringQuery = lookupRes.state[i] != qpeerset.PeerHeard
+			break
 		}
 	}
 
-	// TODO: Consider unlucky disconnect timing and potentially utilizing network.CanConnect or something similar
-	if dht.host.Network().Connectedness(id) == network.Connected {
+	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
+	// to the peer.
+	connectedness := dht.host.Network().Connectedness(id)
+	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
 		return dht.peerstore.PeerInfo(id), nil
 	}
 

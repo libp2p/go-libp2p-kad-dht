@@ -80,7 +80,7 @@ var defaults = func(o *config) error {
 	o.enableValues = true
 
 	o.routingTable.latencyTolerance = time.Minute
-	o.routingTable.refreshQueryTimeout = 10 * time.Second
+	o.routingTable.refreshQueryTimeout = 30 * time.Second
 	o.routingTable.refreshPeriod = 10 * time.Minute
 	o.routingTable.autoRefresh = true
 	o.maxRecordAge = time.Hour * 36

@@ -75,7 +75,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	defer e.Done()
 
-	lookupRes, err := dht.runLookup(ctx, dht.d, key,
+	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, key,
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{

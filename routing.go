@@ -315,9 +315,9 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupResult) {
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
-	lookupResCh := make(chan *lookupResult, 1)
+	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {
@@ -332,7 +332,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	go func() {
 		defer close(valCh)
 		defer close(lookupResCh)
-		lookupRes, err := dht.runLookup(ctx, dht.d, key,
+		lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, key,
 			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -404,7 +404,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	return valCh, lookupResCh
 }
 
-func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupResult) {
+func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollowupResult) {
 	if lookupRes.completed {
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(key, time.Now())
@@ -580,7 +580,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	lookupRes, err := dht.runLookup(ctx, dht.d, string(key),
+	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -656,7 +656,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return pi, nil
 	}
 
-	lookupRes, err := dht.runLookup(ctx, dht.d, string(id),
+	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, string(id),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{

@@ -48,20 +48,23 @@ type query struct {
 	stopFn stopFn
 }
 
-type lookupResult struct {
-	peers     []peer.ID
-	state     []qpeerset.PeerState
+type lookupWithFollowupResult struct {
+	peers     []peer.ID // the top K not unreachable peers across all query paths
+	state     []qpeerset.PeerState // the peer states at the end of the queries
+
+	// indicates that neither the lookup nor the followup has been prematurely terminated by an external condition such
+	// as context cancellation or the stop function being called.
 	completed bool
 }
 
-// runLookup executes the lookup on the target using the given query function and stopping when either the context is
-// cancelled or the stop function returns true (if the stop function is not sticky it is not guaranteed to cause a stop
-// to occur just because it momentarily returns true). Returns the top K peers that have not failed as well as their
-// state at the end of the lookup.
+// runLookupWithFollowup executes the lookup on the target using the given query function and stopping when either the
+// context is cancelled or the stop function returns true. Note: if the stop function is not sticky, i.e. it does not
+// return true every time after the first time it returns true, it is not guaranteed to cause a stop to occur just
+// because it momentarily returns true.
 //
-// After the lookup is complete the query function is run (unless stopped) against all of the top K peers that have not
-// already been successfully queried.
-func (dht *IpfsDHT) runLookup(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupResult, error) {
+// After the lookup is complete the query function is run (unless stopped) against all of the top K peers from the
+// lookup that have not already been successfully queried.
+func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
 	// run the query
 	lookupRes, err := dht.runDisjointQueries(ctx, d, target, queryFn, stopFn)
 	if err != nil {
@@ -121,7 +124,7 @@ processFollowUp:
 }
 
 // d is the number of disjoint queries.
-func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupResult, error) {
+func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
 	queryCtx, cancelQuery := context.WithCancel(ctx)
 
 	// pick the K closest peers to the key in our Routing table and shuffle them.
@@ -193,7 +196,7 @@ func (dht *IpfsDHT) runDisjointQueries(ctx context.Context, d int, target string
 }
 
 // constructLookupResult takes the query information and uses it to construct the lookup result
-func (dht *IpfsDHT) constructLookupResult(queries []*query, target kb.ID) *lookupResult {
+func (dht *IpfsDHT) constructLookupResult(queries []*query, target kb.ID) *lookupWithFollowupResult {
 	// determine if any queries terminated early
 	completed := true
 	for _, q := range queries {
@@ -232,7 +235,7 @@ func (dht *IpfsDHT) constructLookupResult(queries []*query, target kb.ID) *looku
 	}
 
 	// return the top K not unreachable peers across all query paths as well as their states at the end of the queries
-	res := &lookupResult{
+	res := &lookupWithFollowupResult{
 		peers:     sortedPeers,
 		state:     make([]qpeerset.PeerState, len(sortedPeers)),
 		completed: completed,

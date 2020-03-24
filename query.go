@@ -227,7 +227,7 @@ func (q *query) runWithGreedyParallelism() {
 			q.updateState(pathCtx, update)
 			cause = update.cause
 		case <-pathCtx.Done():
-			q.terminate(pathCtx, AsyncCancelled)
+			q.terminate(pathCtx, LookupCancelled)
 		}
 
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
@@ -273,16 +273,16 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 	}
 }
 
-func (q *query) isReadyToTerminate() (bool, AsyncTerminationReason) {
+func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {
 	// give the application logic a chance to terminate
 	if q.stopFn() {
-		return true, AsyncStopped
+		return true, LookupStopped
 	}
 	if q.isStarvationTermination() {
-		return true, AsyncStarvation
+		return true, LookupStarvation
 	}
 	if q.isLookupTermination() {
-		return true, AsyncCompleted
+		return true, LookupCompleted
 	}
 	return false, -1
 }
@@ -304,7 +304,7 @@ func (q *query) isStarvationTermination() bool {
 	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
 }
 
-func (q *query) terminate(ctx context.Context, reason AsyncTerminationReason) {
+func (q *query) terminate(ctx context.Context, reason LookupTerminationReason) {
 	if q.terminated {
 		return
 	} else {

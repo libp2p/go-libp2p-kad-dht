@@ -10,7 +10,7 @@ import (
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 )
 
-// LookupEvent is emitted for every notable event that happens during a DHT async lookup.
+// LookupEvent is emitted for every notable event that happens during a DHT lookup.
 // LookupEvent supports JSON marshalling because all of its fields do, recursively.
 type LookupEvent struct {
 	// ID is a unique identifier for the lookup instance
@@ -41,32 +41,32 @@ type LookupUpdateEvent struct {
 // LookupTerminateEvent describes a lookup termination event.
 type LookupTerminateEvent struct {
 	// Reason is the reason for lookup termination.
-	Reason AsyncTerminationReason
+	Reason LookupTerminationReason
 }
 
-// AsyncTerminationReason captures reasons for terminating a lookup.
-type AsyncTerminationReason int
+// LookupTerminationReason captures reasons for terminating a lookup.
+type LookupTerminationReason int
 
 const (
-	// AsyncStopped indicates that the lookup was aborted by the user's stopFn.
-	AsyncStopped AsyncTerminationReason = iota
-	// AsyncCancelled indicates that the lookup was aborted by the context.
-	AsyncCancelled
-	// AsyncStarvation indicates that the lookup terminated due to lack of unqueried peers.
-	AsyncStarvation
-	// AsyncCompleted indicates that the lookup terminated successfully, reaching the Kademlia end condition.
-	AsyncCompleted
+	// LookupStopped indicates that the lookup was aborted by the user's stopFn.
+	LookupStopped LookupTerminationReason = iota
+	// LookupCancelled indicates that the lookup was aborted by the context.
+	LookupCancelled
+	// LookupStarvation indicates that the lookup terminated due to lack of unqueried peers.
+	LookupStarvation
+	// LookupCompleted indicates that the lookup terminated successfully, reaching the Kademlia end condition.
+	LookupCompleted
 )
 
-type routingAsyncKey struct{}
+type routingLookupKey struct{}
 
-// TODO: asyncEventChannel copies the implementation of eventChanel.
+// TODO: lookupEventChannel copies the implementation of eventChanel.
 // The two should be refactored to use a common event channel implementation.
 // A common implementation needs to rethink the signature of RegisterForEvents,
 // because returning a typed channel cannot be made polymorphic without creating
 // additional "adapter" channels. This will be easier to handle when Go
 // introduces generics.
-type asyncEventChannel struct {
+type lookupEventChannel struct {
 	mu  sync.Mutex
 	ctx context.Context
 	ch  chan<- *LookupEvent
@@ -74,7 +74,7 @@ type asyncEventChannel struct {
 
 // waitThenClose is spawned in a goroutine when the channel is registered. This
 // safely cleans up the channel when the context has been canceled.
-func (e *asyncEventChannel) waitThenClose() {
+func (e *lookupEventChannel) waitThenClose() {
 	<-e.ctx.Done()
 	e.mu.Lock()
 	close(e.ch)
@@ -86,7 +86,7 @@ func (e *asyncEventChannel) waitThenClose() {
 
 // send sends an event on the event channel, aborting if either the passed or
 // the internal context expire.
-func (e *asyncEventChannel) send(ctx context.Context, ev *LookupEvent) {
+func (e *lookupEventChannel) send(ctx context.Context, ev *LookupEvent) {
 	e.mu.Lock()
 	// Closed.
 	if e.ch == nil {
@@ -102,17 +102,17 @@ func (e *asyncEventChannel) send(ctx context.Context, ev *LookupEvent) {
 	e.mu.Unlock()
 }
 
-// RegisterForLookupEvents registers an async lookup event channel with the given
-// context. The returned context can be passed to DHT queries to receive async lookup
-// events on the returned channels.
+// RegisterForLookupEvents registers a lookup event channel with the given context.
+// The returned context can be passed to DHT queries to receive lookup events on
+// the returned channels.
 //
 // The passed context MUST be canceled when the caller is no longer interested
 // in query events.
 func RegisterForLookupEvents(ctx context.Context) (context.Context, <-chan *LookupEvent) {
 	ch := make(chan *LookupEvent, LookupEventBufferSize)
-	ech := &asyncEventChannel{ch: ch, ctx: ctx}
+	ech := &lookupEventChannel{ch: ch, ctx: ctx}
 	go ech.waitThenClose()
-	return context.WithValue(ctx, routingAsyncKey{}, ech), ch
+	return context.WithValue(ctx, routingLookupKey{}, ech), ch
 }
 
 // Number of events to buffer.
@@ -121,12 +121,12 @@ var LookupEventBufferSize = 16
 // PublishLookupEvent publishes a query event to the query event channel
 // associated with the given context, if any.
 func PublishLookupEvent(ctx context.Context, ev *LookupEvent) {
-	ich := ctx.Value(routingAsyncKey{})
+	ich := ctx.Value(routingLookupKey{})
 	if ich == nil {
 		return
 	}
 
 	// We *want* to panic here.
-	ech := ich.(*asyncEventChannel)
+	ech := ich.(*lookupEventChannel)
 	ech.send(ctx, ev)
 }

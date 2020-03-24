@@ -92,7 +92,7 @@ func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, d int, target str
 		return lookupRes, nil
 	}
 
-	doneCh := make(chan struct{}, 1)
+	doneCh := make(chan struct{}, len(queryPeers))
 	followUpCtx, cancelFollowUp := context.WithCancel(ctx)
 	for _, p := range queryPeers {
 		qp := p

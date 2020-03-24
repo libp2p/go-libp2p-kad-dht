@@ -260,10 +260,10 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
 		return
 	} else {
-		PublishAsyncEvent(ctx, &AsyncEvent{
+		PublishLookupEvent(ctx, &LookupEvent{
 			ID:  q.id,
 			Key: q.key,
-			Update: &AsyncUpdateEvent{
+			Update: &LookupUpdateEvent{
 				Cause:   cause,
 				Waiting: []peer.ID{peers[0]},
 			},
@@ -308,10 +308,10 @@ func (q *query) terminate(ctx context.Context, reason AsyncTerminationReason) {
 	if q.terminated {
 		return
 	} else {
-		PublishAsyncEvent(ctx, &AsyncEvent{
+		PublishLookupEvent(ctx, &LookupEvent{
 			ID:        q.id,
 			Key:       q.key,
-			Terminate: &AsyncTerminateEvent{Reason: reason},
+			Terminate: &LookupTerminateEvent{Reason: reason},
 		})
 		q.terminated = true
 	}
@@ -358,10 +358,10 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {
-	PublishAsyncEvent(ctx, &AsyncEvent{
+	PublishLookupEvent(ctx, &LookupEvent{
 		ID:  q.id,
 		Key: q.key,
-		Update: &AsyncUpdateEvent{
+		Update: &LookupUpdateEvent{
 			Cause:       up.cause,
 			Heard:       up.heard,
 			Queried:     up.queried,

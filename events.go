@@ -10,21 +10,21 @@ import (
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 )
 
-// AsyncEvent is emitted for every notable event that happens during a DHT async lookup.
-// AsyncEvent supports JSON marshalling because all of its fields do, recursively.
-type AsyncEvent struct {
+// LookupEvent is emitted for every notable event that happens during a DHT async lookup.
+// LookupEvent supports JSON marshalling because all of its fields do, recursively.
+type LookupEvent struct {
 	// ID is a unique identifier for the lookup instance
 	ID uuid.UUID
 	// Key is the Kademlia key used as a lookup target.
 	Key kbucket.ID
 	// Update, if not nil, describes a state update event.
-	Update *AsyncUpdateEvent
+	Update *LookupUpdateEvent
 	// Terminate, if not nil, describe a termination event.
-	Terminate *AsyncTerminateEvent
+	Terminate *LookupTerminateEvent
 }
 
-// AsyncUpdateEvent describes a lookup state update event.
-type AsyncUpdateEvent struct {
+// LookupUpdateEvent describes a lookup state update event.
+type LookupUpdateEvent struct {
 	// Cause is the peer whose response (or lack of response) caused the update event.
 	// If Cause is nil, this is the first update event in the lookup, caused by the seeding.
 	Cause peer.ID
@@ -38,8 +38,8 @@ type AsyncUpdateEvent struct {
 	Unreachable []peer.ID
 }
 
-// AsyncTerminateEvent describes a lookup termination event.
-type AsyncTerminateEvent struct {
+// LookupTerminateEvent describes a lookup termination event.
+type LookupTerminateEvent struct {
 	// Reason is the reason for lookup termination.
 	Reason AsyncTerminationReason
 }
@@ -69,7 +69,7 @@ type routingAsyncKey struct{}
 type asyncEventChannel struct {
 	mu  sync.Mutex
 	ctx context.Context
-	ch  chan<- *AsyncEvent
+	ch  chan<- *LookupEvent
 }
 
 // waitThenClose is spawned in a goroutine when the channel is registered. This
@@ -86,7 +86,7 @@ func (e *asyncEventChannel) waitThenClose() {
 
 // send sends an event on the event channel, aborting if either the passed or
 // the internal context expire.
-func (e *asyncEventChannel) send(ctx context.Context, ev *AsyncEvent) {
+func (e *asyncEventChannel) send(ctx context.Context, ev *LookupEvent) {
 	e.mu.Lock()
 	// Closed.
 	if e.ch == nil {
@@ -102,25 +102,25 @@ func (e *asyncEventChannel) send(ctx context.Context, ev *AsyncEvent) {
 	e.mu.Unlock()
 }
 
-// RegisterForAsyncEvents registers an async lookup event channel with the given
+// RegisterForLookupEvents registers an async lookup event channel with the given
 // context. The returned context can be passed to DHT queries to receive async lookup
 // events on the returned channels.
 //
 // The passed context MUST be canceled when the caller is no longer interested
 // in query events.
-func RegisterForAsyncEvents(ctx context.Context) (context.Context, <-chan *AsyncEvent) {
-	ch := make(chan *AsyncEvent, AsyncEventBufferSize)
+func RegisterForLookupEvents(ctx context.Context) (context.Context, <-chan *LookupEvent) {
+	ch := make(chan *LookupEvent, LookupEventBufferSize)
 	ech := &asyncEventChannel{ch: ch, ctx: ctx}
 	go ech.waitThenClose()
 	return context.WithValue(ctx, routingAsyncKey{}, ech), ch
 }
 
 // Number of events to buffer.
-var AsyncEventBufferSize = 16
+var LookupEventBufferSize = 16
 
-// PublishAsyncEvent publishes a query event to the query event channel
+// PublishLookupEvent publishes a query event to the query event channel
 // associated with the given context, if any.
-func PublishAsyncEvent(ctx context.Context, ev *AsyncEvent) {
+func PublishLookupEvent(ctx context.Context, ev *LookupEvent) {
 	ich := ctx.Value(routingAsyncKey{})
 	if ich == nil {
 		return

@@ -66,6 +66,7 @@ type IpfsDHT struct {
 
 	birth time.Time  // When this peer started up
 	rng   *rand.Rand // Source of randomness
+	rnglk sync.Mutex // Rand does not support concurrency
 
 	Validator record.Validator
 
@@ -91,6 +92,7 @@ type IpfsDHT struct {
 
 	bucketSize int
 	alpha      int // The concurrency parameter per path
+	beta       int // The number of peers closest to a target that must have responded for a query path to terminate
 	d          int // Number of Disjoint Paths to query
 
 	queryPeerFilter        QueryFilterFunc
@@ -205,14 +207,6 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
-	dht := new(IpfsDHT)
-	dht.host = h
-
-	rt, err := makeRoutingTable(dht, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
-	}
-
 	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
 	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
 
@@ -226,7 +220,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		}
 	}
 
-	*dht = IpfsDHT{
+	dht := &IpfsDHT{
 		datastore:              cfg.datastore,
 		self:                   h.ID(),
 		peerstore:              h.Peerstore(),
@@ -234,17 +228,24 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		strmap:                 make(map[peer.ID]*messageSender),
 		birth:                  time.Now(),
 		rng:                    rand.New(rand.NewSource(rand.Int63())),
-		routingTable:           rt,
 		protocols:              protocols,
 		serverProtocols:        serverProtocols,
 		bucketSize:             cfg.bucketSize,
 		alpha:                  cfg.concurrency,
+		beta:                   cfg.resiliency,
 		d:                      cfg.disjointPaths,
 		triggerRtRefresh:       make(chan chan<- error),
 		triggerSelfLookup:      make(chan chan<- error),
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
 	}
+
+	// construct routing table
+	rt, err := makeRoutingTable(dht, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
+	}
+	dht.routingTable = rt
 
 	// create a DHT proc with the given context
 	dht.proc = goprocessctx.WithContext(ctx)
@@ -260,18 +261,23 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 }
 
 func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
-	h := dht.Host()
-	self := kb.ConvertPeerID(h.ID())
+	self := kb.ConvertPeerID(dht.host.ID())
 	// construct the routing table with a peer validation function
 	pvF := func(c context.Context, p peer.ID) bool {
-		if err := h.Connect(c, peer.AddrInfo{ID: p}); err != nil {
+		// connect should work
+		if err := dht.host.Connect(c, peer.AddrInfo{ID: p}); err != nil {
 			rtPvLogger.Infof("failed to connect to peer %s for validation, err=%s", p, err)
 			return false
 		}
-		if !cfg.routingTable.peerFilter(dht, h.Network().ConnsToPeer(p)) {
+
+		// peer should support the DHT protocol
+		b, err := dht.validRTPeer(p)
+		if err != nil {
+			rtPvLogger.Errorf("failed to check if peer %s supports DHT protocol, err=%s", p, err)
 			return false
 		}
-		return true
+
+		return b && cfg.routingTable.peerFilter(dht, dht.Host().Network().ConnsToPeer(p))
 	}
 
 	rtOpts := []kb.Option{kb.PeerValidationFnc(pvF)}
@@ -279,9 +285,9 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 		rtOpts = append(rtOpts, kb.TableCleanupInterval(cfg.routingTable.checkInterval))
 	}
 
-	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, h.Peerstore(),
+	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(),
 		rtOpts...)
-	cmgr := h.ConnManager()
+	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
 		commonPrefixLen := kb.CommonPrefixLen(self, kb.ConvertPeerID(p))

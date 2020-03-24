@@ -11,7 +11,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-kad-dht/kpeerset"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/multiformats/go-base32"
@@ -76,7 +75,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
 	defer e.Done()
 
-	queries, err := dht.runDisjointQueries(ctx, dht.d, key,
+	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, key,
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -100,7 +99,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 
 			return peers, err
 		},
-		func(peerset *kpeerset.SortedPeerset) bool { return false },
+		func() bool { return false },
 	)
 
 	if err != nil {
@@ -110,18 +109,13 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	out := make(chan peer.ID, dht.bucketSize)
 	defer close(out)
 
-	kadID := kb.ConvertKey(key)
-	allPeers := kb.SortClosestPeers(queries[0].globallyQueriedPeers.Peers(), kadID)
-	for i, p := range allPeers {
-		if i == dht.bucketSize {
-			break
-		}
+	for _, p := range lookupRes.peers {
 		out <- p
 	}
 
-	if ctx.Err() == nil {
+	if ctx.Err() == nil && lookupRes.completed {
 		// refresh the cpl for this key as the query was successful
-		dht.routingTable.ResetCplRefreshedAtForID(kadID, time.Now())
+		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}
 
 	return out, ctx.Err()

@@ -36,6 +36,7 @@ type config struct {
 	bucketSize      int
 	disjointPaths   int
 	concurrency     int
+	resiliency      int
 	maxRecordAge    time.Duration
 	enableProviders bool
 	enableValues    bool
@@ -88,7 +89,7 @@ var defaults = func(o *config) error {
 	o.queryPeerFilter = emptyQueryFilter
 
 	o.routingTable.latencyTolerance = time.Minute
-	o.routingTable.refreshQueryTimeout = 10 * time.Second
+	o.routingTable.refreshQueryTimeout = 30 * time.Second
 	o.routingTable.refreshPeriod = 10 * time.Minute
 	o.routingTable.autoRefresh = true
 	o.routingTable.peerFilter = emptyRTFilter
@@ -96,6 +97,7 @@ var defaults = func(o *config) error {
 
 	o.bucketSize = defaultBucketSize
 	o.concurrency = 3
+	o.resiliency = 3
 
 	return nil
 }
@@ -244,6 +246,17 @@ func BucketSize(bucketSize int) Option {
 func Concurrency(alpha int) Option {
 	return func(c *config) error {
 		c.concurrency = alpha
+		return nil
+	}
+}
+
+// Resiliency configures the number of peers closest to a target that must have responded in order for a given query
+// path to complete.
+//
+// The default value is 3.
+func Resiliency(beta int) Option {
+	return func(c *config) error {
+		c.resiliency = beta
 		return nil
 	}
 }

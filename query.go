@@ -306,13 +306,6 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 		return
 	}
 
-	// add the peer to the global set of queried peers since the dial was successful
-	// so that no other disjoint query tries sending an RPC to the same peer
-	if !q.globallyQueriedPeers.TryAdd(p) {
-		ch <- &queryUpdate{unreachable: []peer.ID{p}}
-		return
-	}
-
 	// send query RPC to the remote peer
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {

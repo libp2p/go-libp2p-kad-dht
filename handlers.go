@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -259,10 +258,10 @@ func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (
 	return pmes, nil
 }
 
-func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	ctx = logger.Start(ctx, "handleFindPeer")
 	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
+	logger.SetTag(ctx, "peer", from)
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -271,28 +270,31 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
 	} else {
-		closest = dht.betterPeersToQuery(pmes, p, dht.bucketSize)
+		closest = dht.betterPeersToQuery(pmes, from, dht.bucketSize)
 
 		// Never tell a peer about itself.
-		if targetPid != p {
-			// If we're connected to the target peer, report their
-			// peer info. This makes FindPeer work even if the
-			// target peer isn't in our routing table.
+		if targetPid != from {
+			// Add the target peer to the set of closest peers if
+			// not already present in our routing table.
 			//
-			// Alternatively, we could just check our peerstore.
-			// However, we don't want to return out of date
-			// information. We can change this in the future when we
-			// add a progressive, asynchronous `SearchPeer` function
-			// and improve peer routing in the host.
-			switch dht.host.Network().Connectedness(targetPid) {
-			case network.Connected, network.CanConnect:
+			// Later, when we lookup known addresses for all peers
+			// in this set, we'll prune this peer if we don't
+			// _actually_ know where it is.
+			found := false
+			for _, p := range closest {
+				if targetPid == p {
+					found = true
+					break
+				}
+			}
+			if !found {
 				closest = append(closest, targetPid)
 			}
 		}
 	}
 
 	if closest == nil {
-		logger.Infof("%s handleFindPeer %s: could not find anything.", dht.self, p)
+		logger.Infof("%s handleFindPeer %s: could not find anything.", dht.self, targetPid)
 		return resp, nil
 	}
 

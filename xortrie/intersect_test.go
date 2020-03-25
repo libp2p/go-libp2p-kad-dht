@@ -48,4 +48,12 @@ var testIntersectSamples = []*testIntersectSample{
 		LeftKeys:  []TrieKey{{1, 2, 3}},
 		RightKeys: []TrieKey{{1, 3, 5}},
 	},
+	{
+		LeftKeys:  []TrieKey{{1, 2, 3, 4, 5, 6}},
+		RightKeys: []TrieKey{{3, 5, 7}},
+	},
+	{
+		LeftKeys:  []TrieKey{{23, 3, 7, 13, 17}},
+		RightKeys: []TrieKey{{2, 11, 17, 19, 23}},
+	},
 }

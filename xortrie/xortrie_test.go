@@ -10,7 +10,7 @@ func TestInsertRemove(t *testing.T) {
 
 func testSeq(r *XorTrie, t *testing.T) {
 	for _, s := range testInsertSeq {
-		depth, _ := r.Insert(TrieKey(s.key))
+		depth, _ := r.Add(TrieKey(s.key))
 		if depth != s.insertedDepth {
 			t.Errorf("inserting expected %d, got %d", s.insertedDepth, depth)
 		}

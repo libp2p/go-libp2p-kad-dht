@@ -69,11 +69,8 @@ func (trie *XorTrie) find(depth int, q TrieKey) (reachedDepth int, found bool) {
 	}
 }
 
-func (trie *XorTrie) AddThen(q TrieKey) *XorTrie {
-	trie.Add(q)
-	return trie
-}
-
+// Add adds the key q to the trie. Add mutates the trie.
+// TODO: Also implement an immutable version of Add.
 func (trie *XorTrie) Add(q TrieKey) (insertedDepth int, insertedOK bool) {
 	return trie.add(0, q)
 }
@@ -100,6 +97,8 @@ func (trie *XorTrie) add(depth int, q TrieKey) (insertedDepth int, insertedOK bo
 	}
 }
 
+// Remove removes the key q from the trie. Remove mutates the trie.
+// TODO: Also implement an immutable version of Add.
 func (trie *XorTrie) Remove(q TrieKey) (removedDepth int, removed bool) {
 	return trie.remove(0, q)
 }

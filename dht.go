@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -64,9 +63,7 @@ type IpfsDHT struct {
 	// ProviderManager stores & manages the provider records for this Dht peer.
 	ProviderManager *providers.ProviderManager
 
-	birth time.Time  // When this peer started up
-	rng   *rand.Rand // Source of randomness
-	rnglk sync.Mutex // Rand does not support concurrency
+	birth time.Time // When this peer started up
 
 	Validator record.Validator
 
@@ -93,7 +90,6 @@ type IpfsDHT struct {
 	bucketSize int
 	alpha      int // The concurrency parameter per path
 	beta       int // The number of peers closest to a target that must have responded for a query path to terminate
-	d          int // Number of Disjoint Paths to query
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
@@ -125,9 +121,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if err := cfg.applyFallbacks(); err != nil {
-		return nil, err
-	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -225,13 +219,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		host:              h,
 		strmap:            make(map[peer.ID]*messageSender),
 		birth:             time.Now(),
-		rng:               rand.New(rand.NewSource(rand.Int63())),
 		protocols:         protocols,
 		serverProtocols:   serverProtocols,
 		bucketSize:        cfg.bucketSize,
 		alpha:             cfg.concurrency,
 		beta:              cfg.resiliency,
-		d:                 cfg.disjointPaths,
 		triggerRtRefresh:  make(chan chan<- error),
 		triggerSelfLookup: make(chan chan<- error),
 	}

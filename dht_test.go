@@ -37,6 +37,8 @@ import (
 	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
+
+	detectrace "github.com/ipfs/go-detect-race"
 )
 
 var testCaseCids []cid.Cid
@@ -1364,6 +1366,10 @@ func TestFindPeerQueryMinimal(t *testing.T) {
 }
 
 func TestFindPeerQuery(t *testing.T) {
+	if detectrace.WithRace() {
+		t.Skip("skipping due to race detector max goroutines")
+	}
+
 	if testing.Short() {
 		t.Skip("skipping test in short mode")
 	}
@@ -1403,10 +1409,15 @@ func testFindPeerQuery(t *testing.T,
 		connect(t, ctx, guy, others[i])
 	}
 
+	for _, d := range dhts {
+		if err := <-d.RefreshRoutingTable(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	var reachableIds []peer.ID
 	for i, d := range dhts {
 		lp := len(d.host.Network().Peers())
-		//t.Log(i, lp)
 		if i != 0 && lp > 0 {
 			reachableIds = append(reachableIds, d.PeerID())
 		}
@@ -1415,11 +1426,6 @@ func testFindPeerQuery(t *testing.T,
 
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
-
-	rtablePeers := guy.routingTable.NearestPeers(rtval, guy.alpha)
-	assert.Len(t, rtablePeers, minInt(bootstrappers, guy.alpha))
-
-	assert.Len(t, guy.host.Network().Peers(), bootstrappers)
 
 	out, err := guy.GetClosestPeers(ctx, val)
 	require.NoError(t, err)

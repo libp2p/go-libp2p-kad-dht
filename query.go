@@ -265,6 +265,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 			Key: q.key,
 			Update: &LookupUpdateEvent{
 				Cause:   cause,
+				Source:  q.queryPeers.GetReferrer(peers[0]),
 				Waiting: []peer.ID{peers[0]},
 			},
 		})
@@ -363,6 +364,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		Key: q.key,
 		Update: &LookupUpdateEvent{
 			Cause:       up.cause,
+			Source:      up.cause,
 			Heard:       up.heard,
 			Queried:     up.queried,
 			Unreachable: up.unreachable,
@@ -372,7 +374,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
-		q.queryPeers.TryAdd(p)
+		q.queryPeers.TryAdd(p, up.cause)
 	}
 	for _, p := range up.queried {
 		if p == q.dht.self { // don't add self.

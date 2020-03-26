@@ -7,10 +7,11 @@ go:
   - 1.13.x
 
 env:
-  global:
-    - GOTFLAGS="-race"
-    - IPFS_REUSEPORT=false
   matrix:
+    - GOTFLAGS="-race"
+    - GOTFLAGS=""
+  global:
+    - IPFS_REUSEPORT=false
     - BUILD_DEPTYPE=gomod
 
 

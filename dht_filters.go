@@ -81,19 +81,26 @@ func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 	router, _ := netroute.New()
 	myAdvertisedIPs := make([]net.IP, 0)
 	for _, a := range dht.Host().Addrs() {
-		if manet.IsPublicAddr(a) {
-			ip, _ := manet.ToIP(a)
+		if manet.IsPublicAddr(a) && !isRelayAddr(a) {
+			ip, err := manet.ToIP(a)
+			if err != nil {
+				continue
+			}
 			myAdvertisedIPs = append(myAdvertisedIPs, ip)
 		}
 	}
 
 	for _, c := range conns {
-		if manet.IsPrivateAddr(c.RemoteMultiaddr()) {
+		ra := c.RemoteMultiaddr()
+		if manet.IsPrivateAddr(ra) || isRelayAddr(ra) {
 			return true
 		}
 
-		if manet.IsPublicAddr(c.RemoteMultiaddr()) {
-			ip, _ := manet.ToIP(c.RemoteMultiaddr())
+		if manet.IsPublicAddr(ra) {
+			ip, err := manet.ToIP(ra)
+			if err != nil {
+				continue
+			}
 
 			// if the ip is the same as one of the local host's public advertised IPs - then consider it local
 			for _, i := range myAdvertisedIPs {
@@ -132,6 +139,10 @@ func sameV6Net(a, b net.IP) bool {
 }
 
 func isRelayAddr(a ma.Multiaddr) bool {
-	val, err := a.ValueForProtocol(ma.P_CIRCUIT)
-	return err != nil && val != ""
+	for _, p := range a.Protocols() {
+		if p.Code == ma.P_CIRCUIT {
+			return true
+		}
+	}
+	return false
 }

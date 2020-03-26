@@ -136,12 +136,6 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 		return nil, kb.ErrLookupFailure
 	}
 
-	dht.rnglk.Lock()
-	dht.rng.Shuffle(len(seedPeers), func(i, j int) {
-		seedPeers[i], seedPeers[j] = seedPeers[j], seedPeers[i]
-	})
-	dht.rnglk.Unlock()
-
 	q := &query{
 		ctx:        queryCtx,
 		cancel:     cancelQuery,

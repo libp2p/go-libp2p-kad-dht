@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -65,8 +64,6 @@ type IpfsDHT struct {
 	providers    *providers.ProviderManager
 
 	birth time.Time  // When this peer started up
-	rng   *rand.Rand // Source of randomness
-	rnglk sync.Mutex // Rand does not support concurrency
 
 	Validator record.Validator
 
@@ -222,7 +219,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		host:              h,
 		strmap:            make(map[peer.ID]*messageSender),
 		birth:             time.Now(),
-		rng:               rand.New(rand.NewSource(rand.Int63())),
 		protocols:         protocols,
 		serverProtocols:   serverProtocols,
 		bucketSize:        cfg.bucketSize,

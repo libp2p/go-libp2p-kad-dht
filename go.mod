@@ -33,5 +33,3 @@ require (
 	go.opencensus.io v0.22.3
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898
 )
-
-replace github.com/libp2p/go-libp2p-peerstore => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-peerstore

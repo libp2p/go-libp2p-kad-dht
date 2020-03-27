@@ -161,8 +161,25 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	// run the query
 	q.runWithGreedyParallelism()
 
+	if ctx.Err() != nil {
+		q.recordValuablePeers()
+	}
+
 	res := q.constructLookupResult(targetKadID)
 	return res, nil
+}
+
+func recordPeerIsValuable(p peer.ID) {}
+
+func (q *query) recordValuablePeers() {
+	closePeers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
+	for _, p := range closePeers {
+		referrer := p
+		recordPeerIsValuable(referrer)
+		for referrer = q.queryPeers.GetReferrer(referrer); referrer != ""; {
+			recordPeerIsValuable(referrer)
+		}
+	}
 }
 
 // constructLookupResult takes the query information and uses it to construct the lookup result

@@ -2,13 +2,11 @@ package dht
 
 import (
 	"context"
+	ma "github.com/multiformats/go-multiaddr"
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/event"
-
 	kb "github.com/libp2p/go-libp2p-kbucket"
-
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,11 +35,9 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	waitForWellFormedTables(t, []*IpfsDHT{d1}, 1, 1, 2*time.Second)
 	require.Equal(t, connectedTo.self, d1.routingTable.ListPeers()[0])
 
-	// now emit the address change event
-	em, err := d1.host.EventBus().Emitter(&event.EvtLocalAddressesUpdated{})
-	require.NoError(t, err)
-	require.NoError(t, em.Emit(event.EvtLocalAddressesUpdated{}))
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 2*time.Second)
+	// now change the listen address so and event is emitted and we do a self walk
+	require.NoError(t, d1.host.Network().Listen(ma.StringCast("/ip4/0.0.0.0/tcp/1234")))
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 20*time.Second))
 	// it should now have both peers in the RT
 	ps := d1.routingTable.ListPeers()
 	require.Contains(t, ps, d2.self)

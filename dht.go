@@ -107,6 +107,9 @@ type IpfsDHT struct {
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
 	// networks).
 	enableProviders, enableValues bool
+
+	// peerstore interface that supports signed peer records for peer addresses
+	ca peerstore.CertifiedAddrBook
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -253,6 +256,12 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 
 	dht.providers = providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore)
 
+	ca, ok := peerstore.GetCertifiedAddrBook(h.Peerstore())
+	if !ok {
+		return nil, errors.New("peerstore is not a certified addr book")
+	}
+	dht.ca = ca
+
 	return dht, nil
 }
 
@@ -320,14 +329,22 @@ var errInvalidRecord = errors.New("received invalid record")
 // key. It returns either the value or a list of closer peers.
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
+func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, *queryResponse, error) {
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Perhaps we were given closer peers
-	peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+	srs, err := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
+	if err != nil {
+		logger.Errorf("could not parse signed records in resp, err=%s", err)
+		return nil, nil, routing.ErrNotFound
+	}
+	q := &queryResponse{}
+	for p := range srs {
+		q.signedPeers = append(q.signedPeers, &signedPeerResp{p, srs[p].Addrs, srs[p].Envelope})
+	}
 
 	if record := pmes.GetRecord(); record != nil {
 		// Success! We were given the value
@@ -341,12 +358,12 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 			err = errInvalidRecord
 			record = new(recpb.Record)
 		}
-		return record, peers, err
+		return record, q, err
 	}
 
-	if len(peers) > 0 {
+	if len(q.signedPeers) > 0 {
 		logger.Debug("getValueOrPeers: peers")
-		return nil, peers, nil
+		return nil, q, nil
 	}
 
 	logger.Warning("getValueOrPeers: routing.ErrNotFound")
@@ -483,6 +500,7 @@ func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key mult
 // nearestPeersToQuery returns the routing tables closest peers.
 func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
 	closer := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count)
+
 	return closer
 }
 

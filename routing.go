@@ -10,15 +10,16 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	evrecord "github.com/libp2p/go-libp2p-core/record"
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -333,14 +334,14 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 		defer close(valCh)
 		defer close(lookupResCh)
 		lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, key,
-			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 					Type: routing.SendingQuery,
 					ID:   p,
 				})
 
-				rec, peers, err := dht.getValueOrPeers(ctx, p, key)
+				rec, qr, err := dht.getValueOrPeers(ctx, p, key)
 				switch err {
 				case routing.ErrNotFound:
 					// in this case, they responded with nothing,
@@ -372,6 +373,11 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					}
 				}
 
+				var peers []*peer.AddrInfo
+				for _, sp := range qr.signedPeers {
+					peers = append(peers, &peer.AddrInfo{sp.peer, sp.addrs})
+				}
+
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 					Type:      routing.PeerResponse,
@@ -379,7 +385,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					Responses: peers,
 				})
 
-				return peers, err
+				return qr, err
 			},
 			func() bool {
 				select {
@@ -581,7 +587,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	}
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, string(key),
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -629,7 +635,12 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 				Responses: peers,
 			})
 
-			return peers, nil
+			q := &queryResponse{}
+			for _, p := range peers {
+				q.unsignedPeers = append(q.unsignedPeers, p)
+			}
+
+			return q, nil
 		},
 		func() bool {
 			return !findAll && ps.Size() >= count
@@ -642,8 +653,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 }
 
 // FindPeer searches for a peer with given ID.
-func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
-	eip := logger.EventBegin(ctx, "FindPeer", id)
+func (dht *IpfsDHT) FindPeer(ctx context.Context, targetPeer peer.ID) (_ peer.AddrInfo, err error) {
+	eip := logger.EventBegin(ctx, "FindPeer", targetPeer)
 	defer func() {
 		if err != nil {
 			eip.SetError(err)
@@ -652,36 +663,68 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	}()
 
 	// Check if were already connected to them
-	if pi := dht.FindLocal(id); pi.ID != "" {
+	if pi := dht.FindLocal(targetPeer); pi.ID != "" {
 		return pi, nil
 	}
 
-	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, string(id),
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+	var signedRecordTarget []*evrecord.Envelope
+	var unsignedAddrsTarget []ma.Multiaddr
+
+	_, err = dht.runLookupWithFollowup(ctx, dht.d, string(targetPeer),
+		func(ctx context.Context, queryPeer peer.ID) (*queryResponse, error) {
+
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
-				ID:   p,
+				ID:   queryPeer,
 			})
 
-			pmes, err := dht.findPeerSingle(ctx, p, id)
+			pmes, err := dht.findPeerSingle(ctx, queryPeer, targetPeer)
 			if err != nil {
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}
-			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+
+			var peers []*peer.AddrInfo
+			qr := &queryResponse{}
+			// consume the signed records we got from the peer
+			signedRecords, err := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
+			if err != nil {
+				logger.Debugf("error parsing signed records sent in query response, err=%s", err)
+				return nil, err
+			}
+
+			for p := range signedRecords {
+				peers = append(peers, &peer.AddrInfo{p, signedRecords[p].Addrs})
+				// do not add target peer as we want to finish the whole query to discover the latest record
+				if p == targetPeer {
+					signedRecordTarget = append(signedRecordTarget, signedRecords[p].Envelope)
+					continue
+				}
+				qr.signedPeers = append(qr.signedPeers)
+			}
+
+			unsignedPeers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+			for _, p := range unsignedPeers {
+				peers = append(peers, p)
+				// we should only see an unsigned record for the target peer since
+				// it's possible it does not support signed addresses
+				if p.ID == targetPeer {
+					unsignedAddrsTarget = append(unsignedAddrsTarget, p.Addrs...)
+				}
+			}
 
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:      routing.PeerResponse,
-				ID:        p,
+				ID:        queryPeer,
 				Responses: peers,
 			})
 
-			return peers, err
+			return qr, err
 		},
 		func() bool {
-			return dht.host.Network().Connectedness(id) == network.Connected
+			return false
 		},
 	)
 
@@ -689,22 +732,29 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		return peer.AddrInfo{}, err
 	}
 
-	dialedPeerDuringQuery := false
-	for i, p := range lookupRes.peers {
-		if p == id {
-			// Note: we consider PeerUnreachable to be a valid state because the peer may not support the DHT protocol
-			// and therefore the peer would fail the query. The fact that a peer that is returned can be a non-DHT
-			// server peer and is not identified as such is a bug.
-			dialedPeerDuringQuery = lookupRes.state[i] != qpeerset.PeerHeard
-			break
-		}
+	// did we discover the peer during the query ?
+	heardDuringQuery := false
+	if len(signedRecordTarget) != 0 || len(unsignedAddrsTarget) != 0 {
+		heardDuringQuery = true
 	}
 
+	// let's add all signed addrs we discovered to the peerstore
+	for i := range signedRecordTarget {
+		dht.ca.ConsumePeerRecord(signedRecordTarget[i], peerstore.TempAddrTTL)
+	}
+	// lets's add all unsigned addrs. If the peerstore already has a signed record for the peer,
+	// it will anyways ignore the unsigned addrs
+	for _, addr := range unsignedAddrsTarget {
+		dht.peerstore.AddAddr(targetPeer, addr, peerstore.TempAddrTTL)
+	}
+
+	// Let's try dialling
+	dht.host.Connect(ctx, peer.AddrInfo{ID: targetPeer})
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.
-	connectedness := dht.host.Network().Connectedness(id)
-	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
-		return dht.peerstore.PeerInfo(id), nil
+	connectedness := dht.host.Network().Connectedness(targetPeer)
+	if heardDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
+		return dht.peerstore.PeerInfo(targetPeer), nil
 	}
 
 	return peer.AddrInfo{}, routing.ErrNotFound

@@ -1,8 +1,11 @@
 package dht_pb
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/record"
 
 	logging "github.com/ipfs/go-log"
 	b58 "github.com/mr-tron/base58/base58"
@@ -51,6 +54,14 @@ func peerInfoToPBPeer(p peer.AddrInfo) *Message_Peer {
 	return pbp
 }
 
+func peerRecordToPbSignedPeerRecord(peerRecord *record.Envelope) (*Message_SignedPeerRecord, error) {
+	bz, err := peerRecord.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	return &Message_SignedPeerRecord{SignedPeerRecord: bz}, nil
+}
+
 // PBPeerToPeer turns a *Message_Peer into its peer.AddrInfo counterpart
 func PBPeerToPeerInfo(pbp *Message_Peer) *peer.AddrInfo {
 	return &peer.AddrInfo{
@@ -82,6 +93,33 @@ func PeerInfosToPBPeers(n network.Network, peers []peer.AddrInfo) []*Message_Pee
 	return pbps
 }
 
+// PeerSignedRecordsToPBSignedPeerRecords transforms signed peer records to a set
+// of []*Message_SignedPeerRecord which is their Proto representation.
+func PeerSignedRecordsToPBSignedPeerRecords(n network.Network,
+	peerRecords []*record.Envelope) ([]*Message_SignedPeerRecord, error) {
+
+	prs := make([]*Message_SignedPeerRecord, len(peerRecords))
+	for i := range peerRecords {
+		rec, err := peerRecords[i].Record()
+		if err != nil {
+			return nil, err
+		}
+		peerrec, ok := rec.(*peer.PeerRecord)
+		if !ok {
+			return nil, errors.New("record should be a peer record")
+		}
+		c := ConnectionType(n.Connectedness(peerrec.PeerID))
+
+		pbrec, err := peerRecordToPbSignedPeerRecord(peerRecords[i])
+		if err != nil {
+			return nil, err
+		}
+		pbrec.Connection = c
+		prs[i] = pbrec
+	}
+	return prs, nil
+}
+
 func PeerRoutingInfosToPBPeers(peers []PeerRoutingInfo) []*Message_Peer {
 	pbpeers := make([]*Message_Peer, len(peers))
 	for i, p := range peers {
@@ -98,6 +136,35 @@ func PBPeersToPeerInfos(pbps []*Message_Peer) []*peer.AddrInfo {
 		peers = append(peers, PBPeerToPeerInfo(pbp))
 	}
 	return peers
+}
+
+// RawSignedPeerRecordConn is a representation/parsed version of a PB
+// signed peer record.
+type RawSignedPeerRecordConn struct {
+	Envelope *record.Envelope
+	Addrs    []ma.Multiaddr
+	Conn     network.Connectedness
+}
+
+// PBSignedPeerRecordsToPeerRecords converts PB signed peer records to envelopes
+func PBSignedPeerRecordsToPeerRecords(pbsp []*Message_SignedPeerRecord) (map[peer.ID]*RawSignedPeerRecordConn, error) {
+	evs := make(map[peer.ID]*RawSignedPeerRecordConn)
+
+	for i := range pbsp {
+		if pbsp[i] == nil || len(pbsp[i].SignedPeerRecord) == 0 {
+			continue
+		}
+		signedBytes := pbsp[i].SignedPeerRecord
+		ev, rec, err := record.ConsumeEnvelope(signedBytes, peer.PeerRecordEnvelopeDomain)
+		if err != nil {
+			return nil, err
+		}
+
+		peer := rec.(*peer.PeerRecord)
+
+		evs[peer.PeerID] = &RawSignedPeerRecordConn{ev, peer.Addrs, Connectedness(pbsp[i].Connection)}
+	}
+	return evs, nil
 }
 
 // Addresses returns a multiaddr associated with the Message_Peer entry

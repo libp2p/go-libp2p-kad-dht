@@ -8,16 +8,33 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/record"
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
-type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
+// signedPeerResp represents a signed peer we get in a query response for the query.
+type signedPeerResp struct {
+	peer     peer.ID
+	addrs    []ma.Multiaddr
+	envelope *record.Envelope
+}
+
+type queryResponse struct {
+	// signed peer records we receive in query responses
+	signedPeers []*signedPeerResp
+	// unsigned peer addrs
+	unsignedPeers []*peer.AddrInfo
+}
+
+type queryFn func(context.Context, peer.ID) (*queryResponse, error)
 type stopFn func() bool
 
 // query represents a single disjoint query.
@@ -372,8 +389,20 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 	}
 
 	// process new peers
-	saw := []peer.ID{}
-	for _, next := range newPeers {
+	saw := make(map[peer.ID]struct{})
+
+	// consume the signed peer records in the response
+	for _, sr := range newPeers.signedPeers {
+		if sr.peer == q.dht.self {
+			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
+			continue
+		}
+		q.dht.ca.ConsumePeerRecord(sr.envelope, pstore.TempAddrTTL)
+		saw[sr.peer] = struct{}{}
+	}
+
+	// consume the unsigned peers in the response
+	for _, next := range newPeers.unsignedPeers {
 		if next.ID == q.dht.self { // don't add self.
 			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 			continue
@@ -381,10 +410,15 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 
 		// add their addresses to the dialer's peerstore
 		q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-		saw = append(saw, next.ID)
+		saw[next.ID] = struct{}{}
 	}
 
-	ch <- &queryUpdate{seen: saw, queried: []peer.ID{p}}
+	seenPeers := make([]peer.ID, 0, len(saw))
+	for p, _ := range saw {
+		seenPeers = append(seenPeers, p)
+	}
+
+	ch <- &queryUpdate{seen: seenPeers, queried: []peer.ID{p}}
 }
 
 func (q *query) updateState(up *queryUpdate) {

@@ -76,7 +76,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	defer e.Done()
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, dht.d, key,
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -88,7 +88,21 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}
-			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+
+			srs, err := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
+			if err != nil {
+				logger.Errorf("could not parse signed records in resp, err=%s", err)
+				return nil, err
+			}
+
+			// ONLY include Signed records for GetClosestPeers
+			var peers []*peer.AddrInfo
+			q := &queryResponse{}
+			for p := range srs {
+				ev := srs[p].Envelope
+				q.signedPeers = append(q.signedPeers, &signedPeerResp{p, srs[p].Addrs, ev})
+				peers = append(peers, &peer.AddrInfo{p, srs[p].Addrs})
+			}
 
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -97,7 +111,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 				Responses: peers,
 			})
 
-			return peers, err
+			return q, err
 		},
 		func() bool { return false },
 	)

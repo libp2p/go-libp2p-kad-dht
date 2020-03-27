@@ -10,6 +10,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/record"
+
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 
 	"github.com/gogo/protobuf/proto"
@@ -90,6 +92,21 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		}
 
 		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), closerinfos)
+
+		// We should have signed records for all closer peers
+		var signedRecords []*record.Envelope
+		for _, cl := range closer {
+			rec := dht.ca.GetPeerRecord(cl)
+			if rec == nil {
+				return nil, fmt.Errorf("no signed record for peer %s", cl)
+			}
+			signedRecords = append(signedRecords, rec)
+		}
+		scp, err := pb.PeerSignedRecordsToPBSignedPeerRecords(dht.host.Network(), signedRecords)
+		if err != nil {
+			return nil, err
+		}
+		resp.SignedCloserPeers = scp
 	}
 
 	return resp, nil
@@ -265,13 +282,28 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	logger.SetTag(ctx, "peer", p)
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
+	var signedRecords []*record.Envelope
 
 	// if looking for self... special case where we send it on CloserPeers.
 	targetPid := peer.ID(pmes.GetKey())
 	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
+		// we should have a signed record for self
+		rec := dht.ca.GetPeerRecord(dht.self)
+		if rec == nil {
+			return nil, errors.New("did not have signed record for self")
+		}
+		signedRecords = append(signedRecords, rec)
 	} else {
 		closest = dht.betterPeersToQuery(pmes, p, dht.bucketSize)
+
+		for _, cl := range closest {
+			rec := dht.ca.GetPeerRecord(cl)
+			if rec == nil {
+				continue
+			}
+			signedRecords = append(signedRecords, rec)
+		}
 
 		// Never tell a peer about itself.
 		if targetPid != p {
@@ -286,6 +318,11 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 			// and improve peer routing in the host.
 			switch dht.host.Network().Connectedness(targetPid) {
 			case network.Connected, network.CanConnect:
+				// We might not have a signed record for the target peer
+				if rec := dht.ca.GetPeerRecord(targetPid); rec != nil {
+					signedRecords = append(signedRecords, rec)
+				}
+
 				closest = append(closest, targetPid)
 			}
 		}
@@ -307,6 +344,12 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	}
 
 	resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), withAddresses)
+	scp, err := pb.PeerSignedRecordsToPBSignedPeerRecords(dht.host.Network(), signedRecords)
+	if err != nil {
+		return nil, err
+	}
+	resp.SignedCloserPeers = scp
+
 	return resp, nil
 }
 

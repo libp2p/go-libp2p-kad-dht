@@ -16,7 +16,7 @@ require (
 	github.com/libp2p/go-libp2p v0.7.2-0.20200326134718-c351c42dc7b8
 	github.com/libp2p/go-libp2p-core v0.5.1-0.20200326183639-dbfc912c81f7
 	github.com/libp2p/go-libp2p-kbucket v0.3.2-0.20200320132433-d1a1e9242e0c
-	github.com/libp2p/go-libp2p-peerstore v0.2.1
+	github.com/libp2p/go-libp2p-peerstore v0.2.2-0.20200327104853-9868efd05f1a
 	github.com/libp2p/go-libp2p-record v0.1.2
 	github.com/libp2p/go-libp2p-swarm v0.2.2
 	github.com/libp2p/go-libp2p-testing v0.1.1

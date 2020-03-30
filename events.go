@@ -28,7 +28,7 @@ type LookupUpdateEvent struct {
 	// Cause is the peer whose response (or lack of response) caused the update event.
 	// If Cause is nil, this is the first update event in the lookup, caused by the seeding.
 	Cause peer.ID
-	// Source is the peer who returned to us the useful information in this update.
+	// Source is the peer who informed us about the peer IDs in this update (below).
 	Source peer.ID
 	// Heard is a set of peers whose state in the lookup's peerset is being set to "heard".
 	Heard []peer.ID

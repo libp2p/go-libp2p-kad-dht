@@ -159,7 +159,7 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	// run the query
-	q.runWithGreedyParallelism()
+	q.run()
 
 	if ctx.Err() != nil {
 		q.recordValuablePeers()
@@ -187,7 +187,10 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	// determine if the query terminated early
 	completed := true
 
-	if !(q.isLookupTermination()) {
+	// Lookup and starvation are both valid ways for a lookup to complete. (Starvation does not imply failure.)
+	// Lookup termination (as defined in isLookupTermination) is not possible in small networks.
+	// Starvation is a successful query termination in small networks.
+	if !(q.isLookupTermination() || q.isStarvationTermination()) {
 		completed = false
 	}
 
@@ -228,7 +231,7 @@ type queryUpdate struct {
 	unreachable []peer.ID
 }
 
-func (q *query) runWithGreedyParallelism() {
+func (q *query) run() {
 	pathCtx, cancelPath := context.WithCancel(q.ctx)
 	defer cancelPath()
 

@@ -16,7 +16,7 @@ require (
 	github.com/libp2p/go-eventbus v0.1.0
 	github.com/libp2p/go-libp2p v0.7.3-0.20200330204848-85060e8d229f
 	github.com/libp2p/go-libp2p-core v0.5.0
-	github.com/libp2p/go-libp2p-kbucket v0.3.2-0.20200320132433-d1a1e9242e0c
+	github.com/libp2p/go-libp2p-kbucket v0.3.2-0.20200331103104-396aa618a0a1
 	github.com/libp2p/go-libp2p-peerstore v0.2.2
 	github.com/libp2p/go-libp2p-record v0.1.2
 	github.com/libp2p/go-libp2p-swarm v0.2.2
@@ -35,5 +35,3 @@ require (
 	go.opencensus.io v0.22.3
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898
 )
-
-replace github.com/libp2p/go-libp2p-kbucket => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-kbucket

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -96,7 +97,7 @@ type IpfsDHT struct {
 
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
-	rtRefreshPeriod       time.Duration
+	rtRefreshInterval     time.Duration
 	triggerRtRefresh      chan chan<- error
 	triggerSelfLookup     chan chan<- error
 
@@ -134,7 +135,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	}
 
 	dht.autoRefresh = cfg.routingTable.autoRefresh
-	dht.rtRefreshPeriod = cfg.routingTable.refreshPeriod
+	dht.rtRefreshInterval = cfg.routingTable.refreshInterval
 	dht.rtRefreshQueryTimeout = cfg.routingTable.refreshQueryTimeout
 
 	dht.maxRecordAge = cfg.maxRecordAge
@@ -257,6 +258,12 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 }
 
 func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
+	// To grok the Math Wizardy here, please be patient as a document explaining it will
+	// be published soon.
+	l1 := math.Log(float64(1) / float64(defaultBucketSize))                              //(Log(1/K))
+	l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(defaultBucketSize))) // Log(1 - (alpha / K))
+	maxLastSuccessfulOutboundThreshold := l1 / l2 * float64(cfg.routingTable.refreshInterval)
+
 	self := kb.ConvertPeerID(dht.host.ID())
 
 	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore())
@@ -270,6 +277,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 
 	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(),
 		rtOpts...)
+	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold)
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {

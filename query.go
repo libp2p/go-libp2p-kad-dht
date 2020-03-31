@@ -288,10 +288,10 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 				NewLookupUpdateEvent(
 					cause,
 					q.queryPeers.GetReferrer(peers[0]),
-					nil,
-					[]peer.ID{peers[0]},
-					nil,
-					nil,
+					nil,                 // heard
+					[]peer.ID{peers[0]}, // waiting
+					nil,                 // queried
+					nil,                 // unreachable
 				),
 				nil,
 				nil,

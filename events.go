@@ -17,8 +17,10 @@ type LookupEvent struct {
 	ID uuid.UUID
 	// Key is the Kademlia key used as a lookup target.
 	Key kbucket.ID
-	// Update, if not nil, describes a state update event.
-	Update *LookupUpdateEvent
+	// Request, if not nil, describes a state update event, associated with an outgoing query request.
+	Request *LookupUpdateEvent
+	// Response, if not nil, describes a state update event, associated with an outgoing query response.
+	Response *LookupUpdateEvent
 	// Terminate, if not nil, describe a termination event.
 	Terminate *LookupTerminateEvent
 }

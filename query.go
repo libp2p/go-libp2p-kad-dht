@@ -285,7 +285,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 		PublishLookupEvent(ctx, &LookupEvent{
 			ID:  q.id,
 			Key: q.key,
-			Update: &LookupUpdateEvent{
+			Request: &LookupUpdateEvent{
 				Cause:   cause,
 				Source:  q.queryPeers.GetReferrer(peers[0]),
 				Waiting: []peer.ID{peers[0]},
@@ -385,7 +385,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 	PublishLookupEvent(ctx, &LookupEvent{
 		ID:  q.id,
 		Key: q.key,
-		Update: &LookupUpdateEvent{
+		Response: &LookupUpdateEvent{
 			Cause:       up.cause,
 			Source:      up.cause,
 			Heard:       up.heard,

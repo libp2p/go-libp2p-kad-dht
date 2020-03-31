@@ -11,7 +11,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
-	kbucket "github.com/libp2p/go-libp2p-kbucket"
 
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -29,7 +28,7 @@ type query struct {
 	id uuid.UUID
 
 	// target key for the lookup
-	key kbucket.ID
+	key string
 
 	// the query context.
 	ctx context.Context
@@ -147,7 +146,7 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 
 	q := &query{
 		id:         uuid.New(),
-		key:        targetKadID,
+		key:        target,
 		ctx:        queryCtx,
 		cancel:     cancelQuery,
 		dht:        dht,
@@ -282,15 +281,22 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
 		return
 	} else {
-		PublishLookupEvent(ctx, &LookupEvent{
-			ID:  q.id,
-			Key: q.key,
-			Request: &LookupUpdateEvent{
-				Cause:   cause,
-				Source:  q.queryPeers.GetReferrer(peers[0]),
-				Waiting: []peer.ID{peers[0]},
-			},
-		})
+		PublishLookupEvent(ctx,
+			NewLookupEvent(
+				q.id,
+				q.key,
+				NewLookupUpdateEvent(
+					cause,
+					q.queryPeers.GetReferrer(peers[0]),
+					nil,
+					[]peer.ID{peers[0]},
+					nil,
+					nil,
+				),
+				nil,
+				nil,
+			),
+		)
 		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
 		go q.queryPeer(ctx, ch, peers[0])
 	}
@@ -331,11 +337,15 @@ func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason
 	if q.terminated {
 		return
 	} else {
-		PublishLookupEvent(ctx, &LookupEvent{
-			ID:        q.id,
-			Key:       q.key,
-			Terminate: &LookupTerminateEvent{Reason: reason},
-		})
+		PublishLookupEvent(ctx,
+			NewLookupEvent(
+				q.id,
+				q.key,
+				nil,
+				nil,
+				NewLookupTerminateEvent(reason),
+			),
+		)
 		cancel() // abort outstanding queries
 		q.terminated = true
 	}
@@ -382,17 +392,22 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {
-	PublishLookupEvent(ctx, &LookupEvent{
-		ID:  q.id,
-		Key: q.key,
-		Response: &LookupUpdateEvent{
-			Cause:       up.cause,
-			Source:      up.cause,
-			Heard:       up.heard,
-			Queried:     up.queried,
-			Unreachable: up.unreachable,
-		},
-	})
+	PublishLookupEvent(ctx,
+		NewLookupEvent(
+			q.id,
+			q.key,
+			nil,
+			NewLookupUpdateEvent(
+				up.cause,
+				up.cause,
+				up.heard,       // heard
+				nil,            // waiting
+				up.queried,     // queried
+				up.unreachable, // unreachable
+			),
+			nil,
+		),
+	)
 	for _, p := range up.heard {
 		if p == q.dht.self { // don't add self.
 			continue

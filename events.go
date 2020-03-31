@@ -10,13 +10,69 @@ import (
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 )
 
+type KeyKadID struct {
+	Key string
+	Kad kbucket.ID
+}
+
+func NewKeyKadID(k string) *KeyKadID {
+	return &KeyKadID{
+		Key: k,
+		Kad: kbucket.ConvertKey(k),
+	}
+}
+
+type PeerKadID struct {
+	Peer peer.ID
+	Kad  kbucket.ID
+}
+
+func NewPeerKadID(p peer.ID) *PeerKadID {
+	return &PeerKadID{
+		Peer: p,
+		Kad:  kbucket.ConvertPeerID(p),
+	}
+}
+
+func NewPeerKadIDSlice(p []peer.ID) []*PeerKadID {
+	r := make([]*PeerKadID, len(p))
+	for i := range p {
+		r[i] = NewPeerKadID(p[i])
+	}
+	return r
+}
+
+func OptPeerKadID(p peer.ID) *PeerKadID {
+	if p == "" {
+		return nil
+	} else {
+		return NewPeerKadID(p)
+	}
+}
+
+func NewLookupEvent(
+	id uuid.UUID,
+	key string,
+	request *LookupUpdateEvent,
+	response *LookupUpdateEvent,
+	terminate *LookupTerminateEvent,
+) *LookupEvent {
+	return &LookupEvent{
+		ID:        id,
+		Key:       NewKeyKadID(key),
+		Request:   request,
+		Response:  response,
+		Terminate: terminate,
+	}
+}
+
 // LookupEvent is emitted for every notable event that happens during a DHT lookup.
 // LookupEvent supports JSON marshalling because all of its fields do, recursively.
 type LookupEvent struct {
 	// ID is a unique identifier for the lookup instance
 	ID uuid.UUID
 	// Key is the Kademlia key used as a lookup target.
-	Key kbucket.ID
+	Key *KeyKadID
 	// Request, if not nil, describes a state update event, associated with an outgoing query request.
 	Request *LookupUpdateEvent
 	// Response, if not nil, describes a state update event, associated with an outgoing query response.
@@ -25,21 +81,39 @@ type LookupEvent struct {
 	Terminate *LookupTerminateEvent
 }
 
+func NewLookupUpdateEvent(
+	cause peer.ID,
+	source peer.ID,
+	heard []peer.ID,
+	waiting []peer.ID,
+	queried []peer.ID,
+	unreachable []peer.ID,
+) *LookupUpdateEvent {
+	return &LookupUpdateEvent{
+		Cause:       OptPeerKadID(cause),
+		Source:      OptPeerKadID(source),
+		Heard:       NewPeerKadIDSlice(heard),
+		Waiting:     NewPeerKadIDSlice(waiting),
+		Queried:     NewPeerKadIDSlice(queried),
+		Unreachable: NewPeerKadIDSlice(unreachable),
+	}
+}
+
 // LookupUpdateEvent describes a lookup state update event.
 type LookupUpdateEvent struct {
 	// Cause is the peer whose response (or lack of response) caused the update event.
 	// If Cause is nil, this is the first update event in the lookup, caused by the seeding.
-	Cause peer.ID
+	Cause *PeerKadID
 	// Source is the peer who informed us about the peer IDs in this update (below).
-	Source peer.ID
+	Source *PeerKadID
 	// Heard is a set of peers whose state in the lookup's peerset is being set to "heard".
-	Heard []peer.ID
+	Heard []*PeerKadID
 	// Waiting is a set of peers whose state in the lookup's peerset is being set to "waiting".
-	Waiting []peer.ID
+	Waiting []*PeerKadID
 	// Queried is a set of peers whose state in the lookup's peerset is being set to "queried".
-	Queried []peer.ID
+	Queried []*PeerKadID
 	// Unreachable is a set of peers whose state in the lookup's peerset is being set to "unreachable".
-	Unreachable []peer.ID
+	Unreachable []*PeerKadID
 }
 
 // LookupTerminateEvent describes a lookup termination event.
@@ -48,8 +122,30 @@ type LookupTerminateEvent struct {
 	Reason LookupTerminationReason
 }
 
+func NewLookupTerminateEvent(reason LookupTerminationReason) *LookupTerminateEvent {
+	return &LookupTerminateEvent{Reason: reason}
+}
+
 // LookupTerminationReason captures reasons for terminating a lookup.
 type LookupTerminationReason int
+
+func (r LookupTerminationReason) MarshalJSON() ([]byte, error) {
+	return []byte(r.String()), nil
+}
+
+func (r LookupTerminationReason) String() string {
+	switch r {
+	case LookupStopped:
+		return "stopped"
+	case LookupCancelled:
+		return "cancelled"
+	case LookupStarvation:
+		return "starvation"
+	case LookupCompleted:
+		return "completed"
+	}
+	panic("unreachable")
+}
 
 const (
 	// LookupStopped indicates that the lookup was aborted by the user's stopFn.

@@ -256,13 +256,13 @@ func (q *query) run() {
 		}
 
 		if q.terminated {
-			// don't wait for outstanding queries to complete.
-			return
-			// exit once all goroutines have been cleaned up
-			// if q.queryPeers.NumWaiting() == 0 {
-			// 	return
-			// }
-			// continue
+			// exit once all outstanding queries have completed.
+			// This is important because the queries write to channels provided by the user.
+			// The user will close this channels as soon as the lookup completes (i.e. this function returns).
+			if q.queryPeers.NumWaiting() == 0 {
+				return
+			}
+			continue
 		}
 
 		// if all "threads" are busy, wait until someone finishes

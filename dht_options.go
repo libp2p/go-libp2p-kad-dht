@@ -88,7 +88,7 @@ var defaults = func(o *config) error {
 	o.queryPeerFilter = emptyQueryFilter
 
 	o.routingTable.latencyTolerance = time.Minute
-	o.routingTable.refreshQueryTimeout = 30 * time.Second
+	o.routingTable.refreshQueryTimeout = 1 * time.Minute
 	o.routingTable.refreshPeriod = 10 * time.Minute
 	o.routingTable.autoRefresh = true
 	o.routingTable.peerFilter = emptyRTFilter
@@ -120,14 +120,6 @@ func (c *config) validate() error {
 		return nil
 	}
 	return nil
-}
-
-// RoutingTableCheckInterval is the interval between two runs of the RT cleanup routine.
-func RoutingTableCheckInterval(i time.Duration) Option {
-	return func(c *config) error {
-		c.routingTable.checkInterval = i
-		return nil
-	}
 }
 
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers

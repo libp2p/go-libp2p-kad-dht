@@ -192,11 +192,6 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 			continue
 		}
 
-		// do not refresh if bucket is full
-		if dht.routingTable.IsBucketFull(tcpl.Cpl) {
-			continue
-		}
-
 		// gen rand peer with the cpl
 		randPeer, err := dht.routingTable.GenRandPeerID(tcpl.Cpl)
 		if err != nil {

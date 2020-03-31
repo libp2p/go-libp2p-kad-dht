@@ -61,13 +61,7 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 	dht.plk.Lock()
 	defer dht.plk.Unlock()
 	for _, p := range dht.host.Network().Peers() {
-		valid, err := dht.validRTPeer(p)
-		if err != nil {
-			return nil, fmt.Errorf("could not check peerstore for protocol support: err: %s", err)
-		}
-		if valid {
-			dht.peerFound(dht.ctx, p)
-		}
+		dht.peerFound(dht.ctx, p)
 	}
 
 	return nn, nil
@@ -96,10 +90,10 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 				case dht.triggerSelfLookup <- nil:
 				default:
 				}
-			case event.EvtPeerIdentificationCompleted:
-				handlePeerIdentificationCompletedEvent(dht, evt)
 			case event.EvtPeerProtocolsUpdated:
 				handlePeerProtocolsUpdatedEvent(dht, evt)
+			case event.EvtPeerIdentificationCompleted:
+				dht.fixLowPeers()
 			case event.EvtLocalReachabilityChanged:
 				if dht.auto {
 					handleLocalReachabilityChangedEvent(dht, evt)
@@ -117,25 +111,6 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	}
 }
 
-func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentificationCompleted) {
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
-	if dht.host.Network().Connectedness(e.Peer) != network.Connected {
-		return
-	}
-
-	// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
-	valid, err := dht.validRTPeer(e.Peer)
-	if err != nil {
-		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
-		return
-	}
-	if valid {
-		dht.peerFound(dht.ctx, e.Peer)
-		fixLowPeers(dht)
-	}
-}
-
 func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {
 	valid, err := dht.validRTPeer(e.Peer)
 	if err != nil {
@@ -143,13 +118,13 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdat
 		return
 	}
 
-	if valid {
-		dht.peerFound(dht.ctx, e.Peer)
-	} else {
+	if !valid {
 		dht.peerStoppedDHT(dht.ctx, e.Peer)
+	} else {
+		// we just might have discovered a peer that supports the DHT protocol
+		dht.fixLowPeers()
 	}
 
-	fixLowPeers(dht)
 }
 
 func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {
@@ -190,29 +165,6 @@ func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
 	return len(protos) > 0, nil
 }
 
-// fixLowPeers tries to get more peers into the routing table if we're below the threshold
-func fixLowPeers(dht *IpfsDHT) {
-	if dht.routingTable.Size() > minRTRefreshThreshold {
-		return
-	}
-
-	// Passively add peers we already know about
-	for _, p := range dht.host.Network().Peers() {
-		// Don't bother probing, we do that on connect.
-		valid, _ := dht.validRTPeer(p)
-		if valid {
-			dht.peerFound(dht.Context(), p)
-		}
-	}
-
-	if dht.autoRefresh {
-		select {
-		case dht.triggerRtRefresh <- nil:
-		default:
-		}
-	}
-}
-
 func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 	dht := nn.dht
 	select {
@@ -231,10 +183,6 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		// We're still connected.
 		return
 	}
-
-	dht.peerDisconnected(dht.ctx, p)
-
-	fixLowPeers(dht)
 
 	dht.smlk.Lock()
 	defer dht.smlk.Unlock()

@@ -174,6 +174,10 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.startSelfLookup()
 	dht.startRefreshing()
+
+	// go-routine to make sure we ALWAYS have RT peer addresses in the peerstore
+	// since RT membership is decoupled from connectivity
+	go dht.persistRTPeersInPeerStore()
 	return dht, nil
 }
 
@@ -254,21 +258,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 
 func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	self := kb.ConvertPeerID(dht.host.ID())
-	// construct the routing table with a peer validation function
-	pvF := func(c context.Context, p peer.ID) bool {
-		// connect should work
-		if err := dht.host.Connect(c, peer.AddrInfo{ID: p}); err != nil {
-			rtPvLogger.Infof("failed to connect to peer %s for validation, err=%s", p, err)
-			return false
-		}
 
-		// peer should support the DHT protocol
-		b, err := dht.validRTPeer(p)
-		if err != nil {
-			rtPvLogger.Errorf("failed to check if peer %s supports DHT protocol, err=%s", p, err)
-			return false
-		}
-
+	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore())
 		return b && cfg.routingTable.peerFilter(dht, dht.Host().Network().ConnsToPeer(p))
 	}
 
@@ -290,6 +281,25 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	}
 
 	return rt, err
+}
+
+// TODO This is hacky AND SHOULD be removed once https://github.com/libp2p/go-libp2p-core/pull/117
+// has landed.
+func (dht *IpfsDHT) persistRTPeersInPeerStore() {
+	tickr := time.NewTicker(peerstore.RecentlyConnectedAddrTTL / 3)
+	defer tickr.Stop()
+
+	for {
+		select {
+		case <-tickr.C:
+			ps := dht.routingTable.ListPeers()
+			for _, p := range ps {
+				dht.peerstore.AddAddrs(p, dht.peerstore.Addrs(p), peerstore.RecentlyConnectedAddrTTL)
+			}
+		case <-dht.ctx.Done():
+			return
+		}
+	}
 }
 
 // putValueToPeer stores the given key/value pair at the peer 'p'
@@ -404,24 +414,51 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 }
 
 // peerFound signals the routingTable that we've found a peer that
-// supports the DHT protocol.
+// might support the DHT protocol.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
-	logger.Event(ctx, "peerFound", p)
-	dht.routingTable.HandlePeerAlive(p)
+	b, err := dht.validRTPeer(p)
+	if err != nil {
+		logger.Errorf("failed to validate if peer is a DHT peer, err=%s", err)
+	}
+
+	if b {
+		logger.Event(ctx, "peerFound", p)
+		dht.routingTable.TryAddPeer(p)
+	}
 }
 
-// peerStoppedDHT signals the routing table that a peer has stopped supporting the DHT protocol.
+// peerStoppedDHT signals the routing table that a peer is unable to responsd to DHT queries anymore.
 func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "peerStoppedDHT", p)
 	// A peer that does not support the DHT protocol is dead for us.
 	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
-	dht.routingTable.HandlePeerDead(p)
+	dht.routingTable.RemovePeer(p)
+
+	// since we lost a peer from the RT, we should do this here
+	dht.fixLowPeers()
 }
+
+// fixLowPeers tries to get more peers into the routing table if we're below the threshold
+func (dht *IpfsDHT) fixLowPeers() {
+	if dht.routingTable.Size() > minRTRefreshThreshold {
+		return
+	}
 
 // peerDisconnected signals the routing table that a peer is not connected anymore.
 func (dht *IpfsDHT) peerDisconnected(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "peerDisconnected", p)
 	dht.routingTable.HandlePeerDisconnect(p)
+	// Passively add peers we already know about
+	for _, p := range dht.host.Network().Peers() {
+		dht.peerFound(dht.Context(), p)
+	}
+
+	if dht.autoRefresh {
+		select {
+		case dht.triggerRtRefresh <- nil:
+		default:
+		}
+	}
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.

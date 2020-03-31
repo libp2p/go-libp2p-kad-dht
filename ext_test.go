@@ -23,6 +23,7 @@ import (
 // Test that one hung request to a peer doesn't prevent another request
 // using that same peer from obeying its context.
 func TestHungRequest(t *testing.T) {
+	t.Skip("extremely flaky")
 	ctx := context.Background()
 	mn, err := mocknet.FullMeshConnected(ctx, 2)
 	if err != nil {

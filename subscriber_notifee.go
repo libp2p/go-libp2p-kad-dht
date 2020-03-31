@@ -66,7 +66,7 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 			return nil, fmt.Errorf("could not check peerstore for protocol support: err: %s", err)
 		}
 		if valid {
-			dht.peerFound(dht.ctx, p)
+			dht.routingTable.HandlePeerAlive(p)
 		}
 	}
 
@@ -131,7 +131,7 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentif
 		return
 	}
 	if valid {
-		dht.peerFound(dht.ctx, e.Peer)
+		dht.routingTable.HandlePeerAlive(e.Peer)
 		fixLowPeers(dht)
 	}
 }
@@ -144,7 +144,7 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdat
 	}
 
 	if valid {
-		dht.peerFound(dht.ctx, e.Peer)
+		dht.routingTable.HandlePeerAlive(e.Peer)
 	} else {
 		dht.peerStoppedDHT(dht.ctx, e.Peer)
 	}
@@ -201,7 +201,7 @@ func fixLowPeers(dht *IpfsDHT) {
 		// Don't bother probing, we do that on connect.
 		valid, _ := dht.validRTPeer(p)
 		if valid {
-			dht.peerFound(dht.Context(), p)
+			dht.routingTable.HandlePeerAlive(p)
 		}
 	}
 

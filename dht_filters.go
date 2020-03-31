@@ -27,10 +27,7 @@ func PublicQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool {
 
 	var hasPublicAddr bool
 	for _, a := range ai.Addrs {
-		if isRelayAddr(a) {
-			return false
-		}
-		if manet.IsPublicAddr(a) {
+		if !isRelayAddr(a) && manet.IsPublicAddr(a) {
 			hasPublicAddr = true
 		}
 	}
@@ -44,14 +41,6 @@ var _ QueryFilterFunc = PublicQueryFilter
 func PublicRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 	if len(conns) == 0 {
 		return false
-	}
-
-	// Is one of these connections to a public address?
-	for _, c := range conns {
-		addr := c.RemoteMultiaddr()
-		if !isRelayAddr(addr) && manet.IsPublicAddr(addr) {
-			return true
-		}
 	}
 
 	// Do we have a public address for this peer?
@@ -92,7 +81,7 @@ func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 
 	for _, c := range conns {
 		ra := c.RemoteMultiaddr()
-		if manet.IsPrivateAddr(ra) || isRelayAddr(ra) {
+		if manet.IsPrivateAddr(ra) && !isRelayAddr(ra) {
 			return true
 		}
 
@@ -115,6 +104,8 @@ func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 			}
 
 			// if there's no gateway - a direct host in the OS routing table - then consider it local
+			// This is relevant in particular to ipv6 networks where the addresses may all be public,
+			// but the nodes are aware of direct links between each other.
 			if router != nil {
 				_, gw, _, err := router.Route(ip)
 				if gw == nil && err == nil {

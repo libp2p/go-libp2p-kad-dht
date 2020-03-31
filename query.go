@@ -247,20 +247,22 @@ func (q *query) run() {
 			q.updateState(pathCtx, update)
 			cause = update.cause
 		case <-pathCtx.Done():
-			q.terminate(pathCtx, LookupCancelled)
+			q.terminate(pathCtx, cancelPath, LookupCancelled)
 		}
 
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
 		if ready, reason := q.isReadyToTerminate(); ready {
-			q.terminate(pathCtx, reason)
+			q.terminate(pathCtx, cancelPath, reason)
 		}
 
 		if q.terminated {
+			// don't wait for outstanding queries to complete.
+			return
 			// exit once all goroutines have been cleaned up
-			if q.queryPeers.NumWaiting() == 0 {
-				return
-			}
-			continue
+			// if q.queryPeers.NumWaiting() == 0 {
+			// 	return
+			// }
+			// continue
 		}
 
 		// if all "threads" are busy, wait until someone finishes
@@ -290,7 +292,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 			},
 		})
 		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
-		go q.queryPeer(ch, peers[0])
+		go q.queryPeer(ctx, ch, peers[0])
 	}
 }
 
@@ -325,7 +327,7 @@ func (q *query) isStarvationTermination() bool {
 	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
 }
 
-func (q *query) terminate(ctx context.Context, reason LookupTerminationReason) {
+func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason LookupTerminationReason) {
 	if q.terminated {
 		return
 	} else {
@@ -334,14 +336,15 @@ func (q *query) terminate(ctx context.Context, reason LookupTerminationReason) {
 			Key:       q.key,
 			Terminate: &LookupTerminateEvent{Reason: reason},
 		})
+		cancel() // abort outstanding queries
 		q.terminated = true
 	}
 }
 
 // queryPeer queries a single peer and reports its findings on the channel.
 // queryPeer does not access the query state in queryPeers!
-func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
-	dialCtx, queryCtx := q.ctx, q.ctx
+func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID) {
+	dialCtx, queryCtx := ctx, ctx
 
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {

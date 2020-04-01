@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 
 	"github.com/google/uuid"
@@ -134,7 +135,7 @@ func NewLookupTerminateEvent(reason LookupTerminationReason) *LookupTerminateEve
 type LookupTerminationReason int
 
 func (r LookupTerminationReason) MarshalJSON() ([]byte, error) {
-	return []byte(r.String()), nil
+	return json.Marshal(r.String())
 }
 
 func (r LookupTerminationReason) String() string {

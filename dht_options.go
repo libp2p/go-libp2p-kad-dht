@@ -34,7 +34,6 @@ type config struct {
 	mode            ModeOpt
 	protocolPrefix  protocol.ID
 	bucketSize      int
-	disjointPaths   int
 	concurrency     int
 	resiliency      int
 	maxRecordAge    time.Duration
@@ -99,15 +98,6 @@ var defaults = func(o *config) error {
 	o.concurrency = 3
 	o.resiliency = 3
 
-	return nil
-}
-
-// applyFallbacks sets default DHT options. It is applied after Defaults and any options passed to the constructor in
-// order to allow for defaults that are based on other set options.
-func (c *config) applyFallbacks() error {
-	if c.disjointPaths == 0 {
-		c.disjointPaths = c.bucketSize / 2
-	}
 	return nil
 }
 
@@ -257,16 +247,6 @@ func Concurrency(alpha int) Option {
 func Resiliency(beta int) Option {
 	return func(c *config) error {
 		c.resiliency = beta
-		return nil
-	}
-}
-
-// DisjointPaths configures the number of disjoint paths (d in the S/Kademlia paper) taken per query.
-//
-// The default value is BucketSize/2.
-func DisjointPaths(d int) Option {
-	return func(c *config) error {
-		c.disjointPaths = d
 		return nil
 	}
 }

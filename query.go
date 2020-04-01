@@ -315,9 +315,15 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 			continue
 		}
 
+		// add any other know addresses for the candidate peer.
+		curInfo := q.dht.peerstore.PeerInfo(next.ID)
+		next.Addrs = append(next.Addrs, curInfo.Addrs...)
+
 		// add their addresses to the dialer's peerstore
-		q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-		saw = append(saw, next.ID)
+		if q.dht.queryPeerFilter(q.dht, *next) {
+			q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
+			saw = append(saw, next.ID)
+		}
 	}
 
 	ch <- &queryUpdate{seen: saw, queried: []peer.ID{p}}

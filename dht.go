@@ -403,6 +403,13 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	return dht.datastore.Put(mkDsKey(key), data)
 }
 
+// peerFound signals the routingTable that we've found a peer that
+// supports the DHT protocol.
+func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
+	logger.Event(ctx, "peerFound", p)
+	dht.routingTable.HandlePeerAlive(p)
+}
+
 // peerStoppedDHT signals the routing table that a peer has stopped supporting the DHT protocol.
 func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "peerStoppedDHT", p)

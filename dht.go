@@ -16,23 +16,22 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	"go.opencensus.io/tag"
-	"golang.org/x/xerrors"
-
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	record "github.com/libp2p/go-libp2p-record"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 
 	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log"
 	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
-	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
 	"github.com/multiformats/go-multihash"
+	"go.opencensus.io/tag"
+	"golang.org/x/xerrors"
 )
 
 var logger = logging.Logger("dht")
@@ -271,17 +270,6 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 
 	self := kb.ConvertPeerID(dht.host.ID())
 
-	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore())
-		return b && cfg.routingTable.peerFilter(dht, dht.Host().Network().ConnsToPeer(p))
-	}
-
-	rtOpts := []kb.Option{kb.PeerValidationFnc(pvF)}
-	if !(cfg.routingTable.checkInterval == 0) {
-		rtOpts = append(rtOpts, kb.TableCleanupInterval(cfg.routingTable.checkInterval))
-	}
-
-	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(),
-		rtOpts...)
 	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold)
 	cmgr := dht.host.ConnManager()
 
@@ -455,11 +443,6 @@ func (dht *IpfsDHT) fixLowPeers() {
 		return
 	}
 
-// peerDisconnected signals the routing table that a peer is not connected anymore.
-func (dht *IpfsDHT) peerDisconnected(ctx context.Context, p peer.ID) {
-	logger.Event(ctx, "peerDisconnected", p)
-	dht.routingTable.HandlePeerDisconnect(p)
-	// Passively add peers we already know about
 	for _, p := range dht.host.Network().Peers() {
 		dht.peerFound(dht.Context(), p)
 	}

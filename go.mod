@@ -4,7 +4,7 @@ go 1.14
 
 require (
 	github.com/gogo/protobuf v1.3.1
-	github.com/hashicorp/go-multierror v1.0.0
+	github.com/hashicorp/go-multierror v1.1.0
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/ipfs/go-cid v0.0.5
 	github.com/ipfs/go-datastore v0.4.4

@@ -51,6 +51,7 @@ func OptPeerKadID(p peer.ID) *PeerKadID {
 }
 
 func NewLookupEvent(
+	node peer.ID,
 	id uuid.UUID,
 	key string,
 	request *LookupUpdateEvent,
@@ -58,6 +59,7 @@ func NewLookupEvent(
 	terminate *LookupTerminateEvent,
 ) *LookupEvent {
 	return &LookupEvent{
+		Node:      NewPeerKadID(node),
 		ID:        id,
 		Key:       NewKeyKadID(key),
 		Request:   request,
@@ -69,7 +71,9 @@ func NewLookupEvent(
 // LookupEvent is emitted for every notable event that happens during a DHT lookup.
 // LookupEvent supports JSON marshalling because all of its fields do, recursively.
 type LookupEvent struct {
-	// ID is a unique identifier for the lookup instance
+	// Node is the ID of the node performing the lookup.
+	Node *PeerKadID
+	// ID is a unique identifier for the lookup instance.
 	ID uuid.UUID
 	// Key is the Kademlia key used as a lookup target.
 	Key *KeyKadID

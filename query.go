@@ -237,7 +237,7 @@ func (q *query) run() {
 	alpha := q.dht.alpha
 
 	ch := make(chan *queryUpdate, alpha)
-	ch <- &queryUpdate{heard: q.seedPeers}
+	ch <- &queryUpdate{cause: q.dht.self, heard: q.seedPeers}
 
 	for {
 		var cause peer.ID
@@ -283,6 +283,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 	} else {
 		PublishLookupEvent(ctx,
 			NewLookupEvent(
+				q.dht.self,
 				q.id,
 				q.key,
 				NewLookupUpdateEvent(
@@ -339,6 +340,7 @@ func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason
 	} else {
 		PublishLookupEvent(ctx,
 			NewLookupEvent(
+				q.dht.self,
 				q.id,
 				q.key,
 				nil,
@@ -394,6 +396,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 	PublishLookupEvent(ctx,
 		NewLookupEvent(
+			q.dht.self,
 			q.id,
 			q.key,
 			nil,

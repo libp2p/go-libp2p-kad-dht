@@ -6,8 +6,10 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
-	"github.com/libp2p/go-libp2p-record"
+	record "github.com/libp2p/go-libp2p-record"
 )
 
 // ModeOpt describes what mode the dht should operate in
@@ -37,6 +39,7 @@ type config struct {
 	maxRecordAge    time.Duration
 	enableProviders bool
 	enableValues    bool
+	queryPeerFilter QueryFilterFunc
 
 	routingTable struct {
 		refreshQueryTimeout time.Duration
@@ -44,6 +47,7 @@ type config struct {
 		autoRefresh         bool
 		latencyTolerance    time.Duration
 		checkInterval       time.Duration
+		peerFilter          RouteTableFilterFunc
 	}
 
 	// internal parameters, not publicly exposed
@@ -52,6 +56,9 @@ type config struct {
 	// test parameters
 	testProtocols []protocol.ID
 }
+
+func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
+func emptyRTFilter(_ *IpfsDHT, conns []network.Conn) bool { return true }
 
 // apply applies the given options to this Option
 func (c *config) apply(opts ...Option) error {
@@ -78,11 +85,13 @@ var defaults = func(o *config) error {
 	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true
 	o.enableValues = true
+	o.queryPeerFilter = emptyQueryFilter
 
 	o.routingTable.latencyTolerance = time.Minute
 	o.routingTable.refreshQueryTimeout = 30 * time.Second
 	o.routingTable.refreshPeriod = 10 * time.Minute
 	o.routingTable.autoRefresh = true
+	o.routingTable.peerFilter = emptyRTFilter
 	o.maxRecordAge = time.Hour * 36
 
 	o.bucketSize = defaultBucketSize
@@ -288,6 +297,23 @@ func DisableProviders() Option {
 func DisableValues() Option {
 	return func(c *config) error {
 		c.enableValues = false
+		return nil
+	}
+}
+
+// QueryFilter sets a function that approves which peers may be dialed in a query
+func QueryFilter(filter QueryFilterFunc) Option {
+	return func(c *config) error {
+		c.queryPeerFilter = filter
+		return nil
+	}
+}
+
+// RoutingTableFilter sets a function that approves which peers may be added to the routing table. The host should
+// already have at least one connection to the peer under consideration.
+func RoutingTableFilter(filter RouteTableFilterFunc) Option {
+	return func(c *config) error {
+		c.routingTable.peerFilter = filter
 		return nil
 	}
 }

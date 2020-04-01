@@ -91,6 +91,9 @@ type IpfsDHT struct {
 	alpha      int // The concurrency parameter per path
 	beta       int // The number of peers closest to a target that must have responded for a query path to terminate
 
+	queryPeerFilter        QueryFilterFunc
+	routingTablePeerFilter RouteTableFilterFunc
+
 	autoRefresh           bool
 	rtRefreshQueryTimeout time.Duration
 	rtRefreshPeriod       time.Duration
@@ -198,7 +201,6 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
-
 	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
 	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
 
@@ -213,19 +215,21 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	}
 
 	dht := &IpfsDHT{
-		datastore:         cfg.datastore,
-		self:              h.ID(),
-		peerstore:         h.Peerstore(),
-		host:              h,
-		strmap:            make(map[peer.ID]*messageSender),
-		birth:             time.Now(),
-		protocols:         protocols,
-		serverProtocols:   serverProtocols,
-		bucketSize:        cfg.bucketSize,
-		alpha:             cfg.concurrency,
-		beta:              cfg.resiliency,
-		triggerRtRefresh:  make(chan chan<- error),
-		triggerSelfLookup: make(chan chan<- error),
+		datastore:              cfg.datastore,
+		self:                   h.ID(),
+		peerstore:              h.Peerstore(),
+		host:                   h,
+		strmap:                 make(map[peer.ID]*messageSender),
+		birth:                  time.Now(),
+		protocols:              protocols,
+		serverProtocols:        serverProtocols,
+		bucketSize:             cfg.bucketSize,
+		alpha:                  cfg.concurrency,
+		beta:                   cfg.resiliency,
+		triggerRtRefresh:       make(chan chan<- error),
+		triggerSelfLookup:      make(chan chan<- error),
+		queryPeerFilter:        cfg.queryPeerFilter,
+		routingTablePeerFilter: cfg.routingTable.peerFilter,
 	}
 
 	// construct routing table
@@ -265,7 +269,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 			return false
 		}
 
-		return b
+		return b && cfg.routingTable.peerFilter(dht, dht.Host().Network().ConnsToPeer(p))
 	}
 
 	rtOpts := []kb.Option{kb.PeerValidationFnc(pvF)}
@@ -418,7 +422,6 @@ func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 func (dht *IpfsDHT) peerDisconnected(ctx context.Context, p peer.ID) {
 	logger.Event(ctx, "peerDisconnected", p)
 	dht.routingTable.HandlePeerDisconnect(p)
-
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.

@@ -9,21 +9,23 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
+
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	record "github.com/libp2p/go-libp2p-record"
-	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // Test that one hung request to a peer doesn't prevent another request
 // using that same peer from obeying its context.
 func TestHungRequest(t *testing.T) {
-	t.Skip("extremely flaky")
 	ctx := context.Background()
 	mn, err := mocknet.FullMeshConnected(ctx, 2)
 	if err != nil {
@@ -41,6 +43,8 @@ func TestHungRequest(t *testing.T) {
 		defer s.Reset()
 		<-ctx.Done()
 	})
+
+	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.protocols)...))
 	d.peerFound(ctx, hosts[1].ID())
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)

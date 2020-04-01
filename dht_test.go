@@ -774,19 +774,17 @@ func TestRefresh(t *testing.T) {
 	ctxT, cancelT := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelT()
 
-	go func() {
-		for ctxT.Err() == nil {
-			bootstrap(t, ctxT, dhts)
+	for ctxT.Err() == nil {
+		bootstrap(t, ctxT, dhts)
 
-			// wait a bit.
-			select {
-			case <-time.After(50 * time.Millisecond):
-				continue // being explicit
-			case <-ctxT.Done():
-				return
-			}
+		// wait a bit.
+		select {
+		case <-time.After(50 * time.Millisecond):
+			continue // being explicit
+		case <-ctxT.Done():
+			return
 		}
-	}()
+	}
 
 	waitForWellFormedTables(t, dhts, 7, 10, 10*time.Second)
 	cancelT()
@@ -1414,6 +1412,9 @@ func testFindPeerQuery(t *testing.T,
 	for i := 0; i < bootstrappers; i++ {
 		connectNoSync(t, ctx, guy, others[i])
 	}
+
+	// give some time for things to settle down
+	time.Sleep(2 * time.Second)
 
 	for _, d := range dhts {
 		if err := <-d.RefreshRoutingTable(); err != nil {

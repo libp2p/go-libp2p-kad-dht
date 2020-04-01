@@ -23,7 +23,7 @@ import (
 	"go.opencensus.io/tag"
 )
 
-var dhtReadMessageTimeout = time.Minute
+var dhtReadMessageTimeout = 10 * time.Second
 var dhtStreamIdleTimeout = 1 * time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 

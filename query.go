@@ -174,9 +174,12 @@ func (q *query) recordValuablePeers() {
 	closePeers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
 	for _, p := range closePeers {
 		referrer := p
-		recordPeerIsValuable(referrer)
-		for referrer = q.queryPeers.GetReferrer(referrer); referrer != "" && referrer != q.dht.self; {
+		for {
 			recordPeerIsValuable(referrer)
+			referrer = q.queryPeers.GetReferrer(referrer)
+			if referrer == "" || referrer == q.dht.self {
+				break
+			}
 		}
 	}
 }

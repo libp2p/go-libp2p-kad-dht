@@ -423,6 +423,9 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	} else if b {
 		logger.Event(ctx, "peerFound", p)
 		dht.routingTable.TryAddPeer(p, queryPeer)
+
+		// If we discovered the peer because of a query, we need to ensure we override the "zero" lastSuccessfulOutboundQuery
+		// value that must have been set in the Routing Table for this peer when it was first added during a connection.
 		if queryPeer {
 			dht.routingTable.UpdateLastSuccessfulOutboundQuery(p, time.Now())
 		}

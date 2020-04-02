@@ -105,6 +105,7 @@ func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, qu
 
 	doneCh := make(chan struct{}, len(queryPeers))
 	followUpCtx, cancelFollowUp := context.WithCancel(ctx)
+	defer cancelFollowUp()
 	for _, p := range queryPeers {
 		qp := p
 		go func() {
@@ -135,8 +136,6 @@ processFollowUp:
 }
 
 func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
-	queryCtx, cancelQuery := context.WithCancel(ctx)
-
 	// pick the K closest peers to the key in our Routing table and shuffle them.
 	targetKadID := kb.ConvertKey(target)
 	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
@@ -151,8 +150,7 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	q := &query{
 		id:         uuid.New(),
 		key:        target,
-		ctx:        queryCtx,
-		cancel:     cancelQuery,
+		ctx:        ctx,
 		dht:        dht,
 		queryPeers: qpeerset.NewQueryPeerset(target),
 		seedPeers:  seedPeers,

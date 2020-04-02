@@ -237,6 +237,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	defer eip.Done()
 
 	queryCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	valCh, _ := dht.getValues(queryCtx, key, nil)
 
 	out := make([]RecvdVal, 0, nvals)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -47,6 +48,9 @@ type query struct {
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.
 	terminated bool
+
+	// waitGroup ensures lookup does not end until all query goroutines complete.
+	waitGroup sync.WaitGroup
 
 	// the function that will be used to query a single peer.
 	queryFn queryFn
@@ -242,6 +246,8 @@ func (q *query) run() {
 	ch := make(chan *queryUpdate, alpha)
 	ch <- &queryUpdate{cause: q.dht.self, heard: q.seedPeers}
 
+	// return only once all outstanding queries have completed.
+	defer q.waitGroup.Wait()
 	for {
 		var cause peer.ID
 		select {
@@ -258,13 +264,7 @@ func (q *query) run() {
 		}
 
 		if q.terminated {
-			// exit once all outstanding queries have completed.
-			// This is important because the queries write to channels provided by the user.
-			// The user will close this channels as soon as the lookup completes (i.e. this function returns).
-			if q.queryPeers.NumWaiting() == 0 {
-				return
-			}
-			continue
+			return
 		}
 
 		// if all "threads" are busy, wait until someone finishes
@@ -302,6 +302,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 			),
 		)
 		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
+		q.waitGroup.Add(1)
 		go q.queryPeer(ctx, ch, peers[0])
 	}
 }
@@ -359,6 +360,7 @@ func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason
 // queryPeer queries a single peer and reports its findings on the channel.
 // queryPeer does not access the query state in queryPeers!
 func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID) {
+	defer q.waitGroup.Add(-1)
 	dialCtx, queryCtx := ctx, ctx
 
 	// dial the peer
@@ -397,6 +399,10 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {
+	// do not update the query state once logical termination has been reached
+	if q.terminated {
+		return
+	}
 	PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,

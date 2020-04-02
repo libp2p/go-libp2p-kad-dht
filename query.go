@@ -360,7 +360,7 @@ func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason
 // queryPeer queries a single peer and reports its findings on the channel.
 // queryPeer does not access the query state in queryPeers!
 func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID) {
-	defer q.waitGroup.Add(-1)
+	defer q.waitGroup.Done()
 	dialCtx, queryCtx := ctx, ctx
 
 	// dial the peer

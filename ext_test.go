@@ -9,15 +9,18 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
+
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	record "github.com/libp2p/go-libp2p-record"
-	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // Test that one hung request to a peer doesn't prevent another request
@@ -40,7 +43,9 @@ func TestHungRequest(t *testing.T) {
 		defer s.Reset()
 		<-ctx.Done()
 	})
-	d.peerFound(ctx, hosts[1].ID())
+
+	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.protocols)...))
+	d.peerFound(ctx, hosts[1].ID(), true)
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()
@@ -214,7 +219,7 @@ func TestNotFound(t *testing.T) {
 	}
 
 	for _, p := range hosts {
-		d.peerFound(ctx, p.ID())
+		d.peerFound(ctx, p.ID(), true)
 	}
 
 	// Reply with random peers to every message
@@ -294,7 +299,7 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 
 	for i := 1; i < 5; i++ {
-		d.peerFound(ctx, hosts[i].ID())
+		d.peerFound(ctx, hosts[i].ID(), true)
 	}
 
 	// Reply with random peers to every message
@@ -363,7 +368,7 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.peerFound(ctx, hosts[1].ID())
+	d.peerFound(ctx, hosts[1].ID(), true)
 
 	// It would be nice to be able to just get a value and succeed but then
 	// we'd need to deal with selectors and validators...

@@ -85,7 +85,7 @@ func (dht *IpfsDHT) startRefreshing() error {
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
 
-		refreshTicker := time.NewTicker(dht.rtRefreshPeriod)
+		refreshTicker := time.NewTicker(dht.rtRefreshInterval)
 		defer refreshTicker.Stop()
 
 		// refresh if option is set
@@ -188,12 +188,7 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 
 	var merr error
 	for _, tcpl := range trackedCpls {
-		if time.Since(tcpl.LastRefreshAt) <= dht.rtRefreshPeriod {
-			continue
-		}
-
-		// do not refresh if bucket is full
-		if dht.routingTable.IsBucketFull(tcpl.Cpl) {
+		if time.Since(tcpl.LastRefreshAt) <= dht.rtRefreshInterval {
 			continue
 		}
 

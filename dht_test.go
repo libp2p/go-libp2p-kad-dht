@@ -1383,6 +1383,7 @@ func TestFindPeerQuery(t *testing.T) {
 	testFindPeerQuery(t, 20, 80, 16)
 }
 
+// NOTE: You must have ATLEAST (minRTRefreshThreshold+1) test peers before using this.
 func testFindPeerQuery(t *testing.T,
 	bootstrappers, // Number of nodes connected to the querying node
 	leafs, // Number of nodes that might be connected to from the bootstrappers

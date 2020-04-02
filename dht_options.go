@@ -43,7 +43,7 @@ type config struct {
 
 	routingTable struct {
 		refreshQueryTimeout time.Duration
-		refreshPeriod       time.Duration
+		refreshInterval     time.Duration
 		autoRefresh         bool
 		latencyTolerance    time.Duration
 		checkInterval       time.Duration
@@ -88,8 +88,8 @@ var defaults = func(o *config) error {
 	o.queryPeerFilter = emptyQueryFilter
 
 	o.routingTable.latencyTolerance = time.Minute
-	o.routingTable.refreshQueryTimeout = 30 * time.Second
-	o.routingTable.refreshPeriod = 10 * time.Minute
+	o.routingTable.refreshQueryTimeout = 1 * time.Minute
+	o.routingTable.refreshInterval = 10 * time.Minute
 	o.routingTable.autoRefresh = true
 	o.routingTable.peerFilter = emptyRTFilter
 	o.maxRecordAge = time.Hour * 36
@@ -122,14 +122,6 @@ func (c *config) validate() error {
 	return nil
 }
 
-// RoutingTableCheckInterval is the interval between two runs of the RT cleanup routine.
-func RoutingTableCheckInterval(i time.Duration) Option {
-	return func(c *config) error {
-		c.routingTable.checkInterval = i
-		return nil
-	}
-}
-
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
 func RoutingTableLatencyTolerance(latency time.Duration) Option {
@@ -156,7 +148,7 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 //    the last refresh period.
 func RoutingTableRefreshPeriod(period time.Duration) Option {
 	return func(c *config) error {
-		c.routingTable.refreshPeriod = period
+		c.routingTable.refreshInterval = period
 		return nil
 	}
 }

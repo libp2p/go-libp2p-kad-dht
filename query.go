@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -170,14 +171,16 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	return res, nil
 }
 
-func recordPeerIsValuable(p peer.ID) {}
+func (q *query) recordPeerIsValuable(p peer.ID) {
+	q.dht.routingTable.UpdateLastSuccessfulOutboundQuery(p, time.Now())
+}
 
 func (q *query) recordValuablePeers() {
 	closePeers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
 	for _, p := range closePeers {
 		referrer := p
 		for {
-			recordPeerIsValuable(referrer)
+			q.recordPeerIsValuable(referrer)
 			referrer = q.queryPeers.GetReferrer(referrer)
 			if referrer == q.dht.self {
 				break
@@ -363,6 +366,10 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
+		// remove the peer if there was a dial failure..but not because of a context cancellation
+		if dialCtx.Err() == nil {
+			q.dht.peerStoppedDHT(q.dht.ctx, p)
+		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
@@ -370,9 +377,15 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	// send query RPC to the remote peer
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {
+		if queryCtx.Err() == nil {
+			q.dht.peerStoppedDHT(q.dht.ctx, p)
+		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
+
+	// query successful, try to add to RT
+	q.dht.peerFound(q.dht.ctx, p, true)
 
 	// process new peers
 	saw := []peer.ID{}

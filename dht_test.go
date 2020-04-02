@@ -772,21 +772,19 @@ func TestRefresh(t *testing.T) {
 	ctxT, cancelT := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelT()
 
-	go func() {
-		for ctxT.Err() == nil {
-			bootstrap(t, ctxT, dhts)
+	for ctxT.Err() == nil {
+		bootstrap(t, ctxT, dhts)
 
-			// wait a bit.
-			select {
-			case <-time.After(50 * time.Millisecond):
-				continue // being explicit
-			case <-ctxT.Done():
-				return
-			}
+		// wait a bit.
+		select {
+		case <-time.After(50 * time.Millisecond):
+			continue // being explicit
+		case <-ctxT.Done():
+			return
 		}
-	}()
+	}
 
-	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
+	waitForWellFormedTables(t, dhts, 7, 10, 10*time.Second)
 	cancelT()
 
 	if u.Debug {
@@ -901,10 +899,16 @@ func TestPeriodicRefresh(t *testing.T) {
 	}
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
+	var wg sync.WaitGroup
 	for _, dht := range dhts {
-		dht.RefreshRoutingTable()
+		wg.Add(1)
+		go func(d *IpfsDHT) {
+			<-d.RefreshRoutingTable()
+			wg.Done()
+		}(dht)
 	}
 
+	wg.Wait()
 	// this is async, and we dont know when it's finished with one cycle, so keep checking
 	// until the routing tables look better, or some long timeout for the failure case.
 	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
@@ -1377,6 +1381,7 @@ func TestFindPeerQuery(t *testing.T) {
 	testFindPeerQuery(t, 20, 80, 16)
 }
 
+// NOTE: You must have ATLEAST (minRTRefreshThreshold+1) test peers before using this.
 func testFindPeerQuery(t *testing.T,
 	bootstrappers, // Number of nodes connected to the querying node
 	leafs, // Number of nodes that might be connected to from the bootstrappers
@@ -1399,13 +1404,16 @@ func testFindPeerQuery(t *testing.T,
 	for i := 0; i < bootstrappers; i++ {
 		for j := 0; j < bootstrapperLeafConns; j++ {
 			v := mrand.Intn(leafs)
-			connect(t, ctx, others[i], others[bootstrappers+v])
+			connectNoSync(t, ctx, others[i], others[bootstrappers+v])
 		}
 	}
 
 	for i := 0; i < bootstrappers; i++ {
-		connect(t, ctx, guy, others[i])
+		connectNoSync(t, ctx, guy, others[i])
 	}
+
+	// give some time for things to settle down
+	waitForWellFormedTables(t, dhts, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
 
 	for _, d := range dhts {
 		if err := <-d.RefreshRoutingTable(); err != nil {
@@ -1579,7 +1587,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	// dhtB becomes a server
 	require.NoError(t, dhtB.setMode(modeServer))
 
-	// which means dhtA should have it in the RT again
+	// which means dhtA should have it in the RT again because of fixLowPeers
 	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 1, 1, 10*time.Second), "dHTA routing table should have 1 peers")
 }
 
@@ -1730,6 +1738,8 @@ func TestDynamicModeSwitching(t *testing.T) {
 	assertDHTServer := func() {
 		err = prober.Ping(ctx, node.PeerID())
 		assert.Nil(t, err)
+		// the node should be in the RT for the prober
+		// because the prober will call fixLowPeers when the node updates it's protocols
 		if l := len(prober.RoutingTable().ListPeers()); l != 1 {
 			t.Errorf("expected routing table length to be 1; instead is %d", l)
 		}

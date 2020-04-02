@@ -181,14 +181,11 @@ func (q *query) recordValuablePeers() {
 	for _, p := range closePeers {
 		referrer := p
 		for {
-			recordPeerIsValuable(referrer)
+			q.recordPeerIsValuable(referrer)
 			referrer = q.queryPeers.GetReferrer(referrer)
 			if referrer == q.dht.self {
 				break
 			}
-		q.recordPeerIsValuable(referrer)
-		for referrer = q.queryPeers.GetReferrer(referrer); referrer != ""; {
-			q.recordPeerIsValuable(referrer)
 		}
 	}
 }

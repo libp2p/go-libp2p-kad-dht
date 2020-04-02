@@ -399,9 +399,8 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {
-	// do not update the query state once logical termination has been reached
 	if q.terminated {
-		return
+		panic("update should not be invoked after the logical lookup termination")
 	}
 	PublishLookupEvent(ctx,
 		NewLookupEvent(

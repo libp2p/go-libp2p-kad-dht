@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"fmt"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
@@ -119,6 +120,20 @@ func (dht *IpfsDHT) startRefreshing() error {
 			if err != nil {
 				logger.Warning(err)
 			}
+
+			// ping Routing Table peers that haven't been hear of/from in the interval they should have been.
+			for _, ps := range dht.routingTable.GetPeerInfos() {
+				// ping the peer if it's due for a ping and evict it if the ping fails
+				if time.Since(ps.LastSuccessfulOutboundQuery) > dht.maxLastSuccessfulOutboundThreshold {
+					livelinessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
+						logger.Debugf("failed to ping peer=%s, got error=%s, evicting it from the RT", ps.Id, err)
+						dht.routingTable.RemovePeer(ps.Id)
+					}
+					cancel()
+				}
+			}
+
 		}
 	})
 

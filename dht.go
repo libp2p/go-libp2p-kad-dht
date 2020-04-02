@@ -106,6 +106,13 @@ type IpfsDHT struct {
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
 	// networks).
 	enableProviders, enableValues bool
+
+	// maxLastSuccessfulOutboundThreshold is the max threshold/upper limit for the value of "lastSuccessfulOutboundQuery"
+	// of the peer in the bucket above which we will evict it to make place for a new peer if the bucket
+	// is full
+	maxLastSuccessfulOutboundThreshold time.Duration
+
+	fixLowPeersChan chan struct{}
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -181,6 +188,10 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// go-routine to make sure we ALWAYS have RT peer addresses in the peerstore
 	// since RT membership is decoupled from connectivity
 	go dht.persistRTPeersInPeerStore()
+
+	// listens to the fix low peers chan and tries to fix the Routing Table
+	go dht.fixLowPeersRoutine()
+
 	return dht, nil
 }
 
@@ -237,6 +248,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		triggerSelfLookup:      make(chan chan<- error),
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
+		fixLowPeersChan:        make(chan struct{}),
 	}
 
 	// construct routing table
@@ -279,9 +291,41 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	}
 	rt.PeerRemoved = func(p peer.ID) {
 		cmgr.UntagPeer(p, "kbucket")
+
+		// try to fix the RT
+		select {
+		case dht.fixLowPeersChan <- struct{}{}:
+		default:
+		}
 	}
 
 	return rt, err
+}
+
+// fixLowPeers tries to get more peers into the routing table if we're below the threshold
+func (dht *IpfsDHT) fixLowPeersRoutine() {
+	for {
+		select {
+		case <-dht.fixLowPeersChan:
+		case <-dht.ctx.Done():
+			return
+		}
+		if dht.routingTable.Size() > minRTRefreshThreshold {
+			continue
+		}
+
+		for _, p := range dht.host.Network().Peers() {
+			dht.peerFound(dht.Context(), p, false)
+		}
+
+		if dht.autoRefresh {
+			select {
+			case dht.triggerRtRefresh <- nil:
+			default:
+			}
+		}
+	}
+
 }
 
 // TODO This is hacky, horrible and the programmer needs to have his mother called a hamster.
@@ -440,24 +484,9 @@ func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 	dht.routingTable.RemovePeer(p)
 
 	// since we lost a peer from the RT, we should do this here
-	dht.fixLowPeers()
-}
-
-// fixLowPeers tries to get more peers into the routing table if we're below the threshold
-func (dht *IpfsDHT) fixLowPeers() {
-	if dht.routingTable.Size() > minRTRefreshThreshold {
-		return
-	}
-
-	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(dht.Context(), p, false)
-	}
-
-	if dht.autoRefresh {
-		select {
-		case dht.triggerRtRefresh <- nil:
-		default:
-		}
+	select {
+	case dht.fixLowPeersChan <- struct{}{}:
+	default:
 	}
 }
 

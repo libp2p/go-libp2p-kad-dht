@@ -120,6 +120,7 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdat
 
 	if !valid {
 		dht.peerStoppedDHT(dht.ctx, e.Peer)
+		return
 	}
 
 	// we just might have discovered a peer that supports the DHT protocol

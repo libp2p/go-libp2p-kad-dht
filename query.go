@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -22,6 +25,12 @@ type stopFn func() bool
 
 // query represents a single DHT query.
 type query struct {
+	// unique identifier for the lookup instance
+	id uuid.UUID
+
+	// target key for the lookup
+	key string
+
 	// the query context.
 	ctx context.Context
 
@@ -39,6 +48,9 @@ type query struct {
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.
 	terminated bool
+
+	// waitGroup ensures lookup does not end until all query goroutines complete.
+	waitGroup sync.WaitGroup
 
 	// the function that will be used to query a single peer.
 	queryFn queryFn
@@ -137,6 +149,8 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	q := &query{
+		id:         uuid.New(),
+		key:        target,
 		ctx:        queryCtx,
 		cancel:     cancelQuery,
 		dht:        dht,
@@ -148,10 +162,30 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	// run the query
-	q.runWithGreedyParallelism()
+	q.run()
+
+	if ctx.Err() == nil {
+		q.recordValuablePeers()
+	}
 
 	res := q.constructLookupResult(targetKadID)
 	return res, nil
+}
+
+func recordPeerIsValuable(p peer.ID) {}
+
+func (q *query) recordValuablePeers() {
+	closePeers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
+	for _, p := range closePeers {
+		referrer := p
+		for {
+			recordPeerIsValuable(referrer)
+			referrer = q.queryPeers.GetReferrer(referrer)
+			if referrer == q.dht.self {
+				break
+			}
+		}
+	}
 }
 
 // constructLookupResult takes the query information and uses it to construct the lookup result
@@ -159,7 +193,10 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	// determine if the query terminated early
 	completed := true
 
-	if !(q.isLookupTermination()) {
+	// Lookup and starvation are both valid ways for a lookup to complete. (Starvation does not imply failure.)
+	// Lookup termination (as defined in isLookupTermination) is not possible in small networks.
+	// Starvation is a successful query termination in small networks.
+	if !(q.isLookupTermination() || q.isStarvationTermination()) {
 		completed = false
 	}
 
@@ -194,37 +231,40 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 }
 
 type queryUpdate struct {
-	seen        []peer.ID
+	cause       peer.ID
+	heard       []peer.ID
 	queried     []peer.ID
 	unreachable []peer.ID
 }
 
-func (q *query) runWithGreedyParallelism() {
+func (q *query) run() {
 	pathCtx, cancelPath := context.WithCancel(q.ctx)
 	defer cancelPath()
 
 	alpha := q.dht.alpha
 
 	ch := make(chan *queryUpdate, alpha)
-	ch <- &queryUpdate{seen: q.seedPeers}
+	ch <- &queryUpdate{cause: q.dht.self, heard: q.seedPeers}
 
+	// return only once all outstanding queries have completed.
+	defer q.waitGroup.Wait()
 	for {
+		var cause peer.ID
 		select {
 		case update := <-ch:
-			q.updateState(update)
+			q.updateState(pathCtx, update)
+			cause = update.cause
 		case <-pathCtx.Done():
-			q.terminate()
+			q.terminate(pathCtx, cancelPath, LookupCancelled)
 		}
 
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
-		if q.readyToTerminate() {
-			q.terminate()
+		if ready, reason := q.isReadyToTerminate(); ready {
+			q.terminate(pathCtx, cancelPath, reason)
+		}
 
-			// exit once all goroutines have been cleaned up
-			if q.queryPeers.NumWaiting() == 0 {
-				return
-			}
-			continue
+		if q.terminated {
+			return
 		}
 
 		// if all "threads" are busy, wait until someone finishes
@@ -234,38 +274,51 @@ func (q *query) runWithGreedyParallelism() {
 
 		// spawn new queries, up to the parallelism allowance
 		for j := 0; j < alpha-q.queryPeers.NumWaiting(); j++ {
-			q.spawnQuery(ch)
+			q.spawnQuery(pathCtx, cause, ch)
 		}
 	}
 }
 
-// spawnQuery starts one query, if an available seen peer is found
-func (q *query) spawnQuery(ch chan<- *queryUpdate) {
+// spawnQuery starts one query, if an available heard peer is found
+func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
 	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
 		return
 	} else {
+		PublishLookupEvent(ctx,
+			NewLookupEvent(
+				q.dht.self,
+				q.id,
+				q.key,
+				NewLookupUpdateEvent(
+					cause,
+					q.queryPeers.GetReferrer(peers[0]),
+					nil,                 // heard
+					[]peer.ID{peers[0]}, // waiting
+					nil,                 // queried
+					nil,                 // unreachable
+				),
+				nil,
+				nil,
+			),
+		)
 		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
-		go q.queryPeer(ch, peers[0])
+		q.waitGroup.Add(1)
+		go q.queryPeer(ctx, ch, peers[0])
 	}
 }
 
-func (q *query) readyToTerminate() bool {
-	// if termination has already been determined, the query is considered terminated forever,
-	// regardless of any change to queryPeers that might occur after the initial termination.
-	if q.terminated {
-		return true
-	}
+func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {
 	// give the application logic a chance to terminate
 	if q.stopFn() {
-		return true
+		return true, LookupStopped
 	}
 	if q.isStarvationTermination() {
-		return true
+		return true, LookupStarvation
 	}
 	if q.isLookupTermination() {
-		return true
+		return true, LookupCompleted
 	}
-	return false
+	return false, -1
 }
 
 // From the set of all nodes that are not unreachable,
@@ -285,25 +338,41 @@ func (q *query) isStarvationTermination() bool {
 	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
 }
 
-func (q *query) terminate() {
-	q.terminated = true
+func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason LookupTerminationReason) {
+	if q.terminated {
+		return
+	} else {
+		PublishLookupEvent(ctx,
+			NewLookupEvent(
+				q.dht.self,
+				q.id,
+				q.key,
+				nil,
+				nil,
+				NewLookupTerminateEvent(reason),
+			),
+		)
+		cancel() // abort outstanding queries
+		q.terminated = true
+	}
 }
 
 // queryPeer queries a single peer and reports its findings on the channel.
 // queryPeer does not access the query state in queryPeers!
-func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
-	dialCtx, queryCtx := q.ctx, q.ctx
+func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID) {
+	defer q.waitGroup.Done()
+	dialCtx, queryCtx := ctx, ctx
 
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
-		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
 
 	// send query RPC to the remote peer
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {
-		ch <- &queryUpdate{unreachable: []peer.ID{p}}
+		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
 
@@ -326,15 +395,35 @@ func (q *query) queryPeer(ch chan<- *queryUpdate, p peer.ID) {
 		}
 	}
 
-	ch <- &queryUpdate{seen: saw, queried: []peer.ID{p}}
+	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}}
 }
 
-func (q *query) updateState(up *queryUpdate) {
-	for _, p := range up.seen {
+func (q *query) updateState(ctx context.Context, up *queryUpdate) {
+	if q.terminated {
+		panic("update should not be invoked after the logical lookup termination")
+	}
+	PublishLookupEvent(ctx,
+		NewLookupEvent(
+			q.dht.self,
+			q.id,
+			q.key,
+			nil,
+			NewLookupUpdateEvent(
+				up.cause,
+				up.cause,
+				up.heard,       // heard
+				nil,            // waiting
+				up.queried,     // queried
+				up.unreachable, // unreachable
+			),
+			nil,
+		),
+	)
+	for _, p := range up.heard {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
-		q.queryPeers.TryAdd(p)
+		q.queryPeers.TryAdd(p, up.cause)
 	}
 	for _, p := range up.queried {
 		if p == q.dht.self { // don't add self.

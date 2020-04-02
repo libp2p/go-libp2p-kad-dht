@@ -160,7 +160,7 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	// run the query
 	q.run()
 
-	if ctx.Err() != nil {
+	if ctx.Err() == nil {
 		q.recordValuablePeers()
 	}
 

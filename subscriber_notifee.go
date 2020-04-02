@@ -120,11 +120,10 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdat
 
 	if !valid {
 		dht.peerStoppedDHT(dht.ctx, e.Peer)
-	} else {
-		// we just might have discovered a peer that supports the DHT protocol
-		dht.fixLowPeers()
 	}
 
+	// we just might have discovered a peer that supports the DHT protocol
+	dht.fixLowPeers()
 }
 
 func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {

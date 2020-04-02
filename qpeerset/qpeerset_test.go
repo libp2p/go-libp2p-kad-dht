@@ -43,17 +43,19 @@ func TestQPeerSet(t *testing.T) {
 		}
 	}
 
+	oracle := test.RandPeerIDFatal(t)
+
 	// find fails
 	require.Equal(t, -1, qp.find(peer2))
 
 	// add peer2,assert state & then another add fails
-	require.True(t, qp.TryAdd(peer2))
+	require.True(t, qp.TryAdd(peer2, oracle))
 	require.Equal(t, PeerHeard, qp.GetState(peer2))
-	require.False(t, qp.TryAdd(peer2))
+	require.False(t, qp.TryAdd(peer2, oracle))
 	require.Equal(t, 0, qp.NumWaiting())
 
 	// add peer4
-	require.True(t, qp.TryAdd(peer4))
+	require.True(t, qp.TryAdd(peer4, oracle))
 	cl := qp.GetClosestNotUnreachable(2)
 	require.Equal(t, []peer.ID{peer4, peer2}, cl)
 	cl = qp.GetClosestNotUnreachable(3)
@@ -67,7 +69,7 @@ func TestQPeerSet(t *testing.T) {
 	require.Equal(t, []peer.ID{peer2}, cl)
 
 	// add peer1
-	require.True(t, qp.TryAdd(peer1))
+	require.True(t, qp.TryAdd(peer1, oracle))
 	cl = qp.GetClosestNotUnreachable(1)
 	require.Equal(t, []peer.ID{peer1}, cl)
 	cl = qp.GetClosestNotUnreachable(2)
@@ -78,7 +80,7 @@ func TestQPeerSet(t *testing.T) {
 	require.Equal(t, []peer.ID{peer2}, qp.GetWaitingPeers())
 
 	require.Equal(t, []peer.ID{peer1}, qp.GetHeardPeers())
-	require.True(t, qp.TryAdd(peer3))
+	require.True(t, qp.TryAdd(peer3, oracle))
 	require.Equal(t, []peer.ID{peer3, peer1}, qp.GetSortedHeard())
 	require.Equal(t, 2, qp.NumHeard())
 }

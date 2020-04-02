@@ -4,6 +4,7 @@ go 1.12
 
 require (
 	github.com/gogo/protobuf v1.3.1
+	github.com/google/uuid v1.1.1
 	github.com/hashicorp/go-multierror v1.0.0
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/ipfs/go-cid v0.0.5

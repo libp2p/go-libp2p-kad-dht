@@ -177,7 +177,7 @@ func (q *query) recordValuablePeers() {
 		for {
 			recordPeerIsValuable(referrer)
 			referrer = q.queryPeers.GetReferrer(referrer)
-			if referrer == "" || referrer == q.dht.self {
+			if referrer == q.dht.self {
 				break
 			}
 		}

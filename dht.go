@@ -482,12 +482,12 @@ func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
 }
 
 // betterPeersToQuery returns nearestPeersToQuery with some additional filtering
-func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) []peer.ID {
+func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, from peer.ID, count int) []peer.ID {
 	closer := dht.nearestPeersToQuery(pmes, count)
 
 	// no node? nil
 	if closer == nil {
-		logger.Warning("betterPeersToQuery: no closer peers to send:", p)
+		logger.Warning("betterPeersToQuery: no closer peers to send:", from)
 		return nil
 	}
 
@@ -500,7 +500,7 @@ func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, p peer.ID, count int) [
 			return nil
 		}
 		// Dont send a peer back themselves
-		if clp == p {
+		if clp == from {
 			continue
 		}
 

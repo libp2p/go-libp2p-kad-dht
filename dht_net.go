@@ -141,7 +141,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		}
 
 		// a peer has queried us, let's add it to RT
-		dht.peerFound(dht.ctx, mPeer)
+		dht.peerFound(dht.ctx, mPeer, true)
 
 		resp, err := handler(ctx, mPeer, &req)
 		if err != nil {

@@ -416,13 +416,16 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 
 // peerFound signals the routingTable that we've found a peer that
 // might support the DHT protocol.
-func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
+func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	b, err := dht.validRTPeer(p)
 	if err != nil {
 		logger.Errorf("failed to validate if peer is a DHT peer, err=%s", err)
 	} else if b {
 		logger.Event(ctx, "peerFound", p)
-		dht.routingTable.TryAddPeer(p)
+		dht.routingTable.TryAddPeer(p, queryPeer)
+		if queryPeer {
+			dht.routingTable.UpdateLastSuccessfulOutboundQuery(p, time.Now())
+		}
 	}
 }
 
@@ -444,7 +447,7 @@ func (dht *IpfsDHT) fixLowPeers() {
 	}
 
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(dht.Context(), p)
+		dht.peerFound(dht.Context(), p, false)
 	}
 
 	if dht.autoRefresh {

@@ -45,7 +45,7 @@ func TestHungRequest(t *testing.T) {
 	})
 
 	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.protocols)...))
-	d.peerFound(ctx, hosts[1].ID())
+	d.peerFound(ctx, hosts[1].ID(), true)
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()
@@ -219,7 +219,7 @@ func TestNotFound(t *testing.T) {
 	}
 
 	for _, p := range hosts {
-		d.peerFound(ctx, p.ID())
+		d.peerFound(ctx, p.ID(), true)
 	}
 
 	// Reply with random peers to every message
@@ -299,7 +299,7 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 
 	for i := 1; i < 5; i++ {
-		d.peerFound(ctx, hosts[i].ID())
+		d.peerFound(ctx, hosts[i].ID(), true)
 	}
 
 	// Reply with random peers to every message
@@ -368,7 +368,7 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.peerFound(ctx, hosts[1].ID())
+	d.peerFound(ctx, hosts[1].ID(), true)
 
 	// It would be nice to be able to just get a value and succeed but then
 	// we'd need to deal with selectors and validators...

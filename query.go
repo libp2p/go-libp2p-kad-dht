@@ -44,8 +44,8 @@ type query struct {
 	// seedPeers is the set of peers that seed the query
 	seedPeers []peer.ID
 
-	// seedPeerTimes contains the duration of each successful query to a seed peer
-	seedPeerTimes map[peer.ID]time.Duration
+	// peerTimes contains the duration of each successful query to a peer
+	peerTimes map[peer.ID]time.Duration
 
 	// queryPeers is the set of peers known by this query and their respective states.
 	queryPeers *qpeerset.QueryPeerset
@@ -153,16 +153,16 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	q := &query{
-		id:            uuid.New(),
-		key:           target,
-		ctx:           ctx,
-		dht:           dht,
-		queryPeers:    qpeerset.NewQueryPeerset(target),
-		seedPeers:     seedPeers,
-		seedPeerTimes: make(map[peer.ID]time.Duration),
-		terminated:    false,
-		queryFn:       queryFn,
-		stopFn:        stopFn,
+		id:         uuid.New(),
+		key:        target,
+		ctx:        ctx,
+		dht:        dht,
+		queryPeers: qpeerset.NewQueryPeerset(target),
+		seedPeers:  seedPeers,
+		peerTimes:  make(map[peer.ID]time.Duration),
+		terminated: false,
+		queryFn:    queryFn,
+		stopFn:     stopFn,
 	}
 
 	// run the query
@@ -186,18 +186,17 @@ func (q *query) recordValuablePeers() {
 	// Each seed peer that responded to a query within some range (i.e. 2x) of the MVP's time is a valuable peer
 	// Mark the MVP and all the other valuable peers as valuable
 	mvpDuration := time.Duration(math.MaxInt64)
-	for _, dur := range q.seedPeerTimes {
-		if dur < mvpDuration {
-			mvpDuration = dur
+	for _, p := range q.seedPeers {
+		if queryTime, ok := q.peerTimes[p]; ok && queryTime < mvpDuration {
+			mvpDuration = queryTime
 		}
 	}
 
-	for p, dur := range q.seedPeerTimes {
-		if dur < mvpDuration*2 {
+	for _, p := range q.seedPeers {
+		if queryTime, ok := q.peerTimes[p]; ok && queryTime < mvpDuration*2 {
 			q.recordPeerIsValuable(p)
 		}
 	}
-
 }
 
 // constructLookupResult takes the query information and uses it to construct the lookup result
@@ -461,12 +460,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		}
 		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
 			q.queryPeers.SetState(p, qpeerset.PeerQueried)
-			for _, seed := range q.seedPeers {
-				if p == seed {
-					q.seedPeerTimes[p] = up.queryDuration
-				}
-			}
-
+			q.peerTimes[p] = up.queryDuration
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the queried state from state %v", st))
 		}

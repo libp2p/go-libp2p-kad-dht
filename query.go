@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -42,6 +43,9 @@ type query struct {
 
 	// seedPeers is the set of peers that seed the query
 	seedPeers []peer.ID
+
+	// seedPeerTimes contains the duration of each successful query to a seed peer
+	seedPeerTimes map[peer.ID]time.Duration
 
 	// queryPeers is the set of peers known by this query and their respective states.
 	queryPeers *qpeerset.QueryPeerset
@@ -149,15 +153,16 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	q := &query{
-		id:         uuid.New(),
-		key:        target,
-		ctx:        ctx,
-		dht:        dht,
-		queryPeers: qpeerset.NewQueryPeerset(target),
-		seedPeers:  seedPeers,
-		terminated: false,
-		queryFn:    queryFn,
-		stopFn:     stopFn,
+		id:            uuid.New(),
+		key:           target,
+		ctx:           ctx,
+		dht:           dht,
+		queryPeers:    qpeerset.NewQueryPeerset(target),
+		seedPeers:     seedPeers,
+		seedPeerTimes: make(map[peer.ID]time.Duration),
+		terminated:    false,
+		queryFn:       queryFn,
+		stopFn:        stopFn,
 	}
 
 	// run the query
@@ -176,17 +181,23 @@ func (q *query) recordPeerIsValuable(p peer.ID) {
 }
 
 func (q *query) recordValuablePeers() {
-	closePeers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
-	for _, p := range closePeers {
-		referrer := p
-		for {
-			q.recordPeerIsValuable(referrer)
-			referrer = q.queryPeers.GetReferrer(referrer)
-			if referrer == q.dht.self {
-				break
-			}
+	// Valuable peers algorithm:
+	// Label the seed peer that responded to a query in the shortest amount of time as the "most valuable peer" (MVP)
+	// Each seed peer that responded to a query within some range (i.e. 2x) of the MVP's time is a valuable peer
+	// Mark the MVP and all the other valuable peers as valuable
+	mvpDuration := time.Duration(math.MaxInt64)
+	for _, dur := range q.seedPeerTimes {
+		if dur < mvpDuration {
+			mvpDuration = dur
 		}
 	}
+
+	for p, dur := range q.seedPeerTimes {
+		if dur < mvpDuration*2 {
+			q.recordPeerIsValuable(p)
+		}
+	}
+
 }
 
 // constructLookupResult takes the query information and uses it to construct the lookup result
@@ -232,10 +243,11 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 }
 
 type queryUpdate struct {
-	cause       peer.ID
-	heard       []peer.ID
-	queried     []peer.ID
-	unreachable []peer.ID
+	cause         peer.ID
+	heard         []peer.ID
+	queried       []peer.ID
+	unreachable   []peer.ID
+	queryDuration time.Duration
 }
 
 func (q *query) run() {
@@ -368,6 +380,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	defer q.waitGroup.Done()
 	dialCtx, queryCtx := ctx, ctx
 
+	startQuery := time.Now()
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
 		// remove the peer if there was a dial failure..but not because of a context cancellation
@@ -387,6 +400,8 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
+
+	queryDuration := time.Since(startQuery)
 
 	// query successful, try to add to RT
 	q.dht.peerFound(q.dht.ctx, p, true)
@@ -410,7 +425,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		}
 	}
 
-	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}}
+	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {
@@ -446,6 +461,12 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		}
 		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
 			q.queryPeers.SetState(p, qpeerset.PeerQueried)
+			for _, seed := range q.seedPeers {
+				if p == seed {
+					q.seedPeerTimes[p] = up.queryDuration
+				}
+			}
+
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the queried state from state %v", st))
 		}

@@ -1,10 +1,14 @@
-version: 2
-jobs:
-  build:
-    docker:
-      - image: circleci/golang:1.12
-        environment:
-          GO111MODULE: "on"
-    steps:
-      - checkout
-      - run: go test -v -race -bench . ./...
+version: 2.1
+orbs:
+  ci-go: ipfs/ci-go@0.2.9
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - ci-go/build
+      - ci-go/lint
+      - ci-go/test
+      - ci-go/test:
+          race: true
+          name: "ci-go/test/race"

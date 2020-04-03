@@ -274,7 +274,11 @@ func (q *query) run() {
 		}
 
 		// spawn new queries, up to the parallelism allowance
-		for j := 0; j < alpha-q.queryPeers.NumWaiting(); j++ {
+		// calculate the maximum number of queries we could be spawning.
+		// Note: NumWaiting will be updated in spawnQuery
+		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
+		// try spawning the queries, if there are no available peers to query then we won't spawn them
+		for j := 0; j < maxNumQueriesToSpawn; j++ {
 			q.spawnQuery(pathCtx, cause, ch)
 		}
 	}

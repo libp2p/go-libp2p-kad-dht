@@ -50,9 +50,6 @@ type config struct {
 		peerFilter          RouteTableFilterFunc
 	}
 
-	// internal parameters, not publicly exposed
-	protocols, serverProtocols []protocol.ID
-
 	// test parameters
 	testProtocols []protocol.ID
 }

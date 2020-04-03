@@ -32,7 +32,6 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	"github.com/libp2p/go-libp2p-testing/ci"
-	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
 
@@ -1171,12 +1170,11 @@ func TestFindPeer(t *testing.T) {
 }
 
 func TestConnectCollision(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if testing.Short() {
 		t.SkipNow()
 	}
-	if travisci.IsRunning() {
-		t.Skip("Skipping on Travis-CI.")
+	if ci.IsRunning() {
+		t.Skip("Skipping on CI.")
 	}
 
 	runTimes := 10
@@ -1276,7 +1274,7 @@ func TestAtomicPut(t *testing.T) {
 		wg.Add(1)
 		go func(v []byte) {
 			defer wg.Done()
-			putRecord(v)
+			_ = putRecord(v) // we expect some of these to fail
 		}(v)
 	}
 	wg.Wait()
@@ -1782,17 +1780,26 @@ func TestDynamicModeSwitching(t *testing.T) {
 		}
 	}
 
-	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPrivate})
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPrivate})
+	if err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTClient()
 
-	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPublic})
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPublic})
+	if err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTServer()
 
-	emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityUnknown})
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityUnknown})
+	if err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTClient()
@@ -1874,7 +1881,7 @@ func TestProtocolUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	value, err = dhtB.GetValue(ctxT, "/v/crow")
+	_, err = dhtB.GetValue(ctxT, "/v/crow")
 	switch err {
 	case nil:
 		t.Fatalf("should not have been able to find value for %s", "/v/crow")

@@ -122,11 +122,11 @@ var _ RouteTableFilterFunc = PrivateRoutingTableFilter
 
 func isEUI(ip net.IP) bool {
 	// per rfc 2373
-	return ip[11] == 0xff && ip[12] == 0xfe
+	return len(ip) == net.IPv6len && ip[11] == 0xff && ip[12] == 0xfe
 }
 
 func sameV6Net(a, b net.IP) bool {
-	return bytes.Equal(a[0:8], b[0:8])
+	return len(a) == net.IPv6len && len(b) == net.IPv6len && bytes.Equal(a[0:8], b[0:8]) //nolint
 }
 
 func isRelayAddr(a ma.Multiaddr) bool {

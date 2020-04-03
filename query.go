@@ -36,9 +36,6 @@ type query struct {
 	// the query context.
 	ctx context.Context
 
-	// the cancellation function for the query context.
-	cancel context.CancelFunc
-
 	dht *IpfsDHT
 
 	// seedPeers is the set of peers that seed the query
@@ -340,8 +337,7 @@ func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {
 // From the set of all nodes that are not unreachable,
 // if the closest beta nodes are all queried, the lookup can terminate.
 func (q *query) isLookupTermination() bool {
-	var peers []peer.ID
-	peers = q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
+	peers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
 	for _, p := range peers {
 		if q.queryPeers.GetState(p) != qpeerset.PeerQueried {
 			return false

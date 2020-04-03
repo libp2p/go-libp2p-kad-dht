@@ -42,7 +42,7 @@ func init() {
 // startSelfLookup starts a go-routine that listens for requests to trigger a self walk on a dedicated channel
 // and then sends the error status back on the error channel sent along with the request.
 // if multiple callers "simultaneously" ask for a self walk, it performs ONLY one self walk and sends the same error status to all of them.
-func (dht *IpfsDHT) startSelfLookup() error {
+func (dht *IpfsDHT) startSelfLookup() {
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
 		for {
@@ -79,12 +79,10 @@ func (dht *IpfsDHT) startSelfLookup() error {
 			}
 		}
 	})
-
-	return nil
 }
 
 // Start the refresh worker.
-func (dht *IpfsDHT) startRefreshing() error {
+func (dht *IpfsDHT) startRefreshing() {
 	// scan the RT table periodically & do a random walk for cpl's that haven't been queried since the given period
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.OnClosingContext(proc)
@@ -94,7 +92,10 @@ func (dht *IpfsDHT) startRefreshing() error {
 
 		// refresh if option is set
 		if dht.autoRefresh {
-			dht.doRefresh(ctx)
+			err := dht.doRefresh(ctx)
+			if err != nil {
+				logger.Warn(err)
+			}
 		} else {
 			// disable the "auto-refresh" ticker so that no more ticks are sent to this channel
 			refreshTicker.Stop()
@@ -139,8 +140,6 @@ func (dht *IpfsDHT) startRefreshing() error {
 
 		}
 	})
-
-	return nil
 }
 
 func collectWaitingChannels(source chan chan<- error) []chan<- error {

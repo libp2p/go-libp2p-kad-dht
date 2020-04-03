@@ -10,11 +10,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/multiformats/go-base32"
-	"github.com/multiformats/go-multihash"
 )
 
 func tryFormatLoggableKey(k string) (string, error) {
@@ -46,23 +44,26 @@ func tryFormatLoggableKey(k string) (string, error) {
 	return fmt.Sprintf("/%s/%s", proto, encStr), nil
 }
 
-func loggableKey(k string) logging.LoggableMap {
-	newKey, err := tryFormatLoggableKey(k)
-	if err != nil {
-		logger.Debug(err)
-	} else {
-		k = newKey
-	}
+type loggableKeyBytes []byte
 
-	return logging.LoggableMap{
-		"key": k,
+func (lk loggableKeyString) String() string {
+	k := string(lk)
+	newKey, err := tryFormatLoggableKey(k)
+	if err == nil {
+		return newKey
 	}
+	return k
 }
 
-func multihashLoggableKey(mh multihash.Multihash) logging.LoggableMap {
-	return logging.LoggableMap{
-		"multihash": base32.RawStdEncoding.EncodeToString(mh),
+type loggableKeyString string
+
+func (lk loggableKeyBytes) String() string {
+	k := string(lk)
+	newKey, err := tryFormatLoggableKey(k)
+	if err == nil {
+		return newKey
 	}
+	return k
 }
 
 // Kademlia 'node lookup' operation. Returns a channel of the K closest peers
@@ -72,9 +73,6 @@ func multihashLoggableKey(mh multihash.Multihash) logging.LoggableMap {
 // with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
 	//TODO: I can break the interface! return []peer.ID
-	e := logger.EventBegin(ctx, "getClosestPeers", loggableKey(key))
-	defer e.Done()
-
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key,
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 			// For DHT query command

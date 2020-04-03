@@ -55,7 +55,7 @@ func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, err
 			// Found the public key
 			err := dht.peerstore.AddPubKey(p, r.pubk)
 			if err != nil {
-				logger.Warningf("Failed to add public key to peerstore for %v", p)
+				logger.Errorw("failed to add public key to peerstore", "peer", p)
 			}
 			return r.pubk, nil
 		}

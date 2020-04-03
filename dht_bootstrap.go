@@ -75,7 +75,7 @@ func (dht *IpfsDHT) startSelfLookup() {
 				close(w)
 			}
 			if err != nil {
-				logger.Warning(err)
+				logger.Warnw("self lookup failed", "error", err)
 			}
 		}
 	})
@@ -94,7 +94,7 @@ func (dht *IpfsDHT) startRefreshing() {
 		if dht.autoRefresh {
 			err := dht.doRefresh(ctx)
 			if err != nil {
-				logger.Warn(err)
+				logger.Warn("failed when refreshing routing table", err)
 			}
 		} else {
 			// disable the "auto-refresh" ticker so that no more ticks are sent to this channel
@@ -122,7 +122,7 @@ func (dht *IpfsDHT) startRefreshing() {
 				close(w)
 			}
 			if err != nil {
-				logger.Warning(err)
+				logger.Warnw("failed when refreshing routing table", "error", err)
 			}
 
 			// ping Routing Table peers that haven't been hear of/from in the interval they should have been.
@@ -131,7 +131,7 @@ func (dht *IpfsDHT) startRefreshing() {
 				if time.Since(ps.LastSuccessfulOutboundQuery) > dht.maxLastSuccessfulOutboundThreshold {
 					livelinessCtx, cancel := context.WithTimeout(ctx, peerPingTimeout)
 					if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
-						logger.Debugf("failed to ping peer=%s, got error=%s, evicting it from the RT", ps.Id, err)
+						logger.Debugw("evicting peer after failed ping", "peer", ps.Id, "error", err)
 						dht.routingTable.RemovePeer(ps.Id)
 					}
 					cancel()

@@ -44,7 +44,7 @@ func init() {
 // if multiple callers "simultaneously" ask for a self walk, it performs ONLY one self walk and sends the same error status to all of them.
 func (dht *IpfsDHT) startSelfLookup() {
 	dht.proc.Go(func(proc process.Process) {
-		ctx := processctx.OnClosingContext(proc)
+		ctx := processctx.WithProcessClosing(dht.ctx, proc)
 		for {
 			var waiting []chan<- error
 			select {
@@ -85,7 +85,7 @@ func (dht *IpfsDHT) startSelfLookup() {
 func (dht *IpfsDHT) startRefreshing() {
 	// scan the RT table periodically & do a random walk for cpl's that haven't been queried since the given period
 	dht.proc.Go(func(proc process.Process) {
-		ctx := processctx.OnClosingContext(proc)
+		ctx := processctx.WithProcessClosing(dht.ctx, proc)
 
 		refreshTicker := time.NewTicker(dht.rtRefreshInterval)
 		defer refreshTicker.Stop()

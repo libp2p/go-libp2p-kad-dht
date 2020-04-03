@@ -77,10 +77,11 @@ type IpfsDHT struct {
 
 	stripedPutLocks [256]sync.Mutex
 
-	// Primary DHT protocols - we query and respond to these protocols
+	// DHT protocols we query with. We'll only add peers to our routing
+	// table if they speak these protocols.
 	protocols []protocol.ID
 
-	// DHT protocols we can respond to (may contain protocols in addition to the primary protocols)
+	// DHT protocols we can respond to.
 	serverProtocols []protocol.ID
 
 	auto   bool
@@ -219,17 +220,30 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
-	protocols := []protocol.ID{cfg.protocolPrefix + kad2}
-	serverProtocols := []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
+	var protocols, serverProtocols []protocol.ID
 
 	// check if custom test protocols were set
 	if len(cfg.testProtocols) > 0 {
 		protocols = make([]protocol.ID, len(cfg.testProtocols))
-		serverProtocols = make([]protocol.ID, len(cfg.testProtocols))
 		for i, p := range cfg.testProtocols {
 			protocols[i] = cfg.protocolPrefix + p
-			serverProtocols[i] = cfg.protocolPrefix + p
 		}
+		serverProtocols = protocols
+	} else if cfg.v1CompatibleMode {
+		// In compat mode, query/serve using the old protocol.
+		//
+		// DO NOT accept requests on the new protocol. Otherwise:
+		// 1. We'll end up in V2 routing tables.
+		// 2. We'll have V1 peers in our routing table.
+		//
+		// In other words, we'll pollute the V2 network.
+		protocols = []protocol.ID{cfg.protocolPrefix + kad1}
+		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad1}
+	} else {
+		// In v2 mode, serve on both protocols, but only
+		// query/accept peers in v2 mode.
+		protocols = []protocol.ID{cfg.protocolPrefix + kad2}
+		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
 	}
 
 	dht := &IpfsDHT{

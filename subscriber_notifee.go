@@ -125,10 +125,7 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentif
 		return
 	} else if valid {
 		dht.peerFound(dht.ctx, e.Peer, false)
-		select {
-		case dht.fixLowPeersChan <- struct{}{}:
-		default:
-		}
+		dht.fixRTIfNeeded()
 	}
 }
 
@@ -145,10 +142,7 @@ func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdat
 	}
 
 	// we just might have discovered a peer that supports the DHT protocol
-	select {
-	case dht.fixLowPeersChan <- struct{}{}:
-	default:
-	}
+	dht.fixRTIfNeeded()
 }
 
 func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {

@@ -20,6 +20,9 @@ var DefaultBootstrapPeers []multiaddr.Multiaddr
 // see a new peer, we trigger a bootstrap round.
 var minRTRefreshThreshold = 10
 
+// timeout for pinging one peer
+const peerPingTimeout = 10 * time.Second
+
 func init() {
 	for _, s := range []string{
 		"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -125,7 +128,7 @@ func (dht *IpfsDHT) startRefreshing() error {
 			for _, ps := range dht.routingTable.GetPeerInfos() {
 				// ping the peer if it's due for a ping and evict it if the ping fails
 				if time.Since(ps.LastSuccessfulOutboundQuery) > dht.maxLastSuccessfulOutboundThreshold {
-					livelinessCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					livelinessCtx, cancel := context.WithTimeout(ctx, peerPingTimeout)
 					if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
 						logger.Debugf("failed to ping peer=%s, got error=%s, evicting it from the RT", ps.Id, err)
 						dht.routingTable.RemovePeer(ps.Id)

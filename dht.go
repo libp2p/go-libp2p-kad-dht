@@ -190,7 +190,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	go dht.persistRTPeersInPeerStore()
 
 	// listens to the fix low peers chan and tries to fix the Routing Table
-	go dht.fixLowPeersRoutine()
+	dht.proc.Go(dht.fixLowPeersRoutine)
 
 	return dht, nil
 }
@@ -293,21 +293,18 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 		cmgr.UntagPeer(p, "kbucket")
 
 		// try to fix the RT
-		select {
-		case dht.fixLowPeersChan <- struct{}{}:
-		default:
-		}
+		dht.fixRTIfNeeded()
 	}
 
 	return rt, err
 }
 
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold
-func (dht *IpfsDHT) fixLowPeersRoutine() {
+func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 	for {
 		select {
 		case <-dht.fixLowPeersChan:
-		case <-dht.ctx.Done():
+		case <-proc.Closing():
 			return
 		}
 		if dht.routingTable.Size() > minRTRefreshThreshold {
@@ -484,6 +481,10 @@ func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 	dht.routingTable.RemovePeer(p)
 
 	// since we lost a peer from the RT, we should do this here
+	dht.fixRTIfNeeded()
+}
+
+func (dht *IpfsDHT) fixRTIfNeeded() {
 	select {
 	case dht.fixLowPeersChan <- struct{}{}:
 	default:

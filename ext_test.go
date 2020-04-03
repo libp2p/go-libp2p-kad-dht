@@ -129,15 +129,14 @@ func TestGetFailures(t *testing.T) {
 
 		pmes := new(pb.Message)
 		if err := pbr.ReadMsg(pmes); err != nil {
-			panic(err)
+			// user gave up
+			return
 		}
 
 		resp := &pb.Message{
 			Type: pmes.Type,
 		}
-		if err := pbw.WriteMsg(resp); err != nil {
-			panic(err)
-		}
+		_ = pbw.WriteMsg(resp)
 	})
 
 	// This one should fail with NotFound.

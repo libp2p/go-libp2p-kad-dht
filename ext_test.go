@@ -38,13 +38,15 @@ func TestHungRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Hang on every request.
-	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
-		defer s.Reset() //nolint
-		<-ctx.Done()
-	})
+	for _, proto := range d.serverProtocols {
+		// Hang on every request.
+		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
+			defer s.Reset() //nolint
+			<-ctx.Done()
+		})
+	}
 
-	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.protocols)...))
+	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.serverProtocols)...))
 	d.peerFound(ctx, hosts[1].ID(), true)
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
@@ -91,10 +93,12 @@ func TestGetFailures(t *testing.T) {
 	}
 
 	// Reply with failures to every message
-	host2.SetStreamHandler(d.protocols[0], func(s network.Stream) {
-		time.Sleep(400 * time.Millisecond)
-		s.Close()
-	})
+	for _, proto := range d.serverProtocols {
+		host2.SetStreamHandler(proto, func(s network.Stream) {
+			time.Sleep(400 * time.Millisecond)
+			s.Close()
+		})
+	}
 
 	host1.Peerstore().AddAddrs(host2.ID(), host2.Addrs(), peerstore.ConnectedAddrTTL)
 	_, err = host1.Network().DialPeer(ctx, host2.ID())
@@ -120,24 +124,26 @@ func TestGetFailures(t *testing.T) {
 
 	t.Log("Timeout test passed.")
 
-	// Reply with failures to every message
-	host2.SetStreamHandler(d.protocols[0], func(s network.Stream) {
-		defer s.Close()
+	for _, proto := range d.serverProtocols {
+		// Reply with failures to every message
+		host2.SetStreamHandler(proto, func(s network.Stream) {
+			defer s.Close()
 
-		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-		pbw := ggio.NewDelimitedWriter(s)
+			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+			pbw := ggio.NewDelimitedWriter(s)
 
-		pmes := new(pb.Message)
-		if err := pbr.ReadMsg(pmes); err != nil {
-			// user gave up
-			return
-		}
+			pmes := new(pb.Message)
+			if err := pbr.ReadMsg(pmes); err != nil {
+				// user gave up
+				return
+			}
 
-		resp := &pb.Message{
-			Type: pmes.Type,
-		}
-		_ = pbw.WriteMsg(resp)
-	})
+			resp := &pb.Message{
+				Type: pmes.Type,
+			}
+			_ = pbw.WriteMsg(resp)
+		})
+	}
 
 	// This one should fail with NotFound.
 	// long context timeout to ensure we dont end too early.
@@ -172,7 +178,7 @@ func TestGetFailures(t *testing.T) {
 			Record: rec,
 		}
 
-		s, err := host2.NewStream(context.Background(), host1.ID(), d.protocols[0])
+		s, err := host2.NewStream(context.Background(), host1.ID(), d.protocols...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,36 +230,38 @@ func TestNotFound(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(d.protocols[0], func(s network.Stream) {
-			defer s.Close()
+		for _, proto := range d.serverProtocols {
+			host.SetStreamHandler(proto, func(s network.Stream) {
+				defer s.Close()
 
-			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-			pbw := ggio.NewDelimitedWriter(s)
+				pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+				pbw := ggio.NewDelimitedWriter(s)
 
-			pmes := new(pb.Message)
-			if err := pbr.ReadMsg(pmes); err != nil {
-				panic(err)
-			}
-
-			switch pmes.GetType() {
-			case pb.Message_GET_VALUE:
-				resp := &pb.Message{Type: pmes.Type}
-
-				ps := []peer.AddrInfo{}
-				for i := 0; i < 7; i++ {
-					p := hosts[rand.Intn(len(hosts))].ID()
-					pi := host.Peerstore().PeerInfo(p)
-					ps = append(ps, pi)
-				}
-
-				resp.CloserPeers = pb.PeerInfosToPBPeers(d.host.Network(), ps)
-				if err := pbw.WriteMsg(resp); err != nil {
+				pmes := new(pb.Message)
+				if err := pbr.ReadMsg(pmes); err != nil {
 					panic(err)
 				}
-			default:
-				panic("Shouldnt recieve this.")
-			}
-		})
+
+				switch pmes.GetType() {
+				case pb.Message_GET_VALUE:
+					resp := &pb.Message{Type: pmes.Type}
+
+					ps := []peer.AddrInfo{}
+					for i := 0; i < 7; i++ {
+						p := hosts[rand.Intn(len(hosts))].ID()
+						pi := host.Peerstore().PeerInfo(p)
+						ps = append(ps, pi)
+					}
+
+					resp.CloserPeers = pb.PeerInfosToPBPeers(d.host.Network(), ps)
+					if err := pbw.WriteMsg(resp); err != nil {
+						panic(err)
+					}
+				default:
+					panic("Shouldnt recieve this.")
+				}
+			})
+		}
 	}
 
 	// long timeout to ensure timing is not at play.
@@ -304,33 +312,35 @@ func TestLessThanKResponses(t *testing.T) {
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
-		host.SetStreamHandler(d.protocols[0], func(s network.Stream) {
-			defer s.Close()
+		for _, proto := range d.serverProtocols {
+			host.SetStreamHandler(proto, func(s network.Stream) {
+				defer s.Close()
 
-			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-			pbw := ggio.NewDelimitedWriter(s)
+				pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+				pbw := ggio.NewDelimitedWriter(s)
 
-			pmes := new(pb.Message)
-			if err := pbr.ReadMsg(pmes); err != nil {
-				panic(err)
-			}
-
-			switch pmes.GetType() {
-			case pb.Message_GET_VALUE:
-				pi := host.Peerstore().PeerInfo(hosts[1].ID())
-				resp := &pb.Message{
-					Type:        pmes.Type,
-					CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []peer.AddrInfo{pi}),
-				}
-
-				if err := pbw.WriteMsg(resp); err != nil {
+				pmes := new(pb.Message)
+				if err := pbr.ReadMsg(pmes); err != nil {
 					panic(err)
 				}
-			default:
-				panic("Shouldnt recieve this.")
-			}
 
-		})
+				switch pmes.GetType() {
+				case pb.Message_GET_VALUE:
+					pi := host.Peerstore().PeerInfo(hosts[1].ID())
+					resp := &pb.Message{
+						Type:        pmes.Type,
+						CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []peer.AddrInfo{pi}),
+					}
+
+					if err := pbw.WriteMsg(resp); err != nil {
+						panic(err)
+					}
+				default:
+					panic("Shouldnt recieve this.")
+				}
+
+			})
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
@@ -369,34 +379,36 @@ func TestMultipleQueries(t *testing.T) {
 
 	d.peerFound(ctx, hosts[1].ID(), true)
 
-	// It would be nice to be able to just get a value and succeed but then
-	// we'd need to deal with selectors and validators...
-	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
-		defer s.Close()
+	for _, proto := range d.serverProtocols {
+		// It would be nice to be able to just get a value and succeed but then
+		// we'd need to deal with selectors and validators...
+		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
+			defer s.Close()
 
-		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-		pbw := ggio.NewDelimitedWriter(s)
+			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
+			pbw := ggio.NewDelimitedWriter(s)
 
-		pmes := new(pb.Message)
-		if err := pbr.ReadMsg(pmes); err != nil {
-			panic(err)
-		}
-
-		switch pmes.GetType() {
-		case pb.Message_GET_VALUE:
-			pi := hosts[1].Peerstore().PeerInfo(hosts[0].ID())
-			resp := &pb.Message{
-				Type:        pmes.Type,
-				CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []peer.AddrInfo{pi}),
-			}
-
-			if err := pbw.WriteMsg(resp); err != nil {
+			pmes := new(pb.Message)
+			if err := pbr.ReadMsg(pmes); err != nil {
 				panic(err)
 			}
-		default:
-			panic("Shouldnt recieve this.")
-		}
-	})
+
+			switch pmes.GetType() {
+			case pb.Message_GET_VALUE:
+				pi := hosts[1].Peerstore().PeerInfo(hosts[0].ID())
+				resp := &pb.Message{
+					Type:        pmes.Type,
+					CloserPeers: pb.PeerInfosToPBPeers(d.host.Network(), []peer.AddrInfo{pi}),
+				}
+
+				if err := pbw.WriteMsg(resp); err != nil {
+					panic(err)
+				}
+			default:
+				panic("Shouldnt recieve this.")
+			}
+		})
+	}
 
 	// long timeout to ensure timing is not at play.
 	ctx, cancel := context.WithTimeout(ctx, time.Second*20)

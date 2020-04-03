@@ -1810,6 +1810,7 @@ func TestProtocolUpgrade(t *testing.T) {
 	defer cancel()
 
 	os := []Option{
+		testPrefix,
 		Mode(ModeServer),
 		NamespacedValidator("v", blankValidator{}),
 		DisableAutoRefresh(),
@@ -1820,19 +1821,19 @@ func TestProtocolUpgrade(t *testing.T) {
 	// about other DHT servers in the new DHT.
 
 	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]Option{testPrefix}, os...)...)
+		append([]Option{V1CompatibleMode(false)}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]Option{testPrefix}, os...)...)
+		append([]Option{V1CompatibleMode(false)}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dhtC, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]Option{testPrefix, customProtocols(kad1)}, os...)...)
+		append([]Option{V1CompatibleMode(true)}, os...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 
 	"github.com/libp2p/go-eventbus"
 
@@ -170,12 +171,7 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 // supporting the primary protocols, we do not want to add peers that are speaking obsolete secondary protocols to our
 // routing table
 func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
-	pstrs := make([]string, len(dht.protocols))
-	for idx, proto := range dht.protocols {
-		pstrs[idx] = string(proto)
-	}
-
-	protos, err := dht.peerstore.SupportsProtocols(p, pstrs...)
+	protos, err := dht.peerstore.SupportsProtocols(p, protocol.ConvertToStrings(dht.protocols)...)
 	if err != nil {
 		return false, err
 	}

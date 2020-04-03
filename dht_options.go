@@ -52,6 +52,9 @@ type config struct {
 
 	// test parameters
 	testProtocols []protocol.ID
+
+	// set to true if we're operating in v1 dht compatible mode
+	v1CompatibleMode bool
 }
 
 func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
@@ -94,6 +97,8 @@ var defaults = func(o *config) error {
 	o.bucketSize = defaultBucketSize
 	o.concurrency = 3
 	o.resiliency = 3
+
+	o.v1CompatibleMode = true
 
 	return nil
 }
@@ -312,6 +317,21 @@ func RoutingTableFilter(filter RouteTableFilterFunc) Option {
 func customProtocols(protos ...protocol.ID) Option {
 	return func(c *config) error {
 		c.testProtocols = protos
+		return nil
+	}
+}
+
+// V1CompatibleMode sets the DHT to operate in V1 compatible mode. In this mode,
+// the DHT node will act like a V1 DHT node (use the V1 protocol names) but will
+// use the V2 query and routing table logic.
+//
+// For now, this option defaults to true for backwards compatibility. In the
+// near future, it will switch to false.
+//
+// This option is perma-unstable and may be removed in the future.
+func V1CompatibleMode(enable bool) Option {
+	return func(c *config) error {
+		c.v1CompatibleMode = enable
 		return nil
 	}
 }

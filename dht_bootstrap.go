@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"fmt"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
@@ -18,6 +19,9 @@ var DefaultBootstrapPeers []multiaddr.Multiaddr
 // Minimum number of peers in the routing table. If we drop below this and we
 // see a new peer, we trigger a bootstrap round.
 var minRTRefreshThreshold = 10
+
+// timeout for pinging one peer
+const peerPingTimeout = 10 * time.Second
 
 func init() {
 	for _, s := range []string{
@@ -119,6 +123,20 @@ func (dht *IpfsDHT) startRefreshing() error {
 			if err != nil {
 				logger.Warning(err)
 			}
+
+			// ping Routing Table peers that haven't been hear of/from in the interval they should have been.
+			for _, ps := range dht.routingTable.GetPeerInfos() {
+				// ping the peer if it's due for a ping and evict it if the ping fails
+				if time.Since(ps.LastSuccessfulOutboundQuery) > dht.maxLastSuccessfulOutboundThreshold {
+					livelinessCtx, cancel := context.WithTimeout(ctx, peerPingTimeout)
+					if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
+						logger.Debugf("failed to ping peer=%s, got error=%s, evicting it from the RT", ps.Id, err)
+						dht.routingTable.RemovePeer(ps.Id)
+					}
+					cancel()
+				}
+			}
+
 		}
 	})
 

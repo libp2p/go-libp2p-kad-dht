@@ -1484,6 +1484,43 @@ func TestFindClosestPeers(t *testing.T) {
 	}
 }
 
+func TestFixLowPeers(t *testing.T) {
+	ctx := context.Background()
+
+	dhts := setupDHTS(t, ctx, minRTRefreshThreshold+5)
+
+	defer func() {
+		for _, d := range dhts {
+			d.Close()
+			d.Host().Close()
+		}
+	}()
+
+	mainD := dhts[0]
+
+	// connect it to everyone else
+	for _, d := range dhts[1:] {
+		mainD.peerstore.AddAddrs(d.self, d.peerstore.Addrs(d.self), peerstore.TempAddrTTL)
+		require.NoError(t, mainD.Host().Connect(ctx, peer.AddrInfo{ID: d.self}))
+	}
+
+	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold+4, 5*time.Second)
+
+	// run a refresh on all of them
+	for _, d := range dhts {
+		err := <-d.RefreshRoutingTable()
+		require.NoError(t, err)
+	}
+
+	// now remove peers from RT so threshold gets hit
+	for _, d := range dhts[3:] {
+		mainD.routingTable.RemovePeer(d.self)
+	}
+
+	// but we will still get enough peers in the RT because of fix low Peers
+	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
+}
+
 func TestProvideDisabled(t *testing.T) {
 	k := testCaseCids[0]
 	kHash := k.Hash()

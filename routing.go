@@ -14,7 +14,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
-	logging "github.com/ipfs/go-log"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -33,15 +32,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return routing.ErrNotSupported
 	}
 
-	eip := logger.EventBegin(ctx, "PutValue")
-	defer func() {
-		eip.Append(loggableKey(key))
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
-	logger.Debugf("PutValue %s", key)
+	logger.Debugw("putting value", "key", loggableKeyString(key))
 
 	// don't even allow local users to put bad values.
 	if err := dht.Validator.Validate(key, value); err != nil {
@@ -112,15 +103,6 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
-
-	eip := logger.EventBegin(ctx, "GetValue")
-	defer func() {
-		eip.Append(loggableKey(key))
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
 
 	// apply defaultQuorum if relevant
 	var cfg routing.Options
@@ -226,10 +208,6 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 		return nil, routing.ErrNotSupported
 	}
 
-	eip := logger.EventBegin(ctx, "GetValues")
-	eip.Append(loggableKey(key))
-	defer eip.Done()
-
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	valCh, _ := dht.getValues(queryCtx, key, nil)
@@ -268,7 +246,7 @@ loop:
 				}
 				sel, err := dht.Validator.Select(key, [][]byte{best, v.Val})
 				if err != nil {
-					logger.Warning("Failed to select dht key: ", err)
+					logger.Warnw("failed to select best value", "key", key, "error", err)
 					continue
 				}
 				if sel != 1 {
@@ -313,6 +291,8 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
+
+	logger.Debugw("finding value", "key", loggableKeyString(key))
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {
@@ -415,14 +395,9 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	}
+	logger.Debugw("finding provider", "cid", key)
+
 	keyMH := key.Hash()
-	eip := logger.EventBegin(ctx, "Provide", multihashLoggableKey(keyMH), logging.LoggableMap{"broadcast": brdcst})
-	defer func() {
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
 
 	// add self locally
 	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
@@ -538,14 +513,14 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 	peerOut := make(chan peer.AddrInfo, chSize)
 
 	keyMH := key.Hash()
-	logger.Event(ctx, "findProviders", multihashLoggableKey(keyMH))
 
 	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut)
 	return peerOut
 }
 
 func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
-	defer logger.EventBegin(ctx, "findProvidersAsync", multihashLoggableKey(key)).Done()
+	logger.Debugw("finding providers", "key", key)
+
 	defer close(peerOut)
 
 	findAll := count == 0
@@ -638,13 +613,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
-	eip := logger.EventBegin(ctx, "FindPeer", id)
-	defer func() {
-		if err != nil {
-			eip.SetError(err)
-		}
-		eip.Done()
-	}()
+	logger.Debugw("finding peer", "peer", id)
 
 	// Check if were already connected to them
 	if pi := dht.FindLocal(id); pi.ID != "" {

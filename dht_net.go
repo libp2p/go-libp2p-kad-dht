@@ -136,19 +136,37 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
-			logger.Warningf("can't handle received message of type %v", req.GetType())
+			logger.Warnw("can't handle received message", "from", mPeer, "type", req.GetType())
 			return false
 		}
 
 		// a peer has queried us, let's add it to RT
 		dht.peerFound(dht.ctx, mPeer, true)
 
+		logger.Debugw("handling message",
+			"type", req.GetType(),
+			"key", req.GetKey(),
+			"from", mPeer,
+		)
 		resp, err := handler(ctx, mPeer, &req)
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
-			logger.Debugf("error handling message: %v", err)
+			logger.Debugw(
+				"error handling message",
+				"type", req.GetType(),
+				"key", req.GetKey(),
+				"from", mPeer,
+				"error", err)
 			return false
 		}
+
+		logger.Debugw(
+			"handled message",
+			"type", req.GetType(),
+			"key", req.GetKey(),
+			"from", mPeer,
+			"time", time.Since(startTime),
+		)
 
 		if resp == nil {
 			continue
@@ -158,11 +176,25 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		err = writeMsg(s, resp)
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
-			logger.Debugf("error writing response: %v", err)
+			logger.Debugw(
+				"error writing response",
+				"type", req.GetType(),
+				"key", req.GetKey(),
+				"from", mPeer,
+				"error", err)
 			return false
 		}
 
 		elapsedTime := time.Since(startTime)
+
+		logger.Debugw(
+			"responded to message",
+			"type", req.GetType(),
+			"key", req.GetKey(),
+			"from", mPeer,
+			"time", elapsedTime,
+		)
+
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 		stats.Record(ctx, metrics.InboundRequestLatency.M(latencyMillis))
 	}
@@ -179,6 +211,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 			metrics.SentRequests.M(1),
 			metrics.SentRequestErrors.M(1),
 		)
+		logger.Debugw("request failed to open message sender", "error", err, "to", p)
 		return nil, err
 	}
 
@@ -190,6 +223,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 			metrics.SentRequests.M(1),
 			metrics.SentRequestErrors.M(1),
 		)
+		logger.Debugw("request failed", "error", err, "to", p)
 		return nil, err
 	}
 
@@ -199,7 +233,6 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 		metrics.OutboundRequestLatency.M(float64(time.Since(start))/float64(time.Millisecond)),
 	)
 	dht.peerstore.RecordLatency(p, time.Since(start))
-	logger.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
 	return rpmes, nil
 }
 
@@ -213,6 +246,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 			metrics.SentMessages.M(1),
 			metrics.SentMessageErrors.M(1),
 		)
+		logger.Debugw("message failed to open message sender", "error", err, "to", p)
 		return err
 	}
 
@@ -221,6 +255,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 			metrics.SentMessages.M(1),
 			metrics.SentMessageErrors.M(1),
 		)
+		logger.Debugw("message failed", "error", err, "to", p)
 		return err
 	}
 
@@ -228,8 +263,6 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 		metrics.SentMessages.M(1),
 		metrics.SentBytes.M(int64(pmes.Size())),
 	)
-
-	logger.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
 	return nil
 }
 
@@ -344,15 +377,13 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			ms.s = nil
 
 			if retry {
-				logger.Info("error writing message, bailing: ", err)
+				logger.Debugw("error writing message", "error", err)
 				return err
 			}
-			logger.Info("error writing message, trying again: ", err)
+			logger.Debugw("error writing message", "error", err, "retrying", true)
 			retry = true
 			continue
 		}
-
-		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
 			go helpers.FullClose(ms.s)
@@ -382,10 +413,10 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.s = nil
 
 			if retry {
-				logger.Info("error writing message, bailing: ", err)
+				logger.Debugw("error writing message", "error", err)
 				return nil, err
 			}
-			logger.Info("error writing message, trying again: ", err)
+			logger.Debugw("error writing message", "error", err, "retrying", true)
 			retry = true
 			continue
 		}
@@ -396,15 +427,13 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.s = nil
 
 			if retry {
-				logger.Info("error reading message, bailing: ", err)
+				logger.Debugw("error reading message", "error", err)
 				return nil, err
 			}
-			logger.Info("error reading message, trying again: ", err)
+			logger.Debugw("error reading message", "error", err, "retrying", true)
 			retry = true
 			continue
 		}
-
-		logger.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
 			go helpers.FullClose(ms.s)

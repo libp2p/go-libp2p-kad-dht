@@ -22,12 +22,6 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
-// asyncQueryBuffer is the size of buffered channels in async queries. This
-// buffer allows multiple queries to execute simultaneously, return their
-// results and continue querying closer peers. Note that different query
-// results will wait for the channel to drain.
-var asyncQueryBuffer = 10
-
 // This file implements the Routing interface for the IpfsDHT struct.
 
 // Basic Put/Get

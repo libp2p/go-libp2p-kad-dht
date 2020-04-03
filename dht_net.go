@@ -62,7 +62,7 @@ func (w *bufferedDelimitedWriter) Flush() error {
 
 // handleNewStream implements the network.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s network.Stream) {
-	defer s.Reset()
+	defer s.Reset() //nolint
 	if dht.handleNewMessage(s) {
 		// Gracefully close the stream for writes.
 		s.Close()
@@ -76,7 +76,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 
 	mPeer := s.Conn().RemotePeer()
 
-	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { s.Reset() })
+	timer := time.AfterFunc(dhtStreamIdleTimeout, func() { _ = s.Reset() })
 	defer timer.Stop()
 
 	for {
@@ -99,7 +99,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 				logger.Debugf("error reading message: %#v", err)
 			}
 			if msgLen > 0 {
-				stats.RecordWithTags(ctx,
+				_ = stats.RecordWithTags(ctx,
 					[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
 					metrics.ReceivedMessages.M(1),
 					metrics.ReceivedMessageErrors.M(1),
@@ -112,7 +112,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		r.ReleaseMsg(msgbytes)
 		if err != nil {
 			logger.Debugf("error unmarshalling message: %#v", err)
-			stats.RecordWithTags(ctx,
+			_ = stats.RecordWithTags(ctx,
 				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
 				metrics.ReceivedMessages.M(1),
 				metrics.ReceivedMessageErrors.M(1),
@@ -282,7 +282,7 @@ type messageSender struct {
 func (ms *messageSender) invalidate() {
 	ms.invalid = true
 	if ms.s != nil {
-		ms.s.Reset()
+		_ = ms.s.Reset()
 		ms.s = nil
 	}
 }
@@ -340,7 +340,7 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 		}
 
 		if err := ms.writeMsg(pmes); err != nil {
-			ms.s.Reset()
+			_ = ms.s.Reset()
 			ms.s = nil
 
 			if retry {
@@ -378,7 +378,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 		}
 
 		if err := ms.writeMsg(pmes); err != nil {
-			ms.s.Reset()
+			_ = ms.s.Reset()
 			ms.s = nil
 
 			if retry {
@@ -392,7 +392,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 
 		mes := new(pb.Message)
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
-			ms.s.Reset()
+			_ = ms.s.Reset()
 			ms.s = nil
 
 			if retry {

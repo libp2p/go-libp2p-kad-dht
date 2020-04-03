@@ -35,15 +35,14 @@ import (
 )
 
 var logger = logging.Logger("dht")
-var rtPvLogger = logging.Logger("dht/rt-validation")
 
 const BaseConnMgrScore = 5
 
 type mode int
 
 const (
-	modeServer mode = 1
-	modeClient      = 2
+	modeServer mode = iota + 1
+	modeClient
 )
 
 const (
@@ -463,8 +462,11 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	if err != nil {
 		logger.Errorf("failed to validate if peer is a DHT peer, err=%s", err)
 	} else if b {
-		logger.Event(ctx, "peerFound", p)
-		dht.routingTable.TryAddPeer(p, queryPeer)
+		_, err := dht.routingTable.TryAddPeer(p, queryPeer)
+		if err != nil {
+			// peer not added.
+			return
+		}
 
 		// If we discovered the peer because of a query, we need to ensure we override the "zero" lastSuccessfulOutboundQuery
 		// value that must have been set in the Routing Table for this peer when it was first added during a connection.
@@ -628,7 +630,7 @@ func (dht *IpfsDHT) moveToClientMode() error {
 		for _, s := range c.GetStreams() {
 			if pset[s.Protocol()] {
 				if s.Stat().Direction == network.DirInbound {
-					s.Reset()
+					_ = s.Reset()
 				}
 			}
 		}

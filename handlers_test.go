@@ -110,7 +110,10 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		d.handleFindPeer(ctx, peers[0], reqs[i])
+		_, err = d.handleFindPeer(ctx, peers[0], reqs[i])
+		if err != nil {
+			b.Error(err)
+		}
 	}
 
 }

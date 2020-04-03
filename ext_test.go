@@ -40,7 +40,7 @@ func TestHungRequest(t *testing.T) {
 	}
 	// Hang on every request.
 	hosts[1].SetStreamHandler(d.protocols[0], func(s network.Stream) {
-		defer s.Reset()
+		defer s.Reset() //nolint
 		<-ctx.Done()
 	})
 

@@ -223,13 +223,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	var protocols, serverProtocols []protocol.ID
 
 	// check if custom test protocols were set
-	if len(cfg.testProtocols) > 0 {
-		protocols = make([]protocol.ID, len(cfg.testProtocols))
-		for i, p := range cfg.testProtocols {
-			protocols[i] = cfg.protocolPrefix + p
-		}
-		serverProtocols = protocols
-	} else if cfg.v1CompatibleMode {
+	if cfg.v1CompatibleMode {
 		// In compat mode, query/serve using the old protocol.
 		//
 		// DO NOT accept requests on the new protocol. Otherwise:

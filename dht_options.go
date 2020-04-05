@@ -50,9 +50,6 @@ type config struct {
 		peerFilter          RouteTableFilterFunc
 	}
 
-	// test parameters
-	testProtocols []protocol.ID
-
 	// set to true if we're operating in v1 dht compatible mode
 	v1CompatibleMode bool
 }
@@ -308,15 +305,6 @@ func QueryFilter(filter QueryFilterFunc) Option {
 func RoutingTableFilter(filter RouteTableFilterFunc) Option {
 	return func(c *config) error {
 		c.routingTable.peerFilter = filter
-		return nil
-	}
-}
-
-// customProtocols is only to be used for testing. It sets the protocols that the DHT listens on and queries with to be
-// the ones passed in. The custom protocols are still augmented by the Prefix.
-func customProtocols(protos ...protocol.ID) Option {
-	return func(c *config) error {
-		c.testProtocols = protos
 		return nil
 	}
 }

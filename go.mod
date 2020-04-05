@@ -16,7 +16,7 @@ require (
 	github.com/libp2p/go-eventbus v0.1.0
 	github.com/libp2p/go-libp2p v0.7.4
 	github.com/libp2p/go-libp2p-core v0.5.1
-	github.com/libp2p/go-libp2p-kbucket v0.3.2
+	github.com/libp2p/go-libp2p-kbucket v0.3.3-0.20200405215848-73747a2450e8
 	github.com/libp2p/go-libp2p-peerstore v0.2.2
 	github.com/libp2p/go-libp2p-record v0.1.2
 	github.com/libp2p/go-libp2p-swarm v0.2.3

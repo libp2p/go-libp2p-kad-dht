@@ -72,13 +72,17 @@ func (c *config) apply(opts ...Option) error {
 
 // applyFallbacks sets default values that could not be applied during config creation since they are dependent
 // on other configuration parameters (e.g. optA is by default 2x optB) and/or on the Host
-func (c *config) applyFallbacks(h host.Host) {
+func (c *config) applyFallbacks(h host.Host) error {
 	if !c.validatorChanged {
-		c.validator = record.NamespacedValidator{
-			"pk":   record.PublicKeyValidator{},
-			"ipns": ipns.Validator{KeyBook: h.Peerstore()},
+		nsval, ok := c.validator.(record.NamespacedValidator)
+		if ok {
+			nsval["pk"] = record.PublicKeyValidator{}
+			nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
+		} else {
+			return fmt.Errorf("the default validator was changed without being marked as changed")
 		}
 	}
+	return nil
 }
 
 // Option DHT option type.
@@ -89,6 +93,7 @@ const defaultBucketSize = 20
 // defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
 var defaults = func(o *config) error {
+	o.validator = record.NamespacedValidator{}
 	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true
@@ -186,7 +191,7 @@ func Mode(m ModeOpt) Option {
 // Validator configures the DHT to use the specified validator.
 //
 // Defaults to a namespaced validator that can validate both public key (under the "pk"
-// namespaced) and IPNS records (under the "ipns" namespace). Setting the validator
+// namespace) and IPNS records (under the "ipns" namespace). Setting the validator
 // implies that the user wants to control the validators and therefore the default
 // public key and IPNS validators will not be added.
 func Validator(v record.Validator) Option {
@@ -198,32 +203,32 @@ func Validator(v record.Validator) Option {
 }
 
 // NamespacedValidator adds a validator namespaced under `ns`. This option fails
-// if the DHT is not using a `record.NamespacedValidator` as its validator. If
-// the validator has yet to be modified (e.g. by the `Validator` option) then
-// a NamespacedValidator will be created implicitly. Adding a namespaced
-// validator implies that the user wants to control the validators and therefore
-// the default public key and IPNS validators will not be added.
+// if the DHT is not using a `record.NamespacedValidator` as its validator (it
+// uses one by default but this can be overridden with the `Validator` option).
+// Adding a namespaced validator without changing the `Validator` will result in
+// adding a new validator in addition to the default public key and IPNS validators.
+// The "pk" and "ipns" namespaces cannot be overridden here unless a new `Validator`
+// has been set first.
 //
 // Example: Given a validator registered as `NamespacedValidator("ipns",
 // myValidator)`, all records with keys starting with `/ipns/` will be validated
 // with `myValidator`.
 func NamespacedValidator(ns string, v record.Validator) Option {
 	return func(c *config) error {
-		// while the validator will not change if there's an error setting the validator that is only possible
-		// if the validator has already been changed
-		c.validatorChanged = true
-
-		if c.validator == nil {
-			c.validator = record.NamespacedValidator{
-				ns: v,
+		if !c.validatorChanged {
+			if ns == "pk" {
+				return fmt.Errorf("cannot override the pk namespace without first changing the Validator")
 			}
-		} else {
-			nsval, ok := c.validator.(record.NamespacedValidator)
-			if !ok {
-				return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
+			if ns == "ipns" {
+				return fmt.Errorf("cannot override the ipns namespace without first changing the Validator")
 			}
-			nsval[ns] = v
 		}
+
+		nsval, ok := c.validator.(record.NamespacedValidator)
+		if !ok {
+			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
+		}
+		nsval[ns] = v
 		return nil
 	}
 }

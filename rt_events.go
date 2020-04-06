@@ -8,7 +8,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-func NewRTEvent(
+func NewRoutingTableEvent(
 	peerUpdate *RoutingTablePeerUpdatedEvent,
 	bucketEvt *BucketRefreshLaunchedEvent,
 ) *RoutingTableEvent {

@@ -59,7 +59,7 @@ func (dht *IpfsDHT) startSelfLookup() {
 			// batch multiple refresh requests if they're all waiting at the same time.
 			waiting = append(waiting, collectWaitingChannels(dht.triggerSelfLookup)...)
 
-			PublishRoutingTableEvent(dht.ctx, NewRTEvent(nil,
+			PublishRoutingTableEvent(dht.ctx, NewRoutingTableEvent(nil,
 				NewBucketRefreshLaunchedEvent(255, false),
 			))
 
@@ -199,7 +199,7 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 		queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
 		defer cancel()
 
-		PublishRoutingTableEvent(dht.ctx, NewRTEvent(nil,
+		PublishRoutingTableEvent(dht.ctx, NewRoutingTableEvent(nil,
 			NewBucketRefreshLaunchedEvent(int(cpl), false),
 		))
 
@@ -215,7 +215,7 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 	var merr error
 	for cpl, lastRefreshedAt := range trackedCpls {
 		if time.Since(lastRefreshedAt) <= dht.rtRefreshInterval {
-			PublishRoutingTableEvent(dht.ctx, NewRTEvent(nil,
+			PublishRoutingTableEvent(dht.ctx, NewRoutingTableEvent(nil,
 				NewBucketRefreshLaunchedEvent(cpl, true),
 			))
 			continue
@@ -225,7 +225,7 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 		randPeer, err := dht.routingTable.GenRandPeerID(uint(cpl))
 		if err != nil {
 			logger.Errorw("failed to generate peer ID", "cpl", cpl, "error", err)
-			PublishRoutingTableEvent(dht.ctx, NewRTEvent(nil,
+			PublishRoutingTableEvent(dht.ctx, NewRoutingTableEvent(nil,
 				NewBucketRefreshLaunchedEvent(cpl, true),
 			))
 			continue

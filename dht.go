@@ -294,7 +294,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
-		PublishRoutingTableEvent(dht.ctx, NewRTEvent(NewRoutingTablePeerUpdatedEvent(
+		PublishRoutingTableEvent(dht.ctx, NewRoutingTableEvent(NewRoutingTablePeerUpdatedEvent(
 			[]peer.ID{p},
 			nil,
 			nil,
@@ -304,7 +304,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 		cmgr.TagPeer(p, "kbucket", BaseConnMgrScore+commonPrefixLen)
 	}
 	rt.PeerRemoved = func(p peer.ID) {
-		PublishRoutingTableEvent(dht.ctx, NewRTEvent(NewRoutingTablePeerUpdatedEvent(
+		PublishRoutingTableEvent(dht.ctx, NewRoutingTableEvent(NewRoutingTablePeerUpdatedEvent(
 			nil,
 			[]peer.ID{p},
 			nil,

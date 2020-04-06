@@ -2,10 +2,12 @@ package dht
 
 import (
 	"fmt"
+	"github.com/ipfs/go-ipns"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
@@ -29,17 +31,18 @@ const DefaultPrefix protocol.ID = "/ipfs"
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type config struct {
-	datastore       ds.Batching
-	validator       record.Validator
-	mode            ModeOpt
-	protocolPrefix  protocol.ID
-	bucketSize      int
-	concurrency     int
-	resiliency      int
-	maxRecordAge    time.Duration
-	enableProviders bool
-	enableValues    bool
-	queryPeerFilter QueryFilterFunc
+	datastore        ds.Batching
+	validator        record.Validator
+	validatorChanged bool // if true implies that the validator has been changed and that defaults should not be used
+	mode             ModeOpt
+	protocolPrefix   protocol.ID
+	bucketSize       int
+	concurrency      int
+	resiliency       int
+	maxRecordAge     time.Duration
+	enableProviders  bool
+	enableValues     bool
+	queryPeerFilter  QueryFilterFunc
 
 	routingTable struct {
 		refreshQueryTimeout time.Duration
@@ -67,6 +70,25 @@ func (c *config) apply(opts ...Option) error {
 	return nil
 }
 
+// applyFallbacks sets default values that could not be applied during config creation since they are dependent
+// on other configuration parameters (e.g. optA is by default 2x optB) and/or on the Host
+func (c *config) applyFallbacks(h host.Host) error {
+	if !c.validatorChanged {
+		nsval, ok := c.validator.(record.NamespacedValidator)
+		if ok {
+			if _, pkFound := nsval["pk"]; !pkFound {
+				nsval["pk"] = record.PublicKeyValidator{}
+			}
+			if _, ipnsFound := nsval["ipns"]; !ipnsFound {
+				nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
+			}
+		} else {
+			return fmt.Errorf("the default validator was changed without being marked as changed")
+		}
+	}
+	return nil
+}
+
 // Option DHT option type.
 type Option func(*config) error
 
@@ -75,9 +97,7 @@ const defaultBucketSize = 20
 // defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
 var defaults = func(o *config) error {
-	o.validator = record.NamespacedValidator{
-		"pk": record.PublicKeyValidator{},
-	}
+	o.validator = record.NamespacedValidator{}
 	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true
@@ -101,22 +121,38 @@ var defaults = func(o *config) error {
 }
 
 func (c *config) validate() error {
-	if c.protocolPrefix == DefaultPrefix {
-		if c.bucketSize != defaultBucketSize {
-			return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
-		}
-		if !c.enableProviders {
-			return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)
-		}
-		if !c.enableValues {
-			return fmt.Errorf("protocol prefix %s must have values enabled", DefaultPrefix)
-		}
-		if nsval, ok := c.validator.(record.NamespacedValidator); !ok {
-			return fmt.Errorf("protocol prefix %s must use a namespaced validator", DefaultPrefix)
-		} else if len(nsval) > 2 || nsval["pk"] == nil || nsval["ipns"] == nil {
-			return fmt.Errorf("protocol prefix %s must support only the /pk and /ipns namespaces", DefaultPrefix)
-		}
+	if c.protocolPrefix != DefaultPrefix {
 		return nil
+	}
+	if c.bucketSize != defaultBucketSize {
+		return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
+	}
+	if !c.enableProviders {
+		return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)
+	}
+	if !c.enableValues {
+		return fmt.Errorf("protocol prefix %s must have values enabled", DefaultPrefix)
+	}
+
+	nsval, isNSVal := c.validator.(record.NamespacedValidator)
+	if !isNSVal {
+		return fmt.Errorf("protocol prefix %s must use a namespaced validator", DefaultPrefix)
+	}
+
+	if len(nsval) != 2 {
+		return fmt.Errorf("protocol prefix %s must have exactly two namespaced validators - /pk and /ipns", DefaultPrefix)
+	}
+
+	if pkVal, pkValFound := nsval["pk"]; !pkValFound {
+		return fmt.Errorf("protocol prefix %s must support the /pk namespaced validator", DefaultPrefix)
+	} else if _, ok := pkVal.(record.PublicKeyValidator); !ok {
+		return fmt.Errorf("protocol prefix %s must use the record.PublicKeyValidator for the /pk namespace", DefaultPrefix)
+	}
+
+	if ipnsVal, ipnsValFound := nsval["ipns"]; !ipnsValFound {
+		return fmt.Errorf("protocol prefix %s must support the /ipns namespaced validator", DefaultPrefix)
+	} else if _, ok := ipnsVal.(ipns.Validator); !ok {
+		return fmt.Errorf("protocol prefix %s must use ipns.Validator for the /ipns namespace", DefaultPrefix)
 	}
 	return nil
 }
@@ -174,17 +210,25 @@ func Mode(m ModeOpt) Option {
 
 // Validator configures the DHT to use the specified validator.
 //
-// Defaults to a namespaced validator that can only validate public keys.
+// Defaults to a namespaced validator that can validate both public key (under the "pk"
+// namespace) and IPNS records (under the "ipns" namespace). Setting the validator
+// implies that the user wants to control the validators and therefore the default
+// public key and IPNS validators will not be added.
 func Validator(v record.Validator) Option {
 	return func(c *config) error {
 		c.validator = v
+		c.validatorChanged = true
 		return nil
 	}
 }
 
 // NamespacedValidator adds a validator namespaced under `ns`. This option fails
-// if the DHT is not using a `record.NamespacedValidator` as it's validator (it
+// if the DHT is not using a `record.NamespacedValidator` as its validator (it
 // uses one by default but this can be overridden with the `Validator` option).
+// Adding a namespaced validator without changing the `Validator` will result in
+// adding a new validator in addition to the default public key and IPNS validators.
+// The "pk" and "ipns" namespaces cannot be overridden here unless a new `Validator`
+// has been set first.
 //
 // Example: Given a validator registered as `NamespacedValidator("ipns",
 // myValidator)`, all records with keys starting with `/ipns/` will be validated

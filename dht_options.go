@@ -31,17 +31,18 @@ const DefaultPrefix protocol.ID = "/ipfs"
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type config struct {
-	datastore       ds.Batching
-	validator       record.Validator
-	mode            ModeOpt
-	protocolPrefix  protocol.ID
-	bucketSize      int
-	concurrency     int
-	resiliency      int
-	maxRecordAge    time.Duration
-	enableProviders bool
-	enableValues    bool
-	queryPeerFilter QueryFilterFunc
+	datastore        ds.Batching
+	validator        record.Validator
+	validatorChanged bool // if true implies that the validator has been changed and that defaults should not be used
+	mode             ModeOpt
+	protocolPrefix   protocol.ID
+	bucketSize       int
+	concurrency      int
+	resiliency       int
+	maxRecordAge     time.Duration
+	enableProviders  bool
+	enableValues     bool
+	queryPeerFilter  QueryFilterFunc
 
 	routingTable struct {
 		refreshQueryTimeout time.Duration
@@ -72,10 +73,10 @@ func (c *config) apply(opts ...Option) error {
 // applyFallbacks sets default values that could not be applied during config creation since they are dependent
 // on other configuration parameters (e.g. optA is by default 2x optB) and/or on the Host
 func (c *config) applyFallbacks(h host.Host) {
-	if c.protocolPrefix == DefaultPrefix {
-		nsval, ok := c.validator.(record.NamespacedValidator)
-		if ok {
-			nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
+	if !c.validatorChanged {
+		c.validator = record.NamespacedValidator{
+			"pk":   record.PublicKeyValidator{},
+			"ipns": ipns.Validator{KeyBook: h.Peerstore()},
 		}
 	}
 }
@@ -88,9 +89,6 @@ const defaultBucketSize = 20
 // defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
 var defaults = func(o *config) error {
-	o.validator = record.NamespacedValidator{
-		"pk": record.PublicKeyValidator{},
-	}
 	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true
@@ -187,30 +185,45 @@ func Mode(m ModeOpt) Option {
 
 // Validator configures the DHT to use the specified validator.
 //
-// Defaults to a namespaced validator that can only validate public keys.
-// For the default protocol prefix it defaults to a namespaced validator that
-// supports validating both public key and IPNS records
+// Defaults to a namespaced validator that can validate both public key (under the "pk"
+// namespaced) and IPNS records (under the "ipns" namespace). Setting the validator
+// implies that the user wants to control the validators and therefore the default
+// public key and IPNS validators will not be added.
 func Validator(v record.Validator) Option {
 	return func(c *config) error {
 		c.validator = v
+		c.validatorChanged = true
 		return nil
 	}
 }
 
 // NamespacedValidator adds a validator namespaced under `ns`. This option fails
-// if the DHT is not using a `record.NamespacedValidator` as it's validator (it
-// uses one by default but this can be overridden with the `Validator` option).
+// if the DHT is not using a `record.NamespacedValidator` as its validator. If
+// the validator has yet to be modified (e.g. by the `Validator` option) then
+// a NamespacedValidator will be created implicitly. Adding a namespaced
+// validator implies that the user wants to control the validators and therefore
+// the default public key and IPNS validators will not be added.
 //
 // Example: Given a validator registered as `NamespacedValidator("ipns",
 // myValidator)`, all records with keys starting with `/ipns/` will be validated
 // with `myValidator`.
 func NamespacedValidator(ns string, v record.Validator) Option {
 	return func(c *config) error {
-		nsval, ok := c.validator.(record.NamespacedValidator)
-		if !ok {
-			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
+		// while the validator will not change if there's an error setting the validator that is only possible
+		// if the validator has already been changed
+		c.validatorChanged = true
+
+		if c.validator == nil {
+			c.validator = record.NamespacedValidator{
+				ns: v,
+			}
+		} else {
+			nsval, ok := c.validator.(record.NamespacedValidator)
+			if !ok {
+				return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
+			}
+			nsval[ns] = v
 		}
-		nsval[ns] = v
 		return nil
 	}
 }

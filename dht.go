@@ -135,7 +135,6 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	cfg.applyFallbacks(h)
 
 	if err := cfg.validate(); err != nil {
 		return nil, err

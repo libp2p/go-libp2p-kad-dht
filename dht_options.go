@@ -6,6 +6,8 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipfs/go-ipns"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
@@ -67,6 +69,23 @@ func (c *config) apply(opts ...Option) error {
 	return nil
 }
 
+// applyFallbacks sets default values that could not be applied during config creation since they are dependent
+// on other configuration parameters (e.g. optA is by default 2x optB) and/or on the Host
+func (c *config) applyFallbacks(h host.Host) {
+	if c.validator == nil {
+		if c.protocolPrefix == DefaultPrefix {
+			c.validator = record.NamespacedValidator{
+				"pk":   record.PublicKeyValidator{},
+				"ipns": ipns.Validator{KeyBook: h.Peerstore()},
+			}
+		} else {
+			c.validator = record.NamespacedValidator{
+				"pk": record.PublicKeyValidator{},
+			}
+		}
+	}
+}
+
 // Option DHT option type.
 type Option func(*config) error
 
@@ -75,9 +94,6 @@ const defaultBucketSize = 20
 // defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
 var defaults = func(o *config) error {
-	o.validator = record.NamespacedValidator{
-		"pk": record.PublicKeyValidator{},
-	}
 	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true
@@ -175,6 +191,8 @@ func Mode(m ModeOpt) Option {
 // Validator configures the DHT to use the specified validator.
 //
 // Defaults to a namespaced validator that can only validate public keys.
+// For the default protocol prefix it defaults to a namespaced validator that
+// supports validating both public key and IPNS records
 func Validator(v record.Validator) Option {
 	return func(c *config) error {
 		c.validator = v

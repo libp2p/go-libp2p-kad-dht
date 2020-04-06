@@ -204,15 +204,15 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 	trackedCpls := dht.routingTable.GetTrackedCplsForRefresh()
 
 	var merr error
-	for _, tcpl := range trackedCpls {
-		if time.Since(tcpl.LastRefreshAt) <= dht.rtRefreshInterval {
+	for cpl, lastRefreshedAt := range trackedCpls {
+		if time.Since(lastRefreshedAt) <= dht.rtRefreshInterval {
 			continue
 		}
 
 		// gen rand peer with the cpl
-		randPeer, err := dht.routingTable.GenRandPeerID(tcpl.Cpl)
+		randPeer, err := dht.routingTable.GenRandPeerID(uint(cpl))
 		if err != nil {
-			logger.Errorf("failed to generate peerID for cpl %d, err: %s", tcpl.Cpl, err)
+			logger.Errorw("failed to generate peer ID", "cpl", cpl, "error", err)
 			continue
 		}
 
@@ -222,10 +222,10 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 			return err
 		}
 
-		if err := doQuery(tcpl.Cpl, randPeer.String(), walkFnc); err != nil {
+		if err := doQuery(uint(cpl), randPeer.String(), walkFnc); err != nil {
 			merr = multierror.Append(
 				merr,
-				fmt.Errorf("failed to do a random walk for cpl %d: %s", tcpl.Cpl, err),
+				fmt.Errorf("failed to do a random walk for cpl %d: %w", cpl, err),
 			)
 		}
 	}

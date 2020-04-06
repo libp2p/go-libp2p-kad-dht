@@ -2,11 +2,11 @@ package dht
 
 import (
 	"fmt"
+	"github.com/ipfs/go-ipns"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/ipfs/go-ipns"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -76,8 +76,12 @@ func (c *config) applyFallbacks(h host.Host) error {
 	if !c.validatorChanged {
 		nsval, ok := c.validator.(record.NamespacedValidator)
 		if ok {
-			nsval["pk"] = record.PublicKeyValidator{}
-			nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
+			if _, pkFound := nsval["pk"]; !pkFound {
+				nsval["pk"] = record.PublicKeyValidator{}
+			}
+			if _, ipnsFound := nsval["ipns"]; !ipnsFound {
+				nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
+			}
 		} else {
 			return fmt.Errorf("the default validator was changed without being marked as changed")
 		}
@@ -117,22 +121,38 @@ var defaults = func(o *config) error {
 }
 
 func (c *config) validate() error {
-	if c.protocolPrefix == DefaultPrefix {
-		if c.bucketSize != defaultBucketSize {
-			return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
-		}
-		if !c.enableProviders {
-			return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)
-		}
-		if !c.enableValues {
-			return fmt.Errorf("protocol prefix %s must have values enabled", DefaultPrefix)
-		}
-		if nsval, ok := c.validator.(record.NamespacedValidator); !ok {
-			return fmt.Errorf("protocol prefix %s must use a namespaced validator", DefaultPrefix)
-		} else if len(nsval) > 2 || nsval["pk"] == nil || nsval["ipns"] == nil {
-			return fmt.Errorf("protocol prefix %s must support only the /pk and /ipns namespaces", DefaultPrefix)
-		}
+	if c.protocolPrefix != DefaultPrefix {
 		return nil
+	}
+	if c.bucketSize != defaultBucketSize {
+		return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
+	}
+	if !c.enableProviders {
+		return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)
+	}
+	if !c.enableValues {
+		return fmt.Errorf("protocol prefix %s must have values enabled", DefaultPrefix)
+	}
+
+	nsval, isNSVal := c.validator.(record.NamespacedValidator)
+	if !isNSVal {
+		return fmt.Errorf("protocol prefix %s must use a namespaced validator", DefaultPrefix)
+	}
+
+	if len(nsval) != 2 {
+		return fmt.Errorf("protocol prefix %s must have exactly two namespaced validators - /pk and /ipns", DefaultPrefix)
+	}
+
+	if pkVal, pkValFound := nsval["pk"]; !pkValFound {
+		return fmt.Errorf("protocol prefix %s must support the /pk namespaced validator", DefaultPrefix)
+	} else if _, ok := pkVal.(record.PublicKeyValidator); !ok {
+		return fmt.Errorf("protocol prefix %s must use the record.PublicKeyValidator for the /pk namespace", DefaultPrefix)
+	}
+
+	if ipnsVal, ipnsValFound := nsval["ipns"]; !ipnsValFound {
+		return fmt.Errorf("protocol prefix %s must support the /ipns namespaced validator", DefaultPrefix)
+	} else if _, ok := ipnsVal.(ipns.Validator); !ok {
+		return fmt.Errorf("protocol prefix %s must use ipns.Validator for the /ipns namespace", DefaultPrefix)
 	}
 	return nil
 }
@@ -215,15 +235,6 @@ func Validator(v record.Validator) Option {
 // with `myValidator`.
 func NamespacedValidator(ns string, v record.Validator) Option {
 	return func(c *config) error {
-		if !c.validatorChanged {
-			if ns == "pk" {
-				return fmt.Errorf("cannot override the pk namespace without first changing the Validator")
-			}
-			if ns == "ipns" {
-				return fmt.Errorf("cannot override the ipns namespace without first changing the Validator")
-			}
-		}
-
 		nsval, ok := c.validator.(record.NamespacedValidator)
 		if !ok {
 			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")

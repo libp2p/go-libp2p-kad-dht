@@ -72,16 +72,10 @@ func (c *config) apply(opts ...Option) error {
 // applyFallbacks sets default values that could not be applied during config creation since they are dependent
 // on other configuration parameters (e.g. optA is by default 2x optB) and/or on the Host
 func (c *config) applyFallbacks(h host.Host) {
-	if c.validator == nil {
-		if c.protocolPrefix == DefaultPrefix {
-			c.validator = record.NamespacedValidator{
-				"pk":   record.PublicKeyValidator{},
-				"ipns": ipns.Validator{KeyBook: h.Peerstore()},
-			}
-		} else {
-			c.validator = record.NamespacedValidator{
-				"pk": record.PublicKeyValidator{},
-			}
+	if c.protocolPrefix == DefaultPrefix {
+		nsval, ok := c.validator.(record.NamespacedValidator)
+		if ok {
+			nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
 		}
 	}
 }
@@ -94,6 +88,9 @@ const defaultBucketSize = 20
 // defaults are the default DHT options. This option will be automatically
 // prepended to any options you pass to the DHT constructor.
 var defaults = func(o *config) error {
+	o.validator = record.NamespacedValidator{
+		"pk": record.PublicKeyValidator{},
+	}
 	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
 	o.protocolPrefix = DefaultPrefix
 	o.enableProviders = true

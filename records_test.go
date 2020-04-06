@@ -14,8 +14,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
-
-	dhtopt "github.com/libp2p/go-libp2p-kad-dht/opts"
 )
 
 // Check that GetPublicKey() correctly extracts a public key
@@ -318,13 +316,16 @@ func TestValuesDisabled(t *testing.T) {
 			defer cancel()
 
 			var (
-				optsA, optsB []dhtopt.Option
+				optsA, optsB []Option
 			)
+			optsA = append(optsA, ProtocolPrefix("/valuesMaybeDisabled"))
+			optsB = append(optsB, ProtocolPrefix("/valuesMaybeDisabled"))
+
 			if !enabledA {
-				optsA = append(optsA, dhtopt.DisableValues())
+				optsA = append(optsA, DisableValues())
 			}
 			if !enabledB {
-				optsB = append(optsB, dhtopt.DisableValues())
+				optsB = append(optsB, DisableValues())
 			}
 
 			dhtA := setupDHT(ctx, t, false, optsA...)

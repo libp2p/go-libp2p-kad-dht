@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/event"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -22,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	"github.com/ipfs/go-cid"
@@ -31,9 +32,10 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	"github.com/libp2p/go-libp2p-testing/ci"
-	travisci "github.com/libp2p/go-libp2p-testing/ci/travis"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
+
+	detectrace "github.com/ipfs/go-detect-race"
 )
 
 var testCaseCids []cid.Cid
@@ -125,15 +127,25 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 
-func setupDHT(ctx context.Context, t *testing.T, client bool, options ...opts.Option) *IpfsDHT {
+var testPrefix = ProtocolPrefix("/test")
+
+func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *IpfsDHT {
+	baseOpts := []Option{
+		testPrefix,
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
+	}
+
+	if client {
+		baseOpts = append(baseOpts, Mode(ModeClient))
+	} else {
+		baseOpts = append(baseOpts, Mode(ModeServer))
+	}
+
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append([]opts.Option{
-			opts.Client(client),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
-		}, options...)...,
+		append(baseOpts, options...)...,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +245,8 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 
 // Check to make sure we always signal the RefreshRoutingTable channel.
 func TestRefreshMultiple(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// TODO: What's with this test? How long should it take and why does RefreshRoutingTable not take a context?
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 	defer cancel()
 
 	dhts := setupDHTS(t, ctx, 5)
@@ -295,7 +308,7 @@ func TestValueGetSet(t *testing.T) {
 	}
 
 	t.Log("requesting value on dhts: ", dhts[1].self)
-	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
+	ctxT, cancel = context.WithTimeout(ctx, time.Second*2*60)
 	defer cancel()
 
 	val, err := dhts[1].GetValue(ctxT, "/v/hello")
@@ -314,13 +327,13 @@ func TestValueGetSet(t *testing.T) {
 
 	t.Log("requesting value (offline) on dhts: ", dhts[2].self)
 	vala, err := dhts[2].GetValue(ctxT, "/v/hello", Quorum(0))
-	if vala != nil {
-		t.Fatalf("offline get should have failed, got %s", string(vala))
-	}
-	if err != routing.ErrNotFound {
-		t.Fatalf("offline get should have failed with ErrNotFound, got: %s", err)
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	if string(vala) != "world" {
+		t.Fatalf("Expected 'world' got '%s'", string(vala))
+	}
 	t.Log("requesting value (online) on dhts: ", dhts[2].self)
 	val, err = dhts[2].GetValue(ctxT, "/v/hello")
 	if err != nil {
@@ -451,7 +464,7 @@ func TestSearchValue(t *testing.T) {
 
 	ctxT, cancel = context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
-	valCh, err := dhtA.SearchValue(ctxT, "/v/hello", Quorum(-1))
+	valCh, err := dhtA.SearchValue(ctxT, "/v/hello", Quorum(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,21 +771,19 @@ func TestRefresh(t *testing.T) {
 	ctxT, cancelT := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelT()
 
-	go func() {
-		for ctxT.Err() == nil {
-			bootstrap(t, ctxT, dhts)
+	for ctxT.Err() == nil {
+		bootstrap(t, ctxT, dhts)
 
-			// wait a bit.
-			select {
-			case <-time.After(50 * time.Millisecond):
-				continue // being explicit
-			case <-ctxT.Done():
-				return
-			}
+		// wait a bit.
+		select {
+		case <-time.After(50 * time.Millisecond):
+			continue // being explicit
+		case <-ctxT.Done():
+			return
 		}
-	}()
+	}
 
-	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
+	waitForWellFormedTables(t, dhts, 7, 10, 10*time.Second)
 	cancelT()
 
 	if u.Debug {
@@ -788,8 +799,9 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	dhtA, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		opts.Client(false),
-		opts.NamespacedValidator("v", blankValidator{}),
+		testPrefix,
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -841,83 +853,6 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }
 
-// Check to make sure we re-fill the routing table from connected peers when it
-// completely empties.
-func TestEmptyTable(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	nDHTs := 50
-	dhts := setupDHTS(t, ctx, nDHTs)
-	defer func() {
-		for _, dht := range dhts {
-			dht.Close()
-			defer dht.host.Close()
-		}
-	}()
-
-	t.Logf("dhts are not connected. %d", nDHTs)
-	for _, dht := range dhts {
-		rtlen := dht.routingTable.Size()
-		if rtlen > 0 {
-			t.Errorf("routing table for %s should have 0 peers. has %d", dht.self, rtlen)
-		}
-	}
-
-	for i := 1; i < nDHTs; i++ {
-		connectNoSync(t, ctx, dhts[0], dhts[i])
-	}
-
-	// Wait till the routing table stabilizes.
-	oldSize := dhts[0].routingTable.Size()
-	for {
-		time.Sleep(time.Millisecond)
-		newSize := dhts[0].routingTable.Size()
-		if oldSize == newSize {
-			break
-		}
-		oldSize = newSize
-	}
-
-	// remove any one peer from the RT so we don't  end up disconnecting all of them if the RT
-	// already has all peers we are connected to
-	dhts[0].routingTable.Remove(dhts[0].routingTable.ListPeers()[0])
-
-	if u.Debug {
-		printRoutingTables(dhts[:1])
-	}
-
-	// Disconnect from all peers that _were_ in the routing table.
-	routingTablePeers := make(map[peer.ID]bool, nDHTs)
-	for _, p := range dhts[0].RoutingTable().ListPeers() {
-		routingTablePeers[p] = true
-	}
-
-	oldDHTs := dhts[1:]
-	dhts = dhts[:1]
-	for _, dht := range oldDHTs {
-		if routingTablePeers[dht.Host().ID()] {
-			dhts[0].Host().Network().ClosePeer(dht.host.ID())
-			dht.Close()
-			dht.host.Close()
-		} else {
-			dhts = append(dhts, dht)
-		}
-	}
-
-	// we should now _re-add_ some peers to the routing table
-	for i := 0; i < 100; i++ {
-		if dhts[0].routingTable.Size() > 0 {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if u.Debug {
-		printRoutingTables(dhts[:1])
-	}
-	t.Fatal("routing table shouldn't have been empty")
-}
-
 func TestPeriodicRefresh(t *testing.T) {
 	if ci.IsRunning() {
 		t.Skip("skipping on CI. highly timing dependent")
@@ -963,10 +898,16 @@ func TestPeriodicRefresh(t *testing.T) {
 	}
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
+	var wg sync.WaitGroup
 	for _, dht := range dhts {
-		dht.RefreshRoutingTable()
+		wg.Add(1)
+		go func(d *IpfsDHT) {
+			<-d.RefreshRoutingTable()
+			wg.Done()
+		}(dht)
 	}
 
+	wg.Wait()
 	// this is async, and we dont know when it's finished with one cycle, so keep checking
 	// until the routing tables look better, or some long timeout for the failure case.
 	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
@@ -1228,68 +1169,12 @@ func TestFindPeer(t *testing.T) {
 	}
 }
 
-func TestFindPeersConnectedToPeer(t *testing.T) {
-	t.Skip("not quite correct (see note)")
-
-	if testing.Short() {
-		t.SkipNow()
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dhts := setupDHTS(t, ctx, 4)
-	defer func() {
-		for i := 0; i < 4; i++ {
-			dhts[i].Close()
-			dhts[i].host.Close()
-		}
-	}()
-
-	// topology:
-	// 0-1, 1-2, 1-3, 2-3
-	connect(t, ctx, dhts[0], dhts[1])
-	connect(t, ctx, dhts[1], dhts[2])
-	connect(t, ctx, dhts[1], dhts[3])
-	connect(t, ctx, dhts[2], dhts[3])
-
-	// fmt.Println("0 is", peers[0])
-	// fmt.Println("1 is", peers[1])
-	// fmt.Println("2 is", peers[2])
-	// fmt.Println("3 is", peers[3])
-
-	ctxT, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	pchan, err := dhts[0].FindPeersConnectedToPeer(ctxT, dhts[2].PeerID())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// shouldFind := []peer.ID{peers[1], peers[3]}
-	var found []*peer.AddrInfo
-	for nextp := range pchan {
-		found = append(found, nextp)
-	}
-
-	// fmt.Printf("querying 0 (%s) FindPeersConnectedToPeer 2 (%s)\n", peers[0], peers[2])
-	// fmt.Println("should find 1, 3", shouldFind)
-	// fmt.Println("found", found)
-
-	// testPeerListsMatch(t, shouldFind, found)
-
-	logger.Warning("TestFindPeersConnectedToPeer is not quite correct")
-	if len(found) == 0 {
-		t.Fatal("didn't find any peers.")
-	}
-}
-
 func TestConnectCollision(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if testing.Short() {
 		t.SkipNow()
 	}
-	if travisci.IsRunning() {
-		t.Skip("Skipping on Travis-CI.")
+	if ci.IsRunning() {
+		t.Skip("Skipping on CI.")
 	}
 
 	runTimes := 10
@@ -1389,7 +1274,7 @@ func TestAtomicPut(t *testing.T) {
 		wg.Add(1)
 		go func(v []byte) {
 			defer wg.Done()
-			putRecord(v)
+			_ = putRecord(v) // we expect some of these to fail
 		}(v)
 	}
 	wg.Wait()
@@ -1481,6 +1366,10 @@ func TestFindPeerQueryMinimal(t *testing.T) {
 }
 
 func TestFindPeerQuery(t *testing.T) {
+	if detectrace.WithRace() {
+		t.Skip("skipping due to race detector max goroutines")
+	}
+
 	if testing.Short() {
 		t.Skip("skipping test in short mode")
 	}
@@ -1490,6 +1379,7 @@ func TestFindPeerQuery(t *testing.T) {
 	testFindPeerQuery(t, 20, 80, 16)
 }
 
+// NOTE: You must have ATLEAST (minRTRefreshThreshold+1) test peers before using this.
 func testFindPeerQuery(t *testing.T,
 	bootstrappers, // Number of nodes connected to the querying node
 	leafs, // Number of nodes that might be connected to from the bootstrappers
@@ -1512,18 +1402,28 @@ func testFindPeerQuery(t *testing.T,
 	for i := 0; i < bootstrappers; i++ {
 		for j := 0; j < bootstrapperLeafConns; j++ {
 			v := mrand.Intn(leafs)
-			connect(t, ctx, others[i], others[bootstrappers+v])
+			connectNoSync(t, ctx, others[i], others[bootstrappers+v])
 		}
 	}
 
 	for i := 0; i < bootstrappers; i++ {
-		connect(t, ctx, guy, others[i])
+		connectNoSync(t, ctx, guy, others[i])
+	}
+
+	// give some time for things to settle down
+	waitForWellFormedTables(t, dhts, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
+
+	for _, d := range dhts {
+		if len(d.RoutingTable().ListPeers()) > 0 {
+			if err := <-d.RefreshRoutingTable(); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 
 	var reachableIds []peer.ID
 	for i, d := range dhts {
 		lp := len(d.host.Network().Peers())
-		//t.Log(i, lp)
 		if i != 0 && lp > 0 {
 			reachableIds = append(reachableIds, d.PeerID())
 		}
@@ -1532,11 +1432,6 @@ func testFindPeerQuery(t *testing.T,
 
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
-
-	rtablePeers := guy.routingTable.NearestPeers(rtval, AlphaValue)
-	assert.Len(t, rtablePeers, minInt(bootstrappers, AlphaValue))
-
-	assert.Len(t, guy.host.Network().Peers(), bootstrappers)
 
 	out, err := guy.GetClosestPeers(ctx, val)
 	require.NoError(t, err)
@@ -1548,7 +1443,7 @@ func testFindPeerQuery(t *testing.T,
 
 	sort.Sort(peer.IDSlice(outpeers))
 
-	exp := kb.SortClosestPeers(reachableIds, rtval)[:minInt(KValue, len(reachableIds))]
+	exp := kb.SortClosestPeers(reachableIds, rtval)[:minInt(guy.bucketSize, len(reachableIds))]
 	t.Logf("got %d peers", len(outpeers))
 	got := kb.SortClosestPeers(outpeers, rtval)
 
@@ -1573,7 +1468,8 @@ func TestFindClosestPeers(t *testing.T) {
 		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
 	}
 
-	peers, err := dhts[1].GetClosestPeers(ctx, "foo")
+	querier := dhts[1]
+	peers, err := querier.GetClosestPeers(ctx, "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1583,9 +1479,46 @@ func TestFindClosestPeers(t *testing.T) {
 		out = append(out, p)
 	}
 
-	if len(out) != KValue {
-		t.Fatalf("got wrong number of peers (got %d, expected %d)", len(out), KValue)
+	if len(out) < querier.beta {
+		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(out), querier.beta)
 	}
+}
+
+func TestFixLowPeers(t *testing.T) {
+	ctx := context.Background()
+
+	dhts := setupDHTS(t, ctx, minRTRefreshThreshold+5)
+
+	defer func() {
+		for _, d := range dhts {
+			d.Close()
+			d.Host().Close()
+		}
+	}()
+
+	mainD := dhts[0]
+
+	// connect it to everyone else
+	for _, d := range dhts[1:] {
+		mainD.peerstore.AddAddrs(d.self, d.peerstore.Addrs(d.self), peerstore.TempAddrTTL)
+		require.NoError(t, mainD.Host().Connect(ctx, peer.AddrInfo{ID: d.self}))
+	}
+
+	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold+4, 5*time.Second)
+
+	// run a refresh on all of them
+	for _, d := range dhts {
+		err := <-d.RefreshRoutingTable()
+		require.NoError(t, err)
+	}
+
+	// now remove peers from RT so threshold gets hit
+	for _, d := range dhts[3:] {
+		mainD.routingTable.RemovePeer(d.self)
+	}
+
+	// but we will still get enough peers in the RT because of fix low Peers
+	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
 }
 
 func TestProvideDisabled(t *testing.T) {
@@ -1599,13 +1532,16 @@ func TestProvideDisabled(t *testing.T) {
 			defer cancel()
 
 			var (
-				optsA, optsB []opts.Option
+				optsA, optsB []Option
 			)
+			optsA = append(optsA, ProtocolPrefix("/provMaybeDisabled"))
+			optsB = append(optsB, ProtocolPrefix("/provMaybeDisabled"))
+
 			if !enabledA {
-				optsA = append(optsA, opts.DisableProviders())
+				optsA = append(optsA, DisableProviders())
 			}
 			if !enabledB {
-				optsB = append(optsB, opts.DisableProviders())
+				optsB = append(optsB, DisableProviders())
 			}
 
 			dhtA := setupDHT(ctx, t, false, optsA...)
@@ -1655,16 +1591,53 @@ func TestProvideDisabled(t *testing.T) {
 	}
 }
 
+func TestHandleRemotePeerProtocolChanges(t *testing.T) {
+	ctx := context.Background()
+	os := []Option{
+		testPrefix,
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
+	}
+
+	// start host 1 that speaks dht v1
+	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
+	require.NoError(t, err)
+	defer dhtA.Close()
+
+	// start host 2 that also speaks dht v1
+	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
+	require.NoError(t, err)
+	defer dhtB.Close()
+
+	connect(t, ctx, dhtA, dhtB)
+
+	// now assert both have each other in their RT
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second), "both RT should have one peer each")
+
+	// dhtB becomes a client
+	require.NoError(t, dhtB.setMode(modeClient))
+
+	// which means that dhtA should evict it from it's RT
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 0, 0, 10*time.Second), "dHTA routing table should have 0 peers")
+
+	// dhtB becomes a server
+	require.NoError(t, dhtB.setMode(modeServer))
+
+	// which means dhtA should have it in the RT again because of fixLowPeers
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 1, 1, 10*time.Second), "dHTA routing table should have 1 peers")
+}
+
 func TestGetSetPluggedProtocol(t *testing.T) {
 	t.Run("PutValue/GetValue - same protocol", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		os := []opts.Option{
-			opts.Protocols("/esh/dht"),
-			opts.Client(false),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
+		os := []Option{
+			ProtocolPrefix("/esh"),
+			Mode(ModeServer),
+			NamespacedValidator("v", blankValidator{}),
+			DisableAutoRefresh(),
 		}
 
 		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), os...)
@@ -1699,21 +1672,21 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
-			opts.Protocols("/esh/dht"),
-			opts.Client(false),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
+		dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
+			ProtocolPrefix("/esh"),
+			Mode(ModeServer),
+			NamespacedValidator("v", blankValidator{}),
+			DisableAutoRefresh(),
 		}...)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []opts.Option{
-			opts.Protocols("/lsr/dht"),
-			opts.Client(false),
-			opts.NamespacedValidator("v", blankValidator{}),
-			opts.DisableAutoRefresh(),
+		dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)), []Option{
+			ProtocolPrefix("/lsr"),
+			Mode(ModeServer),
+			NamespacedValidator("v", blankValidator{}),
+			DisableAutoRefresh(),
 		}...)
 		if err != nil {
 			t.Fatal(err)
@@ -1731,9 +1704,9 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 			t.Fatalf("put should not have been able to find any peers in routing table, err:'%v'", err)
 		}
 
-		_, err = dhtB.GetValue(ctx, "/v/cat")
-		if err == nil || !strings.Contains(err.Error(), "failed to find any peer in table") {
-			t.Fatalf("get should not have been able to find any peers in routing table, err:'%v'", err)
+		v, err := dhtB.GetValue(ctx, "/v/cat")
+		if v != nil || err != routing.ErrNotFound {
+			t.Fatalf("get should have failed from not being able to find the value, err: '%v'", err)
 		}
 	})
 }
@@ -1754,4 +1727,186 @@ func TestClientModeAtInit(t *testing.T) {
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
 	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+}
+
+func TestModeChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clientOnly := setupDHT(ctx, t, true)
+	clientToServer := setupDHT(ctx, t, true)
+	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
+	err := clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	err = clientToServer.setMode(modeServer)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.Nil(t, err)
+	err = clientToServer.setMode(modeClient)
+	assert.Nil(t, err)
+	err = clientOnly.Ping(ctx, clientToServer.PeerID())
+	assert.NotNil(t, err)
+}
+
+func TestDynamicModeSwitching(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prober := setupDHT(ctx, t, true)               // our test harness
+	node := setupDHT(ctx, t, true, Mode(ModeAuto)) // the node under test
+	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
+	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
+		t.Fatal(err)
+	}
+
+	emitter, err := node.host.EventBus().Emitter(new(event.EvtLocalReachabilityChanged))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertDHTClient := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
+			t.Errorf("expected routing table length to be 0; instead is %d", l)
+		}
+	}
+
+	assertDHTServer := func() {
+		err = prober.Ping(ctx, node.PeerID())
+		assert.Nil(t, err)
+		// the node should be in the RT for the prober
+		// because the prober will call fixLowPeers when the node updates it's protocols
+		if l := len(prober.RoutingTable().ListPeers()); l != 1 {
+			t.Errorf("expected routing table length to be 1; instead is %d", l)
+		}
+	}
+
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPrivate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPublic})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTServer()
+
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityUnknown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+}
+
+func TestProtocolUpgrade(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	os := []Option{
+		testPrefix,
+		Mode(ModeServer),
+		NamespacedValidator("v", blankValidator{}),
+		DisableAutoRefresh(),
+	}
+
+	// This test verifies that we can have a node serving both old and new DHTs that will respond as a server to the old
+	// DHT, but only act as a client of the new DHT. In it's capacity as a server it should also only tell queriers
+	// about other DHT servers in the new DHT.
+
+	dhtA, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		append([]Option{V1CompatibleMode(false)}, os...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dhtB, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		append([]Option{V1CompatibleMode(false)}, os...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dhtC, err := New(ctx, bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		append([]Option{V1CompatibleMode(true)}, os...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connect(t, ctx, dhtA, dhtB)
+	connectNoSync(t, ctx, dhtA, dhtC)
+	wait(t, ctx, dhtC, dhtA)
+
+	if sz := dhtA.RoutingTable().Size(); sz != 1 {
+		t.Fatalf("Expected routing table to be of size %d got %d", 1, sz)
+	}
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := dhtB.PutValue(ctxT, "/v/bat", []byte("screech")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := dhtC.GetValue(ctxT, "/v/bat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "screech" {
+		t.Fatalf("Expected 'screech' got '%s'", string(value))
+	}
+
+	if err := dhtC.PutValue(ctxT, "/v/cat", []byte("meow")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = dhtB.GetValue(ctxT, "/v/cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "meow" {
+		t.Fatalf("Expected 'meow' got '%s'", string(value))
+	}
+
+	// Add record into local DHT only
+	rec := record.MakePutRecord("/v/crow", []byte("caw"))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	err = dhtC.putLocal(string(rec.Key), rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = dhtB.GetValue(ctxT, "/v/crow")
+	switch err {
+	case nil:
+		t.Fatalf("should not have been able to find value for %s", "/v/crow")
+	case routing.ErrNotFound:
+	default:
+		t.Fatal(err)
+	}
+
+	// Add record into local DHT only
+	rec = record.MakePutRecord("/v/bee", []byte("buzz"))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	err = dhtB.putLocal(string(rec.Key), rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	value, err = dhtC.GetValue(ctxT, "/v/bee")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(value) != "buzz" {
+		t.Fatalf("Expected 'buzz' got '%s'", string(value))
+	}
 }

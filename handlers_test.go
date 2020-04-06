@@ -89,7 +89,7 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 			panic(err)
 		}
 
-		d.routingTable.Update(id)
+		d.peerFound(ctx, id, true)
 
 		peers = append(peers, id)
 		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
@@ -110,7 +110,10 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		d.handleFindPeer(ctx, peers[0], reqs[i])
+		_, err = d.handleFindPeer(ctx, peers[0], reqs[i])
+		if err != nil {
+			b.Error(err)
+		}
 	}
 
 }

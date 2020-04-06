@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -53,11 +52,6 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 }
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	ctx = logger.Start(ctx, "handleGetValue")
-	logger.SetTag(ctx, "peer", p)
-	defer func() { logger.FinishWithErr(ctx, err) }()
-	logger.Debugf("%s handleGetValue for key: %s", dht.self, pmes.GetKey())
-
 	// setup response
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
@@ -82,10 +76,11 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		for _, pi := range closerinfos {
 			logger.Debugf("handleGetValue returning closer peer: '%s'", pi.ID)
 			if len(pi.Addrs) < 1 {
-				logger.Warningf(`no addresses on peer being sent!
-					[local:%s]
-					[sending:%s]
-					[remote:%s]`, dht.self, pi.ID, p)
+				logger.Warnw("no addresses on peer being sent",
+					"local", dht.self,
+					"to", p,
+					"sending", pi.ID,
+				)
 			}
 		}
 
@@ -155,13 +150,9 @@ func cleanRecord(rec *recpb.Record) {
 
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	ctx = logger.Start(ctx, "handlePutValue")
-	logger.SetTag(ctx, "peer", p)
-	defer func() { logger.FinishWithErr(ctx, err) }()
-
 	rec := pmes.GetRecord()
 	if rec == nil {
-		logger.Infof("Got nil record from: %s", p.Pretty())
+		logger.Debugw("got nil record from", "from", p)
 		return nil, errors.New("nil record")
 	}
 
@@ -173,7 +164,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 	// Make sure the record is valid (not expired, valid signature etc)
 	if err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
-		logger.Warningf("Bad dht record in PUT from: %s. %s", p.Pretty(), err)
+		logger.Infow("bad dht record in PUT", "from", p, "key", rec.GetKey(), "error", err)
 		return nil, err
 	}
 
@@ -202,11 +193,11 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		recs := [][]byte{rec.GetValue(), existing.GetValue()}
 		i, err := dht.Validator.Select(string(rec.GetKey()), recs)
 		if err != nil {
-			logger.Warningf("Bad dht record in PUT from %s: %s", p.Pretty(), err)
+			logger.Warnw("dht record passed validation but failed select", "from", p, "key", rec.GetKey(), "error", err)
 			return nil, err
 		}
 		if i != 0 {
-			logger.Infof("DHT record in PUT from %s is older than existing record. Ignoring", p.Pretty())
+			logger.Infow("DHT record in PUT older than existing record (ignoring)", "peer", p, "key", rec.GetKey())
 			return nil, errors.New("old record")
 		}
 	}
@@ -220,7 +211,6 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	}
 
 	err = dht.datastore.Put(dskey, data)
-	logger.Debugf("%s handlePutValue %v", dht.self, dskey)
 	return pmes, err
 }
 
@@ -232,14 +222,14 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 		return nil, nil
 	}
 	if err != nil {
-		logger.Errorf("Got error retrieving record with key %s from datastore: %s", dskey, err)
+		logger.Errorw("error retrieving record from datastore", "key", dskey, "error", err)
 		return nil, err
 	}
 	rec := new(recpb.Record)
 	err = proto.Unmarshal(buf, rec)
 	if err != nil {
 		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
-		logger.Errorf("Bad record data stored in datastore with key %s: could not unmarshal record", dskey)
+		logger.Errorw("failed to unmarshal record from datastore", "key", dskey, "error", err)
 		return nil, nil
 	}
 
@@ -247,7 +237,7 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 	if err != nil {
 		// Invalid record in datastore, probably expired but don't return an error,
 		// we'll just overwrite it
-		logger.Debugf("Local record verify failed: %s (discarded)", err)
+		logger.Debugw("local record verify failed", "key", rec.GetKey(), "error", err)
 		return nil, nil
 	}
 
@@ -259,10 +249,7 @@ func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (
 	return pmes, nil
 }
 
-func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	ctx = logger.Start(ctx, "handleFindPeer")
-	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
+func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -271,28 +258,30 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 	if targetPid == dht.self {
 		closest = []peer.ID{dht.self}
 	} else {
-		closest = dht.betterPeersToQuery(pmes, p, dht.bucketSize)
+		closest = dht.betterPeersToQuery(pmes, from, dht.bucketSize)
 
 		// Never tell a peer about itself.
-		if targetPid != p {
-			// If we're connected to the target peer, report their
-			// peer info. This makes FindPeer work even if the
-			// target peer isn't in our routing table.
+		if targetPid != from {
+			// Add the target peer to the set of closest peers if
+			// not already present in our routing table.
 			//
-			// Alternatively, we could just check our peerstore.
-			// However, we don't want to return out of date
-			// information. We can change this in the future when we
-			// add a progressive, asynchronous `SearchPeer` function
-			// and improve peer routing in the host.
-			switch dht.host.Network().Connectedness(targetPid) {
-			case network.Connected, network.CanConnect:
+			// Later, when we lookup known addresses for all peers
+			// in this set, we'll prune this peer if we don't
+			// _actually_ know where it is.
+			found := false
+			for _, p := range closest {
+				if targetPid == p {
+					found = true
+					break
+				}
+			}
+			if !found {
 				closest = append(closest, targetPid)
 			}
 		}
 	}
 
 	if closest == nil {
-		logger.Infof("%s handleFindPeer %s: could not find anything.", dht.self, p)
 		return resp, nil
 	}
 
@@ -311,26 +300,18 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Mess
 }
 
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	ctx = logger.Start(ctx, "handleGetProviders")
-	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
-
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	key := pmes.GetKey()
 	if len(key) > 80 {
 		return nil, fmt.Errorf("handleGetProviders key size too large")
 	}
-	logger.SetTag(ctx, "key", key)
-
-	// debug logging niceness.
-	reqDesc := fmt.Sprintf("%s handleGetProviders(%s, %s): ", dht.self, p, key)
-	logger.Debugf("%s begin", reqDesc)
-	defer logger.Debugf("%s end", reqDesc)
 
 	// check if we have this value, to add ourselves as provider.
 	has, err := dht.datastore.Has(convertToDsKey(key))
 	if err != nil && err != ds.ErrNotFound {
-		logger.Debugf("unexpected datastore error: %v\n", err)
+		// FIXME: This doesn't work reliably. If we want this check, we
+		// need a _blockstore_.
+		logger.Errorw("error checking datastore for block", "key", key, "error", err)
 		has = false
 	}
 
@@ -338,14 +319,12 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	providers := dht.ProviderManager.GetProviders(ctx, key)
 	if has {
 		providers = append(providers, dht.self)
-		logger.Debugf("%s have the value. added self as provider", reqDesc)
 	}
 
 	if len(providers) > 0 {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 		infos := pstore.PeerInfos(dht.peerstore, providers)
 		resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
-		logger.Debugf("%s have %d providers: %s", reqDesc, len(providers), infos)
 	}
 
 	// Also send closer peers.
@@ -354,24 +333,18 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 		infos := pstore.PeerInfos(dht.peerstore, closer)
 		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
-		logger.Debugf("%s have %d closer peers: %s", reqDesc, len(closer), infos)
 	}
 
 	return resp, nil
 }
 
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	ctx = logger.Start(ctx, "handleAddProvider")
-	defer func() { logger.FinishWithErr(ctx, _err) }()
-	logger.SetTag(ctx, "peer", p)
-
 	key := pmes.GetKey()
 	if len(key) > 80 {
 		return nil, fmt.Errorf("handleAddProviders key size too large")
 	}
-	logger.SetTag(ctx, "key", key)
 
-	logger.Debugf("%s adding %s as a provider for '%s'\n", dht.self, p, key)
+	logger.Debugf("adding provider", "from", p, "key", key)
 
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
@@ -379,16 +352,15 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		if pi.ID != p {
 			// we should ignore this provider record! not from originator.
 			// (we should sign them and check signature later...)
-			logger.Debugf("handleAddProvider received provider %s from %s. Ignore.", pi.ID, p)
+			logger.Debugw("received provider from wrong peer", "from", p, "peer", pi.ID)
 			continue
 		}
 
 		if len(pi.Addrs) < 1 {
-			logger.Debugf("%s got no valid addresses for provider %s. Ignore.", dht.self, p)
+			logger.Debugw("no valid addresses for provider", "from", p)
 			continue
 		}
 
-		logger.Debugf("received provider %s for %s (addrs: %s)", p, key, pi.Addrs)
 		if pi.ID != dht.self { // don't add own addrs.
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)

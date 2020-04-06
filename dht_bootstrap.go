@@ -3,12 +3,13 @@ package dht
 import (
 	"context"
 	"fmt"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
-	"github.com/libp2p/go-libp2p-core/routing"
+	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/multiformats/go-multiaddr"
 	_ "github.com/multiformats/go-multiaddr-dns"
 )
@@ -17,7 +18,10 @@ var DefaultBootstrapPeers []multiaddr.Multiaddr
 
 // Minimum number of peers in the routing table. If we drop below this and we
 // see a new peer, we trigger a bootstrap round.
-var minRTRefreshThreshold = 4
+var minRTRefreshThreshold = 10
+
+// timeout for pinging one peer
+const peerPingTimeout = 10 * time.Second
 
 func init() {
 	for _, s := range []string{
@@ -35,18 +39,63 @@ func init() {
 	}
 }
 
+// startSelfLookup starts a go-routine that listens for requests to trigger a self walk on a dedicated channel
+// and then sends the error status back on the error channel sent along with the request.
+// if multiple callers "simultaneously" ask for a self walk, it performs ONLY one self walk and sends the same error status to all of them.
+func (dht *IpfsDHT) startSelfLookup() {
+	dht.proc.Go(func(proc process.Process) {
+		ctx := processctx.WithProcessClosing(dht.ctx, proc)
+		for {
+			var waiting []chan<- error
+			select {
+			case res := <-dht.triggerSelfLookup:
+				if res != nil {
+					waiting = append(waiting, res)
+				}
+			case <-ctx.Done():
+				return
+			}
+
+			// batch multiple refresh requests if they're all waiting at the same time.
+			waiting = append(waiting, collectWaitingChannels(dht.triggerSelfLookup)...)
+
+			// Do a self walk
+			queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
+			_, err := dht.GetClosestPeers(queryCtx, string(dht.self))
+			if err == kbucket.ErrLookupFailure {
+				err = nil
+			} else if err != nil {
+				err = fmt.Errorf("failed to query self during routing table refresh: %s", err)
+			}
+			cancel()
+
+			// send back the error status
+			for _, w := range waiting {
+				w <- err
+				close(w)
+			}
+			if err != nil {
+				logger.Warnw("self lookup failed", "error", err)
+			}
+		}
+	})
+}
+
 // Start the refresh worker.
-func (dht *IpfsDHT) startRefreshing() error {
+func (dht *IpfsDHT) startRefreshing() {
 	// scan the RT table periodically & do a random walk for cpl's that haven't been queried since the given period
 	dht.proc.Go(func(proc process.Process) {
-		ctx := processctx.OnClosingContext(proc)
+		ctx := processctx.WithProcessClosing(dht.ctx, proc)
 
-		refreshTicker := time.NewTicker(dht.rtRefreshPeriod)
+		refreshTicker := time.NewTicker(dht.rtRefreshInterval)
 		defer refreshTicker.Stop()
 
 		// refresh if option is set
 		if dht.autoRefresh {
-			dht.doRefresh(ctx)
+			err := dht.doRefresh(ctx)
+			if err != nil {
+				logger.Warn("failed when refreshing routing table", err)
+			}
 		} else {
 			// disable the "auto-refresh" ticker so that no more ticks are sent to this channel
 			refreshTicker.Stop()
@@ -65,17 +114,7 @@ func (dht *IpfsDHT) startRefreshing() error {
 			}
 
 			// Batch multiple refresh requests if they're all waiting at the same time.
-		collectWaiting:
-			for {
-				select {
-				case res := <-dht.triggerRtRefresh:
-					if res != nil {
-						waiting = append(waiting, res)
-					}
-				default:
-					break collectWaiting
-				}
-			}
+			waiting = append(waiting, collectWaitingChannels(dht.triggerRtRefresh)...)
 
 			err := dht.doRefresh(ctx)
 			for _, w := range waiting {
@@ -83,19 +122,61 @@ func (dht *IpfsDHT) startRefreshing() error {
 				close(w)
 			}
 			if err != nil {
-				logger.Warning(err)
+				logger.Warnw("failed when refreshing routing table", "error", err)
 			}
+
+			// ping Routing Table peers that haven't been hear of/from in the interval they should have been.
+			for _, ps := range dht.routingTable.GetPeerInfos() {
+				// ping the peer if it's due for a ping and evict it if the ping fails
+				if time.Since(ps.LastSuccessfulOutboundQuery) > dht.maxLastSuccessfulOutboundThreshold {
+					livelinessCtx, cancel := context.WithTimeout(ctx, peerPingTimeout)
+					if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
+						logger.Debugw("evicting peer after failed ping", "peer", ps.Id, "error", err)
+						dht.routingTable.RemovePeer(ps.Id)
+					}
+					cancel()
+				}
+			}
+
 		}
 	})
+}
 
-	return nil
+func collectWaitingChannels(source chan chan<- error) []chan<- error {
+	var waiting []chan<- error
+	for {
+		select {
+		case res := <-source:
+			if res != nil {
+				waiting = append(waiting, res)
+			}
+		default:
+			return waiting
+		}
+	}
 }
 
 func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
 	var merr error
-	if err := dht.selfWalk(ctx); err != nil {
-		merr = multierror.Append(merr, err)
+
+	// wait for the self walk result
+	selfWalkres := make(chan error, 1)
+
+	select {
+	case dht.triggerSelfLookup <- selfWalkres:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+
+	select {
+	case err := <-selfWalkres:
+		if err != nil {
+			merr = multierror.Append(merr, err)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	if err := dht.refreshCpls(ctx); err != nil {
 		merr = multierror.Append(merr, err)
 	}
@@ -123,45 +204,32 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 	trackedCpls := dht.routingTable.GetTrackedCplsForRefresh()
 
 	var merr error
-	for _, tcpl := range trackedCpls {
-		if time.Since(tcpl.LastRefreshAt) <= dht.rtRefreshPeriod {
+	for cpl, lastRefreshedAt := range trackedCpls {
+		if time.Since(lastRefreshedAt) <= dht.rtRefreshInterval {
 			continue
 		}
+
 		// gen rand peer with the cpl
-		randPeer, err := dht.routingTable.GenRandPeerID(tcpl.Cpl)
+		randPeer, err := dht.routingTable.GenRandPeerID(uint(cpl))
 		if err != nil {
-			logger.Errorf("failed to generate peerID for cpl %d, err: %s", tcpl.Cpl, err)
+			logger.Errorw("failed to generate peer ID", "cpl", cpl, "error", err)
 			continue
 		}
 
 		// walk to the generated peer
 		walkFnc := func(c context.Context) error {
-			_, err := dht.FindPeer(c, randPeer)
-			if err == routing.ErrNotFound {
-				return nil
-			}
+			_, err := dht.GetClosestPeers(c, string(randPeer))
 			return err
 		}
 
-		if err := doQuery(tcpl.Cpl, randPeer.String(), walkFnc); err != nil {
+		if err := doQuery(uint(cpl), randPeer.String(), walkFnc); err != nil {
 			merr = multierror.Append(
 				merr,
-				fmt.Errorf("failed to do a random walk for cpl %d: %s", tcpl.Cpl, err),
+				fmt.Errorf("failed to do a random walk for cpl %d: %w", cpl, err),
 			)
 		}
 	}
 	return merr
-}
-
-// Traverse the DHT toward the self ID
-func (dht *IpfsDHT) selfWalk(ctx context.Context) error {
-	queryCtx, cancel := context.WithTimeout(ctx, dht.rtRefreshQueryTimeout)
-	defer cancel()
-	_, err := dht.FindPeer(queryCtx, dht.self)
-	if err == routing.ErrNotFound {
-		return nil
-	}
-	return fmt.Errorf("failed to query self during routing table refresh: %s", err)
 }
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the
@@ -179,6 +247,10 @@ func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 // error and close. The channel is buffered and safe to ignore.
 func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 	res := make(chan error, 1)
-	dht.triggerRtRefresh <- res
+	select {
+	case dht.triggerRtRefresh <- res:
+	case <-dht.ctx.Done():
+		res <- dht.ctx.Err()
+	}
 	return res
 }

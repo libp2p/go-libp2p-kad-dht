@@ -52,15 +52,14 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 }
 
 func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
-	// setup response
-	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
-
 	// first, is there even a key?
 	k := pmes.GetKey()
 	if len(k) == 0 {
 		return nil, errors.New("handleGetValue but no key was provided")
-		// TODO: send back an error response? could be bad, but the other node's hanging.
 	}
+
+	// setup response
+	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
 	rec, err := dht.checkLocalDatastore(k)
 	if err != nil {
@@ -150,6 +149,10 @@ func cleanRecord(rec *recpb.Record) {
 
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+	if len(pmes.GetKey()) == 0 {
+		return nil, errors.New("handleGetValue but no key was provided")
+	}
+
 	rec := pmes.GetRecord()
 	if rec == nil {
 		logger.Debugw("got nil record from", "from", p)
@@ -253,6 +256,10 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
+	if len(pmes.GetKey()) == 0 {
+		return nil, fmt.Errorf("handleFindPeer with empty key")
+	}
+
 	// if looking for self... special case where we send it on CloserPeers.
 	targetPid := peer.ID(pmes.GetKey())
 	if targetPid == dht.self {
@@ -300,11 +307,14 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 }
 
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
-	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 	key := pmes.GetKey()
 	if len(key) > 80 {
 		return nil, fmt.Errorf("handleGetProviders key size too large")
+	} else if len(key) == 0 {
+		return nil, fmt.Errorf("handleGetProviders key is empty")
 	}
+
+	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
 	// check if we have this value, to add ourselves as provider.
 	has, err := dht.datastore.Has(convertToDsKey(key))
@@ -341,7 +351,9 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
-		return nil, fmt.Errorf("handleAddProviders key size too large")
+		return nil, fmt.Errorf("handleAddProvider key size too large")
+	} else if len(key) == 0 {
+		return nil, fmt.Errorf("handleAddProvider key is empty")
 	}
 
 	logger.Debugf("adding provider", "from", p, "key", key)

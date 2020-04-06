@@ -72,6 +72,9 @@ func (lk loggableKeyBytes) String() string {
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
+	if key == "" {
+		return nil, fmt.Errorf("can't lookup empty key")
+	}
 	//TODO: I can break the interface! return []peer.ID
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key,
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {

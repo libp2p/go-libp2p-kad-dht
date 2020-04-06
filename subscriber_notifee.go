@@ -119,15 +119,8 @@ func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentif
 		return
 	}
 
-	// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
-	valid, err := dht.validRTPeer(e.Peer)
-	if err != nil {
-		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
-		return
-	} else if valid {
-		dht.peerFound(dht.ctx, e.Peer, false)
-		dht.fixRTIfNeeded()
-	}
+	// try using the peer in the routing table.
+	dht.peerFound(dht.ctx, e.Peer, false)
 }
 
 func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {

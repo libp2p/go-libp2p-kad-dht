@@ -454,7 +454,7 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		_, err := dht.routingTable.TryAddPeer(p, queryPeer)
+		added, err := dht.routingTable.TryAddPeer(p, queryPeer)
 		if err != nil {
 			// peer not added.
 			return
@@ -464,6 +464,10 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 		// value that must have been set in the Routing Table for this peer when it was first added during a connection.
 		if queryPeer {
 			dht.routingTable.UpdateLastSuccessfulOutboundQuery(p, time.Now())
+		}
+		// if we just added this peer, consider querying the DHT for more.
+		if added {
+			dht.fixRTIfNeeded()
 		}
 	}
 }

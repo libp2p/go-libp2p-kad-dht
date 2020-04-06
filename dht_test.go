@@ -1414,8 +1414,10 @@ func testFindPeerQuery(t *testing.T,
 	waitForWellFormedTables(t, dhts, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
 
 	for _, d := range dhts {
-		if err := <-d.RefreshRoutingTable(); err != nil {
-			t.Fatal(err)
+		if len(d.RoutingTable().ListPeers()) > 0 {
+			if err := <-d.RefreshRoutingTable(); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 

@@ -394,6 +394,8 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
+	} else if !key.Defined() {
+		return fmt.Errorf("invalid cid: undefined")
 	}
 	logger.Debugw("finding provider", "cid", key)
 
@@ -486,7 +488,10 @@ func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
+	} else if !c.Defined() {
+		return nil, fmt.Errorf("invalid cid: undefined")
 	}
+
 	var providers []peer.AddrInfo
 	for p := range dht.FindProvidersAsync(ctx, c, dht.bucketSize) {
 		providers = append(providers, p)
@@ -500,7 +505,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
-	if !dht.enableProviders {
+	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
 		return peerOut
@@ -613,6 +618,10 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+	if err := id.Validate(); err != nil {
+		return peer.AddrInfo{}, err
+	}
+
 	logger.Debugw("finding peer", "peer", id)
 
 	// Check if were already connected to them

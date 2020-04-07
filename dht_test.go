@@ -1910,3 +1910,51 @@ func TestProtocolUpgrade(t *testing.T) {
 		t.Fatalf("Expected 'buzz' got '%s'", string(value))
 	}
 }
+
+func TestInvalidKeys(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nDHTs := 2
+	dhts := setupDHTS(t, ctx, nDHTs)
+	defer func() {
+		for i := 0; i < nDHTs; i++ {
+			dhts[i].Close()
+			defer dhts[i].host.Close()
+		}
+	}()
+
+	t.Logf("connecting %d dhts in a ring", nDHTs)
+	for i := 0; i < nDHTs; i++ {
+		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
+	}
+
+	querier := dhts[0]
+	_, err := querier.GetClosestPeers(ctx, "")
+	if err == nil {
+		t.Fatal("get closest peers should have failed")
+	}
+
+	_, err = querier.FindProviders(ctx, cid.Cid{})
+	switch err {
+	case routing.ErrNotFound, routing.ErrNotSupported, kb.ErrLookupFailure:
+		t.Fatal("failed with the wrong error: ", err)
+	case nil:
+		t.Fatal("find providers should have failed")
+	}
+
+	_, err = querier.FindPeer(ctx, peer.ID(""))
+	if err != peer.ErrEmptyPeerID {
+		t.Fatal("expected to fail due to the empty peer ID")
+	}
+
+	_, err = querier.GetValue(ctx, "")
+	if err == nil {
+		t.Fatal("expected to have failed")
+	}
+
+	err = querier.PutValue(ctx, "", []byte("foobar"))
+	if err == nil {
+		t.Fatal("expected to have failed")
+	}
+}

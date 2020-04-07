@@ -5,7 +5,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 
 	logging "github.com/ipfs/go-log"
-	b58 "github.com/mr-tron/base58/base58"
 	ma "github.com/multiformats/go-multiaddr"
 )
 
@@ -136,16 +135,6 @@ func (m *Message) GetClusterLevel() int {
 func (m *Message) SetClusterLevel(level int) {
 	lvl := int32(level)
 	m.ClusterLevelRaw = lvl + 1
-}
-
-// Loggable turns a Message into machine-readable log output
-func (m *Message) Loggable() map[string]interface{} {
-	return map[string]interface{}{
-		"message": map[string]string{
-			"type": m.Type.String(),
-			"key":  b58.Encode([]byte(m.GetKey())),
-		},
-	}
 }
 
 // ConnectionType returns a Message_ConnectionType associated with the

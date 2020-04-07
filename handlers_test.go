@@ -67,6 +67,27 @@ func TestCleanRecord(t *testing.T) {
 	}
 }
 
+func TestBadMessage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dht := setupDHT(ctx, t, false)
+
+	for _, typ := range []pb.Message_MessageType{
+		pb.Message_PUT_VALUE, pb.Message_GET_VALUE, pb.Message_ADD_PROVIDER,
+		pb.Message_GET_PROVIDERS, pb.Message_FIND_NODE,
+	} {
+		msg := &pb.Message{
+			Type: typ,
+			// explicitly avoid the key.
+		}
+		_, err := dht.handlerForMsgType(typ)(ctx, dht.Host().ID(), msg)
+		if err == nil {
+			t.Fatalf("expected processing message to fail for type %s", pb.Message_FIND_NODE)
+		}
+	}
+}
+
 func BenchmarkHandleFindPeer(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

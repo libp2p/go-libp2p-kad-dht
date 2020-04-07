@@ -36,7 +36,7 @@ type query struct {
 	// the query context.
 	ctx context.Context
 
-	dht *IpfsDHT
+	dht *KadDHT
 
 	// seedPeers is the set of peers that seed the query
 	seedPeers []peer.ID
@@ -77,7 +77,7 @@ type lookupWithFollowupResult struct {
 //
 // After the lookup is complete the query function is run (unless stopped) against all of the top K peers from the
 // lookup that have not already been successfully queried.
-func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
+func (dht *KadDHT) runLookupWithFollowup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
 	// run the query
 	lookupRes, err := dht.runQuery(ctx, target, queryFn, stopFn)
 	if err != nil {
@@ -137,7 +137,7 @@ processFollowUp:
 	return lookupRes, nil
 }
 
-func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
+func (dht *KadDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
 	// pick the K closest peers to the key in our Routing table and shuffle them.
 	targetKadID := kb.ConvertKey(target)
 	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
@@ -473,7 +473,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 	}
 }
 
-func (dht *IpfsDHT) dialPeer(ctx context.Context, p peer.ID) error {
+func (dht *KadDHT) dialPeer(ctx context.Context, p peer.ID) error {
 	// short-circuit if we're already connected.
 	if dht.host.Network().Connectedness(p) == network.Connected {
 		return nil

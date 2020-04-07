@@ -19,7 +19,7 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	d2 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	d3 := setupDHT(ctx, t, false, DisableAutoRefresh())
 
-	var connectedTo *IpfsDHT
+	var connectedTo *KadDHT
 	// connect d1 to whoever is "further"
 	if kb.CommonPrefixLen(kb.ConvertPeerID(d1.self), kb.ConvertPeerID(d2.self)) <=
 		kb.CommonPrefixLen(kb.ConvertPeerID(d1.self), kb.ConvertPeerID(d3.self)) {
@@ -34,14 +34,14 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	connect(t, ctx, d2, d3)
 
 	// d1 should have ONLY 1 peer in it's RT
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 1, 1, 2*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d1}, 1, 1, 2*time.Second)
 	require.Equal(t, connectedTo.self, d1.routingTable.ListPeers()[0])
 
 	// now emit the address change event
 	em, err := d1.host.EventBus().Emitter(&event.EvtLocalAddressesUpdated{})
 	require.NoError(t, err)
 	require.NoError(t, em.Emit(event.EvtLocalAddressesUpdated{}))
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 2*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d1}, 2, 2, 2*time.Second)
 	// it should now have both peers in the RT
 	ps := d1.routingTable.ListPeers()
 	require.Contains(t, ps, d2.self)

@@ -13,14 +13,14 @@ import (
 )
 
 // QueryFilterFunc is a filter applied when considering peers to dial when querying
-type QueryFilterFunc func(dht *IpfsDHT, ai peer.AddrInfo) bool
+type QueryFilterFunc func(dht *KadDHT, ai peer.AddrInfo) bool
 
 // RouteTableFilterFunc is a filter applied when considering connections to keep in
 // the local route table.
-type RouteTableFilterFunc func(dht *IpfsDHT, conns []network.Conn) bool
+type RouteTableFilterFunc func(dht *KadDHT, conns []network.Conn) bool
 
 // PublicQueryFilter returns true if the peer is suspected of being publicly accessible
-func PublicQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool {
+func PublicQueryFilter(_ *KadDHT, ai peer.AddrInfo) bool {
 	if len(ai.Addrs) == 0 {
 		return false
 	}
@@ -38,7 +38,7 @@ var _ QueryFilterFunc = PublicQueryFilter
 
 // PublicRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a public network
-func PublicRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
+func PublicRoutingTableFilter(dht *KadDHT, conns []network.Conn) bool {
 	if len(conns) == 0 {
 		return false
 	}
@@ -58,7 +58,7 @@ func PublicRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 var _ RouteTableFilterFunc = PublicRoutingTableFilter
 
 // PrivateQueryFilter doens't currently restrict which peers we are willing to query from the local DHT.
-func PrivateQueryFilter(dht *IpfsDHT, ai peer.AddrInfo) bool {
+func PrivateQueryFilter(dht *KadDHT, ai peer.AddrInfo) bool {
 	return len(ai.Addrs) > 0
 }
 
@@ -66,7 +66,7 @@ var _ QueryFilterFunc = PrivateQueryFilter
 
 // PrivateRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a private network
-func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
+func PrivateRoutingTableFilter(dht *KadDHT, conns []network.Conn) bool {
 	router, _ := netroute.New()
 	myAdvertisedIPs := make([]net.IP, 0)
 	for _, a := range dht.Host().Addrs() {

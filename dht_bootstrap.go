@@ -3,8 +3,9 @@ package dht
 import (
 	"context"
 	"fmt"
-	"github.com/libp2p/go-libp2p-core/peer"
 	"time"
+
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
@@ -42,7 +43,7 @@ func init() {
 // startSelfLookup starts a go-routine that listens for requests to trigger a self walk on a dedicated channel
 // and then sends the error status back on the error channel sent along with the request.
 // if multiple callers "simultaneously" ask for a self walk, it performs ONLY one self walk and sends the same error status to all of them.
-func (dht *IpfsDHT) startSelfLookup() {
+func (dht *KadDHT) startSelfLookup() {
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.WithProcessClosing(dht.ctx, proc)
 		for {
@@ -82,7 +83,7 @@ func (dht *IpfsDHT) startSelfLookup() {
 }
 
 // Start the refresh worker.
-func (dht *IpfsDHT) startRefreshing() {
+func (dht *KadDHT) startRefreshing() {
 	// scan the RT table periodically & do a random walk for cpl's that haven't been queried since the given period
 	dht.proc.Go(func(proc process.Process) {
 		ctx := processctx.WithProcessClosing(dht.ctx, proc)
@@ -156,7 +157,7 @@ func collectWaitingChannels(source chan chan<- error) []chan<- error {
 	}
 }
 
-func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
+func (dht *KadDHT) doRefresh(ctx context.Context) error {
 	var merr error
 
 	// wait for the self walk result
@@ -184,7 +185,7 @@ func (dht *IpfsDHT) doRefresh(ctx context.Context) error {
 }
 
 // refreshCpls scans the routing table, and does a random walk for cpl's that haven't been queried since the given period
-func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
+func (dht *KadDHT) refreshCpls(ctx context.Context) error {
 	doQuery := func(cpl uint, target string, f func(context.Context) error) error {
 		logger.Infof("starting refreshing cpl %d to %s (routing table size was %d)",
 			cpl, target, dht.routingTable.Size())
@@ -236,7 +237,7 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 // IpfsRouter interface.
 //
 // This just calls `RefreshRoutingTable`.
-func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
+func (dht *KadDHT) Bootstrap(_ context.Context) error {
 	dht.RefreshRoutingTable()
 	return nil
 }
@@ -245,7 +246,7 @@ func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 //
 // The returned channel will block until the refresh finishes, then yield the
 // error and close. The channel is buffered and safe to ignore.
-func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
+func (dht *KadDHT) RefreshRoutingTable() <-chan error {
 	res := make(chan error, 1)
 	select {
 	case dht.triggerRtRefresh <- res:

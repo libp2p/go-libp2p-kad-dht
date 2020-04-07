@@ -22,7 +22,7 @@ import (
 // dhthandler specifies the signature of functions that handle DHT messages.
 type dhtHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, error)
 
-func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
+func (dht *KadDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 	switch t {
 	case pb.Message_FIND_NODE:
 		return dht.handleFindPeer
@@ -51,7 +51,7 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 	return nil
 }
 
-func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (dht *KadDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	// first, is there even a key?
 	k := pmes.GetKey()
 	if len(k) == 0 {
@@ -89,7 +89,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return resp, nil
 }
 
-func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
+func (dht *KadDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 	logger.Debugf("%s handleGetValue looking into ds", dht.self)
 	dskey := convertToDsKey(k)
 	buf, err := dht.datastore.Get(dskey)
@@ -148,7 +148,7 @@ func cleanRecord(rec *recpb.Record) {
 }
 
 // Store a value in this peer local storage
-func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (dht *KadDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	if len(pmes.GetKey()) == 0 {
 		return nil, errors.New("handleGetValue but no key was provided")
 	}
@@ -219,7 +219,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 // returns nil, nil when either nothing is found or the value found doesn't properly validate.
 // returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
+func (dht *KadDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
 	buf, err := dht.datastore.Get(dskey)
 	if err == ds.ErrNotFound {
 		return nil, nil
@@ -247,12 +247,12 @@ func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) 
 	return rec, nil
 }
 
-func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *KadDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	logger.Debugf("%s Responding to ping from %s!\n", dht.self, p)
 	return pmes, nil
 }
 
-func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *KadDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
 	var closest []peer.ID
 
@@ -306,7 +306,7 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 	return resp, nil
 }
 
-func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *KadDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
 		return nil, fmt.Errorf("handleGetProviders key size too large")
@@ -348,7 +348,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	return resp, nil
 }
 
-func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
+func (dht *KadDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
 		return nil, fmt.Errorf("handleAddProvider key size too large")

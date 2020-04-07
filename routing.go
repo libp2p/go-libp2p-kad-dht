@@ -27,7 +27,7 @@ import (
 
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
-func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
+func (dht *KadDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
 	if !dht.enableValues {
 		return routing.ErrNotSupported
 	}
@@ -99,7 +99,7 @@ type RecvdVal struct {
 }
 
 // GetValue searches for the value corresponding to given Key.
-func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) (_ []byte, err error) {
+func (dht *KadDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) (_ []byte, err error) {
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
@@ -132,7 +132,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	return best, nil
 }
 
-func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
+func (dht *KadDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
@@ -180,7 +180,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	return out, nil
 }
 
-func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
+func (dht *KadDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
 	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
 	numResponses := 0
 	return dht.processValues(ctx, key, valCh,
@@ -203,7 +203,7 @@ func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-c
 }
 
 // GetValues gets nvals values corresponding to the given key.
-func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
+func (dht *KadDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
@@ -223,7 +223,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 	return out, ctx.Err()
 }
 
-func (dht *IpfsDHT) processValues(ctx context.Context, key string, vals <-chan RecvdVal,
+func (dht *KadDHT) processValues(ctx context.Context, key string, vals <-chan RecvdVal,
 	newVal func(ctx context.Context, v RecvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:
 	for {
@@ -266,7 +266,7 @@ loop:
 	return
 }
 
-func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte, peers []peer.ID) {
+func (dht *KadDHT) updatePeerValues(ctx context.Context, key string, val []byte, peers []peer.ID) {
 	fixupRec := record.MakePutRecord(key, val)
 	for _, p := range peers {
 		go func(p peer.ID) {
@@ -288,7 +288,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
+func (dht *KadDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
@@ -379,7 +379,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	return valCh, lookupResCh
 }
 
-func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollowupResult) {
+func (dht *KadDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollowupResult) {
 	if lookupRes.completed {
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(key, time.Now())
@@ -391,7 +391,7 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+func (dht *KadDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
@@ -467,7 +467,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 	return ctx.Err()
 }
-func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
+func (dht *KadDHT) makeProvRecord(key []byte) (*pb.Message, error) {
 	pi := peer.AddrInfo{
 		ID:    dht.self,
 		Addrs: dht.host.Addrs(),
@@ -485,7 +485,7 @@ func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
 }
 
 // FindProviders searches until the context expires.
-func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+func (dht *KadDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
@@ -504,7 +504,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // the search query completes. If count is zero then the query will run until it
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
-func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+func (dht *KadDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
@@ -523,7 +523,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 	return peerOut
 }
 
-func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
+func (dht *KadDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
 	logger.Debugw("finding providers", "key", key)
 
 	defer close(peerOut)
@@ -617,7 +617,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 }
 
 // FindPeer searches for a peer with given ID.
-func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+func (dht *KadDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err
 	}

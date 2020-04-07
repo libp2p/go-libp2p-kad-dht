@@ -61,7 +61,7 @@ func (w *bufferedDelimitedWriter) Flush() error {
 }
 
 // handleNewStream implements the network.StreamHandler
-func (dht *IpfsDHT) handleNewStream(s network.Stream) {
+func (dht *KadDHT) handleNewStream(s network.Stream) {
 	defer s.Reset() //nolint
 	if dht.handleNewMessage(s) {
 		// Gracefully close the stream for writes.
@@ -70,7 +70,7 @@ func (dht *IpfsDHT) handleNewStream(s network.Stream) {
 }
 
 // Returns true on orderly completion of writes (so we can Close the stream).
-func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
+func (dht *KadDHT) handleNewMessage(s network.Stream) bool {
 	ctx := dht.ctx
 	r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 
@@ -202,7 +202,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (dht *KadDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
@@ -237,7 +237,7 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 }
 
 // sendMessage sends out a message
-func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+func (dht *KadDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
 	ms, err := dht.messageSenderForPeer(ctx, p)
@@ -266,7 +266,7 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	return nil
 }
 
-func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messageSender, error) {
+func (dht *KadDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messageSender, error) {
 	dht.smlk.Lock()
 	ms, ok := dht.strmap[p]
 	if ok {
@@ -303,7 +303,7 @@ type messageSender struct {
 	r   msgio.ReadCloser
 	lk  ctxMutex
 	p   peer.ID
-	dht *IpfsDHT
+	dht *KadDHT
 
 	invalid   bool
 	singleMes int

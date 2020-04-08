@@ -147,7 +147,7 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 		t.Fatal(err)
 	}
 	hlprs[0].allow = wan.PeerID()
-	connect(ctx, t, wan, d.WAN)
+	connect(ctx, t, d.WAN, wan)
 
 	lan, err := dht.New(
 		ctx,
@@ -193,7 +193,7 @@ func TestFindProviderAsync(t *testing.T) {
 	defer wan.Close()
 	defer lan.Close()
 
-	if err := wan.Provide(ctx, wancid, true); err != nil {
+	if err := wan.Provide(ctx, wancid, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -219,5 +219,72 @@ func TestFindProviderAsync(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("find provider timeout.")
+	}
+}
+
+func TestValueGetSet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	d, wan, lan := setupTier(ctx, t)
+	defer d.Close()
+	defer wan.Close()
+	defer lan.Close()
+
+	err := d.PutValue(ctx, "/v/hello", []byte("world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	val, err := wan.GetValue(ctx, "/v/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(val) != "world" {
+		t.Fatal("failed to get expected string.")
+	}
+
+	val, err = lan.GetValue(ctx, "/v/hello")
+	if err == nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchValue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	d, wan, lan := setupTier(ctx, t)
+	defer d.Close()
+	defer wan.Close()
+	defer lan.Close()
+
+	err := wan.PutValue(ctx, "/v/hello", []byte("world"), )
+
+	valCh, err := d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case v := <-valCh:
+		if string(v) != "world" {
+			t.Errorf("expected 'world', got '%s'", string(v))
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
+	err = lan.PutValue(ctx, "/v/hello", []byte("newer"))
+	if err != nil {
+		t.Error(err)
+	}
+
+	select {
+	case v := <-valCh:
+		if string(v) != "newer" {
+			t.Errorf("expected 'newer', got '%s'", string(v))
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 }

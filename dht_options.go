@@ -2,8 +2,9 @@ package dht
 
 import (
 	"fmt"
-	"github.com/ipfs/go-ipns"
 	"time"
+
+	"github.com/ipfs/go-ipns"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -25,6 +26,8 @@ const (
 	ModeClient
 	// ModeServer operates the DHT as a server, it can both send and respond to queries
 	ModeServer
+	// ModeAutoServer operates in the same way as ModeAuto, but acts as a server when reachability is unknown
+	ModeAutoServer
 )
 
 const DefaultPrefix protocol.ID = "/ipfs"
@@ -251,6 +254,15 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 func ProtocolPrefix(prefix protocol.ID) Option {
 	return func(c *config) error {
 		c.protocolPrefix = prefix
+		return nil
+	}
+}
+
+// ProtocolExtension adds an application specific protocol to the DHT protocol. For example,
+// /ipfs/lan/kad/1.0.0 instead of /ipfs/kad/1.0.0. extension should be of the form /lan.
+func ProtocolExtension(ext protocol.ID) Option {
+	return func(c *config) error {
+		c.protocolPrefix += ext
 		return nil
 	}
 }

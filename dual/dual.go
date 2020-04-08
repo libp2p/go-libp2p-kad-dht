@@ -11,6 +11,7 @@ import (
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 )
@@ -22,6 +23,9 @@ type DHT struct {
 	LAN *dht.IpfsDHT
 }
 
+// DefaultLanExtension is used to differentiate local protocol requests from those on the WAN DHT.
+const DefaultLanExtension protocol.ID = "/lan"
+
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
 // guarantee, but we can use them to aid refactoring.
 var (
@@ -32,12 +36,13 @@ var (
 	_ routing.ValueStore     = (*DHT)(nil)
 )
 
-// NewDHT creates a new DualDHT instance. Options provided are forwarded on to the two concrete
+// New creates a new DualDHT instance. Options provided are forwarded on to the two concrete
 // IpfsDHT internal constructions, modulo additional options used by the Dual DHT to enforce
 // the LAN-vs-WAN distinction.
-func NewDHT(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) {
+// Note: query or routing table functional options provided as arguments to this function
+// will be overriden by this constructor.
+func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) {
 	wanOpts := append(options,
-		dht.ProtocolPrefix(dht.DefaultPrefix),
 		dht.QueryFilter(dht.PublicQueryFilter),
 		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
 	)
@@ -46,8 +51,11 @@ func NewDHT(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, erro
 		return nil, err
 	}
 
-	lanOpts := append(options,
-		dht.ProtocolPrefix(dht.DefaultPrefix+"/lan"),
+	// Unless overridden by user supplied options, the LAN DHT should default
+	// to 'AutoServer' mode.
+	lanOpts := append([]dht.Option{dht.Mode(dht.ModeAutoServer)}, options...)
+	lanOpts = append(lanOpts,
+		dht.ProtocolExtension(DefaultLanExtension),
 		dht.QueryFilter(dht.PrivateQueryFilter),
 		dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),
 	)
@@ -61,8 +69,7 @@ func NewDHT(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, erro
 }
 
 func (dht *DHT) activeWAN() bool {
-	wanPeers := dht.WAN.RoutingTable().ListPeers()
-	return len(wanPeers) > 0
+	return dht.WAN.RoutingTable().Size() > 0
 }
 
 // Provide adds the given cid to the content routing system.
@@ -75,21 +82,72 @@ func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
 
 // FindProvidersAsync searches for peers who are able to provide a given key
 func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
-	if dht.activeWAN() {
-		return dht.WAN.FindProvidersAsync(ctx, key, count)
-	}
-	return dht.LAN.FindProvidersAsync(ctx, key, count)
+	reqCtx, cancel := context.WithCancel(ctx)
+	outCh := make(chan peer.AddrInfo)
+	wanCh := dht.WAN.FindProvidersAsync(reqCtx, key, count)
+	lanCh := dht.LAN.FindProvidersAsync(reqCtx, key, count)
+	go func() {
+		defer cancel()
+		defer close(outCh)
+
+		found := make(map[peer.ID]struct{}, count)
+		nch := 2
+		var pi peer.AddrInfo
+		for nch > 0 && count > 0 {
+			var ok bool
+			select {
+			case pi, ok = <-wanCh:
+				if !ok {
+					wanCh = nil
+					nch--
+					continue
+				}
+			case pi, ok = <-lanCh:
+				if !ok {
+					lanCh = nil
+					nch--
+					continue
+				}
+			}
+			// already found
+			if _, ok = found[pi.ID]; ok {
+				continue
+			}
+
+			select {
+			case outCh <- pi:
+				found[pi.ID] = struct{}{}
+				count--
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return outCh
 }
 
 // FindPeer searches for a peer with given ID
+// Note: with signed peer records, we can change this to short circuit once either DHT returns.
 func (dht *DHT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error) {
-	// TODO: should these be run in parallel?
-	infoa, erra := dht.WAN.FindPeer(ctx, pid)
-	infob, errb := dht.LAN.FindPeer(ctx, pid)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var wanInfo, lanInfo peer.AddrInfo
+	var wanErr, lanErr error
+	go func() {
+		defer wg.Done()
+		wanInfo, wanErr = dht.WAN.FindPeer(ctx, pid)
+	}()
+	go func() {
+		defer wg.Done()
+		lanInfo, lanErr = dht.LAN.FindPeer(ctx, pid)
+	}()
+
+	wg.Wait()
+
 	return peer.AddrInfo{
 		ID:    pid,
-		Addrs: append(infoa.Addrs, infob.Addrs...),
-	}, mergeErrors(erra, errb)
+		Addrs: append(wanInfo.Addrs, lanInfo.Addrs...),
+	}, mergeErrors(wanErr, lanErr)
 }
 
 func mergeErrors(a, b error) error {
@@ -120,13 +178,47 @@ func (dht *DHT) PutValue(ctx context.Context, key string, val []byte, opts ...ro
 }
 
 // GetValue searches for the value corresponding to given Key.
-func (dht *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
-	vala, erra := dht.WAN.GetValue(ctx, key, opts...)
-	if vala != nil {
-		return vala, erra
+func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
+	reqCtx, cncl := context.WithCancel(ctx)
+	defer cncl()
+
+	resChan := make(chan []byte)
+	defer close(resChan)
+	errChan := make(chan error)
+	defer close(errChan)
+	runner := func(impl *dht.IpfsDHT, valCh chan []byte, errCh chan error) {
+		val, err := impl.GetValue(reqCtx, key, opts...)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		valCh <- val
 	}
-	valb, errb := dht.LAN.GetValue(ctx, key, opts...)
-	return valb, mergeErrors(erra, errb)
+	go runner(d.WAN, resChan, errChan)
+	go runner(d.LAN, resChan, errChan)
+
+	var err error
+	var val []byte
+	select {
+	case val = <-resChan:
+		cncl()
+	case err = <-errChan:
+	}
+
+	// Drain or wait for the slower runner
+	select {
+	case secondVal := <-resChan:
+		if val == nil {
+			val = secondVal
+		}
+	case secondErr := <-errChan:
+		if err != nil {
+			err = mergeErrors(err, secondErr)
+		} else if val == nil {
+			err = secondErr
+		}
+	}
+	return val, err
 }
 
 // SearchValue searches for better values from this value
@@ -163,14 +255,45 @@ func (dht *DHT) SearchValue(ctx context.Context, key string, opts ...routing.Opt
 }
 
 // GetPublicKey returns the public key for the given peer.
-func (dht *DHT) GetPublicKey(ctx context.Context, pid peer.ID) (ci.PubKey, error) {
-	pka, erra := dht.WAN.GetPublicKey(ctx, pid)
-	if erra == nil {
-		return pka, nil
+func (d *DHT) GetPublicKey(ctx context.Context, pid peer.ID) (ci.PubKey, error) {
+	reqCtx, cncl := context.WithCancel(ctx)
+	defer cncl()
+
+	resChan := make(chan ci.PubKey)
+	defer close(resChan)
+	errChan := make(chan error)
+	defer close(errChan)
+	runner := func(impl *dht.IpfsDHT, valCh chan ci.PubKey, errCh chan error) {
+		val, err := impl.GetPublicKey(reqCtx, pid)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		valCh <- val
 	}
-	pkb, errb := dht.LAN.GetPublicKey(ctx, pid)
-	if errb == nil {
-		return pkb, nil
+	go runner(d.WAN, resChan, errChan)
+	go runner(d.LAN, resChan, errChan)
+
+	var err error
+	var val ci.PubKey
+	select {
+	case val = <-resChan:
+		cncl()
+	case err = <-errChan:
 	}
-	return nil, mergeErrors(erra, errb)
+
+	// Drain or wait for the slower runner
+	select {
+	case secondVal := <-resChan:
+		if val == nil {
+			val = secondVal
+		}
+	case secondErr := <-errChan:
+		if err != nil {
+			err = mergeErrors(err, secondErr)
+		} else if val == nil {
+			err = secondErr
+		}
+	}
+	return val, err
 }

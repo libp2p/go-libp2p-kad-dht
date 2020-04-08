@@ -172,11 +172,11 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 // routing table
 func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
 	protos, err := dht.peerstore.SupportsProtocols(p, protocol.ConvertToStrings(dht.protocols)...)
-	if err != nil {
+	if len(protos) == 0 || err != nil {
 		return false, err
 	}
 
-	return len(protos) > 0, nil
+	return dht.routingTablePeerFilter == nil || dht.routingTablePeerFilter(dht, dht.Host().Network().ConnsToPeer(p)), nil
 }
 
 func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {

@@ -306,6 +306,11 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	return rt, err
 }
 
+// Mode allows introspection of the operation mode of the DHT
+func (dht *IpfsDHT) Mode() ModeOpt {
+	return dht.auto
+}
+
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold
 func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 	for {

@@ -41,7 +41,7 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 
 	// register for event bus local routability changes in order to trigger switching between client and server modes
 	// only register for events if the DHT is operating in ModeAuto
-	if dht.auto {
+	if dht.auto == ModeAuto || dht.auto == ModeAutoServer {
 		evts = append(evts, new(event.EvtLocalReachabilityChanged))
 	}
 
@@ -96,7 +96,7 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 			case event.EvtPeerIdentificationCompleted:
 				handlePeerIdentificationCompletedEvent(dht, evt)
 			case event.EvtLocalReachabilityChanged:
-				if dht.auto {
+				if dht.auto == ModeAuto || dht.auto == ModeAutoServer {
 					handleLocalReachabilityChangedEvent(dht, evt)
 				} else {
 					// something has gone really wrong if we get an event we did not subscribe to
@@ -150,8 +150,14 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 	var target mode
 
 	switch e.Reachability {
-	case network.ReachabilityPrivate, network.ReachabilityUnknown:
+	case network.ReachabilityPrivate:
 		target = modeClient
+	case network.ReachabilityUnknown:
+		if dht.auto == ModeAutoServer {
+			target = modeServer
+		} else {
+			target = modeClient
+		}
 	case network.ReachabilityPublic:
 		target = modeServer
 	}

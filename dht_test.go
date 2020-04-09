@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
@@ -72,33 +73,8 @@ type blankValidator struct{}
 func (blankValidator) Validate(_ string, _ []byte) error        { return nil }
 func (blankValidator) Select(_ string, _ [][]byte) (int, error) { return 0, nil }
 
-type testValidator struct{}
-
-func (testValidator) Select(_ string, bs [][]byte) (int, error) {
-	index := -1
-	for i, b := range bs {
-		if bytes.Equal(b, []byte("newer")) {
-			index = i
-		} else if bytes.Equal(b, []byte("valid")) {
-			if index == -1 {
-				index = i
-			}
-		}
-	}
-	if index == -1 {
-		return -1, errors.New("no rec found")
-	}
-	return index, nil
-}
-func (testValidator) Validate(_ string, b []byte) error {
-	if bytes.Equal(b, []byte("expired")) {
-		return errors.New("expired")
-	}
-	return nil
-}
-
 type testAtomicPutValidator struct {
-	testValidator
+	test.TestValidator
 }
 
 // selects the entry with the 'highest' last byte
@@ -372,7 +348,7 @@ func TestValueSetInvalid(t *testing.T) {
 	defer dhtA.host.Close()
 	defer dhtB.host.Close()
 
-	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtA.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 	dhtB.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
 
 	connect(t, ctx, dhtA, dhtB)
@@ -451,8 +427,8 @@ func TestSearchValue(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	dhtA.Validator.(record.NamespacedValidator)["v"] = testValidator{}
-	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtA.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -554,7 +530,7 @@ func TestValueGetInvalid(t *testing.T) {
 	defer dhtB.host.Close()
 
 	dhtA.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
-	dhtB.Validator.(record.NamespacedValidator)["v"] = testValidator{}
+	dhtB.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 
 	connect(t, ctx, dhtA, dhtB)
 

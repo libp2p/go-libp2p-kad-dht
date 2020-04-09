@@ -86,7 +86,7 @@ type IpfsDHT struct {
 	// DHT protocols we can respond to.
 	serverProtocols []protocol.ID
 
-	auto   bool
+	auto   ModeOpt
 	mode   mode
 	modeLk sync.Mutex
 
@@ -159,15 +159,11 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.Validator = cfg.validator
 
+	dht.auto = cfg.mode
 	switch cfg.mode {
-	case ModeAuto:
-		dht.auto = true
+	case ModeAuto, ModeClient:
 		dht.mode = modeClient
-	case ModeClient:
-		dht.auto = false
-		dht.mode = modeClient
-	case ModeServer:
-		dht.auto = false
+	case ModeAutoServer, ModeServer:
 		dht.mode = modeServer
 	default:
 		return nil, fmt.Errorf("invalid dht mode %d", cfg.mode)
@@ -310,6 +306,11 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	}
 
 	return rt, err
+}
+
+// Mode allows introspection of the operation mode of the DHT
+func (dht *IpfsDHT) Mode() ModeOpt {
+	return dht.auto
 }
 
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold

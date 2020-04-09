@@ -7,6 +7,6 @@ import (
 var (
 	// ProtocolDHT is the default DHT protocol.
 	ProtocolDHT protocol.ID = "/ipfs/kad/1.0.0"
-	// DefualtProtocols spoken by the DHT.
+	// DefaultProtocols spoken by the DHT.
 	DefaultProtocols = []protocol.ID{ProtocolDHT}
 )

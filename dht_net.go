@@ -24,6 +24,8 @@ import (
 
 var dhtReadMessageTimeout = 10 * time.Second
 var dhtStreamIdleTimeout = 1 * time.Minute
+
+// ErrReadTimeout is an error that occurs when no message is read within the timeout period.
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 // The Protobuf writer performs multiple small writes when writing a message.
@@ -111,7 +113,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		err = req.Unmarshal(msgbytes)
 		r.ReleaseMsg(msgbytes)
 		if err != nil {
-			logger.Debugf("error unmarshalling message: %#v", err)
+			logger.Debugf("error unmarshaling message: %#v", err)
 			_ = stats.RecordWithTags(ctx,
 				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
 				metrics.ReceivedMessages.M(1),

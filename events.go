@@ -11,11 +11,13 @@ import (
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 )
 
+// KeyKadID contains the Kademlia key in string and binary form.
 type KeyKadID struct {
 	Key string
 	Kad kbucket.ID
 }
 
+// NewKeyKadID creates a KeyKadID from a string Kademlia ID.
 func NewKeyKadID(k string) *KeyKadID {
 	return &KeyKadID{
 		Key: k,
@@ -23,11 +25,13 @@ func NewKeyKadID(k string) *KeyKadID {
 	}
 }
 
+// PeerKadID contains a libp2p Peer ID and a binary Kademlia ID.
 type PeerKadID struct {
 	Peer peer.ID
 	Kad  kbucket.ID
 }
 
+// NewPeerKadID creates a PeerKadID from a libp2p Peer ID.
 func NewPeerKadID(p peer.ID) *PeerKadID {
 	return &PeerKadID{
 		Peer: p,
@@ -35,6 +39,7 @@ func NewPeerKadID(p peer.ID) *PeerKadID {
 	}
 }
 
+// NewPeerKadIDSlice creates a slice of PeerKadID from the passed slice of libp2p Peer IDs.
 func NewPeerKadIDSlice(p []peer.ID) []*PeerKadID {
 	r := make([]*PeerKadID, len(p))
 	for i := range p {
@@ -43,14 +48,16 @@ func NewPeerKadIDSlice(p []peer.ID) []*PeerKadID {
 	return r
 }
 
+// OptPeerKadID returns a pointer to a PeerKadID or nil if the passed Peer ID is it's default value.
 func OptPeerKadID(p peer.ID) *PeerKadID {
 	if p == "" {
 		return nil
-	} else {
-		return NewPeerKadID(p)
 	}
+	return NewPeerKadID(p)
 }
 
+// NewLookupEvent creates a LookupEvent automatically converting the node
+// libp2p Peer ID to a PeerKadID and the string Kademlia key to a KeyKadID.
 func NewLookupEvent(
 	node peer.ID,
 	id uuid.UUID,
@@ -86,6 +93,7 @@ type LookupEvent struct {
 	Terminate *LookupTerminateEvent
 }
 
+// NewLookupUpdateEvent creates a new lookup update event, automatically converting the passed peer IDs to peer Kad IDs.
 func NewLookupUpdateEvent(
 	cause peer.ID,
 	source peer.ID,
@@ -127,6 +135,7 @@ type LookupTerminateEvent struct {
 	Reason LookupTerminationReason
 }
 
+// NewLookupTerminateEvent creates a new lookup termination event with a given reason.
 func NewLookupTerminateEvent(reason LookupTerminationReason) *LookupTerminateEvent {
 	return &LookupTerminateEvent{Reason: reason}
 }
@@ -134,6 +143,7 @@ func NewLookupTerminateEvent(reason LookupTerminationReason) *LookupTerminateEve
 // LookupTerminationReason captures reasons for terminating a lookup.
 type LookupTerminationReason int
 
+// MarshalJSON returns the JSON encoding of the passed lookup termination reason.
 func (r LookupTerminationReason) MarshalJSON() ([]byte, error) {
 	return json.Marshal(r.String())
 }
@@ -220,7 +230,7 @@ func RegisterForLookupEvents(ctx context.Context) (context.Context, <-chan *Look
 	return context.WithValue(ctx, routingLookupKey{}, ech), ch
 }
 
-// Number of events to buffer.
+// LookupEventBufferSize is the number of events to buffer.
 var LookupEventBufferSize = 16
 
 // PublishLookupEvent publishes a query event to the query event channel

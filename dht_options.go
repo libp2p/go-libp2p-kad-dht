@@ -2,11 +2,11 @@ package dht
 
 import (
 	"fmt"
-	"github.com/ipfs/go-ipns"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipfs/go-ipns"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -27,6 +27,7 @@ const (
 	ModeServer
 )
 
+// DefaultPrefix is the application specific prefix attached to all DHT protocols by default.
 const DefaultPrefix protocol.ID = "/ipfs"
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
@@ -322,7 +323,7 @@ func DisableProviders() Option {
 	}
 }
 
-// DisableProviders disables storing and retrieving value records (including
+// DisableValues disables storing and retrieving value records (including
 // public keys).
 //
 // Defaults to enabled.

@@ -66,8 +66,8 @@ func (lk loggableKeyBytes) String() string {
 	return k
 }
 
-// Kademlia 'node lookup' operation. Returns a channel of the K closest peers
-// to the given key
+// GetClosestPeers is a Kademlia 'node lookup' operation. Returns a channel of
+// the K closest peers to the given key.
 //
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.

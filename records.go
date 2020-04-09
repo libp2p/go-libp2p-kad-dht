@@ -79,7 +79,7 @@ func (dht *IpfsDHT) getPublicKeyFromDHT(ctx context.Context, p peer.ID) (ci.PubK
 
 	pubk, err := ci.UnmarshalPublicKey(val)
 	if err != nil {
-		logger.Errorf("Could not unmarshall public key retrieved from DHT for %v", p)
+		logger.Errorf("Could not unmarshal public key retrieved from DHT for %v", p)
 		return nil, err
 	}
 
@@ -111,7 +111,7 @@ func (dht *IpfsDHT) getPublicKeyFromNode(ctx context.Context, p peer.ID) (ci.Pub
 
 	pubk, err := ci.UnmarshalPublicKey(record.GetValue())
 	if err != nil {
-		logger.Errorf("Could not unmarshall public key for %v", p)
+		logger.Errorf("Could not unmarshal public key for %v", p)
 		return nil, err
 	}
 

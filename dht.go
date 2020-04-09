@@ -36,6 +36,8 @@ import (
 
 var logger = logging.Logger("dht")
 
+// BaseConnMgrScore is the base of the score set on the connection manager "kbucket" tag.
+// It is added with the common prefix length between two peer IDs.
 const BaseConnMgrScore = 5
 
 type mode int
@@ -607,22 +609,22 @@ func (dht *IpfsDHT) getMode() mode {
 	return dht.mode
 }
 
-// Context return dht's context
+// Context returns the DHT's context.
 func (dht *IpfsDHT) Context() context.Context {
 	return dht.ctx
 }
 
-// Process return dht's process
+// Process returns the DHT's process.
 func (dht *IpfsDHT) Process() goprocess.Process {
 	return dht.proc
 }
 
-// RoutingTable return dht's routingTable
+// RoutingTable returns the DHT's routingTable.
 func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 	return dht.routingTable
 }
 
-// Close calls Process Close
+// Close calls Process Close.
 func (dht *IpfsDHT) Close() error {
 	return dht.proc.Close()
 }
@@ -631,18 +633,22 @@ func mkDsKey(s string) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }
 
+// PeerID returns the DHT node's Peer ID.
 func (dht *IpfsDHT) PeerID() peer.ID {
 	return dht.self
 }
 
+// PeerKey returns a DHT key, converted from the DHT node's Peer ID.
 func (dht *IpfsDHT) PeerKey() []byte {
 	return kb.ConvertPeerID(dht.self)
 }
 
+// Host returns the libp2p host this DHT is operating with.
 func (dht *IpfsDHT) Host() host.Host {
 	return dht.host
 }
 
+// Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 	req := pb.NewMessage(pb.Message_PING, nil, 0)
 	resp, err := dht.sendRequest(ctx, p, req)

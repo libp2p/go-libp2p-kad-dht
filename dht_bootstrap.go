@@ -3,17 +3,17 @@ package dht
 import (
 	"context"
 	"fmt"
-	"github.com/libp2p/go-libp2p-core/peer"
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
 	process "github.com/jbenet/goprocess"
 	processctx "github.com/jbenet/goprocess/context"
+	"github.com/libp2p/go-libp2p-core/peer"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/multiformats/go-multiaddr"
-	_ "github.com/multiformats/go-multiaddr-dns"
 )
 
+// DefaultBootstrapPeers is a set of public DHT bootstrap peers provided by libp2p.
 var DefaultBootstrapPeers []multiaddr.Multiaddr
 
 // Minimum number of peers in the routing table. If we drop below this and we

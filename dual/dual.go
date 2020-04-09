@@ -14,6 +14,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	helper "github.com/libp2p/go-libp2p-routing-helpers"
 )
 
 // DHT implements the routing interface to provide two concrete DHT implementationts for use
@@ -230,35 +231,8 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 
 // SearchValue searches for better values from this value
 func (dht *DHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
-	streama, erra := dht.WAN.SearchValue(ctx, key, opts...)
-	streamb, errb := dht.WAN.SearchValue(ctx, key, opts...)
-	if erra == nil && errb == nil {
-		combinedStream := make(chan []byte)
-		var combinedWg sync.WaitGroup
-		combinedWg.Add(2)
-		go func(out chan []byte) {
-			for itm := range streama {
-				out <- itm
-			}
-			combinedWg.Done()
-		}(combinedStream)
-		go func(out chan []byte) {
-			for itm := range streamb {
-				out <- itm
-			}
-			combinedWg.Done()
-		}(combinedStream)
-		go func() {
-			combinedWg.Wait()
-			close(combinedStream)
-		}()
-		return combinedStream, nil
-	} else if erra == nil {
-		return streama, nil
-	} else if errb == nil {
-		return streamb, nil
-	}
-	return nil, mergeErrors(erra, errb)
+	p := helper.Parallel{Routers: []routing.Routing{dht.WAN, dht.LAN}, Validator: dht.WAN.Validator}
+	return p.SearchValue(ctx, key, opts...)
 }
 
 // GetPublicKey returns the public key for the given peer.

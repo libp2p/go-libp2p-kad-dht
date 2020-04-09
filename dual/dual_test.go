@@ -12,7 +12,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	peerstore "github.com/libp2p/go-libp2p-peerstore"
+	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 )
@@ -108,11 +110,9 @@ func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 		t.Fatal("no addresses for connection.")
 	}
 	a.Host().Peerstore().AddAddrs(bid, baddr, peerstore.TempAddrTTL)
-	fmt.Fprintf(os.Stderr, "gonna connect.\n")
 	if err := a.Host().Connect(ctx, peer.AddrInfo{ID: bid}); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "gonn wait\n")
 	wait(ctx, t, a, b)
 }
 
@@ -231,7 +231,7 @@ func TestValueGetSet(t *testing.T) {
 	defer wan.Close()
 	defer lan.Close()
 
-	err := d.PutValue(ctx, "/v/hello", []byte("world"))
+	err := d.PutValue(ctx, "/v/hello", []byte("valid"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestValueGetSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(val) != "world" {
+	if string(val) != "valid" {
 		t.Fatal("failed to get expected string.")
 	}
 
@@ -258,7 +258,10 @@ func TestSearchValue(t *testing.T) {
 	defer wan.Close()
 	defer lan.Close()
 
-	err := wan.PutValue(ctx, "/v/hello", []byte("world"), )
+	d.WAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
+	d.LAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
+
+	err := wan.PutValue(ctx, "/v/hello", []byte("valid"))
 
 	valCh, err := d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
 	if err != nil {
@@ -267,8 +270,8 @@ func TestSearchValue(t *testing.T) {
 
 	select {
 	case v := <-valCh:
-		if string(v) != "world" {
-			t.Errorf("expected 'world', got '%s'", string(v))
+		if string(v) != "valid" {
+			t.Errorf("expected 'valid', got '%s'", string(v))
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
@@ -280,9 +283,12 @@ func TestSearchValue(t *testing.T) {
 	}
 
 	select {
-	case v := <-valCh:
+	case v, ok := <-valCh:
 		if string(v) != "newer" {
 			t.Errorf("expected 'newer', got '%s'", string(v))
+		}
+		if !ok {
+			t.Errorf("chan closed early")
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())

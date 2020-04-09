@@ -9,9 +9,9 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	peerstore "github.com/libp2p/go-libp2p-core/peerstore"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
-	peerstore "github.com/libp2p/go-libp2p-peerstore"
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
@@ -189,6 +189,8 @@ func TestFindProviderAsync(t *testing.T) {
 	defer wan.Close()
 	defer lan.Close()
 
+	time.Sleep(5 * time.Millisecond)
+
 	if err := wan.Provide(ctx, wancid, false); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +229,8 @@ func TestValueGetSet(t *testing.T) {
 	defer wan.Close()
 	defer lan.Close()
 
+	time.Sleep(5 * time.Millisecond)
+
 	err := d.PutValue(ctx, "/v/hello", []byte("valid"))
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +243,7 @@ func TestValueGetSet(t *testing.T) {
 		t.Fatal("failed to get expected string.")
 	}
 
-	val, err = lan.GetValue(ctx, "/v/hello")
+	_, err = lan.GetValue(ctx, "/v/hello")
 	if err == nil {
 		t.Fatal(err)
 	}
@@ -257,7 +261,7 @@ func TestSearchValue(t *testing.T) {
 	d.WAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 	d.LAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 
-	err := wan.PutValue(ctx, "/v/hello", []byte("valid"))
+	_ = wan.PutValue(ctx, "/v/hello", []byte("valid"))
 
 	valCh, err := d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
 	if err != nil {
@@ -310,6 +314,8 @@ func TestGetPublicKey(t *testing.T) {
 	defer wan.Close()
 	defer lan.Close()
 
+	time.Sleep(5 * time.Millisecond)
+
 	pk, err := d.GetPublicKey(ctx, wan.PeerID())
 	if err != nil {
 		t.Fatal(err)
@@ -343,6 +349,8 @@ func TestFindPeer(t *testing.T) {
 	defer d.Close()
 	defer wan.Close()
 	defer lan.Close()
+
+	time.Sleep(5 * time.Millisecond)
 
 	p, err := d.FindPeer(ctx, lan.PeerID())
 	if err != nil {

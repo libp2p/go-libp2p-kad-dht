@@ -174,7 +174,7 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 }
 
 func (q *query) recordPeerIsValuable(p peer.ID) {
-	q.dht.routingTable.UpdateLastSuccessfulOutboundQuery(p, time.Now())
+	q.dht.routingTable.UpdateLastUsefulAt(p, time.Now())
 }
 
 func (q *query) recordValuablePeers() {

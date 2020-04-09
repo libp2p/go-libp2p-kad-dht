@@ -77,13 +77,14 @@ func (dht *DHT) Close() error {
 	return multierror.Append(dht.WAN.Close(), dht.LAN.Close()).ErrorOrNil()
 }
 
-func (dht *DHT) activeWAN() bool {
+// WANActive returns true when the WAN DHT is active (has peers).
+func (dht *DHT) WANActive() bool {
 	return dht.WAN.RoutingTable().Size() > 0
 }
 
 // Provide adds the given cid to the content routing system.
 func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
-	if dht.activeWAN() {
+	if dht.WANActive() {
 		return dht.WAN.Provide(ctx, key, announce)
 	}
 	return dht.LAN.Provide(ctx, key, announce)
@@ -167,7 +168,7 @@ func (dht *DHT) Bootstrap(ctx context.Context) error {
 
 // PutValue adds value corresponding to given Key.
 func (dht *DHT) PutValue(ctx context.Context, key string, val []byte, opts ...routing.Option) error {
-	if dht.activeWAN() {
+	if dht.WANActive() {
 		return dht.WAN.PutValue(ctx, key, val, opts...)
 	}
 	return dht.LAN.PutValue(ctx, key, val, opts...)

@@ -95,13 +95,14 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 	outCh := make(chan peer.AddrInfo)
 	wanCh := dht.WAN.FindProvidersAsync(reqCtx, key, count)
 	lanCh := dht.LAN.FindProvidersAsync(reqCtx, key, count)
+	zeroCount := (count == 0)
 	go func() {
 		defer cancel()
 		defer close(outCh)
 
 		found := make(map[peer.ID]struct{}, count)
 		var pi peer.AddrInfo
-		for count > 0 && (wanCh != nil || lanCh != nil) {
+		for (zeroCount || count > 0) && (wanCh != nil || lanCh != nil) {
 			var ok bool
 			select {
 			case pi, ok = <-wanCh:

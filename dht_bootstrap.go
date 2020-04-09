@@ -128,7 +128,7 @@ func (dht *IpfsDHT) startRefreshing() {
 			// ping Routing Table peers that haven't been hear of/from in the interval they should have been.
 			for _, ps := range dht.routingTable.GetPeerInfos() {
 				// ping the peer if it's due for a ping and evict it if the ping fails
-				if float64(time.Since(ps.LastSuccessfulOutboundQueryAt)) > dht.successfulOutboundQueryGracePeriod {
+				if time.Since(ps.LastSuccessfulOutboundQueryAt) > dht.successfulOutboundQueryGracePeriod {
 					livelinessCtx, cancel := context.WithTimeout(ctx, peerPingTimeout)
 					if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
 						logger.Debugw("evicting peer after failed ping", "peer", ps.Id, "error", err)

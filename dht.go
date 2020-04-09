@@ -111,7 +111,7 @@ type IpfsDHT struct {
 	// successfulOutboundQueryGracePeriod is the maximum grace period we will give to a peer
 	// to between two successful query responses from it, failing which,
 	// we will ping it to see if it's alive.
-	successfulOutboundQueryGracePeriod float64
+	successfulOutboundQueryGracePeriod time.Duration
 
 	fixLowPeersChan chan struct{}
 }
@@ -289,7 +289,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	// be published soon.
 	l1 := math.Log(float64(1) / float64(defaultBucketSize))                              //(Log(1/K))
 	l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(defaultBucketSize))) // Log(1 - (alpha / K))
-	maxLastSuccessfulOutboundThreshold := l1 / l2 * float64(cfg.routingTable.refreshInterval)
+	maxLastSuccessfulOutboundThreshold := time.Duration(l1 / l2 * float64(cfg.routingTable.refreshInterval))
 
 	self := kb.ConvertPeerID(dht.host.ID())
 

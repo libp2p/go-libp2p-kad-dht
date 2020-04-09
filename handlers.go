@@ -316,20 +316,8 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
-	// check if we have this value, to add ourselves as provider.
-	has, err := dht.datastore.Has(convertToDsKey(key))
-	if err != nil && err != ds.ErrNotFound {
-		// FIXME: This doesn't work reliably. If we want this check, we
-		// need a _blockstore_.
-		logger.Errorw("error checking datastore for block", "key", key, "error", err)
-		has = false
-	}
-
 	// setup providers
 	providers := dht.ProviderManager.GetProviders(ctx, key)
-	if has {
-		providers = append(providers, dht.self)
-	}
 
 	if len(providers) > 0 {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).

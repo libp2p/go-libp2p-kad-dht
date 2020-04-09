@@ -4,6 +4,7 @@ go 1.14
 
 require (
 	github.com/gogo/protobuf v1.3.1
+	github.com/google/gopacket v1.1.17
 	github.com/google/uuid v1.1.1
 	github.com/hashicorp/go-multierror v1.1.0
 	github.com/hashicorp/golang-lru v0.5.4

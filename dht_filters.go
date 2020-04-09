@@ -3,9 +3,13 @@ package dht
 import (
 	"bytes"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+
+	"github.com/google/gopacket/routing"
 	netroute "github.com/libp2p/go-netroute"
 
 	ma "github.com/multiformats/go-multiaddr"
@@ -64,10 +68,42 @@ func PrivateQueryFilter(dht *IpfsDHT, ai peer.AddrInfo) bool {
 
 var _ QueryFilterFunc = PrivateQueryFilter
 
+// We call this very frequently but routes can technically change at runtime.
+// Cache it for two minutes.
+const routerCacheTime = 2 * time.Minute
+
+var routerCache struct {
+	sync.RWMutex
+	router  routing.Router
+	expires time.Time
+}
+
+func getCachedRouter() routing.Router {
+	routerCache.RLock()
+	router := routerCache.router
+	expires := routerCache.expires
+	routerCache.RUnlock()
+
+	if time.Now().Before(expires) {
+		return router
+	}
+
+	routerCache.Lock()
+	defer routerCache.Unlock()
+
+	now := time.Now()
+	if now.Before(routerCache.expires) {
+		return router
+	}
+	routerCache.router, _ = netroute.New()
+	routerCache.expires = now.Add(routerCacheTime)
+	return router
+}
+
 // PrivateRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a private network
 func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
-	router, _ := netroute.New()
+	router := getCachedRouter()
 	myAdvertisedIPs := make([]net.IP, 0)
 	for _, a := range dht.Host().Addrs() {
 		if manet.IsPublicAddr(a) && !isRelayAddr(a) {

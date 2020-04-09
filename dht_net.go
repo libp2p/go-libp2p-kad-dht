@@ -25,7 +25,7 @@ import (
 var dhtReadMessageTimeout = 10 * time.Second
 var dhtStreamIdleTimeout = 1 * time.Minute
 
-// ErrReadTimeout is an error that occurs when no message is read within the timeout period
+// ErrReadTimeout is an error that occurs when no message is read within the timeout period.
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 // The Protobuf writer performs multiple small writes when writing a message.

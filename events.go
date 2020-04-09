@@ -135,7 +135,7 @@ type LookupTerminateEvent struct {
 	Reason LookupTerminationReason
 }
 
-// NewLookupTerminateEvent creates a new lookup termination event with a given reason
+// NewLookupTerminateEvent creates a new lookup termination event with a given reason.
 func NewLookupTerminateEvent(reason LookupTerminationReason) *LookupTerminateEvent {
 	return &LookupTerminateEvent{Reason: reason}
 }
@@ -143,7 +143,7 @@ func NewLookupTerminateEvent(reason LookupTerminationReason) *LookupTerminateEve
 // LookupTerminationReason captures reasons for terminating a lookup.
 type LookupTerminationReason int
 
-// MarshalJSON returns the JSON encoding of the passed lookup termination reason
+// MarshalJSON returns the JSON encoding of the passed lookup termination reason.
 func (r LookupTerminationReason) MarshalJSON() ([]byte, error) {
 	return json.Marshal(r.String())
 }

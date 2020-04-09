@@ -132,6 +132,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	return best, nil
 }
 
+// SearchValue searches for the value corresponding to given Key and streams the results.
 func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
@@ -476,7 +477,7 @@ func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
 	// // only share WAN-friendly addresses ??
 	// pi.Addrs = addrutil.WANShareableAddrs(pi.Addrs)
 	if len(pi.Addrs) < 1 {
-		return nil, fmt.Errorf("no known addresses for self. cannot put provider.")
+		return nil, fmt.Errorf("no known addresses for self, cannot put provider")
 	}
 
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, key, 0)

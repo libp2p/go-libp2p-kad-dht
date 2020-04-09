@@ -294,30 +294,31 @@ func (q *query) run() {
 
 // spawnQuery starts one query, if an available heard peer is found
 func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
-	if peers := q.queryPeers.GetSortedHeard(); len(peers) == 0 {
+	peers := q.queryPeers.GetSortedHeard()
+	if len(peers) == 0 {
 		return
-	} else {
-		PublishLookupEvent(ctx,
-			NewLookupEvent(
-				q.dht.self,
-				q.id,
-				q.key,
-				NewLookupUpdateEvent(
-					cause,
-					q.queryPeers.GetReferrer(peers[0]),
-					nil,                 // heard
-					[]peer.ID{peers[0]}, // waiting
-					nil,                 // queried
-					nil,                 // unreachable
-				),
-				nil,
-				nil,
-			),
-		)
-		q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
-		q.waitGroup.Add(1)
-		go q.queryPeer(ctx, ch, peers[0])
 	}
+
+	PublishLookupEvent(ctx,
+		NewLookupEvent(
+			q.dht.self,
+			q.id,
+			q.key,
+			NewLookupUpdateEvent(
+				cause,
+				q.queryPeers.GetReferrer(peers[0]),
+				nil,                 // heard
+				[]peer.ID{peers[0]}, // waiting
+				nil,                 // queried
+				nil,                 // unreachable
+			),
+			nil,
+			nil,
+		),
+	)
+	q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
+	q.waitGroup.Add(1)
+	go q.queryPeer(ctx, ch, peers[0])
 }
 
 func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {
@@ -353,20 +354,20 @@ func (q *query) isStarvationTermination() bool {
 func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason LookupTerminationReason) {
 	if q.terminated {
 		return
-	} else {
-		PublishLookupEvent(ctx,
-			NewLookupEvent(
-				q.dht.self,
-				q.id,
-				q.key,
-				nil,
-				nil,
-				NewLookupTerminateEvent(reason),
-			),
-		)
-		cancel() // abort outstanding queries
-		q.terminated = true
 	}
+
+	PublishLookupEvent(ctx,
+		NewLookupEvent(
+			q.dht.self,
+			q.id,
+			q.key,
+			nil,
+			nil,
+			NewLookupTerminateEvent(reason),
+		),
+	)
+	cancel() // abort outstanding queries
+	q.terminated = true
 }
 
 // queryPeer queries a single peer and reports its findings on the channel.

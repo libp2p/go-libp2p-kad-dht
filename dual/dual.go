@@ -174,21 +174,26 @@ func (dht *DHT) PutValue(ctx context.Context, key string, val []byte, opts ...ro
 
 // GetValue searches for the value corresponding to given Key.
 func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
-	reqCtx, cncl := context.WithCancel(ctx)
-	defer cncl()
+	lanCtx, cancelLan := context.WithCancel(ctx)
+	defer cancelLan()
 
-	var lanVal []byte
-	var lanErr error
-	var lanWaiter sync.WaitGroup
+	var (
+		lanVal    []byte
+		lanErr    error
+		lanWaiter sync.WaitGroup
+	)
 	lanWaiter.Add(1)
 	go func() {
 		defer lanWaiter.Done()
-		lanVal, lanErr = d.LAN.GetValue(reqCtx, key, opts...)
+		lanVal, lanErr = d.LAN.GetValue(lanCtx, key, opts...)
 	}()
 
 	wanVal, wanErr := d.WAN.GetValue(ctx, key, opts...)
+	if wanErr == nil {
+		cancelLan()
+	}
+	lanWaiter.Wait()
 	if wanErr != nil {
-		lanWaiter.Wait()
 		if lanErr != nil {
 			return nil, multierror.Append(wanErr, lanErr).ErrorOrNil()
 		}

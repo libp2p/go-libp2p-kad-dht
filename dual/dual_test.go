@@ -2,8 +2,6 @@ package dual
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -40,11 +38,9 @@ func MkFilterForPeer() (func(d *dht.IpfsDHT, conns []network.Conn) bool, *custom
 	f := func(_ *dht.IpfsDHT, conns []network.Conn) bool {
 		for _, c := range conns {
 			if c.RemotePeer() == helper.allow {
-				fmt.Fprintf(os.Stderr, "allowed conn per filter\n")
 				return true
 			}
 		}
-		fmt.Fprintf(os.Stderr, "rejected conn per rt filter\n")
 		return false
 	}
 	return f, &helper
@@ -277,20 +273,89 @@ func TestSearchValue(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
+	select {
+	case _, ok := <-valCh:
+		if ok {
+			t.Errorf("chan should close")
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
 	err = lan.PutValue(ctx, "/v/hello", []byte("newer"))
 	if err != nil {
 		t.Error(err)
 	}
 
-	select {
-	case v, ok := <-valCh:
-		if string(v) != "newer" {
-			t.Errorf("expected 'newer', got '%s'", string(v))
-		}
-		if !ok {
-			t.Errorf("chan closed early")
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+	valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var lastVal []byte
+	for c := range valCh {
+		lastVal = c
+	}
+	if string(lastVal) != "newer" {
+		t.Fatal("incorrect best search value")
+	}
+}
+
+func TestGetPublicKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	d, wan, lan := setupTier(ctx, t)
+	defer d.Close()
+	defer wan.Close()
+	defer lan.Close()
+
+	pk, err := d.GetPublicKey(ctx, wan.PeerID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := peer.IDFromPublicKey(pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != wan.PeerID() {
+		t.Fatal("incorrect PK")
+	}
+
+	pk, err = d.GetPublicKey(ctx, lan.PeerID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err = peer.IDFromPublicKey(pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != lan.PeerID() {
+		t.Fatal("incorrect PK")
+	}
+}
+
+func TestFindPeer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	d, wan, lan := setupTier(ctx, t)
+	defer d.Close()
+	defer wan.Close()
+	defer lan.Close()
+
+	p, err := d.FindPeer(ctx, lan.PeerID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Addrs) == 0 {
+		t.Fatal("expeced find peer to find addresses.")
+	}
+	p, err = d.FindPeer(ctx, wan.PeerID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Addrs) == 0 {
+		t.Fatal("expeced find peer to find addresses.")
 	}
 }

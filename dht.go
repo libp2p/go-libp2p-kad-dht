@@ -110,10 +110,10 @@ type IpfsDHT struct {
 	// networks).
 	enableProviders, enableValues bool
 
-	// maxLastSuccessfulOutboundThreshold is the max threshold/upper limit for the value of "lastSuccessfulOutboundQuery"
-	// of the peer in the bucket above which we will evict it to make place for a new peer if the bucket
-	// is full
-	maxLastSuccessfulOutboundThreshold time.Duration
+	// successfulOutboundQueryGracePeriod is the maximum grace period we will give to a peer
+	// to between two successful query responses from it, failing which,
+	// we will ping it to see if it's alive.
+	successfulOutboundQueryGracePeriod time.Duration
 
 	fixLowPeersChan chan struct{}
 }
@@ -287,11 +287,12 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	// be published soon.
 	l1 := math.Log(float64(1) / float64(defaultBucketSize))                              //(Log(1/K))
 	l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(defaultBucketSize))) // Log(1 - (alpha / K))
-	maxLastSuccessfulOutboundThreshold := l1 / l2 * float64(cfg.routingTable.refreshInterval)
+	maxLastSuccessfulOutboundThreshold := time.Duration(l1 / l2 * float64(cfg.routingTable.refreshInterval))
 
 	self := kb.ConvertPeerID(dht.host.ID())
 
 	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold)
+	dht.successfulOutboundQueryGracePeriod = maxLastSuccessfulOutboundThreshold
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -451,22 +452,37 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 
 // peerFound signals the routingTable that we've found a peer that
 // might support the DHT protocol.
+// If we have a connection a peer but no exchange of a query RPC ->
+//    LastQueriedAt=time.Now (so we don't ping it for some time for a liveliness check)
+//    LastUsefulAt=N/A
+// If we connect to a peer and exchange a query RPC ->
+//    LastQueriedAt=time.Now (same reason as above)
+//    LastUsefulAt=time.Now (so we give it some life in the RT without immediately evicting it)
+// If we query a peer we already have in our Routing Table ->
+//    LastQueriedAt=time.Now()
+//    LastUsefulAt remains unchanged
+// If we connect to a peer we already have in the RT but do not exchange a query (rare)
+//    Do Nothing.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	logger.Debugw("peer found", "peer", p)
 	b, err := dht.validRTPeer(p)
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		_, err := dht.routingTable.TryAddPeer(p, queryPeer)
+		newlyAdded, err := dht.routingTable.TryAddPeer(p, queryPeer)
 		if err != nil {
 			// peer not added.
 			return
 		}
 
-		// If we discovered the peer because of a query, we need to ensure we override the "zero" lastSuccessfulOutboundQuery
+		// If we freshly added the peer because of a query, we need to ensure we override the "zero" lastUsefulAt
 		// value that must have been set in the Routing Table for this peer when it was first added during a connection.
-		if queryPeer {
-			dht.routingTable.UpdateLastSuccessfulOutboundQuery(p, time.Now())
+		if newlyAdded && queryPeer {
+			dht.routingTable.UpdateLastUsefulAt(p, time.Now())
+		} else if queryPeer {
+			// the peer is already in our RT, but we just successfully queried it and so let's give it a
+			// bump on the query time so we don't ping it too soon for a liveliness check.
+			dht.routingTable.UpdateLastSuccessfulOutboundQueryAt(p, time.Now())
 		}
 	}
 }

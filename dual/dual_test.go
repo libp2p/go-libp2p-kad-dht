@@ -65,7 +65,7 @@ func setupDHTWithFilters(ctx context.Context, t *testing.T, options ...dht.Optio
 	lanOpts := []dht.Option{
 		dht.NamespacedValidator("v", blankValidator{}),
 		dht.ProtocolPrefix("/test"),
-		dht.ProtocolExtension(DefaultLanExtension),
+		dht.ProtocolExtension(LanExtension),
 		dht.DisableAutoRefresh(),
 		dht.RoutingTableFilter(lanFilter),
 		dht.Mode(dht.ModeServer),

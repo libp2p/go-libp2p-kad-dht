@@ -1958,3 +1958,27 @@ func TestInvalidKeys(t *testing.T) {
 		t.Fatal("expected to have failed")
 	}
 }
+
+func TestRoutingFilter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nDHTs := 2
+	dhts := setupDHTS(t, ctx, nDHTs)
+	defer func() {
+		for i := 0; i < nDHTs; i++ {
+			dhts[i].Close()
+			defer dhts[i].host.Close()
+		}
+	}()
+	dhts[0].routingTablePeerFilter = PublicRoutingTableFilter
+
+	connectNoSync(t, ctx, dhts[0], dhts[1])
+	wait(t, ctx, dhts[1], dhts[0])
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-time.After(time.Millisecond * 200):
+	}
+}

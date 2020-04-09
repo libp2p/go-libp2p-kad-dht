@@ -108,9 +108,10 @@ type IpfsDHT struct {
 	// networks).
 	enableProviders, enableValues bool
 
-	// maxLastSuccessfulOutboundThreshold is the max threshold/upper limit on the time duration
-	// between the current time and the last time we successfully queried a peer.
-	maxLastSuccessfulOutboundThreshold float64
+	// successfulOutboundQueryGracePeriod is the maximum grace period we will give to a peer
+	// to between two successful query responses from it, failing which,
+	// we will ping it to see if it's alive.
+	successfulOutboundQueryGracePeriod float64
 
 	fixLowPeersChan chan struct{}
 }
@@ -293,7 +294,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
 	self := kb.ConvertPeerID(dht.host.ID())
 
 	rt, err := kb.NewRoutingTable(cfg.bucketSize, self, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold)
-	dht.maxLastSuccessfulOutboundThreshold = maxLastSuccessfulOutboundThreshold
+	dht.successfulOutboundQueryGracePeriod = maxLastSuccessfulOutboundThreshold
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {

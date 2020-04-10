@@ -15,6 +15,8 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	helper "github.com/libp2p/go-libp2p-routing-helpers"
 
+	ma "github.com/multiformats/go-multiaddr"
+
 	"github.com/hashicorp/go-multierror"
 )
 
@@ -151,9 +153,22 @@ func (dht *DHT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error
 
 	wg.Wait()
 
+	// combine addresses
+	deduped := make(map[string]ma.Multiaddr, len(wanInfo.Addrs)+len(lanInfo.Addrs))
+	for _, addr := range wanInfo.Addrs {
+		deduped[string(addr.Bytes())] = addr
+	}
+	for _, addr := range lanInfo.Addrs {
+		deduped[string(addr.Bytes())] = addr
+	}
+	addrs := make([]ma.Multiaddr, 0, len(deduped))
+	for _, addr := range deduped {
+		addrs = append(addrs, addr)
+	}
+
 	return peer.AddrInfo{
 		ID:    pid,
-		Addrs: append(wanInfo.Addrs, lanInfo.Addrs...),
+		Addrs: addrs,
 	}, multierror.Append(wanErr, lanErr).ErrorOrNil()
 }
 

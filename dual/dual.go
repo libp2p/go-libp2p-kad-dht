@@ -6,15 +6,16 @@ import (
 	"context"
 	"sync"
 
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+
 	"github.com/ipfs/go-cid"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	helper "github.com/libp2p/go-libp2p-routing-helpers"
-
 	ma "github.com/multiformats/go-multiaddr"
 
 	"github.com/hashicorp/go-multierror"
@@ -76,7 +77,7 @@ func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) 
 
 // Close closes the DHT context.
 func (dht *DHT) Close() error {
-	return multierror.Append(dht.WAN.Close(), dht.LAN.Close()).ErrorOrNil()
+	return combineErrors(dht.WAN.Close(), dht.LAN.Close())
 }
 
 func (dht *DHT) activeWAN() bool {
@@ -153,23 +154,52 @@ func (dht *DHT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error
 
 	wg.Wait()
 
-	// combine addresses
-	deduped := make(map[string]ma.Multiaddr, len(wanInfo.Addrs)+len(lanInfo.Addrs))
-	for _, addr := range wanInfo.Addrs {
-		deduped[string(addr.Bytes())] = addr
-	}
-	for _, addr := range lanInfo.Addrs {
-		deduped[string(addr.Bytes())] = addr
-	}
-	addrs := make([]ma.Multiaddr, 0, len(deduped))
-	for _, addr := range deduped {
-		addrs = append(addrs, addr)
+	// Combine addresses. Try to avoid doing unnecessary work while we're at
+	// it. Note: We're ignoring the errors for now as many of our DHT
+	// commands can return both a result and an error.
+	ai := peer.AddrInfo{ID: pid}
+	if len(wanInfo.Addrs) == 0 {
+		ai.Addrs = lanInfo.Addrs
+	} else if len(lanInfo.Addrs) == 0 {
+		ai.Addrs = wanInfo.Addrs
+	} else {
+		// combine addresses
+		deduped := make(map[string]ma.Multiaddr, len(wanInfo.Addrs)+len(lanInfo.Addrs))
+		for _, addr := range wanInfo.Addrs {
+			deduped[string(addr.Bytes())] = addr
+		}
+		for _, addr := range lanInfo.Addrs {
+			deduped[string(addr.Bytes())] = addr
+		}
+		ai.Addrs = make([]ma.Multiaddr, 0, len(deduped))
+		for _, addr := range deduped {
+			ai.Addrs = append(ai.Addrs, addr)
+		}
 	}
 
-	return peer.AddrInfo{
-		ID:    pid,
-		Addrs: addrs,
-	}, multierror.Append(wanErr, lanErr).ErrorOrNil()
+	// If one of the commands succeeded, don't return an error.
+	if wanErr == nil || lanErr == nil {
+		return ai, nil
+	}
+
+	// Otherwise, return what we have _and_ return the error.
+	return ai, combineErrors(wanErr, lanErr)
+}
+
+func combineErrors(erra, errb error) error {
+	// if the errors are the same, just return one.
+	if erra == errb {
+		return erra
+	}
+
+	// If one of the errors is a kb lookup failure (no peers in routing
+	// table), return the other.
+	if erra == kb.ErrLookupFailure {
+		return errb
+	} else if errb == kb.ErrLookupFailure {
+		return erra
+	}
+	return multierror.Append(erra, errb).ErrorOrNil()
 }
 
 // Bootstrap allows callers to hint to the routing system to get into a
@@ -177,7 +207,7 @@ func (dht *DHT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error
 func (dht *DHT) Bootstrap(ctx context.Context) error {
 	erra := dht.WAN.Bootstrap(ctx)
 	errb := dht.LAN.Bootstrap(ctx)
-	return multierror.Append(erra, errb).ErrorOrNil()
+	return combineErrors(erra, errb)
 }
 
 // PutValue adds value corresponding to given Key.
@@ -209,13 +239,13 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 		cancelLan()
 	}
 	lanWaiter.Wait()
-	if wanErr != nil {
-		if lanErr != nil {
-			return nil, multierror.Append(wanErr, lanErr).ErrorOrNil()
-		}
+	if wanErr == nil {
+		return wanVal, nil
+	}
+	if lanErr == nil {
 		return lanVal, nil
 	}
-	return wanVal, nil
+	return nil, combineErrors(wanErr, lanErr)
 }
 
 // SearchValue searches for better values from this value

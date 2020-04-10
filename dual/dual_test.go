@@ -356,14 +356,14 @@ func TestFindPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Addrs) == 0 {
-		t.Fatal("expeced find peer to find addresses.")
+	if len(p.Addrs) != 1 {
+		t.Fatalf("expeced find peer to find 1 address, found %d", len(p.Addrs))
 	}
 	p, err = d.FindPeer(ctx, wan.PeerID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Addrs) == 0 {
-		t.Fatal("expeced find peer to find addresses.")
+	if len(p.Addrs) != 1 {
+		t.Fatalf("expeced find peer to find addresses, found %d", len(p.Addrs))
 	}
 }

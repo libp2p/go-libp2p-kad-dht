@@ -386,7 +386,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, nvals int) (<-cha
 	})
 
 	go func() {
-		reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		reqCtx, cancel := context.WithTimeout(ctx, time.Hour)
 		defer cancel()
 
 		_, err = query.Run(reqCtx, rtp)

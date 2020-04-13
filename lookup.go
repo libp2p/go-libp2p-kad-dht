@@ -94,7 +94,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	go func() {
 		defer close(out)
 		defer e.Done()
-		timedCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		timedCtx, cancel := context.WithTimeout(ctx, time.Hour)
 		defer cancel()
 		// run it!
 		res, err := query.Run(timedCtx, tablepeers)

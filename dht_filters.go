@@ -166,10 +166,10 @@ func sameV6Net(a, b net.IP) bool {
 }
 
 func isRelayAddr(a ma.Multiaddr) bool {
-	for _, p := range a.Protocols() {
-		if p.Code == ma.P_CIRCUIT {
-			return true
-		}
-	}
-	return false
+	found := false
+	ma.ForEach(a, func(c ma.Component) bool {
+		found = c.Protocol().Code == ma.P_CIRCUIT
+		return !found
+	})
+	return found
 }

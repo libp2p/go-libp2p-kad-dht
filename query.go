@@ -138,7 +138,7 @@ processFollowUp:
 }
 
 func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
-	// pick the K closest peers to the key in our Routing table and shuffle them.
+	// pick the K closest peers to the key in our Routing table.
 	targetKadID := kb.ConvertKey(target)
 	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
 	if len(seedPeers) == 0 {

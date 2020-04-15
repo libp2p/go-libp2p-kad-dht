@@ -9,6 +9,7 @@ syntax = "proto3";
 package dht.pb;
 
 import "github.com/libp2p/go-libp2p-record/pb/record.proto";
+import "github.com/gogo/protobuf/gogoproto/gogo.proto";
 
 message Message {
 	enum MessageType {
@@ -37,7 +38,7 @@ message Message {
 
 	message Peer {
 		// ID of a given peer.
-		bytes id = 1;
+		bytes id = 1 [(gogoproto.customtype) = "byteString", (gogoproto.nullable) = false];
 
 		// multiaddrs for a given peer
 		repeated bytes addrs = 2;
@@ -63,9 +64,9 @@ message Message {
 
 	// Used to return peers closer to a key in a query
 	// GET_VALUE, GET_PROVIDERS, FIND_NODE
-	repeated Peer closerPeers = 8;
+	repeated Peer closerPeers = 8 [(gogoproto.nullable) = false];
 
 	// Used to return Providers
 	// GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
-	repeated Peer providerPeers = 9;
+	repeated Peer providerPeers = 9 [(gogoproto.nullable) = false];
 }

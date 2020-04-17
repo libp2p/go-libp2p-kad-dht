@@ -252,7 +252,7 @@ func (dht *IpfsDHT) PublishLookupEvent(ctx context.Context, ev *LookupEvent) {
 		return
 	}
 	// send it on the eventbus
-	lookUpEvent := event.DhtEvent{EventType: "LookupEvent", EventJson: string(js)}
+	lookUpEvent := event.DhtEvent{EventType: "LookupEvent", EventJson: event.JSString(string(js))}
 	if err := dht.eventsEmitter.Emit(lookUpEvent); err != nil {
 		logger.Errorf("failed to emit DhtEvent on the bus, err=%s", err)
 	}

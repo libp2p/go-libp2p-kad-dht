@@ -299,7 +299,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 		return
 	}
 
-	PublishLookupEvent(ctx,
+	q.dht.PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,
 			q.id,
@@ -356,7 +356,7 @@ func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason
 		return
 	}
 
-	PublishLookupEvent(ctx,
+	q.dht.PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,
 			q.id,
@@ -428,7 +428,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 	if q.terminated {
 		panic("update should not be invoked after the logical lookup termination")
 	}
-	PublishLookupEvent(ctx,
+	q.dht.PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,
 			q.id,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/libp2p/go-libp2p-core/event"
 	"math"
 	"sync"
 	"time"
@@ -116,6 +117,8 @@ type IpfsDHT struct {
 	successfulOutboundQueryGracePeriod time.Duration
 
 	fixLowPeersChan chan struct{}
+
+	eventsEmitter event.Emitter
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -183,6 +186,12 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.proc.Go(sn.subscribe)
 	// handle providers
 	dht.proc.AddChild(dht.ProviderManager.Process())
+
+	// create event emitters
+	dht.eventsEmitter, err = h.EventBus().Emitter(new(event.DhtEvent))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create emitter for DHT events, err=%s", err)
+	}
 
 	dht.startSelfLookup()
 	dht.startRefreshing()

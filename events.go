@@ -237,6 +237,8 @@ var LookupEventBufferSize = 16
 // PublishLookupEvent publishes a query event to the query event channel
 // associated with the given context, if any.
 func (dht *IpfsDHT) PublishLookupEvent(ctx context.Context, ev *LookupEvent) {
+	dht.emitLookupEventToBus(ev)
+
 	ich := ctx.Value(routingLookupKey{})
 	if ich == nil {
 		return
@@ -246,6 +248,9 @@ func (dht *IpfsDHT) PublishLookupEvent(ctx context.Context, ev *LookupEvent) {
 	ech := ich.(*lookupEventChannel)
 	ech.send(ctx, ev)
 
+}
+
+func (dht *IpfsDHT) emitLookupEventToBus(ev *LookupEvent) {
 	js, err := json.Marshal(ev)
 	if err != nil {
 		logger.Errorf("failed to marshal lookup event to Json,err=%s", err)

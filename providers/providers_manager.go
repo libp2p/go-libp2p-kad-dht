@@ -102,17 +102,17 @@ type getProv struct {
 
 // NewProviderManager constructor
 func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
-	var options options
-	if err := options.apply(append([]Option{defaults}, opts...)...); err != nil {
+	var cfg options
+	if err := cfg.apply(append([]Option{defaults}, opts...)...); err != nil {
 		return nil, err
 	}
 	pm := new(ProviderManager)
 	pm.getprovs = make(chan *getProv)
 	pm.newprovs = make(chan *addProv)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
-	pm.cache = options.cache
+	pm.cache = cfg.cache
 	pm.proc = goprocessctx.WithContext(ctx)
-	pm.cleanupInterval = options.cleanupInterval
+	pm.cleanupInterval = cfg.cleanupInterval
 	pm.proc.Go(pm.run)
 	return pm, nil
 }

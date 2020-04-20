@@ -30,6 +30,12 @@ var lruCacheSize = 256
 var batchBufferSize = 256
 var log = logging.Logger("providers")
 
+// ProviderStore stores and retrieves provider records.
+type ProviderStore interface {
+	AddProvider(ctx context.Context, k []byte, val peer.ID)
+	GetProviders(ctx context.Context, k []byte) []peer.ID
+}
+
 // ProviderManager adds and pulls providers out of the datastore,
 // caching them in between
 type ProviderManager struct {

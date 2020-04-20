@@ -317,7 +317,7 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
 	// setup providers
-	providers := dht.ProviderManager.GetProviders(ctx, key)
+	providers := dht.providerStore.GetProviders(ctx, key)
 
 	if len(providers) > 0 {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
@@ -365,7 +365,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)
 		}
-		dht.ProviderManager.AddProvider(ctx, key, p)
+		dht.providerStore.AddProvider(ctx, key, p)
 	}
 
 	return nil, nil

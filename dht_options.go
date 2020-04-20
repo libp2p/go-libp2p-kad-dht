@@ -11,6 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	record "github.com/libp2p/go-libp2p-record"
 )
 
@@ -45,6 +46,7 @@ type config struct {
 	maxRecordAge     time.Duration
 	enableProviders  bool
 	enableValues     bool
+	providerStore    providers.ProviderStore
 	queryPeerFilter  QueryFilterFunc
 
 	routingTable struct {
@@ -344,6 +346,14 @@ func DisableProviders() Option {
 func DisableValues() Option {
 	return func(c *config) error {
 		c.enableValues = false
+		return nil
+	}
+}
+
+// ProviderStore sets the provider storage manager.
+func ProviderStore(ps providers.ProviderStore) Option {
+	return func(c *config) error {
+		c.providerStore = ps
 		return nil
 	}
 }

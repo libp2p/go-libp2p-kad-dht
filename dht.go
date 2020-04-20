@@ -62,8 +62,8 @@ type IpfsDHT struct {
 	datastore ds.Datastore // Local data
 
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
-	// ProviderManager stores & manages the provider records for this Dht peer.
-	ProviderManager *providers.ProviderManager
+	// providerStore stores & manages the provider records for this Dht peer.
+	providerStore providers.ProviderStore
 
 	birth time.Time // When this peer started up
 
@@ -181,8 +181,10 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		return nil, err
 	}
 	dht.proc.Go(sn.subscribe)
+	if mgr, ok := dht.providerStore.(interface{ Process() goprocess.Process }); ok {
+		dht.proc.AddChild(mgr.Process())
+	}
 	// handle providers
-	dht.proc.AddChild(dht.ProviderManager.Process())
 
 	dht.startSelfLookup()
 	dht.startRefreshing()
@@ -275,7 +277,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	dht.ProviderManager = providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore)
+	if cfg.providerStore != nil {
+		dht.providerStore = cfg.providerStore
+	} else {
+		dht.providerStore = providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore)
+	}
 
 	return dht, nil
 }
@@ -675,6 +681,11 @@ func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 		return fmt.Errorf("got unexpected response type: %v", resp.Type)
 	}
 	return nil
+}
+
+// ProviderStore returns the provider storage object for storing and retrieving provider records.
+func (dht *IpfsDHT) ProviderStore() providers.ProviderStore {
+	return dht.providerStore
 }
 
 // newContextWithLocalTags returns a new context.Context with the InstanceID and

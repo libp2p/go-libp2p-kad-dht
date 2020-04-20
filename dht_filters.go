@@ -23,6 +23,41 @@ type QueryFilterFunc func(dht *IpfsDHT, ai peer.AddrInfo) bool
 // the local route table.
 type RouteTableFilterFunc func(dht *IpfsDHT, conns []network.Conn) bool
 
+var publicCIDR6 = "2000::/3"
+var public6 *net.IPNet
+
+func init() {
+	_, public6, _ = net.ParseCIDR(publicCIDR6)
+}
+
+// isPublicAddr follows the logic of manet.IsPublicAddr, except it uses
+// a stricter definition of "public" for ipv6: namely "is it in 2000::/3"?
+func isPublicAddr(a ma.Multiaddr) bool {
+	ip, err := manet.ToIP(a)
+	if err != nil {
+		return false
+	}
+	if ip.To4() != nil {
+		return !inAddrRange(ip, manet.Private4) && !inAddrRange(ip, manet.Unroutable4)
+	}
+
+	return public6.Contains(ip)
+}
+
+// isPrivateAddr follows the logic of manet.IsPrivateAddr, except that
+// it uses a stricter definition of "public" for ipv6
+func isPrivateAddr(a ma.Multiaddr) bool {
+	ip, err := manet.ToIP(a)
+	if err != nil {
+		return false
+	}
+	if ip.To4() != nil {
+		return inAddrRange(ip, manet.Private4)
+	}
+
+	return !public6.Contains(ip) && !inAddrRange(ip, manet.Unroutable6)
+}
+
 // PublicQueryFilter returns true if the peer is suspected of being publicly accessible
 func PublicQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool {
 	if len(ai.Addrs) == 0 {
@@ -31,7 +66,7 @@ func PublicQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool {
 
 	var hasPublicAddr bool
 	for _, a := range ai.Addrs {
-		if !isRelayAddr(a) && manet.IsPublicAddr(a) {
+		if !isRelayAddr(a) && isPublicAddr(a) {
 			hasPublicAddr = true
 		}
 	}
@@ -51,7 +86,7 @@ func PublicRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 	id := conns[0].RemotePeer()
 	known := dht.peerstore.PeerInfo(id)
 	for _, a := range known.Addrs {
-		if !isRelayAddr(a) && manet.IsPublicAddr(a) {
+		if !isRelayAddr(a) && isPublicAddr(a) {
 			return true
 		}
 	}
@@ -106,7 +141,7 @@ func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 	router := getCachedRouter()
 	myAdvertisedIPs := make([]net.IP, 0)
 	for _, a := range dht.Host().Addrs() {
-		if manet.IsPublicAddr(a) && !isRelayAddr(a) {
+		if isPublicAddr(a) && !isRelayAddr(a) {
 			ip, err := manet.ToIP(a)
 			if err != nil {
 				continue
@@ -117,11 +152,11 @@ func PrivateRoutingTableFilter(dht *IpfsDHT, conns []network.Conn) bool {
 
 	for _, c := range conns {
 		ra := c.RemoteMultiaddr()
-		if manet.IsPrivateAddr(ra) && !isRelayAddr(ra) {
+		if isPrivateAddr(ra) && !isRelayAddr(ra) {
 			return true
 		}
 
-		if manet.IsPublicAddr(ra) {
+		if isPublicAddr(ra) {
 			ip, err := manet.ToIP(ra)
 			if err != nil {
 				continue
@@ -172,4 +207,14 @@ func isRelayAddr(a ma.Multiaddr) bool {
 		return !found
 	})
 	return found
+}
+
+func inAddrRange(ip net.IP, ipnets []*net.IPNet) bool {
+	for _, ipnet := range ipnets {
+		if ipnet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }

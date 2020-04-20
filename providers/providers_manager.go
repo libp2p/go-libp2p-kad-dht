@@ -35,7 +35,7 @@ var log = logging.Logger("providers")
 type ProviderManager struct {
 	// all non channel fields are meant to be accessed only within
 	// the run method
-	cache  *lru.LRU
+	cache  lru.LRUCache
 	dstore *autobatch.Datastore
 
 	newprovs chan *addProv
@@ -43,6 +43,51 @@ type ProviderManager struct {
 	proc     goprocess.Process
 
 	cleanupInterval time.Duration
+}
+
+type options struct {
+	cleanupInterval time.Duration
+	cache           lru.LRUCache
+}
+
+// Option is a function that sets a provider manager option.
+type Option func(*options) error
+
+func (c *options) apply(opts ...Option) error {
+	for i, opt := range opts {
+		if err := opt(c); err != nil {
+			return fmt.Errorf("provider manager option %d failed: %s", i, err)
+		}
+	}
+	return nil
+}
+
+var defaults = func(o *options) error {
+	o.cleanupInterval = defaultCleanupInterval
+	cache, err := lru.NewLRU(lruCacheSize, nil)
+	if err != nil {
+		return err
+	}
+	o.cache = cache
+	return nil
+}
+
+// CleanupInterval sets the time between GC runs.
+// Defaults to 1h.
+func CleanupInterval(d time.Duration) Option {
+	return func(o *options) error {
+		o.cleanupInterval = d
+		return nil
+	}
+}
+
+// Cache sets the LRU cache implementation.
+// Defaults to a simple LRU cache.
+func Cache(c lru.LRUCache) Option {
+	return func(o *options) error {
+		o.cache = c
+		return nil
+	}
 }
 
 type addProv struct {
@@ -56,22 +101,20 @@ type getProv struct {
 }
 
 // NewProviderManager constructor
-func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching) *ProviderManager {
+func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
+	var options options
+	if err := options.apply(append([]Option{defaults}, opts...)...); err != nil {
+		return nil, err
+	}
 	pm := new(ProviderManager)
 	pm.getprovs = make(chan *getProv)
 	pm.newprovs = make(chan *addProv)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
-	cache, err := lru.NewLRU(lruCacheSize, nil)
-	if err != nil {
-		panic(err) //only happens if negative value is passed to lru constructor
-	}
-	pm.cache = cache
-
+	pm.cache = options.cache
 	pm.proc = goprocessctx.WithContext(ctx)
-	pm.cleanupInterval = defaultCleanupInterval
+	pm.cleanupInterval = options.cleanupInterval
 	pm.proc.Go(pm.run)
-
-	return pm
+	return pm, nil
 }
 
 // Process returns the ProviderManager process

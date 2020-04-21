@@ -279,7 +279,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	dht.ProviderManager = providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore)
+	pm, err := providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore, cfg.providersOptions...)
+	if err != nil {
+		return nil, err
+	}
+	dht.ProviderManager = pm
 
 	return dht, nil
 }

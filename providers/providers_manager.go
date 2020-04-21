@@ -45,38 +45,23 @@ type ProviderManager struct {
 	cleanupInterval time.Duration
 }
 
-type options struct {
-	cleanupInterval time.Duration
-	cache           lru.LRUCache
-}
-
 // Option is a function that sets a provider manager option.
-type Option func(*options) error
+type Option func(*ProviderManager) error
 
-func (c *options) apply(opts ...Option) error {
+func (pm *ProviderManager) applyOptions(opts ...Option) error {
 	for i, opt := range opts {
-		if err := opt(c); err != nil {
+		if err := opt(pm); err != nil {
 			return fmt.Errorf("provider manager option %d failed: %s", i, err)
 		}
 	}
 	return nil
 }
 
-var defaults = func(o *options) error {
-	o.cleanupInterval = defaultCleanupInterval
-	cache, err := lru.NewLRU(lruCacheSize, nil)
-	if err != nil {
-		return err
-	}
-	o.cache = cache
-	return nil
-}
-
 // CleanupInterval sets the time between GC runs.
 // Defaults to 1h.
 func CleanupInterval(d time.Duration) Option {
-	return func(o *options) error {
-		o.cleanupInterval = d
+	return func(pm *ProviderManager) error {
+		pm.cleanupInterval = d
 		return nil
 	}
 }
@@ -84,8 +69,8 @@ func CleanupInterval(d time.Duration) Option {
 // Cache sets the LRU cache implementation.
 // Defaults to a simple LRU cache.
 func Cache(c lru.LRUCache) Option {
-	return func(o *options) error {
-		o.cache = c
+	return func(pm *ProviderManager) error {
+		pm.cache = c
 		return nil
 	}
 }
@@ -102,17 +87,20 @@ type getProv struct {
 
 // NewProviderManager constructor
 func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
-	var cfg options
-	if err := cfg.apply(append([]Option{defaults}, opts...)...); err != nil {
-		return nil, err
-	}
 	pm := new(ProviderManager)
 	pm.getprovs = make(chan *getProv)
 	pm.newprovs = make(chan *addProv)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
-	pm.cache = cfg.cache
+	cache, err := lru.NewLRU(lruCacheSize, nil)
+	if err != nil {
+		return nil, err
+	}
+	pm.cache = cache
+	pm.cleanupInterval = defaultCleanupInterval
+	if err := pm.applyOptions(opts...); err != nil {
+		return nil, err
+	}
 	pm.proc = goprocessctx.WithContext(ctx)
-	pm.cleanupInterval = cfg.cleanupInterval
 	pm.proc.Go(pm.run)
 	return pm, nil
 }

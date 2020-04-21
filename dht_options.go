@@ -351,6 +351,10 @@ func DisableValues() Option {
 }
 
 // ProvidersOptions are options passed directly to the provider manager.
+//
+// The provider manager adds and gets provider records from the datastore, cahing
+// them in between. These options are passed to the provider manager allowing
+// customisation of things like the GC interval and cache implementation.
 func ProvidersOptions(opts []providers.Option) Option {
 	return func(c *config) error {
 		c.providersOptions = opts

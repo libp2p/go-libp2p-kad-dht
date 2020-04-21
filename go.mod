@@ -13,7 +13,7 @@ require (
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ipfs-util v0.0.1
 	github.com/ipfs/go-ipns v0.0.2
-	github.com/ipfs/go-log v1.0.3
+	github.com/ipfs/go-log v1.0.4
 	github.com/jbenet/goprocess v0.1.4
 	github.com/libp2p/go-eventbus v0.1.0
 	github.com/libp2p/go-libp2p v0.8.1

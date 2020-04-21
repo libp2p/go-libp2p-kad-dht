@@ -20,6 +20,7 @@ import (
 	"github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
+	"go.uber.org/zap"
 )
 
 var dhtReadMessageTimeout = 10 * time.Second
@@ -97,8 +98,9 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			}
 			// This string test is necessary because there isn't a single stream reset error
 			// instance	in use.
-			if err.Error() != "stream reset" {
-				logger.Debugf("error reading message: %#v", err)
+			if c := baseLogger.Check(zap.DebugLevel, "error reading message"); c != nil && err.Error() != "stream reset" {
+				c.Write(zap.String("from", mPeer.String()),
+					zap.Error(err))
 			}
 			if msgLen > 0 {
 				_ = stats.RecordWithTags(ctx,
@@ -113,7 +115,10 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		err = req.Unmarshal(msgbytes)
 		r.ReleaseMsg(msgbytes)
 		if err != nil {
-			logger.Debugf("error unmarshaling message: %#v", err)
+			if c := baseLogger.Check(zap.DebugLevel, "error unmarshaling message"); c != nil {
+				c.Write(zap.String("from", mPeer.String()),
+					zap.Error(err))
+			}
 			_ = stats.RecordWithTags(ctx,
 				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
 				metrics.ReceivedMessages.M(1),
@@ -138,37 +143,39 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
-			logger.Warnw("can't handle received message", "from", mPeer, "type", req.GetType())
+			if c := baseLogger.Check(zap.DebugLevel, "can't handle received message"); c != nil {
+				c.Write(zap.String("from", mPeer.String()),
+					zap.Int32("type", int32(req.GetType())))
+			}
 			return false
 		}
 
 		// a peer has queried us, let's add it to RT
 		dht.peerFound(dht.ctx, mPeer, true)
 
-		logger.Debugw("handling message",
-			"type", req.GetType(),
-			"key", req.GetKey(),
-			"from", mPeer,
-		)
+		if c := baseLogger.Check(zap.DebugLevel, "handling message"); c != nil {
+			c.Write(zap.String("from", mPeer.String()),
+				zap.Int32("type", int32(req.GetType())),
+				zap.Binary("key", req.GetKey()))
+		}
 		resp, err := handler(ctx, mPeer, &req)
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
-			logger.Debugw(
-				"error handling message",
-				"type", req.GetType(),
-				"key", req.GetKey(),
-				"from", mPeer,
-				"error", err)
+			if c := baseLogger.Check(zap.DebugLevel, "error handling message"); c != nil {
+				c.Write(zap.String("from", mPeer.String()),
+					zap.Int32("type", int32(req.GetType())),
+					zap.Binary("key", req.GetKey()),
+					zap.Error(err))
+			}
 			return false
 		}
 
-		logger.Debugw(
-			"handled message",
-			"type", req.GetType(),
-			"key", req.GetKey(),
-			"from", mPeer,
-			"time", time.Since(startTime),
-		)
+		if c := baseLogger.Check(zap.DebugLevel, "handled message"); c != nil {
+			c.Write(zap.String("from", mPeer.String()),
+				zap.Int32("type", int32(req.GetType())),
+				zap.Binary("key", req.GetKey()),
+				zap.Duration("time", time.Since(startTime)))
+		}
 
 		if resp == nil {
 			continue
@@ -178,24 +185,23 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		err = writeMsg(s, resp)
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
-			logger.Debugw(
-				"error writing response",
-				"type", req.GetType(),
-				"key", req.GetKey(),
-				"from", mPeer,
-				"error", err)
+			if c := baseLogger.Check(zap.DebugLevel, "error writing response"); c != nil {
+				c.Write(zap.String("from", mPeer.String()),
+					zap.Int32("type", int32(req.GetType())),
+					zap.Binary("key", req.GetKey()),
+					zap.Error(err))
+			}
 			return false
 		}
 
 		elapsedTime := time.Since(startTime)
 
-		logger.Debugw(
-			"responded to message",
-			"type", req.GetType(),
-			"key", req.GetKey(),
-			"from", mPeer,
-			"time", elapsedTime,
-		)
+		if c := baseLogger.Check(zap.DebugLevel, "responded to message"); c != nil {
+			c.Write(zap.String("from", mPeer.String()),
+				zap.Int32("type", int32(req.GetType())),
+				zap.Binary("key", req.GetKey()),
+				zap.Duration("time", elapsedTime))
+		}
 
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 		stats.Record(ctx, metrics.InboundRequestLatency.M(latencyMillis))

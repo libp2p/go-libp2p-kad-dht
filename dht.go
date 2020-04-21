@@ -15,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
+	"go.uber.org/zap"
 
 	"go.opencensus.io/tag"
 
@@ -34,7 +35,10 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
-var logger = logging.Logger("dht")
+var (
+	logger     = logging.Logger("dht")
+	baseLogger = logger.Desugar()
+)
 
 // BaseConnMgrScore is the base of the score set on the connection manager "kbucket" tag.
 // It is added with the common prefix length between two peer IDs.
@@ -464,7 +468,9 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 // If we connect to a peer we already have in the RT but do not exchange a query (rare)
 //    Do Nothing.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
-	logger.Debugw("peer found", "peer", p)
+	if c := baseLogger.Check(zap.DebugLevel, "peer found"); c != nil {
+		c.Write(zap.String("peer", p.String()))
+	}
 	b, err := dht.validRTPeer(p)
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)

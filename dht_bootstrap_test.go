@@ -34,14 +34,14 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	connect(t, ctx, d2, d3)
 
 	// d1 should have ONLY 1 peer in it's RT
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 1, 1, 2*time.Second)
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{d1}, 1, 1, 2*time.Second))
 	require.Equal(t, connectedTo.self, d1.routingTable.ListPeers()[0])
 
 	// now emit the address change event
 	em, err := d1.host.EventBus().Emitter(&event.EvtLocalAddressesUpdated{})
 	require.NoError(t, err)
 	require.NoError(t, em.Emit(event.EvtLocalAddressesUpdated{}))
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 2*time.Second)
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 10*time.Second))
 	// it should now have both peers in the RT
 	ps := d1.routingTable.ListPeers()
 	require.Contains(t, ps, d2.self)

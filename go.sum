@@ -246,6 +246,14 @@ github.com/libp2p/go-libp2p-discovery v0.3.0 h1:+JnYBRLzZQtRq0mK3xhyjBwHytLmJXMT
 github.com/libp2p/go-libp2p-discovery v0.3.0/go.mod h1:o03drFnz9BVAZdzC/QUQ+NeQOu38Fu7LJGEOK2gQltw=
 github.com/libp2p/go-libp2p-kbucket v0.4.1 h1:6FyzbQuGLPzbMv3HiD232zqscIz5iB8ppJwb380+OGI=
 github.com/libp2p/go-libp2p-kbucket v0.4.1/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421102457-cc5620509c30 h1:0TyaLR2Lr539zQyujO19ugaK3bH8HS3Y4NzE/1qgJZs=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421102457-cc5620509c30/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421110852-c52371e28294 h1:ICfDi7saFuD4GmbMmwz2ZZt2Nh9wIcHx6F0YaMHYWjk=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421110852-c52371e28294/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421114920-40bab4520849 h1:Urz1yatQnZBoG36F3TN/Xuy8i/XerGL+ou1neof4M/4=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421114920-40bab4520849/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421135417-9ee07aec44d4 h1:KhQrfpDCwixF0HVWYICAaU/p7i+O7wJCvzXsZXZN2A0=
+github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200421135417-9ee07aec44d4/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
 github.com/libp2p/go-libp2p-loggables v0.1.0 h1:h3w8QFfCt2UJl/0/NW4K829HX/0S4KD31PQ7m8UXXO8=
 github.com/libp2p/go-libp2p-loggables v0.1.0/go.mod h1:EyumB2Y6PrYjr55Q3/tiJ/o3xoDasoRYM7nOzEpoa90=
 github.com/libp2p/go-libp2p-mplex v0.2.0/go.mod h1:Ejl9IyjvXJ0T9iqUTE1jpYATQ9NM3g+OtR+EMMODbKo=

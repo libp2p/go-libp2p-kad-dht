@@ -45,52 +45,52 @@ var (
 var (
 	ReceivedMessagesView = &view.View{
 		Measure:     ReceivedMessages,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
 	ReceivedMessageErrorsView = &view.View{
 		Measure:     ReceivedMessageErrors,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
 	ReceivedBytesView = &view.View{
 		Measure:     ReceivedBytes,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
 	}
 	InboundRequestLatencyView = &view.View{
 		Measure:     InboundRequestLatency,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
 	}
 	OutboundRequestLatencyView = &view.View{
 		Measure:     OutboundRequestLatency,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: defaultMillisecondsDistribution,
 	}
 	SentMessagesView = &view.View{
 		Measure:     SentMessages,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
 	SentMessageErrorsView = &view.View{
 		Measure:     SentMessageErrors,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
 	SentRequestsView = &view.View{
 		Measure:     SentRequests,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
 	SentRequestErrorsView = &view.View{
 		Measure:     SentRequestErrors,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: view.Count(),
 	}
 	SentBytesView = &view.View{
 		Measure:     SentBytes,
-		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
+		TagKeys:     []tag.Key{KeyMessageType, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
 	}
 )

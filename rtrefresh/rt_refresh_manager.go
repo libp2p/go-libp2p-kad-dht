@@ -3,7 +3,6 @@ package rtrefresh
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -19,8 +18,7 @@ import (
 var logger = logging.Logger("dht/RtRefreshManager")
 
 const (
-	maxNoResultsAfterRefresh = 2
-	peerPingTimeout          = 10 * time.Second
+	peerPingTimeout = 10 * time.Second
 )
 
 type triggerRefreshReq struct {
@@ -50,8 +48,7 @@ type RtRefreshManager struct {
 	refreshInterval                    time.Duration
 	successfulOutboundQueryGracePeriod time.Duration
 
-	triggerRefresh  chan *triggerRefreshReq // channel to write refresh requests to.
-	noResultsForCpl map[uint]int            // tracks how many times we didn't get any peer for a cpl
+	triggerRefresh chan *triggerRefreshReq // channel to write refresh requests to.
 }
 
 func NewRtRefreshManager(h host.Host, rt *kbucket.RoutingTable, autoRefresh bool,
@@ -77,8 +74,7 @@ func NewRtRefreshManager(h host.Host, rt *kbucket.RoutingTable, autoRefresh bool
 		refreshInterval:                    refreshInterval,
 		successfulOutboundQueryGracePeriod: successfulOutboundQueryGracePeriod,
 
-		triggerRefresh:  make(chan *triggerRefreshReq),
-		noResultsForCpl: make(map[uint]int),
+		triggerRefresh: make(chan *triggerRefreshReq),
 	}, nil
 }
 
@@ -202,29 +198,38 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 		merr = multierror.Append(merr, err)
 	}
 
-	for c, lastRefreshedAt := range r.rt.GetTrackedCplsForRefresh() {
+	refreshCpls := r.rt.GetTrackedCplsForRefresh()
+
+	rfnc := func(c int) (err error) {
 		cpl := uint(c)
-
-		// skip cpls that we've stopped discovering new peers for
-		if r.noResultsForCpl[cpl] >= maxNoResultsAfterRefresh {
-			continue
-		}
-
-		isCplFull := r.rt.IsBucketFull(cpl)
-		peersBeforeRefresh := r.rt.GetPeersForCpl(cpl)
-
-		var err error
 		if forceRefresh {
 			err = r.refreshCpl(cpl)
 		} else {
-			err = r.refreshCplIfEligible(cpl, lastRefreshedAt)
+			err = r.refreshCplIfEligible(cpl, refreshCpls[c])
 		}
+		return
+	}
 
-		if err != nil {
+	for c := range refreshCpls {
+		cpl := uint(c)
+		if err := rfnc(c); err != nil {
 			merr = multierror.Append(merr, err)
 		} else {
-			if !refreshDiscoverNewPeers(isCplFull, peersBeforeRefresh, r.rt.GetPeersForCpl(cpl)) {
-				r.noResultsForCpl[cpl] = r.noResultsForCpl[cpl] + 1
+			// If we see a gap at a Cpl in the Routing table, we ONLY refresh up until the maximum cpl we
+			// have in the Routing Table OR (2 * Cpl with the gap), whichever is smaller.
+			// This is to prevent refreshes for Cpls that have no peers in the network but happen to be before a very high max Cpl
+			// for which we do have peers in the network.
+			// The number of 2 * Cpl can be proved and a proof would have been written here if the programmer
+			// had paid more attention in the Math classes at university.
+			// So, please be patient and a doc explaining it will be published soon.
+			if r.rt.NPeersForCpl(cpl) == 0 {
+				lastCpl := min(2*c, len(refreshCpls)-1)
+				for i := c + 1; i < lastCpl+1; i++ {
+					if err := rfnc(i); err != nil {
+						merr = multierror.Append(merr, err)
+					}
+				}
+				return merr
 			}
 		}
 	}
@@ -232,30 +237,12 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 	return merr
 }
 
-// did we discover any new peers because of the refresh for this cpl ?
-// Only if they have the exact same elements
-// should we consider that we didn't discover any new peers.
-// This is because peers can also randomly drop on and off the routing table.
-func refreshDiscoverNewPeers(wasCplFull bool, peersBeforeRefresh []peer.ID, peersAfterRefresh []peer.ID) bool {
-	// we should always refresh buckets that were once full
-	if wasCplFull || (len(peersBeforeRefresh) != len(peersAfterRefresh)) {
-		return true
+func min(a int, b int) int {
+	if a <= b {
+		return a
 	}
 
-	sort.Slice(peersBeforeRefresh, func(i, j int) bool {
-		return peersBeforeRefresh[i] < peersBeforeRefresh[j]
-	})
-
-	sort.Slice(peersAfterRefresh, func(i, j int) bool {
-		return peersAfterRefresh[i] < peersAfterRefresh[j]
-	})
-
-	for i := range peersBeforeRefresh {
-		if peersBeforeRefresh[i] != peersAfterRefresh[i] {
-			return true
-		}
-	}
-	return false
+	return b
 }
 
 func (r *RtRefreshManager) refreshCplIfEligible(cpl uint, lastRefreshedAt time.Time) error {

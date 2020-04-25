@@ -32,6 +32,7 @@ import (
 	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
 	"github.com/multiformats/go-base32"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -701,4 +702,12 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 		extraTags...,
 	) // ignoring error as it is unrelated to the actual function of this code.
 	return ctx
+}
+
+func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Duration) {
+	// Don't add addresses for self or our connected peers. We have better ones.
+	if p == dht.self || dht.host.Network().Connectedness(p) == network.Connected {
+		return
+	}
+	dht.peerstore.AddAddrs(p, addrs, ttl)
 }

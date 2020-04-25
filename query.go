@@ -416,7 +416,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 
 		// add their addresses to the dialer's peerstore
 		if q.dht.queryPeerFilter(q.dht, *next) {
-			q.dht.peerstore.AddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
+			q.dht.maybeAddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
 			saw = append(saw, next.ID)
 		}
 	}

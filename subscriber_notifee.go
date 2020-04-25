@@ -92,9 +92,9 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 				default:
 				}
 			case event.EvtPeerProtocolsUpdated:
-				handlePeerProtocolsUpdatedEvent(dht, evt)
+				handlePeerChangeEvent(dht, evt.Peer)
 			case event.EvtPeerIdentificationCompleted:
-				handlePeerIdentificationCompletedEvent(dht, evt)
+				handlePeerChangeEvent(dht, evt.Peer)
 			case event.EvtLocalReachabilityChanged:
 				if dht.auto == ModeAuto || dht.auto == ModeAutoServer {
 					handleLocalReachabilityChangedEvent(dht, evt)
@@ -112,38 +112,17 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	}
 }
 
-func handlePeerIdentificationCompletedEvent(dht *IpfsDHT, e event.EvtPeerIdentificationCompleted) {
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
-	if dht.host.Network().Connectedness(e.Peer) != network.Connected {
-		return
-	}
-
-	// if the peer supports the DHT protocol, add it to our RT and kick a refresh if needed
-	valid, err := dht.validRTPeer(e.Peer)
+func handlePeerChangeEvent(dht *IpfsDHT, p peer.ID) {
+	valid, err := dht.validRTPeer(p)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
 		return
 	} else if valid {
-		dht.peerFound(dht.ctx, e.Peer, false)
+		dht.peerFound(dht.ctx, p, false)
 		dht.fixRTIfNeeded()
+	} else {
+		dht.peerStoppedDHT(dht.ctx, p)
 	}
-}
-
-func handlePeerProtocolsUpdatedEvent(dht *IpfsDHT, e event.EvtPeerProtocolsUpdated) {
-	valid, err := dht.validRTPeer(e.Peer)
-	if err != nil {
-		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
-		return
-	}
-
-	if !valid {
-		dht.peerStoppedDHT(dht.ctx, e.Peer)
-		return
-	}
-
-	// we just might have discovered a peer that supports the DHT protocol
-	dht.fixRTIfNeeded()
 }
 
 func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {

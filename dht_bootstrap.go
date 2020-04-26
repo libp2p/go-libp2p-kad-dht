@@ -234,10 +234,12 @@ func (dht *IpfsDHT) refreshCpls(ctx context.Context) error {
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the
 // IpfsRouter interface.
-//
-// This just calls `RefreshRoutingTable`.
 func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
-	dht.RefreshRoutingTable()
+	// Important: don't block!
+	select {
+	case dht.triggerRtRefresh <- nil:
+	default:
+	}
 	return nil
 }
 
@@ -248,9 +250,12 @@ func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
 func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 	res := make(chan error, 1)
 	select {
+	// FIXME: this can block. Ideally, we'd return a channel without blocking.
+	// https://github.com/libp2p/go-libp2p-kad-dht/issues/609
 	case dht.triggerRtRefresh <- res:
 	case <-dht.ctx.Done():
 		res <- dht.ctx.Err()
+		close(res)
 	}
 	return res
 }

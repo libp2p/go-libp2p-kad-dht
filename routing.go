@@ -530,7 +530,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 }
 
 func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
-	dht.findProvidersAsyncRoutineSeeded(ctx, key,count, peerOut, nil)
+	dht.findProvidersAsyncRoutineSeeded(ctx, key, count, peerOut, nil)
 }
 
 func (dht *IpfsDHT) findProvidersAsyncRoutineSeeded(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, seedPeers []peer.ID) {

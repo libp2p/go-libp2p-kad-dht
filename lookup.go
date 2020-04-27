@@ -126,4 +126,3 @@ func (dht *IpfsDHT) GetClosestPeersSeeded(ctx context.Context, key string, seedP
 
 	return out, ctx.Err()
 }
-

@@ -96,8 +96,10 @@ type IpfsDHT struct {
 	modeLk sync.Mutex
 
 	bucketSize int
-	alpha      int // The concurrency parameter per path
-	beta       int // The number of peers closest to a target that must have responded for a query path to terminate
+	alphaMax   int // The maximum concurrency per lookup
+	alphaEarly int // XXX
+	alphaLate  int // XXX
+	beta       int // The number of peers closest to a target that must have responded for a lookup to terminate
 
 	queryPeerFilter        QueryFilterFunc
 	routingTablePeerFilter RouteTableFilterFunc
@@ -256,7 +258,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		protocols:              protocols,
 		serverProtocols:        serverProtocols,
 		bucketSize:             cfg.bucketSize,
-		alpha:                  cfg.concurrency,
+		alphaMax:               cfg.maxConcurrency,
+		alphaEarly:             cfg.earlyConcurrency,
+		alphaLate:              cfg.lateConcurrency,
 		beta:                   cfg.resiliency,
 		triggerRtRefresh:       make(chan chan<- error),
 		triggerSelfLookup:      make(chan chan<- error),
@@ -290,12 +294,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 }
 
 func makeRoutingTable(dht *IpfsDHT, cfg config) (*kb.RoutingTable, error) {
-	// The threshold is calculated based on the expected amount of time that should pass before we
-	// query a peer as part of our refresh cycle.
-	// To grok the Math Wizardy that produced these exact equations, please be patient as a document explaining it will
-	// be published soon.
-	l1 := math.Log(float64(1) / float64(defaultBucketSize))                              //(Log(1/K))
-	l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(defaultBucketSize))) // Log(1 - (alpha / K))
+	// maxLastSuccessfulOutboundThreshold is a duration, which is chosen so that
+	// the expected number of times a contact is queried due to a bucket refresh
+	// is at least one.
+	l1 := math.Log(float64(1) / float64(defaultBucketSize))                                   //(Log(1/K))
+	l2 := math.Log(float64(1) - (float64(cfg.earlyConcurrency) / float64(defaultBucketSize))) // Log(1 - (alphaEarly / K))
 	maxLastSuccessfulOutboundThreshold := time.Duration(l1 / l2 * float64(cfg.routingTable.refreshInterval))
 
 	self := kb.ConvertPeerID(dht.host.ID())

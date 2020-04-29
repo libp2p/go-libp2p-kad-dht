@@ -41,7 +41,9 @@ type config struct {
 	mode             ModeOpt
 	protocolPrefix   protocol.ID
 	bucketSize       int
-	concurrency      int
+	maxConcurrency   int
+	earlyConcurrency int
+	lateConcurrency  int
 	resiliency       int
 	maxRecordAge     time.Duration
 	enableProviders  bool
@@ -117,7 +119,9 @@ var defaults = func(o *config) error {
 	o.maxRecordAge = time.Hour * 36
 
 	o.bucketSize = defaultBucketSize
-	o.concurrency = 3
+	o.maxConcurrency = 10
+	o.earlyConcurrency = 2
+	o.lateConcurrency = 3
 	o.resiliency = 3
 
 	o.v1CompatibleMode = true
@@ -279,12 +283,34 @@ func BucketSize(bucketSize int) Option {
 	}
 }
 
-// Concurrency configures the number of concurrent requests (alpha in the Kademlia paper) for a given query path.
+// MaxConcurrency configures the maximum number of concurrent requests for a given query path.
+//
+// The default value is 10.
+func MaxConcurrency(alphaMax int) Option {
+	return func(c *config) error {
+		c.maxConcurrency = alphaMax
+		return nil
+	}
+}
+
+// EarlyConcurrency configures the number of new concurrent requests in reaction to query responses
+// in the early stage of a given query path.
+//
+// The default value is 2.
+func EarlyConcurrency(alphaEarly int) Option {
+	return func(c *config) error {
+		c.earlyConcurrency = alphaEarly
+		return nil
+	}
+}
+
+// LateConcurrency configures the number of new concurrent requests in reaction to query responses
+// in the late stage of a given query path.
 //
 // The default value is 3.
-func Concurrency(alpha int) Option {
+func LateConcurrency(alphaLate int) Option {
 	return func(c *config) error {
-		c.concurrency = alpha
+		c.lateConcurrency = alphaLate
 		return nil
 	}
 }

@@ -250,9 +250,9 @@ func (q *query) run() {
 	pathCtx, cancelPath := context.WithCancel(q.ctx)
 	defer cancelPath()
 
-	alpha := q.dht.alpha
+	alphaMax := q.dht.alphaMax
 
-	ch := make(chan *queryUpdate, alpha)
+	ch := make(chan *queryUpdate, alphaMax)
 	ch <- &queryUpdate{cause: q.dht.self, heard: q.seedPeers}
 
 	// return only once all outstanding queries have completed.
@@ -277,28 +277,58 @@ func (q *query) run() {
 		}
 
 		// if all "threads" are busy, wait until someone finishes
-		if q.queryPeers.NumWaiting() >= alpha {
+		if q.queryPeers.NumWaiting() >= alphaMax {
 			continue
 		}
 
-		// spawn new queries, up to the parallelism allowance
-		// calculate the maximum number of queries we could be spawning.
-		// Note: NumWaiting will be updated in spawnQuery
-		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
-		// try spawning the queries, if there are no available peers to query then we won't spawn them
-		for j := 0; j < maxNumQueriesToSpawn; j++ {
-			q.spawnQuery(pathCtx, cause, ch)
+		// compute the next win of peers and apply the maximum concurrency cap
+		win := q.window()
+		for _, to := range win[:min(len(win), max(0, alphaMax-q.queryPeers.NumWaiting()))] {
+			q.spawnQuery(pathCtx, cause, to, ch)
 		}
 	}
 }
 
-// spawnQuery starts one query, if an available heard peer is found
-func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
-	peers := q.queryPeers.GetSortedHeard()
-	if len(peers) == 0 {
-		return
+func (q *query) window() []peer.ID {
+	all := q.queryPeers.GetClosestNotUnreachable(-1)
+	if len(all) == 0 {
+		return nil
 	}
+	// If the closest (to the target) peer is in state queried, we are in the late stage.
+	// Otherwise, we are in the "early stage".
+	quota := 0
+	if q.queryPeers.GetState(all[0]) == qpeerset.PeerQueried {
+		quota = q.dht.alphaLate // late stage
+	} else {
+		quota = q.dht.alphaEarly // early stage
+	}
+	// We identify quota-many peers closest to the target who are not queried (i.e. they are heard or waiting).
+	// We then plan to send queries to everyone in this set who is not waiting.
+	win := make([]peer.ID, 0, quota)
+	for i := 0; i < min(quota, len(all)); i++ {
+		if q.queryPeers.GetState(all[i]) == qpeerset.PeerHeard {
+			win = append(win, all[i])
+		}
+	}
+	return win
+}
 
+func min(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
+}
+
+func max(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
+}
+
+// spawnQuery starts one query, if an available heard peer is found
+func (q *query) spawnQuery(ctx context.Context, cause, to peer.ID, ch chan<- *queryUpdate) {
 	PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,
@@ -306,19 +336,19 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 			q.key,
 			NewLookupUpdateEvent(
 				cause,
-				q.queryPeers.GetReferrer(peers[0]),
-				nil,                 // heard
-				[]peer.ID{peers[0]}, // waiting
-				nil,                 // queried
-				nil,                 // unreachable
+				q.queryPeers.GetReferrer(to),
+				nil,           // heard
+				[]peer.ID{to}, // waiting
+				nil,           // queried
+				nil,           // unreachable
 			),
 			nil,
 			nil,
 		),
 	)
-	q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
+	q.queryPeers.SetState(to, qpeerset.PeerWaiting)
 	q.waitGroup.Add(1)
-	go q.queryPeer(ctx, ch, peers[0])
+	go q.queryPeer(ctx, ch, to)
 }
 
 func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {

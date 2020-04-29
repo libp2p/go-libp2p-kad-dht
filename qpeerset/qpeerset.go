@@ -137,7 +137,9 @@ func (qp *QueryPeerset) GetWaitingPeers() (result []peer.ID) {
 }
 
 // GetClosestNotUnreachable returns the closest to the key peers, which are not in state PeerUnreachable.
-// It returns count peers or less, if fewer peers meet the condition.
+// If count is non-negative, GetClosestNotUnreachable returns count peers or less, if fewer peers meet the condition.
+// Otherwise, GetClosestNotUnreachable returns all peers meeting the condition.
+// In all cases, returned peers are sorted by ascending distance to target.
 func (qp *QueryPeerset) GetClosestNotUnreachable(count int) (result []peer.ID) {
 	qp.sort()
 	for _, p := range qp.all {
@@ -145,7 +147,7 @@ func (qp *QueryPeerset) GetClosestNotUnreachable(count int) (result []peer.ID) {
 			result = append(result, p.id)
 		}
 	}
-	if len(result) >= count {
+	if count >= 0 && len(result) >= count {
 		return result[:count]
 	}
 	return result

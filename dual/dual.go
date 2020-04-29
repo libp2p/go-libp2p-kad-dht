@@ -97,7 +97,7 @@ func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
 func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
 	reqCtx, cancel := context.WithCancel(ctx)
 	outCh := make(chan peer.AddrInfo)
-	subCtx, errCh := routing.RegisterForQueryEvents(reqCtx)
+	subCtx, evtCh := routing.RegisterForQueryEvents(reqCtx)
 	wanCh := dht.WAN.FindProvidersAsync(subCtx, key, count)
 	lanCh := dht.LAN.FindProvidersAsync(subCtx, key, count)
 	zeroCount := (count == 0)
@@ -111,8 +111,10 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 		for (zeroCount || count > 0) && (wanCh != nil || lanCh != nil) {
 			var ok bool
 			select {
-			case qEv, ok = <-errCh:
-				if ok && qEv != nil && qEv.Type != routing.QueryError {
+			case qEv, ok = <-evtCh:
+				if !ok {
+					evtCh = nil
+				} else if qEv != nil && qEv.Type != routing.QueryError {
 					routing.PublishQueryEvent(reqCtx, qEv)
 				}
 				continue

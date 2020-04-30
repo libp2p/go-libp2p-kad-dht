@@ -461,6 +461,7 @@ func (ms *messageSender) writeMsg(pmes *pb.Message) error {
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
 	errc := make(chan error, 1)
 	go func(r msgio.ReadCloser) {
+		defer close(errc)
 		bytes, err := r.ReadMsg()
 		defer r.ReleaseMsg(bytes)
 		if err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -387,6 +388,21 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 	}
 }
 
+func (dht *IpfsDHT) provideAllLocal(ctx context.Context, keys <-chan cid.Cid) error {
+	for {
+		select {
+		case key, ok := <-keys:
+			if !ok {
+				return nil
+			}
+			keyMH := key.Hash()
+			dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // Provider abstraction for indirect stores.
 // Some DHTs store values directly, while an indirect store stores pointers to
 // locations of the value, similarly to Coral and Mainline DHT.
@@ -468,6 +484,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 	return ctx.Err()
 }
+
 func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
 	pi := peer.AddrInfo{
 		ID:    dht.self,

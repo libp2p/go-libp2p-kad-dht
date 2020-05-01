@@ -24,6 +24,7 @@ require (
 	github.com/libp2p/go-libp2p-routing-helpers v0.2.3
 	github.com/libp2p/go-libp2p-swarm v0.2.3
 	github.com/libp2p/go-libp2p-testing v0.1.1
+	github.com/libp2p/go-libp2p-xor v0.0.0-20200501025846-71e284145d58
 	github.com/libp2p/go-msgio v0.0.4
 	github.com/libp2p/go-netroute v0.1.2
 	github.com/multiformats/go-base32 v0.0.3

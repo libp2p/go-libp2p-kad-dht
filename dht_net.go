@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"io"
 	"sync"
 	"time"
@@ -276,14 +274,6 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	return nil
 }
 
-func (dht *IpfsDHT) getHost() host.Host {
-	return dht.host
-}
-
-func (dht *IpfsDHT) getProtocols() []protocol.ID {
-	return append([]protocol.ID{},dht.protocols...)
-}
-
 func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messageSender, error) {
 	dht.smlk.Lock()
 	ms, ok := dht.strmap[p]
@@ -316,17 +306,12 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 	return ms, nil
 }
 
-type protocolSender interface {
-	getHost() host.Host
-	getProtocols() []protocol.ID
-}
-
 type messageSender struct {
 	s   network.Stream
 	r   msgio.ReadCloser
 	lk  ctxMutex
 	p   peer.ID
-	dht protocolSender
+	dht *IpfsDHT
 
 	invalid   bool
 	singleMes int
@@ -367,7 +352,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 	// We only want to speak to peers using our primary protocols. We do not want to query any peer that only speaks
 	// one of the secondary "server" protocols that we happen to support (e.g. older nodes that we can respond to for
 	// backwards compatibility reasons).
-	nstr, err := ms.dht.getHost().NewStream(ctx, ms.p, ms.dht.getProtocols()...)
+	nstr, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.protocols...)
 	if err != nil {
 		return err
 	}

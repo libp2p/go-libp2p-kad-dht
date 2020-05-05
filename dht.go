@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -107,6 +108,11 @@ type IpfsDHT struct {
 	rtRefreshInterval     time.Duration
 	triggerRtRefresh      chan chan<- error
 	triggerSelfLookup     chan chan<- error
+
+	// A set of bootstrap peers to fallback on if all other attempts to fix
+	// the routing table fail (or, e.g., this is the first time this node is
+	// connecting to the network).
+	bootstrapPeers []peer.AddrInfo
 
 	maxRecordAge time.Duration
 
@@ -262,7 +268,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		triggerSelfLookup:      make(chan chan<- error),
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
-		fixLowPeersChan:        make(chan struct{}),
+		fixLowPeersChan:        make(chan struct{}, 1),
 	}
 
 	// construct routing table
@@ -271,6 +277,12 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}
 	dht.routingTable = rt
+
+	// parse the bootstrap peers.
+	dht.bootstrapPeers, err = peer.AddrInfosFromP2pAddrs(cfg.bootstrapPeers...)
+	if err != nil {
+		return nil, err
+	}
 
 	// create a DHT proc with the given context
 	dht.proc = goprocessctx.WithContext(ctx)
@@ -323,20 +335,60 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 	return dht.auto
 }
 
-// fixLowPeers tries to get more peers into the routing table if we're below the threshold
+// fixLowPeersRoutine tries to get more peers into the routing table if we're below the threshold
 func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
+	timer := time.NewTimer(periodicBootstrapInterval)
+	defer timer.Stop()
+
 	for {
 		select {
 		case <-dht.fixLowPeersChan:
+		case <-timer.C:
 		case <-proc.Closing():
 			return
 		}
+
 		if dht.routingTable.Size() > minRTRefreshThreshold {
 			continue
 		}
 
 		for _, p := range dht.host.Network().Peers() {
 			dht.peerFound(dht.Context(), p, false)
+		}
+
+		if dht.routingTable.Size() == 0 {
+			if len(dht.bootstrapPeers) == 0 {
+				// No point in continuing, we have no peers!
+				continue
+			}
+
+			found := 0
+			for _, i := range rand.Perm(len(dht.bootstrapPeers)) {
+				ai := dht.bootstrapPeers[i]
+				err := dht.Host().Connect(dht.Context(), ai)
+				if err == nil {
+					found++
+				} else {
+					logger.Warnw("failed to bootstrap", "peer", ai.ID, "error", err)
+				}
+
+				// Wait for two bootstrap peers, or try them all.
+				//
+				// Why two? In theory, one should be enough
+				// normally. However, if the network were to
+				// restart and everyone connected to just one
+				// bootstrapper, we'll end up with a mostly
+				// partitioned network.
+				//
+				// So we always bootstrap with two random peers.
+				if found == 2 {
+					break
+				}
+			}
+
+			// No point in refreshing the routing table yet. We have
+			// to wait to identify the peer.
+			continue
 		}
 
 		if dht.autoRefresh {

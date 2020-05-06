@@ -232,10 +232,6 @@ func TestNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, p := range hosts {
-		d.peerFound(ctx, p.ID(), true)
-	}
-
 	// Reply with random peers to every message
 	for _, host := range hosts {
 		host := host // shadow loop var
@@ -271,6 +267,16 @@ func TestNotFound(t *testing.T) {
 				}
 			})
 		}
+		for _, peer := range hosts {
+			if host == peer {
+				continue
+			}
+			_ = peer.Peerstore().AddProtocols(host.ID(), protocol.ConvertToStrings(d.serverProtocols)...)
+		}
+	}
+
+	for _, p := range hosts {
+		d.peerFound(ctx, p.ID(), true)
 	}
 
 	// long timeout to ensure timing is not at play.

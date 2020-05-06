@@ -28,7 +28,7 @@ func TestHungRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mn, err := mocknet.FullMeshConnected(ctx, 2)
+	mn, err := mocknet.FullMeshLinked(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +45,11 @@ func TestHungRequest(t *testing.T) {
 			defer s.Reset() //nolint
 			<-ctx.Done()
 		})
+	}
+
+	err = mn.ConnectAllButSelf()
+	if err != nil {
+		t.Fatal("failed to connect peers", err)
 	}
 
 	// Wait at a bit for a peer in our routing table.

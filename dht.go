@@ -121,6 +121,9 @@ type IpfsDHT struct {
 	successfulOutboundQueryGracePeriod time.Duration
 
 	fixLowPeersChan chan struct{}
+
+	// peerstore interface that supports signed peer records for peer addresses
+	ca peerstore.CertifiedAddrBook
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -286,6 +289,12 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	}
 	dht.ProviderManager = pm
 
+	ca, ok := peerstore.GetCertifiedAddrBook(h.Peerstore())
+	if !ok {
+		return nil, errors.New("peerstore is not a certified addr book")
+	}
+	dht.ca = ca
+
 	return dht, nil
 }
 
@@ -392,14 +401,16 @@ var errInvalidRecord = errors.New("received invalid record")
 // key. It returns either the value or a list of closer peers.
 // NOTE: It will update the dht's peerstore with any new addresses
 // it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
+func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, *queryResponse, error) {
 	pmes, err := dht.getValueSingle(ctx, p, key)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Perhaps we were given closer peers
-	peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+	unsigned := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+	signed := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
+	q := &queryResponse{signedPeerRecords: signed, unsignedPeers: unsigned}
 
 	if record := pmes.GetRecord(); record != nil {
 		// Success! We were given the value
@@ -413,11 +424,11 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 			err = errInvalidRecord
 			record = new(recpb.Record)
 		}
-		return record, peers, err
+		return record, q, err
 	}
 
-	if len(peers) > 0 {
-		return nil, peers, nil
+	if len(q.signedPeerRecords) > 0 || len(q.unsignedPeers) > 0 {
+		return nil, q, nil
 	}
 
 	return nil, nil, routing.ErrNotFound

@@ -66,6 +66,25 @@ func (lk loggableKeyBytes) String() string {
 	return k
 }
 
+func getAllSeenPeers(unsigned []*peer.AddrInfo, signed map[peer.ID]pb.RawSignedPeerRecordConn) []*peer.AddrInfo {
+	seenpeers := make(map[peer.ID]struct{}, len(signed)+len(unsigned))
+	allPeers := make([]*peer.AddrInfo, 0, len(signed)+len(unsigned))
+
+	for i := range unsigned {
+		seenpeers[unsigned[i].ID] = struct{}{}
+		allPeers = append(allPeers, unsigned[i])
+	}
+
+	for pid := range signed {
+		if _, ok := seenpeers[pid]; ok {
+			continue
+		}
+		seenpeers[pid] = struct{}{}
+		allPeers = append(allPeers, &peer.AddrInfo{ID: pid, Addrs: signed[pid].Addrs})
+	}
+	return allPeers
+}
+
 // GetClosestPeers is a Kademlia 'node lookup' operation. Returns a channel of
 // the K closest peers to the given key.
 //
@@ -77,7 +96,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 	}
 	//TODO: I can break the interface! return []peer.ID
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key,
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -89,16 +108,18 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}
-			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+
+			signedPeers := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
+			unsignedPeers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:      routing.PeerResponse,
 				ID:        p,
-				Responses: peers,
+				Responses: getAllSeenPeers(unsignedPeers, signedPeers),
 			})
 
-			return peers, err
+			return &queryResponse{unsignedPeers: unsignedPeers, signedPeerRecords: signedPeers}, err
 		},
 		func() bool { return false },
 	)

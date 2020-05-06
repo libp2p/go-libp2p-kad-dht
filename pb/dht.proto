@@ -47,6 +47,17 @@ message Message {
 		ConnectionType connection = 3;
 	}
 
+	message SignedPeerRecord {
+		// signedPeerRecord contains a serialized SignedEnvelope containing a PeerRecord,
+		// signed by the sending node. It contains the same addresses as the listenAddrs field, but
+		// in a form that lets us share authenticated addrs with other peers.
+		// see github.com/libp2p/go-libp2p-core/record/pb/envelope.proto and
+		// github.com/libp2p/go-libp2p-core/peer/pb/peer_record.proto for message definitions.
+		bytes signedPeerRecord = 1;
+		// used to signal the sender's connection capabilities to the peer
+		ConnectionType connection = 2;
+	}
+
 	// defines what type of message it is.
 	MessageType type = 1;
 
@@ -69,4 +80,7 @@ message Message {
 	// Used to return Providers
 	// GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
 	repeated Peer providerPeers = 9 [(gogoproto.nullable) = false];
+
+	// Used to return Signed Peer Address records.
+	repeated SignedPeerRecord signedCloserPeers = 11 [(gogoproto.nullable) = false];
 }

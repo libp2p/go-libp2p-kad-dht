@@ -15,6 +15,7 @@ import (
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 )
@@ -22,7 +23,12 @@ import (
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
-type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
+type queryResponse struct {
+	signedPeerRecords map[peer.ID]pb.RawSignedPeerRecordConn
+	unsignedPeers     []*peer.AddrInfo
+}
+
+type queryFn func(context.Context, peer.ID) (*queryResponse, error)
 type stopFn func() bool
 
 // query represents a single DHT query.
@@ -403,8 +409,30 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	q.dht.peerFound(q.dht.ctx, p, true)
 
 	// process new peers
-	saw := []peer.ID{}
-	for _, next := range newPeers {
+	saw := make(map[peer.ID]struct{})
+
+	// process signed peer records
+	for pid, record := range newPeers.signedPeerRecords {
+		if pid == q.dht.self { // don't add self.
+			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
+			continue
+		}
+
+		// add any other know addresses for the candidate peer.
+		curInfo := q.dht.peerstore.PeerInfo(pid)
+		curInfo.Addrs = append(curInfo.Addrs, record.Addrs...)
+
+		if q.dht.queryPeerFilter(q.dht, curInfo) {
+			saw[pid] = struct{}{}
+			_, err := q.dht.ca.ConsumePeerRecord(record.Envelope, pstore.TempAddrTTL)
+			if err != nil {
+				logger.Warnf("failed to consume signed record in the peerstore, err=%s", err)
+			}
+		}
+	}
+
+	// process unsigned peers
+	for _, next := range newPeers.unsignedPeers {
 		if next.ID == q.dht.self { // don't add self.
 			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 			continue
@@ -417,11 +445,16 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		// add their addresses to the dialer's peerstore
 		if q.dht.queryPeerFilter(q.dht, *next) {
 			q.dht.maybeAddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
-			saw = append(saw, next.ID)
+			saw[next.ID] = struct{}{}
 		}
 	}
 
-	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
+	seenPeers := make([]peer.ID, 0, len(saw))
+	for p := range saw {
+		seenPeers = append(seenPeers, p)
+	}
+
+	ch <- &queryUpdate{cause: p, heard: seenPeers, queried: []peer.ID{p}, queryDuration: queryDuration}
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {

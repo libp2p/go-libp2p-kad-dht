@@ -309,14 +309,14 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 		defer close(valCh)
 		defer close(lookupResCh)
 		lookupRes, err := dht.runLookupWithFollowup(ctx, key,
-			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 					Type: routing.SendingQuery,
 					ID:   p,
 				})
 
-				rec, peers, err := dht.getValueOrPeers(ctx, p, key)
+				rec, q, err := dht.getValueOrPeers(ctx, p, key)
 				switch err {
 				case routing.ErrNotFound:
 					// in this case, they responded with nothing,
@@ -352,10 +352,10 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 					Type:      routing.PeerResponse,
 					ID:        p,
-					Responses: peers,
+					Responses: getAllSeenPeers(q.unsignedPeers, q.signedPeerRecords),
 				})
 
-				return peers, err
+				return q, err
 			},
 			func() bool {
 				select {
@@ -557,7 +557,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	}
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, string(key),
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -593,17 +593,18 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 			}
 
 			// Give closer peers back to the query to be queried
-			closer := pmes.GetCloserPeers()
-			peers := pb.PBPeersToPeerInfos(closer)
-			logger.Debugf("got closer peers: %d %s", len(peers), peers)
+			unsigned := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+			signed := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
+			logger.Debugf("got closer unsigned peers: %d %s", len(unsigned), unsigned)
+			logger.Debugf("got closer signed peers: %d %s", len(signed), signed)
 
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:      routing.PeerResponse,
 				ID:        p,
-				Responses: peers,
+				Responses: getAllSeenPeers(unsigned, signed),
 			})
 
-			return peers, nil
+			return &queryResponse{signed, unsigned}, nil
 		},
 		func() bool {
 			return !findAll && ps.Size() >= count
@@ -629,7 +630,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	}
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, string(id),
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		func(ctx context.Context, p peer.ID) (*queryResponse, error) {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -641,16 +642,17 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}
-			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+			unsigned := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
+			signed := pb.PBSignedPeerRecordsToPeerRecords(pmes.GetSignedCloserPeers())
 
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:      routing.PeerResponse,
 				ID:        p,
-				Responses: peers,
+				Responses: getAllSeenPeers(unsigned, signed),
 			})
 
-			return peers, err
+			return &queryResponse{signed, unsigned}, err
 		},
 		func() bool {
 			return dht.host.Network().Connectedness(id) == network.Connected

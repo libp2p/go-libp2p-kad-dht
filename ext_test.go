@@ -75,6 +75,10 @@ func TestHungRequest(t *testing.T) {
 		}
 	}
 
+	if d.routingTable.Size() == 0 {
+		// make sure we didn't just disconnect
+		t.Fatal("expected peers in the routing table")
+	}
 }
 
 func TestGetFailures(t *testing.T) {
@@ -202,6 +206,11 @@ func TestGetFailures(t *testing.T) {
 			t.Fatal("shouldnt have provider peers")
 		}
 	}
+
+	if d.routingTable.Size() == 0 {
+		// make sure we didn't just disconnect
+		t.Fatal("expected peers in the routing table")
+	}
 }
 
 func TestNotFound(t *testing.T) {
@@ -275,6 +284,10 @@ func TestNotFound(t *testing.T) {
 		}
 		switch err {
 		case routing.ErrNotFound:
+			if d.routingTable.Size() == 0 {
+				// make sure we didn't just disconnect
+				t.Fatal("expected peers in the routing table")
+			}
 			//Success!
 			return
 		case u.ErrTimeout:

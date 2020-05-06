@@ -20,13 +20,14 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
-	"github.com/stretchr/testify/require"
 )
 
 // Test that one hung request to a peer doesn't prevent another request
 // using that same peer from obeying its context.
 func TestHungRequest(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	mn, err := mocknet.FullMeshConnected(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +47,10 @@ func TestHungRequest(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.serverProtocols)...))
-	d.peerFound(ctx, hosts[1].ID(), true)
+	// Wait at most 100ms for a peer in our routing table.
+	for i := 0; i < 100 && d.routingTable.Size() == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()
@@ -66,8 +69,8 @@ func TestHungRequest(t *testing.T) {
 		t.Errorf("expected to fail with deadline exceeded, got: %s", ctx2.Err())
 	}
 	select {
-	case <-done:
-		t.Errorf("GetClosestPeers should not have returned yet")
+	case err = <-done:
+		t.Error("GetClosestPeers should not have returned yet", err)
 	default:
 		err = <-done
 		if err != context.DeadlineExceeded {

@@ -51,6 +51,9 @@ func TestHungRequest(t *testing.T) {
 	for i := 0; i < 100 && d.routingTable.Size() == 0; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
+	if d.routingTable.Size() == 0 {
+		t.Fatal("failed to fill routing table")
+	}
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()

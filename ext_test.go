@@ -247,7 +247,8 @@ func TestNotFound(t *testing.T) {
 
 				pmes := new(pb.Message)
 				if err := pbr.ReadMsg(pmes); err != nil {
-					panic(err)
+					// this isn't an error, it just means the stream has died.
+					return
 				}
 
 				switch pmes.GetType() {

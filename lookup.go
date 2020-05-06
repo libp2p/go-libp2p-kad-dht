@@ -12,8 +12,8 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
-	"github.com/multiformats/go-base32"
 	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-base32"
 )
 
 func tryFormatLoggableKey(k string) (string, error) {

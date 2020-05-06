@@ -402,8 +402,13 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
 	}
-
 	queryDuration := time.Since(startQuery)
+	// return if we got a nil response
+	// This happens if the self peer decides to not run the query RPC on the remote peer for some reason
+	if newPeers == nil {
+		ch <- &queryUpdate{cause: p, heard: nil, queried: []peer.ID{p}, queryDuration: queryDuration}
+		return
+	}
 
 	// query successful, try to add to RT
 	q.dht.peerFound(q.dht.ctx, p, true)

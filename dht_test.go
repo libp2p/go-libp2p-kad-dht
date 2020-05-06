@@ -835,6 +835,9 @@ func TestPeriodicRefresh(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	if detectrace.WithRace() {
+		t.Skip("skipping due to race detector max goroutines")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

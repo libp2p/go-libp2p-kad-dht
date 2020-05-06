@@ -267,7 +267,7 @@ func TestNotFound(t *testing.T) {
 
 					resp.CloserPeers = pb.PeerInfosToPBPeers(d.host.Network(), ps)
 					if err := pbw.WriteMsg(resp); err != nil {
-						panic(err)
+						return
 					}
 				default:
 					panic("Shouldnt recieve this.")

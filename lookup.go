@@ -9,10 +9,11 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	"github.com/ipfs/go-cid"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+
 	"github.com/multiformats/go-base32"
+	"github.com/ipfs/go-cid"
 )
 
 func tryFormatLoggableKey(k string) (string, error) {

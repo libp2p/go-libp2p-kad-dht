@@ -47,7 +47,7 @@ func TestHungRequest(t *testing.T) {
 		})
 	}
 
-	// Wait at most 100ms for a peer in our routing table.
+	// Wait at a bit for a peer in our routing table.
 	for i := 0; i < 100 && d.routingTable.Size() == 0; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}

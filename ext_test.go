@@ -33,7 +33,7 @@ func TestHungRequest(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestNotFound(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -371,7 +371,7 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)

@@ -1986,7 +1986,8 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	// convert the bootstrap addresses to a p2p address
 	bootstrapAddrs := make([]ma.Multiaddr, nBootStraps)
 	for i := 0; i < nBootStraps; i++ {
-		b, err := peer.AddrInfoToP2pAddrs(&peer.AddrInfo{bootstrappers[i].self, bootstrappers[i].host.Addrs()})
+		b, err := peer.AddrInfoToP2pAddrs(&peer.AddrInfo{ID: bootstrappers[i].self,
+			Addrs: bootstrappers[i].host.Addrs()})
 		require.NoError(t, err)
 		bootstrapAddrs[i] = b[0]
 	}

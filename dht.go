@@ -87,7 +87,8 @@ type IpfsDHT struct {
 
 	// DHT protocols we query with. We'll only add peers to our routing
 	// table if they speak these protocols.
-	protocols []protocol.ID
+	protocols     []protocol.ID
+	protocolsStrs []string
 
 	// DHT protocols we can respond to.
 	serverProtocols []protocol.ID
@@ -260,6 +261,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		strmap:                 make(map[peer.ID]*messageSender),
 		birth:                  time.Now(),
 		protocols:              protocols,
+		protocolsStrs:          protocol.ConvertToStrings(protocols),
 		serverProtocols:        serverProtocols,
 		bucketSize:             cfg.bucketSize,
 		alpha:                  cfg.concurrency,

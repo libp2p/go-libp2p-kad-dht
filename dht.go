@@ -277,12 +277,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}
 	dht.routingTable = rt
-
-	// parse the bootstrap peers.
-	dht.bootstrapPeers, err = peer.AddrInfosFromP2pAddrs(cfg.bootstrapPeers...)
-	if err != nil {
-		return nil, err
-	}
+	dht.bootstrapPeers = cfg.bootstrapPeers
 
 	// create a DHT proc with the given context
 	dht.proc = goprocessctx.WithContext(ctx)
@@ -352,10 +347,16 @@ func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 			continue
 		}
 
+		// we try to add all peers we are connected to to the Routing Table
+		// in case they aren't already there.
 		for _, p := range dht.host.Network().Peers() {
 			dht.peerFound(dht.Context(), p, false)
 		}
 
+		// TODO Active Bootstrapping
+		// We should first use non-bootstrap peers we knew of from previous
+		// snapshots of the Routing Table before we connect to the bootstrappers.
+		// See https://github.com/libp2p/go-libp2p-kad-dht/issues/387.
 		if dht.routingTable.Size() == 0 {
 			if len(dht.bootstrapPeers) == 0 {
 				// No point in continuing, we have no peers!
@@ -381,13 +382,15 @@ func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 				// partitioned network.
 				//
 				// So we always bootstrap with two random peers.
-				if found == 2 {
+				if found == maxNBoostrappers {
 					break
 				}
 			}
+		}
 
-			// No point in refreshing the routing table yet. We have
-			// to wait to identify the peer.
+		// if we still don't have peers in our routing table(probably because Identify hasn't completed),
+		// there is no point in triggering a Refresh.
+		if dht.routingTable.Size() == 0 {
 			continue
 		}
 
@@ -556,9 +559,6 @@ func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 	// A peer that does not support the DHT protocol is dead for us.
 	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
 	dht.routingTable.RemovePeer(p)
-
-	// since we lost a peer from the RT, we should do this here
-	dht.fixRTIfNeeded()
 }
 
 func (dht *IpfsDHT) fixRTIfNeeded() {

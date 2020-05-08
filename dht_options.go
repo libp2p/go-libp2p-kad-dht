@@ -61,7 +61,7 @@ type config struct {
 
 	// set to true if we're operating in v1 dht compatible mode
 	v1CompatibleMode bool
-	bootstrapPeers   []ma.Multiaddr
+	bootstrapPeers   []peer.AddrInfo
 }
 
 func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
@@ -396,9 +396,15 @@ func V1CompatibleMode(enable bool) Option {
 	}
 }
 
+// BootstrapPeers configures the bootstrapping nodes that we will connect to to seed
+// and refresh our Routing Table if it becomes empty.
 func BootstrapPeers(addrs ...ma.Multiaddr) Option {
 	return func(c *config) error {
-		c.bootstrappers = append(c.bootstrappers, addrs...)
+		bootstrappers, err := peer.AddrInfosFromP2pAddrs(addrs...)
+		if err != nil {
+			return fmt.Errorf("failed to parse bootstrap peer addresses: %w", err)
+		}
+		c.bootstrapPeers = bootstrappers
 		return nil
 	}
 }

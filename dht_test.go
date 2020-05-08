@@ -2051,7 +2051,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		dht2.Close()
 	}()
 	connect(t, ctx, dht1, dht2)
-	require.NoError(t, dht2.moveToClientMode())
+	require.NoError(t, dht2.setMode(modeClient))
 
 	require.Eventually(t, func() bool {
 		rt := dht1.routingTable

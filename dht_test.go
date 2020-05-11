@@ -21,8 +21,6 @@ import (
 
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/ipfs/go-cid"
-	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
@@ -35,6 +33,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -834,11 +833,27 @@ func TestQueryWithEmptyRTShouldNotPanic(t *testing.T) {
 	d := setupDHT(ctx, t, false)
 
 	// TODO This swallows the error for now, should we change it ?
+	// FindProviders
 	ps, _ := d.FindProviders(ctx, testCaseCids[0])
 	require.Empty(t, ps)
 
+	// GetClosestPeers
 	pc, err := d.GetClosestPeers(ctx, "key")
 	require.Nil(t, pc)
+	require.Equal(t, kb.ErrLookupFailure, err)
+
+	// GetValue
+	best, err := d.GetValue(ctx, "key")
+	require.Empty(t, best)
+	require.Error(t, err)
+
+	// SearchValue
+	bchan, err := d.SearchValue(ctx, "key")
+	require.Empty(t, bchan)
+	require.NoError(t, err)
+
+	// Provide
+	err = d.Provide(ctx, testCaseCids[0], true)
 	require.Equal(t, kb.ErrLookupFailure, err)
 }
 

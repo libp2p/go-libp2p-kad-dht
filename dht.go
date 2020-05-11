@@ -257,13 +257,19 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		fixLowPeersChan:        make(chan struct{}),
 	}
 
+	var maxLastSuccessfulOutboundThreshold time.Duration
+
 	// The threshold is calculated based on the expected amount of time that should pass before we
 	// query a peer as part of our refresh cycle.
 	// To grok the Math Wizardy that produced these exact equations, please be patient as a document explaining it will
 	// be published soon.
-	l1 := math.Log(float64(1) / float64(defaultBucketSize))                              //(Log(1/K))
-	l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(defaultBucketSize))) // Log(1 - (alpha / K))
-	maxLastSuccessfulOutboundThreshold := time.Duration(l1 / l2 * float64(cfg.routingTable.refreshInterval))
+	if cfg.concurrency < cfg.bucketSize { // (alpha < K)
+		l1 := math.Log(float64(1) / float64(cfg.bucketSize))                              //(Log(1/K))
+		l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(cfg.bucketSize))) // Log(1 - (alpha / K))
+		maxLastSuccessfulOutboundThreshold = time.Duration(l1 / l2 * float64(cfg.routingTable.refreshInterval))
+	} else {
+		maxLastSuccessfulOutboundThreshold = cfg.routingTable.refreshInterval
+	}
 
 	// construct routing table
 	rt, err := makeRoutingTable(dht, cfg, maxLastSuccessfulOutboundThreshold)

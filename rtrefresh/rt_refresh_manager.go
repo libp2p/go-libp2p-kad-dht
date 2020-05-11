@@ -43,7 +43,7 @@ type RtRefreshManager struct {
 	refreshQueryTimeout time.Duration                               // timeout for one refresh query
 
 	// interval between two periodic refreshes.
-	// also, a cpl wont be refreshed it the time since it was last refreshed
+	// also, a cpl wont be refreshed if the time since it was last refreshed
 	// is below the interval..unless a "forced" refresh is done.
 	refreshInterval                    time.Duration
 	successfulOutboundQueryGracePeriod time.Duration
@@ -160,7 +160,7 @@ func (r *RtRefreshManager) loop() {
 
 		// EXECUTE the refresh
 
-		// ping Routing Table peers that haven't been hear of/from in the interval they should have been.
+		// ping Routing Table peers that haven't been heard of/from in the interval they should have been.
 		// and evict them if they don't reply.
 		var wg sync.WaitGroup
 		for _, ps := range r.rt.GetPeerInfos() {
@@ -200,19 +200,18 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 
 	refreshCpls := r.rt.GetTrackedCplsForRefresh()
 
-	rfnc := func(c int) (err error) {
-		cpl := uint(c)
+	rfnc := func(cpl uint) (err error) {
 		if forceRefresh {
 			err = r.refreshCpl(cpl)
 		} else {
-			err = r.refreshCplIfEligible(cpl, refreshCpls[c])
+			err = r.refreshCplIfEligible(cpl, refreshCpls[cpl])
 		}
 		return
 	}
 
 	for c := range refreshCpls {
 		cpl := uint(c)
-		if err := rfnc(c); err != nil {
+		if err := rfnc(cpl); err != nil {
 			merr = multierror.Append(merr, err)
 		} else {
 			// If we see a gap at a Cpl in the Routing table, we ONLY refresh up until the maximum cpl we
@@ -225,7 +224,7 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 			if r.rt.NPeersForCpl(cpl) == 0 {
 				lastCpl := min(2*c, len(refreshCpls)-1)
 				for i := c + 1; i < lastCpl+1; i++ {
-					if err := rfnc(i); err != nil {
+					if err := rfnc(uint(i)); err != nil {
 						merr = multierror.Append(merr, err)
 					}
 				}

@@ -41,7 +41,7 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	em, err := d1.host.EventBus().Emitter(&event.EvtLocalAddressesUpdated{})
 	require.NoError(t, err)
 	require.NoError(t, em.Emit(event.EvtLocalAddressesUpdated{}))
-	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 10*time.Second))
+	require.True(t, waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 2*time.Second))
 	// it should now have both peers in the RT
 	ps := d1.routingTable.ListPeers()
 	require.Contains(t, ps, d2.self)

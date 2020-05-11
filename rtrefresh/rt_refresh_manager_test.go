@@ -19,7 +19,10 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	defer cancel()
 	local := test.RandPeerIDFatal(t)
 
-	// adds a peer for a cpl
+	// adds a peer for a cpl.
+	// The "ignoreCpl" is the cpl for which we assume we have no peers in the network.
+	// So. if the query function gets a "key" which is basically tha stringed version of the "ignoreCpl",
+	// we return without adding any peers for it to the Routing Table.
 	qFuncWithIgnore := func(rt *kb.RoutingTable, ignoreCpl uint) func(c context.Context, key string) error {
 		return func(c context.Context, key string) error {
 			if key == string(local) {
@@ -42,6 +45,8 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 		}
 	}
 
+	// We use the cpl as the key for the query. So, the cpl -> key transformation function
+	// basically just converts the uint cpl to a string key using the strconv lib.
 	kfnc := func(cpl uint) (string, error) {
 		return strconv.FormatInt(int64(cpl), 10), nil
 	}

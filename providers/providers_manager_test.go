@@ -26,7 +26,10 @@ func TestProviderManager(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	a := u.Hash([]byte("test"))
 	p.AddProvider(ctx, a, peer.ID("testingprovider"))
 
@@ -64,7 +67,10 @@ func TestProvidersDatastore(t *testing.T) {
 	defer cancel()
 
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(ctx, mid, dssync.MutexWrap(ds.NewMapDatastore()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer p.proc.Close()
 
 	friend := peer.ID("friend")
@@ -144,7 +150,10 @@ func TestProvidesExpire(t *testing.T) {
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
 	mid := peer.ID("testing")
-	p := NewProviderManager(ctx, mid, ds)
+	p, err := NewProviderManager(ctx, mid, ds)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	peers := []peer.ID{"a", "b"}
 	var mhs []mh.Multihash
@@ -249,7 +258,10 @@ func TestLargeProvidersSet(t *testing.T) {
 	}
 
 	mid := peer.ID("myself")
-	p := NewProviderManager(ctx, mid, dstore)
+	p, err := NewProviderManager(ctx, mid, dstore)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer p.proc.Close()
 
 	var mhs []mh.Multihash
@@ -281,7 +293,10 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	p1, p2 := peer.ID("a"), peer.ID("b")
 	h1 := u.Hash([]byte("1"))
 	h2 := u.Hash([]byte("2"))
-	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// add provider
 	pm.AddProvider(ctx, h1, p1)
@@ -302,7 +317,10 @@ func TestWriteUpdatesCache(t *testing.T) {
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
 	h1 := u.Hash([]byte("1"))
-	pm := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// add provider
 	pm.AddProvider(ctx, h1, p1)

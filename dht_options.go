@@ -11,6 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	record "github.com/libp2p/go-libp2p-record"
 )
 
@@ -45,6 +46,7 @@ type config struct {
 	maxRecordAge     time.Duration
 	enableProviders  bool
 	enableValues     bool
+	providersOptions []providers.Option
 	queryPeerFilter  QueryFilterFunc
 
 	routingTable struct {
@@ -115,7 +117,7 @@ var defaults = func(o *config) error {
 	o.maxRecordAge = time.Hour * 36
 
 	o.bucketSize = defaultBucketSize
-	o.concurrency = 3
+	o.concurrency = 10
 	o.resiliency = 3
 
 	o.v1CompatibleMode = true
@@ -279,7 +281,7 @@ func BucketSize(bucketSize int) Option {
 
 // Concurrency configures the number of concurrent requests (alpha in the Kademlia paper) for a given query path.
 //
-// The default value is 3.
+// The default value is 10.
 func Concurrency(alpha int) Option {
 	return func(c *config) error {
 		c.concurrency = alpha
@@ -344,6 +346,18 @@ func DisableProviders() Option {
 func DisableValues() Option {
 	return func(c *config) error {
 		c.enableValues = false
+		return nil
+	}
+}
+
+// ProvidersOptions are options passed directly to the provider manager.
+//
+// The provider manager adds and gets provider records from the datastore, cahing
+// them in between. These options are passed to the provider manager allowing
+// customisation of things like the GC interval and cache implementation.
+func ProvidersOptions(opts []providers.Option) Option {
+	return func(c *config) error {
+		c.providersOptions = opts
 		return nil
 	}
 }

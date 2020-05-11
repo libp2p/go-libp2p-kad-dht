@@ -13,15 +13,15 @@ require (
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ipfs-util v0.0.1
 	github.com/ipfs/go-ipns v0.0.2
-	github.com/ipfs/go-log v1.0.3
+	github.com/ipfs/go-log v1.0.4
 	github.com/jbenet/goprocess v0.1.4
 	github.com/libp2p/go-eventbus v0.1.0
-	github.com/libp2p/go-libp2p v0.8.1
-	github.com/libp2p/go-libp2p-core v0.5.1
-	github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200423175301-f3c8e922dcf4
+	github.com/libp2p/go-libp2p v0.8.2
+	github.com/libp2p/go-libp2p-core v0.5.3
+	github.com/libp2p/go-libp2p-kbucket v0.4.1
 	github.com/libp2p/go-libp2p-peerstore v0.2.3
 	github.com/libp2p/go-libp2p-record v0.1.2
-	github.com/libp2p/go-libp2p-routing-helpers v0.2.1
+	github.com/libp2p/go-libp2p-routing-helpers v0.2.3
 	github.com/libp2p/go-libp2p-swarm v0.2.3
 	github.com/libp2p/go-libp2p-testing v0.1.1
 	github.com/libp2p/go-msgio v0.0.4
@@ -34,5 +34,5 @@ require (
 	github.com/stretchr/testify v1.5.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.22.3
-	go.uber.org/zap v1.10.0
+	go.uber.org/zap v1.14.1
 )

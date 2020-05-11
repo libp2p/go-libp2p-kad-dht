@@ -97,8 +97,16 @@ func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
 func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
 	reqCtx, cancel := context.WithCancel(ctx)
 	outCh := make(chan peer.AddrInfo)
-	wanCh := dht.WAN.FindProvidersAsync(reqCtx, key, count)
-	lanCh := dht.LAN.FindProvidersAsync(reqCtx, key, count)
+
+	// Register for and merge query events if we care about them.
+	subCtx := reqCtx
+	var evtCh <-chan *routing.QueryEvent
+	if routing.SubscribesToQueryEvents(ctx) {
+		subCtx, evtCh = routing.RegisterForQueryEvents(reqCtx)
+	}
+
+	wanCh := dht.WAN.FindProvidersAsync(subCtx, key, count)
+	lanCh := dht.LAN.FindProvidersAsync(subCtx, key, count)
 	zeroCount := (count == 0)
 	go func() {
 		defer cancel()
@@ -106,9 +114,17 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 
 		found := make(map[peer.ID]struct{}, count)
 		var pi peer.AddrInfo
+		var qEv *routing.QueryEvent
 		for (zeroCount || count > 0) && (wanCh != nil || lanCh != nil) {
 			var ok bool
 			select {
+			case qEv, ok = <-evtCh:
+				if !ok {
+					evtCh = nil
+				} else if qEv != nil && qEv.Type != routing.QueryError {
+					routing.PublishQueryEvent(reqCtx, qEv)
+				}
+				continue
 			case pi, ok = <-wanCh:
 				if !ok {
 					wanCh = nil
@@ -132,6 +148,9 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 			case <-ctx.Done():
 				return
 			}
+		}
+		if qEv != nil && qEv.Type == routing.QueryError && len(found) == 0 {
+			routing.PublishQueryEvent(reqCtx, qEv)
 		}
 	}()
 	return outCh

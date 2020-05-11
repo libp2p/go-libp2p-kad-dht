@@ -35,10 +35,12 @@ func init() {
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the
 // IpfsRouter interface.
-//
-// This just calls `RefreshRoutingTable`.
 func (dht *IpfsDHT) Bootstrap(_ context.Context) error {
-	dht.RefreshRoutingTable()
+	// Important: don't block!
+	select {
+	case dht.triggerRtRefresh <- nil:
+	default:
+	}
 	return nil
 }
 

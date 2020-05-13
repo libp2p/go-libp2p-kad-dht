@@ -89,29 +89,11 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		}
 
 		var req pb.Message
-		msgbytes, err := r.ReadMsg()
-		msgLen := len(msgbytes)
+		msgbytes, err, ok := messageBytes(ctx, r, mPeer)
 		if err != nil {
-			r.ReleaseMsg(msgbytes)
-			if err == io.EOF {
-				return true
-			}
-			// This string test is necessary because there isn't a single stream reset error
-			// instance	in use.
-			if c := baseLogger.Check(zap.DebugLevel, "error reading message"); c != nil && err.Error() != "stream reset" {
-				c.Write(zap.String("from", mPeer.String()),
-					zap.Error(err))
-			}
-			if msgLen > 0 {
-				_ = stats.RecordWithTags(ctx,
-					[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
-					metrics.ReceivedMessages.M(1),
-					metrics.ReceivedMessageErrors.M(1),
-					metrics.ReceivedBytes.M(int64(msgLen)),
-				)
-			}
-			return false
+			return ok
 		}
+
 		err = req.Unmarshal(msgbytes)
 		r.ReleaseMsg(msgbytes)
 		if err != nil {
@@ -206,6 +188,37 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		latencyMillis := float64(elapsedTime) / float64(time.Millisecond)
 		stats.Record(ctx, metrics.InboundRequestLatency.M(latencyMillis))
 	}
+}
+
+func messageBytes(ctx context.Context, r msgio.ReadCloser, mPeer peer.ID) ([]byte, error, bool) {
+	msgbytes, err := r.ReadMsg()
+	msgLen := len(msgbytes)
+	if err != nil {
+		r.ReleaseMsg(msgbytes)
+		if err == io.EOF {
+			return nil, err, true
+		}
+
+		if c := baseLogger.Check(zap.DebugLevel, "error reading message"); c != nil && err.Error() != "stream reset" {
+			c.Write(zap.String("from", mPeer.String()),
+				zap.Error(err))
+		}
+
+		// This string test is necessary because there isn't a single stream reset error
+		// instance	in use.
+		if msgLen > 0 {
+			_ = stats.RecordWithTags(ctx,
+				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
+				metrics.ReceivedMessages.M(1),
+				metrics.ReceivedMessageErrors.M(1),
+				metrics.ReceivedBytes.M(int64(msgLen)),
+			)
+		}
+
+		return nil, err, false
+	}
+
+	return msgbytes, nil, false
 }
 
 // sendRequest sends out a request, but also makes sure to

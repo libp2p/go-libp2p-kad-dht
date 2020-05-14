@@ -2,6 +2,8 @@ package dht
 
 import (
 	"context"
+	"time"
+
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -11,7 +13,6 @@ var DefaultBootstrapPeers []multiaddr.Multiaddr
 // Minimum number of peers in the routing table. If we drop below this and we
 // see a new peer, we trigger a bootstrap round.
 var minRTRefreshThreshold = 10
-
 
 // timeout for pinging one peer
 const peerPingTimeout = 10 * time.Second

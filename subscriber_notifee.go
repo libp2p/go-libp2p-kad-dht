@@ -6,13 +6,11 @@ import (
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
 
 	"github.com/libp2p/go-eventbus"
 
-	ma "github.com/multiformats/go-multiaddr"
-
 	"github.com/jbenet/goprocess"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // subscriberNotifee implements network.Notifee and also manages the subscriber to the event bus. We consume peer
@@ -156,8 +154,8 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 // supporting the primary protocols, we do not want to add peers that are speaking obsolete secondary protocols to our
 // routing table
 func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
-	protos, err := dht.peerstore.SupportsProtocols(p, protocol.ConvertToStrings(dht.protocols)...)
-	if len(protos) == 0 || err != nil {
+	b, err := dht.peerstore.FirstSupportedProtocol(p, dht.protocolsStrs...)
+	if len(b) == 0 || err != nil {
 		return false, err
 	}
 

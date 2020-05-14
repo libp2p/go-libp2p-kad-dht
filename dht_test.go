@@ -1966,3 +1966,107 @@ func TestRoutingFilter(t *testing.T) {
 	case <-time.After(time.Millisecond * 200):
 	}
 }
+
+func TestBootStrapWhenRTIsEmpty(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create three boostrap peers each of which is connected to 1 other peer.
+	nBootStraps := 3
+	bootstrappers := setupDHTS(t, ctx, nBootStraps)
+	defer func() {
+		for i := 0; i < nBootStraps; i++ {
+			bootstrappers[i].Close()
+			defer bootstrappers[i].host.Close()
+		}
+	}()
+
+	bootstrapcons := setupDHTS(t, ctx, nBootStraps)
+	defer func() {
+		for i := 0; i < nBootStraps; i++ {
+			bootstrapcons[i].Close()
+			defer bootstrapcons[i].host.Close()
+		}
+	}()
+	for i := 0; i < nBootStraps; i++ {
+		connect(t, ctx, bootstrappers[i], bootstrapcons[i])
+	}
+
+	// convert the bootstrap addresses to a p2p address
+	bootstrapAddrs := make([]ma.Multiaddr, nBootStraps)
+	for i := 0; i < nBootStraps; i++ {
+		b, err := peer.AddrInfoToP2pAddrs(&peer.AddrInfo{ID: bootstrappers[i].self,
+			Addrs: bootstrappers[i].host.Addrs()})
+		require.NoError(t, err)
+		bootstrapAddrs[i] = b[0]
+	}
+
+	//----------------
+	// We will initialize a DHT with 1 bootstrapper, connect it to another DHT,
+	// then remove the latter from the Routing Table
+	// This should add the bootstrap peer and the peer that the bootstrap peer is conencted to
+	// to it's Routing Table.
+	// AutoRefresh needs to be enabled for this.
+	dht1, err := New(
+		ctx,
+		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		testPrefix,
+		NamespacedValidator("v", blankValidator{}),
+		Mode(ModeServer),
+		BootstrapPeers(bootstrapAddrs[0]),
+	)
+	require.NoError(t, err)
+	dht2 := setupDHT(ctx, t, false)
+	defer func() {
+		dht1.host.Close()
+		dht2.host.Close()
+		dht1.Close()
+		dht2.Close()
+	}()
+	connect(t, ctx, dht1, dht2)
+	require.NoError(t, dht2.Close())
+	require.NoError(t, dht2.host.Close())
+	require.NoError(t, dht1.host.Network().ClosePeer(dht2.self))
+	dht1.routingTable.RemovePeer(dht2.self)
+	require.NotContains(t, dht2.self, dht1.routingTable.ListPeers())
+
+	require.Eventually(t, func() bool {
+		return dht1.routingTable.Size() == 2 && dht1.routingTable.Find(bootstrappers[0].self) != "" &&
+			dht1.routingTable.Find(bootstrapcons[0].self) != ""
+	}, 5*time.Second, 500*time.Millisecond)
+
+	//----------------
+	// We will initialize a DHT with 2 bootstrappers, connect it to another DHT,
+	// then remove the DHT handler from the other DHT which should make the first DHT's
+	// routing table empty.
+	// This should add the bootstrap peers and the peer thats the bootstrap peers are connected to
+	// to it's Routing Table.
+	// AutoRefresh needs to be enabled for this.
+	dht1, err = New(
+		ctx,
+		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
+		testPrefix,
+		NamespacedValidator("v", blankValidator{}),
+		Mode(ModeServer),
+		BootstrapPeers(bootstrapAddrs[1], bootstrapAddrs[2]),
+	)
+	require.NoError(t, err)
+
+	dht2 = setupDHT(ctx, t, false)
+	connect(t, ctx, dht1, dht2)
+	defer func() {
+		dht1.host.Close()
+		dht2.host.Close()
+		dht1.Close()
+		dht2.Close()
+	}()
+	connect(t, ctx, dht1, dht2)
+	require.NoError(t, dht2.setMode(modeClient))
+
+	require.Eventually(t, func() bool {
+		rt := dht1.routingTable
+
+		return rt.Size() == 4 && rt.Find(bootstrappers[1].self) != "" &&
+			rt.Find(bootstrappers[2].self) != "" && rt.Find(bootstrapcons[1].self) != "" && rt.Find(bootstrapcons[2].self) != ""
+	}, 5*time.Second, 500*time.Millisecond)
+}

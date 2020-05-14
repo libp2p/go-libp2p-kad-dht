@@ -22,6 +22,10 @@ var minRTRefreshThreshold = 10
 
 // timeout for pinging one peer
 const peerPingTimeout = 10 * time.Second
+const (
+	periodicBootstrapInterval = 2 * time.Minute
+	maxNBoostrappers          = 2
+)
 
 func init() {
 	for _, s := range []string{

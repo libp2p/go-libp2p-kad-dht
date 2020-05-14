@@ -34,5 +34,5 @@ require (
 	github.com/stretchr/testify v1.5.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.22.3
-	go.uber.org/zap v1.14.1
+	go.uber.org/zap v1.15.0
 )

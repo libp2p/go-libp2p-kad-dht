@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -89,7 +90,8 @@ type IpfsDHT struct {
 
 	// DHT protocols we query with. We'll only add peers to our routing
 	// table if they speak these protocols.
-	protocols []protocol.ID
+	protocols     []protocol.ID
+	protocolsStrs []string
 
 	// DHT protocols we can respond to.
 	serverProtocols []protocol.ID
@@ -106,6 +108,11 @@ type IpfsDHT struct {
 	routingTablePeerFilter RouteTableFilterFunc
 
 	autoRefresh bool
+
+	// A set of bootstrap peers to fallback on if all other attempts to fix
+	// the routing table fail (or, e.g., this is the first time this node is
+	// connecting to the network).
+	bootstrapPeers []peer.AddrInfo
 
 	maxRecordAge time.Duration
 
@@ -248,13 +255,14 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		strmap:                 make(map[peer.ID]*messageSender),
 		birth:                  time.Now(),
 		protocols:              protocols,
+		protocolsStrs:          protocol.ConvertToStrings(protocols),
 		serverProtocols:        serverProtocols,
 		bucketSize:             cfg.bucketSize,
 		alpha:                  cfg.concurrency,
 		beta:                   cfg.resiliency,
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
-		fixLowPeersChan:        make(chan struct{}),
+		fixLowPeersChan:        make(chan struct{}, 1),
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration
@@ -277,6 +285,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}
 	dht.routingTable = rt
+	dht.bootstrapPeers = cfg.bootstrapPeers
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -351,20 +360,68 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 	return dht.auto
 }
 
-// fixLowPeers tries to get more peers into the routing table if we're below the threshold
+// fixLowPeersRoutine tries to get more peers into the routing table if we're below the threshold
 func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
+	timer := time.NewTimer(periodicBootstrapInterval)
+	defer timer.Stop()
+
 	for {
 		select {
 		case <-dht.fixLowPeersChan:
+		case <-timer.C:
 		case <-proc.Closing():
 			return
 		}
+
 		if dht.routingTable.Size() > minRTRefreshThreshold {
 			continue
 		}
 
+		// we try to add all peers we are connected to to the Routing Table
+		// in case they aren't already there.
 		for _, p := range dht.host.Network().Peers() {
 			dht.peerFound(dht.Context(), p, false)
+		}
+
+		// TODO Active Bootstrapping
+		// We should first use non-bootstrap peers we knew of from previous
+		// snapshots of the Routing Table before we connect to the bootstrappers.
+		// See https://github.com/libp2p/go-libp2p-kad-dht/issues/387.
+		if dht.routingTable.Size() == 0 {
+			if len(dht.bootstrapPeers) == 0 {
+				// No point in continuing, we have no peers!
+				continue
+			}
+
+			found := 0
+			for _, i := range rand.Perm(len(dht.bootstrapPeers)) {
+				ai := dht.bootstrapPeers[i]
+				err := dht.Host().Connect(dht.Context(), ai)
+				if err == nil {
+					found++
+				} else {
+					logger.Warnw("failed to bootstrap", "peer", ai.ID, "error", err)
+				}
+
+				// Wait for two bootstrap peers, or try them all.
+				//
+				// Why two? In theory, one should be enough
+				// normally. However, if the network were to
+				// restart and everyone connected to just one
+				// bootstrapper, we'll end up with a mostly
+				// partitioned network.
+				//
+				// So we always bootstrap with two random peers.
+				if found == maxNBoostrappers {
+					break
+				}
+			}
+		}
+
+		// if we still don't have peers in our routing table(probably because Identify hasn't completed),
+		// there is no point in triggering a Refresh.
+		if dht.routingTable.Size() == 0 {
+			continue
 		}
 
 		if dht.autoRefresh {
@@ -524,9 +581,6 @@ func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
 	// A peer that does not support the DHT protocol is dead for us.
 	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
 	dht.routingTable.RemovePeer(p)
-
-	// since we lost a peer from the RT, we should do this here
-	dht.fixRTIfNeeded()
 }
 
 func (dht *IpfsDHT) fixRTIfNeeded() {

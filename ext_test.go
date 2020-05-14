@@ -20,20 +20,21 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 	u "github.com/ipfs/go-ipfs-util"
-	"github.com/stretchr/testify/require"
 )
 
 // Test that one hung request to a peer doesn't prevent another request
 // using that same peer from obeying its context.
 func TestHungRequest(t *testing.T) {
-	ctx := context.Background()
-	mn, err := mocknet.FullMeshConnected(ctx, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mn, err := mocknet.FullMeshLinked(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +47,18 @@ func TestHungRequest(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, hosts[0].Peerstore().AddProtocols(hosts[1].ID(), protocol.ConvertToStrings(d.serverProtocols)...))
-	d.peerFound(ctx, hosts[1].ID(), true)
+	err = mn.ConnectAllButSelf()
+	if err != nil {
+		t.Fatal("failed to connect peers", err)
+	}
+
+	// Wait at a bit for a peer in our routing table.
+	for i := 0; i < 100 && d.routingTable.Size() == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if d.routingTable.Size() == 0 {
+		t.Fatal("failed to fill routing table")
+	}
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel1()
@@ -66,8 +77,8 @@ func TestHungRequest(t *testing.T) {
 		t.Errorf("expected to fail with deadline exceeded, got: %s", ctx2.Err())
 	}
 	select {
-	case <-done:
-		t.Errorf("GetClosestPeers should not have returned yet")
+	case err = <-done:
+		t.Error("GetClosestPeers should not have returned yet", err)
 	default:
 		err = <-done
 		if err != context.DeadlineExceeded {
@@ -75,6 +86,10 @@ func TestHungRequest(t *testing.T) {
 		}
 	}
 
+	if d.routingTable.Size() == 0 {
+		// make sure we didn't just disconnect
+		t.Fatal("expected peers in the routing table")
+	}
 }
 
 func TestGetFailures(t *testing.T) {
@@ -202,6 +217,11 @@ func TestGetFailures(t *testing.T) {
 			t.Fatal("shouldnt have provider peers")
 		}
 	}
+
+	if d.routingTable.Size() == 0 {
+		// make sure we didn't just disconnect
+		t.Fatal("expected peers in the routing table")
+	}
 }
 
 func TestNotFound(t *testing.T) {
@@ -217,14 +237,10 @@ func TestNotFound(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	for _, p := range hosts {
-		d.peerFound(ctx, p.ID(), true)
 	}
 
 	// Reply with random peers to every message
@@ -239,7 +255,8 @@ func TestNotFound(t *testing.T) {
 
 				pmes := new(pb.Message)
 				if err := pbr.ReadMsg(pmes); err != nil {
-					panic(err)
+					// this isn't an error, it just means the stream has died.
+					return
 				}
 
 				switch pmes.GetType() {
@@ -255,13 +272,23 @@ func TestNotFound(t *testing.T) {
 
 					resp.CloserPeers = pb.PeerInfosToPBPeers(d.host.Network(), ps)
 					if err := pbw.WriteMsg(resp); err != nil {
-						panic(err)
+						return
 					}
 				default:
 					panic("Shouldnt recieve this.")
 				}
 			})
 		}
+		for _, peer := range hosts {
+			if host == peer {
+				continue
+			}
+			_ = peer.Peerstore().AddProtocols(host.ID(), protocol.ConvertToStrings(d.serverProtocols)...)
+		}
+	}
+
+	for _, p := range hosts {
+		d.peerFound(ctx, p.ID(), true)
 	}
 
 	// long timeout to ensure timing is not at play.
@@ -275,6 +302,10 @@ func TestNotFound(t *testing.T) {
 		}
 		switch err {
 		case routing.ErrNotFound:
+			if d.routingTable.Size() == 0 {
+				// make sure we didn't just disconnect
+				t.Fatal("expected peers in the routing table")
+			}
 			//Success!
 			return
 		case u.ErrTimeout:
@@ -299,7 +330,7 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 	hosts := mn.Hosts()
 
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
@@ -371,7 +402,7 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts := mn.Hosts()
-	os := []Option{testPrefix, DisableAutoRefresh()}
+	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)

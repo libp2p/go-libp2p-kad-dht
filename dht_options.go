@@ -13,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	record "github.com/libp2p/go-libp2p-record"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // ModeOpt describes what mode the dht should operate in
@@ -60,6 +61,7 @@ type config struct {
 
 	// set to true if we're operating in v1 dht compatible mode
 	v1CompatibleMode bool
+	bootstrapPeers   []peer.AddrInfo
 }
 
 func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
@@ -390,6 +392,19 @@ func RoutingTableFilter(filter RouteTableFilterFunc) Option {
 func V1CompatibleMode(enable bool) Option {
 	return func(c *config) error {
 		c.v1CompatibleMode = enable
+		return nil
+	}
+}
+
+// BootstrapPeers configures the bootstrapping nodes that we will connect to to seed
+// and refresh our Routing Table if it becomes empty.
+func BootstrapPeers(addrs ...ma.Multiaddr) Option {
+	return func(c *config) error {
+		bootstrappers, err := peer.AddrInfosFromP2pAddrs(addrs...)
+		if err != nil {
+			return fmt.Errorf("failed to parse bootstrap peer addresses: %w", err)
+		}
+		c.bootstrapPeers = bootstrappers
 		return nil
 	}
 }

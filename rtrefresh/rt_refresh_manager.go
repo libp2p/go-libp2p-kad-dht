@@ -215,14 +215,14 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 			merr = multierror.Append(merr, err)
 		} else {
 			// If we see a gap at a Cpl in the Routing table, we ONLY refresh up until the maximum cpl we
-			// have in the Routing Table OR (2 * Cpl with the gap), whichever is smaller.
+			// have in the Routing Table OR (2 * (Cpl+ 1) with the gap), whichever is smaller.
 			// This is to prevent refreshes for Cpls that have no peers in the network but happen to be before a very high max Cpl
 			// for which we do have peers in the network.
-			// The number of 2 * Cpl can be proved and a proof would have been written here if the programmer
+			// The number of 2 * (Cpl + 1) can be proved and a proof would have been written here if the programmer
 			// had paid more attention in the Math classes at university.
 			// So, please be patient and a doc explaining it will be published soon.
 			if r.rt.NPeersForCpl(cpl) == 0 {
-				lastCpl := min(2*c, len(refreshCpls)-1)
+				lastCpl := min(2*(c+1), len(refreshCpls)-1)
 				for i := c + 1; i < lastCpl+1; i++ {
 					if err := rfnc(uint(i)); err != nil {
 						merr = multierror.Append(merr, err)

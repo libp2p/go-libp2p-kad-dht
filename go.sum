@@ -294,6 +294,8 @@ github.com/libp2p/go-libp2p-core v0.5.4-0.20200508062439-98b95a487749 h1:G0zRpRn
 github.com/libp2p/go-libp2p-core v0.5.4-0.20200508062439-98b95a487749/go.mod h1:uN7L2D4EvPCvzSH5SrhR72UWbnSGpt5/a35Sm4upn4Y=
 github.com/libp2p/go-libp2p-core v0.5.4-0.20200511073005-dabf5bbfb028 h1:nQb4SDWcadn/kpWtMwsWweogIzYviVE5qOMT42bkyNE=
 github.com/libp2p/go-libp2p-core v0.5.4-0.20200511073005-dabf5bbfb028/go.mod h1:uN7L2D4EvPCvzSH5SrhR72UWbnSGpt5/a35Sm4upn4Y=
+github.com/libp2p/go-libp2p-core v0.5.4 h1:Z8Tt3R5or2pkl3Wgywfcc0GCNjf18aYWA30OjBpbmRs=
+github.com/libp2p/go-libp2p-core v0.5.4/go.mod h1:uN7L2D4EvPCvzSH5SrhR72UWbnSGpt5/a35Sm4upn4Y=
 github.com/libp2p/go-libp2p-crypto v0.1.0 h1:k9MFy+o2zGDNGsaoZl0MA3iZ75qXxr9OOoAZF+sD5OQ=
 github.com/libp2p/go-libp2p-crypto v0.1.0/go.mod h1:sPUokVISZiy+nNuTTH/TY+leRSxnFj/2GLjtOTW90hI=
 github.com/libp2p/go-libp2p-discovery v0.2.0 h1:1p3YSOq7VsgaL+xVHPi8XAmtGyas6D2J6rWBEfz/aiY=
@@ -304,6 +306,8 @@ github.com/libp2p/go-libp2p-kbucket v0.4.1 h1:6FyzbQuGLPzbMv3HiD232zqscIz5iB8ppJ
 github.com/libp2p/go-libp2p-kbucket v0.4.1/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
 github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200508082052-a64592b8ad85 h1:EAEr+wsZedpIDYtDEJ8vsNOT3VagwpkILE2IgNzPGI4=
 github.com/libp2p/go-libp2p-kbucket v0.4.2-0.20200508082052-a64592b8ad85/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
+github.com/libp2p/go-libp2p-kbucket v0.4.2 h1:wg+VPpCtY61bCasGRexCuXOmEmdKjN+k1w+JtTwu9gA=
+github.com/libp2p/go-libp2p-kbucket v0.4.2/go.mod h1:7sCeZx2GkNK1S6lQnGUW5JYZCFPnXzAZCCBBS70lytY=
 github.com/libp2p/go-libp2p-loggables v0.1.0 h1:h3w8QFfCt2UJl/0/NW4K829HX/0S4KD31PQ7m8UXXO8=
 github.com/libp2p/go-libp2p-loggables v0.1.0/go.mod h1:EyumB2Y6PrYjr55Q3/tiJ/o3xoDasoRYM7nOzEpoa90=
 github.com/libp2p/go-libp2p-mplex v0.2.0/go.mod h1:Ejl9IyjvXJ0T9iqUTE1jpYATQ9NM3g+OtR+EMMODbKo=
@@ -338,6 +342,8 @@ github.com/libp2p/go-libp2p-peerstore v0.2.4-0.20200508064014-7a58f873f4df h1:s3
 github.com/libp2p/go-libp2p-peerstore v0.2.4-0.20200508064014-7a58f873f4df/go.mod h1:wv61HcYms743GsUAaKJFH3Ipf8GP5SxypeTzojTGGVU=
 github.com/libp2p/go-libp2p-peerstore v0.2.4-0.20200511073708-dd0775df6d22 h1:XPySAAPTiy7tGEy9IIhV1f2MLfdjKoufyeD30OnFubU=
 github.com/libp2p/go-libp2p-peerstore v0.2.4-0.20200511073708-dd0775df6d22/go.mod h1:xLI3GVR3TmBs4MeBOY7FKWyPvE/6TU6kWMUptPDy7L0=
+github.com/libp2p/go-libp2p-peerstore v0.2.4 h1:jU9S4jYN30kdzTpDAR7SlHUD+meDUjTODh4waLWF1ws=
+github.com/libp2p/go-libp2p-peerstore v0.2.4/go.mod h1:ss/TWTgHZTMpsU/oKVVPQCGuDHItOpf2W8RxAi50P2s=
 github.com/libp2p/go-libp2p-pnet v0.2.0 h1:J6htxttBipJujEjz1y0a5+eYoiPcFHhSYHH6na5f0/k=
 github.com/libp2p/go-libp2p-pnet v0.2.0/go.mod h1:Qqvq6JH/oMZGwqs3N1Fqhv8NVhrdYcO0BW4wssv21LA=
 github.com/libp2p/go-libp2p-quic-transport v0.3.6/go.mod h1:EPwhh0DGES1hyhAD0Wy923eiMm09Hsl2UYllyYteYGg=

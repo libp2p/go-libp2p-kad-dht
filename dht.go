@@ -42,9 +42,23 @@ var (
 	baseLogger = logger.Desugar()
 )
 
-// BaseConnMgrScore is the base of the score set on the connection manager "kbucket" tag.
-// It is added with the common prefix length between two peer IDs.
-const BaseConnMgrScore = 5
+const (
+	// BaseConnMgrScore is the base of the score set on the connection
+	// manager "kbucket" tag. It is added with the common prefix length
+	// between two peer IDs.
+	baseConnMgrScore = 5
+
+	// UsefulConnMgrScore is given to peers that are among the first peers
+	// to respond to a query.
+	//
+	// This score is given to peers the first time they're useful and lasts
+	// until we disconnect from the peer.
+	usefulConnMgrScore = 20
+
+	// UsefulConnMgrProtectedBuckets is the number of buckets where useful
+	// peers are _protected_, instead of just given the useful score.
+	usefulConnMgrProtectedBuckets = 2
+)
 
 type mode int
 
@@ -347,8 +361,14 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
+		// We tag our closest peers with higher and higher scores so we
+		// stay connected to our nearest neighbors.
+		//
+		// We _also_ (elsewhere) protect useful peers in the furthest
+		// buckets (our "core" routing nodes) and give high scores to
+		// all other useful peers.
 		commonPrefixLen := kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
-		cmgr.TagPeer(p, kbucketTag, BaseConnMgrScore+commonPrefixLen)
+		cmgr.TagPeer(p, kbucketTag, baseConnMgrScore+commonPrefixLen)
 	}
 	rt.PeerRemoved = func(p peer.ID) {
 		cmgr.Unprotect(p, dhtUsefulTag)

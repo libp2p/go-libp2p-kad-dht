@@ -97,6 +97,8 @@ func (r *RtRefreshManager) Close() error {
 //
 // The returned channel will block until the refresh finishes, then yield the
 // error and close. The channel is buffered and safe to ignore.
+// FIXME: this can block. Ideally, we'd return a channel without blocking.
+// https://github.com/libp2p/go-libp2p-kad-dht/issues/609
 func (r *RtRefreshManager) Refresh(force bool) <-chan error {
 	resp := make(chan error, 1)
 	select {

@@ -18,24 +18,23 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
+
+	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	record "github.com/libp2p/go-libp2p-record"
+	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
+	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+
+	"github.com/ipfs/go-cid"
+	detectrace "github.com/ipfs/go-detect-race"
+	u "github.com/ipfs/go-ipfs-util"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-
-	"github.com/ipfs/go-cid"
-	u "github.com/ipfs/go-ipfs-util"
-	kb "github.com/libp2p/go-libp2p-kbucket"
-	record "github.com/libp2p/go-libp2p-record"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
-	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
-	ma "github.com/multiformats/go-multiaddr"
-
-	detectrace "github.com/ipfs/go-detect-race"
 )
 
 var testCaseCids []cid.Cid
@@ -829,6 +828,35 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	// and because of the above bootstrap, A also discovers E !
 	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
+}
+
+func TestQueryWithEmptyRTShouldNotPanic(t *testing.T) {
+	ctx := context.Background()
+	d := setupDHT(ctx, t, false)
+
+	// TODO This swallows the error for now, should we change it ?
+	// FindProviders
+	ps, _ := d.FindProviders(ctx, testCaseCids[0])
+	require.Empty(t, ps)
+
+	// GetClosestPeers
+	pc, err := d.GetClosestPeers(ctx, "key")
+	require.Nil(t, pc)
+	require.Equal(t, kb.ErrLookupFailure, err)
+
+	// GetValue
+	best, err := d.GetValue(ctx, "key")
+	require.Empty(t, best)
+	require.Error(t, err)
+
+	// SearchValue
+	bchan, err := d.SearchValue(ctx, "key")
+	require.Empty(t, bchan)
+	require.NoError(t, err)
+
+	// Provide
+	err = d.Provide(ctx, testCaseCids[0], true)
+	require.Equal(t, kb.ErrLookupFailure, err)
 }
 
 func TestPeriodicRefresh(t *testing.T) {

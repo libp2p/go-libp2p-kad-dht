@@ -280,7 +280,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	}
 
 	// construct routing table
-	rt, err := makeRoutingTable(dht, cfg, maxLastSuccessfulOutboundThreshold)
+	// use twice the theoritical usefulness threhold to keep older peers around longer
+	rt, err := makeRoutingTable(dht, cfg, 2*maxLastSuccessfulOutboundThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}

@@ -196,8 +196,8 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 	}()
 }
 
-func (nn *subscriberNotifee) Connected(n network.Network, v network.Conn)      {}
-func (nn *subscriberNotifee) OpenedStream(n network.Network, v network.Stream) {}
-func (nn *subscriberNotifee) ClosedStream(n network.Network, v network.Stream) {}
-func (nn *subscriberNotifee) Listen(n network.Network, a ma.Multiaddr)         {}
-func (nn *subscriberNotifee) ListenClose(n network.Network, a ma.Multiaddr)    {}
+func (nn *subscriberNotifee) Connected(network.Network, network.Conn)      {}
+func (nn *subscriberNotifee) OpenedStream(network.Network, network.Stream) {}
+func (nn *subscriberNotifee) ClosedStream(network.Network, network.Stream) {}
+func (nn *subscriberNotifee) Listen(network.Network, ma.Multiaddr)         {}
+func (nn *subscriberNotifee) ListenClose(network.Network, ma.Multiaddr)    {}

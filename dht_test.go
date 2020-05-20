@@ -21,12 +21,15 @@ import (
 
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/persist"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
 	detectrace "github.com/ipfs/go-detect-race"
 	u "github.com/ipfs/go-ipfs-util"
 	ma "github.com/multiformats/go-multiaddr"
@@ -385,6 +388,56 @@ func TestValueSetInvalid(t *testing.T) {
 	testSetGet("newer", false, "newer", nil)
 	// Attempt to set older record again should be ignored
 	testSetGet("valid", true, "newer", nil)
+}
+
+func TestRoutingTableSnapshot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sdstore := dssync.MutexWrap(datastore.NewMapDatastore())
+	snapShotter, err := persist.NewDatastoreSnapshotter(sdstore, "rand")
+	require.NoError(t, err)
+	snapShotterOpt := Snapshotter(snapShotter, 100*time.Millisecond)
+
+	// start 4 other dht's we can connect to & add to our RT
+	dhts := setupDHTS(t, ctx, 4)
+	defer func() {
+		for i := 0; i < 4; i++ {
+			dhts[i].Close()
+			defer dhts[i].host.Close()
+		}
+	}()
+
+	// connect them with each other
+	connect(t, ctx, dhts[0], dhts[1])
+	connect(t, ctx, dhts[1], dhts[2])
+	connect(t, ctx, dhts[2], dhts[3])
+
+	// create dht with snapshotter  & connect it to one of the above dht's
+	selfDht := setupDHT(ctx, t, false, snapShotterOpt)
+	require.True(t, selfDht.routingTable.Size() == 0)
+	defer selfDht.Close()
+	defer selfDht.host.Close()
+
+	connect(t, ctx, selfDht, dhts[0])
+
+	for selfDht.routingTable.Size() != 4 {
+		<-selfDht.ForceRefresh()
+	}
+
+	// assert snapshot & close dht
+	time.Sleep(500 * time.Millisecond) // wait for one snapshot
+	snapshotPeers, err := snapShotter.Load()
+	require.Len(t, snapshotPeers, 4)
+	var peerIds []peer.ID
+	for i := range snapshotPeers {
+		peerIds = append(peerIds, snapshotPeers[i].ID)
+	}
+	require.Len(t, peerIds, 4)
+
+	require.NoError(t, err)
+	for _, d := range dhts {
+		require.Contains(t, peerIds, d.self)
+	}
 }
 
 func TestContextShutDown(t *testing.T) {

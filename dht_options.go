@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/persist"
+
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-ipns"
@@ -59,6 +61,11 @@ type config struct {
 		peerFilter          RouteTableFilterFunc
 	}
 
+	persist struct {
+		snapshotter      persist.Snapshotter
+		snapshotInterval time.Duration
+	}
+
 	// set to true if we're operating in v1 dht compatible mode
 	v1CompatibleMode bool
 	bootstrapPeers   []peer.AddrInfo
@@ -93,6 +100,15 @@ func (c *config) applyFallbacks(h host.Host) error {
 			return fmt.Errorf("the default validator was changed without being marked as changed")
 		}
 	}
+
+	if c.persist.snapshotter == nil {
+		s, err := persist.NewDatastoreSnapshotter(c.datastore, persist.DefaultSnapshotNS)
+		if err != nil {
+			return fmt.Errorf("failed to create snapshotter %w", err)
+		}
+		c.persist.snapshotter = s
+	}
+
 	return nil
 }
 
@@ -123,6 +139,8 @@ var defaults = func(o *config) error {
 	o.resiliency = 3
 
 	o.v1CompatibleMode = true
+
+	o.persist.snapshotInterval = 5 * time.Minute
 
 	return nil
 }
@@ -405,6 +423,19 @@ func BootstrapPeers(addrs ...ma.Multiaddr) Option {
 			return fmt.Errorf("failed to parse bootstrap peer addresses: %w", err)
 		}
 		c.bootstrapPeers = bootstrappers
+		return nil
+	}
+}
+
+// Snapshotter configures the snapshotter and the interval to use to periodically
+// persist the Routing Table. See the documentation for the `persist.Snapshotter` interface
+// for more details.
+// If you configure this, please ensure that you configure the DHT with a persistent Datastore
+// to ensure that the routing table snapshots are persistent across DHT restarts.
+func Snapshotter(s persist.Snapshotter, interval time.Duration) Option {
+	return func(c *config) error {
+		c.persist.snapshotter = s
+		c.persist.snapshotInterval = interval
 		return nil
 	}
 }

@@ -117,6 +117,24 @@ func (m *Message_Peer) Addresses() []ma.Multiaddr {
 	return maddrs
 }
 
+func (p *RoutingTableSnapshot_Peer) Addresses() []ma.Multiaddr {
+	if p == nil {
+		return nil
+	}
+
+	maddrs := make([]ma.Multiaddr, 0, len(p.Addrs))
+	for _, addr := range p.Addrs {
+		maddr, err := ma.NewMultiaddrBytes(addr)
+		if err != nil {
+			log.Debugw("error decoding multiaddr for peer", "peer", peer.ID(p.Id), "error", err)
+			continue
+		}
+
+		maddrs = append(maddrs, maddr)
+	}
+	return maddrs
+}
+
 // GetClusterLevel gets and adjusts the cluster level on the message.
 // a +/- 1 adjustment is needed to distinguish a valid first level (1) and
 // default "no value" protobuf behavior (0)

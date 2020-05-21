@@ -187,7 +187,7 @@ func (q *query) recordPeerIsValuable(p peer.ID) {
 	// protect _too_ many peers.
 	commonPrefixLen := kb.CommonPrefixLen(q.dht.selfKey, kb.ConvertPeerID(p))
 	cmgr := q.dht.host.ConnManager()
-	if commonPrefixLen < 2 {
+	if commonPrefixLen < usefulConnMgrProtectedBuckets {
 		cmgr.Protect(p, dhtUsefulTag)
 	} else {
 		cmgr.TagPeer(p, dhtUsefulTag, usefulConnMgrScore)

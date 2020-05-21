@@ -2021,12 +2021,11 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	}
 
 	// convert the bootstrap addresses to a p2p address
-	bootstrapAddrs := make([]ma.Multiaddr, nBootStraps)
+	bootstrapAddrs := make([]peer.AddrInfo, nBootStraps)
 	for i := 0; i < nBootStraps; i++ {
-		b, err := peer.AddrInfoToP2pAddrs(&peer.AddrInfo{ID: bootstrappers[i].self,
-			Addrs: bootstrappers[i].host.Addrs()})
-		require.NoError(t, err)
-		bootstrapAddrs[i] = b[0]
+		b := peer.AddrInfo{ID: bootstrappers[i].self,
+			Addrs: bootstrappers[i].host.Addrs()}
+		bootstrapAddrs[i] = b
 	}
 
 	//----------------

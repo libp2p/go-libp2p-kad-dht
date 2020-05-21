@@ -47,24 +47,3 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	require.Contains(t, ps, d2.self)
 	require.Contains(t, ps, d3.self)
 }
-
-func TestDefaultBootstrappers(t *testing.T) {
-	ds := GetDefaultBootstrapPeerAddrInfos()
-	require.NotEmpty(t, ds)
-	require.Len(t, ds, len(DefaultBootstrapPeers))
-
-	dfmap := make(map[peer.ID]peer.AddrInfo)
-	for _, p := range DefaultBootstrapPeers {
-		info, err := peer.AddrInfoFromP2pAddr(p)
-		require.NoError(t, err)
-		dfmap[info.ID] = *info
-	}
-
-	for _, p := range ds {
-		inf, ok := dfmap[p.ID]
-		require.True(t, ok)
-		require.ElementsMatch(t, p.Addrs, inf.Addrs)
-		delete(dfmap, p.ID)
-	}
-	require.Empty(t, dfmap)
-}

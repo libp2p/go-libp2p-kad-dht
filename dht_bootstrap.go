@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/peer"
-
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -35,24 +33,6 @@ func init() {
 		}
 		DefaultBootstrapPeers = append(DefaultBootstrapPeers, ma)
 	}
-}
-
-// GetDefaultBootstrapPeerAddrInfos returns the peer.AddrInfos for the default
-// bootstrap peers so we can use these for initializing the DHT by passing these to the
-// BootstrapPeers(...) option.
-func GetDefaultBootstrapPeerAddrInfos() []peer.AddrInfo {
-	ds := make([]peer.AddrInfo, 0, len(DefaultBootstrapPeers))
-
-	for i := range DefaultBootstrapPeers {
-		info, err := peer.AddrInfoFromP2pAddr(DefaultBootstrapPeers[i])
-		if err != nil {
-			logger.Errorw("failed to convert bootstrapper address to peer addr info", "address",
-				DefaultBootstrapPeers[i].String(), err, "err")
-			continue
-		}
-		ds = append(ds, *info)
-	}
-	return ds
 }
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the

@@ -30,6 +30,7 @@ import (
 	logging "github.com/ipfs/go-log"
 	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
+	periodicproc "github.com/jbenet/goprocess/periodic"
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
@@ -179,6 +180,18 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 			return nil, err
 		}
 	}
+
+	// schedule periodic snapshots
+	snapshotter := cfg.persist.snapshotter
+	snapshotInterval := cfg.persist.snapshotInterval
+	sproc := periodicproc.Tick(snapshotInterval, func(proc goprocess.Process) {
+		logger.Debug("persisting Routing Table snapshot")
+		err := snapshotter.Store(h, dht.routingTable)
+		if err != nil {
+			logger.Errorw("failed to persist Routing Table snapshot", "err", err)
+		}
+	})
+	dht.proc.AddChild(sproc)
 
 	// register for event bus and network notifications
 	sn, err := newSubscriberNotifiee(dht)

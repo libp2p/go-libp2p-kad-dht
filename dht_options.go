@@ -13,7 +13,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	record "github.com/libp2p/go-libp2p-record"
-	ma "github.com/multiformats/go-multiaddr"
 )
 
 // ModeOpt describes what mode the dht should operate in
@@ -398,12 +397,8 @@ func V1CompatibleMode(enable bool) Option {
 
 // BootstrapPeers configures the bootstrapping nodes that we will connect to to seed
 // and refresh our Routing Table if it becomes empty.
-func BootstrapPeers(addrs ...ma.Multiaddr) Option {
+func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
 	return func(c *config) error {
-		bootstrappers, err := peer.AddrInfosFromP2pAddrs(addrs...)
-		if err != nil {
-			return fmt.Errorf("failed to parse bootstrap peer addresses: %w", err)
-		}
 		c.bootstrapPeers = bootstrappers
 		return nil
 	}

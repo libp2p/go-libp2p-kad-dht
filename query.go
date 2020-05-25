@@ -174,7 +174,24 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 }
 
 func (q *query) recordPeerIsValuable(p peer.ID) {
-	q.dht.routingTable.UpdateLastUsefulAt(p, time.Now())
+	if !q.dht.routingTable.UpdateLastUsefulAt(p, time.Now()) {
+		// not in routing table
+		return
+	}
+
+	// Protect useful peers, when they're actually useful. This will last
+	// through disconnects. However, we'll still evict them if they keep
+	// disconnecting from us.
+	//
+	// Restrict to buckets 0, 1 (75% of requests, max 40 peers), so we don't
+	// protect _too_ many peers.
+	commonPrefixLen := kb.CommonPrefixLen(q.dht.selfKey, kb.ConvertPeerID(p))
+	cmgr := q.dht.host.ConnManager()
+	if commonPrefixLen < usefulConnMgrProtectedBuckets {
+		cmgr.Protect(p, dhtUsefulTag)
+	} else {
+		cmgr.TagPeer(p, dhtUsefulTag, usefulConnMgrScore)
+	}
 }
 
 func (q *query) recordValuablePeers() {

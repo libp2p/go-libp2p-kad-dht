@@ -570,14 +570,14 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 	defer dht.Close()
 
 	foo := peer.ID("asdasd")
-	_, err := dht.messageSenderForPeer(ctx, foo)
+	_, err := dht.protoMessenger.m.messageSenderForPeer(ctx, foo)
 	if err == nil {
 		t.Fatal("that shouldnt have succeeded")
 	}
 
-	dht.smlk.Lock()
-	mscnt := len(dht.strmap)
-	dht.smlk.Unlock()
+	dht.protoMessenger.m.smlk.Lock()
+	mscnt := len(dht.protoMessenger.m.strmap)
+	dht.protoMessenger.m.smlk.Unlock()
 
 	if mscnt > 0 {
 		t.Fatal("should have no message senders in map")

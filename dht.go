@@ -1,7 +1,6 @@
 package dht
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	goprocessctx "github.com/jbenet/goprocess/context"
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 )
@@ -97,8 +95,7 @@ type IpfsDHT struct {
 	ctx  context.Context
 	proc goprocess.Process
 
-	strmap map[peer.ID]*messageSender
-	smlk   sync.Mutex
+	protoMessenger *ProtocolMessenger
 
 	plk sync.Mutex
 
@@ -190,6 +187,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.disableFixLowPeers = cfg.disableFixLowPeers
 
 	dht.Validator = cfg.validator
+	dht.protoMessenger = NewProtocolMessenger(dht.host, dht.protocols, dht.Validator)
 
 	dht.testAddressUpdateProcessing = cfg.testAddressUpdateProcessing
 
@@ -276,7 +274,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		selfKey:                kb.ConvertPeerID(h.ID()),
 		peerstore:              h.Peerstore(),
 		host:                   h,
-		strmap:                 make(map[peer.ID]*messageSender),
 		birth:                  time.Now(),
 		protocols:              protocols,
 		protocolsStrs:          protocol.ConvertToStrings(protocols),
@@ -530,66 +527,7 @@ func (dht *IpfsDHT) persistRTPeersInPeerStore() {
 	}
 }
 
-// putValueToPeer stores the given key/value pair at the peer 'p'
-func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Record) error {
-	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
-	pmes.Record = rec
-	rpmes, err := dht.sendRequest(ctx, p, pmes)
-	if err != nil {
-		logger.Debugw("failed to put value to peer", "to", p, "key", loggableRecordKeyBytes(rec.Key), "error", err)
-		return err
-	}
-
-	if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
-		logger.Infow("value not put correctly", "put-message", pmes, "get-message", rpmes)
-		return errors.New("value not put correctly")
-	}
-
-	return nil
-}
-
 var errInvalidRecord = errors.New("received invalid record")
-
-// getValueOrPeers queries a particular peer p for the value for
-// key. It returns either the value or a list of closer peers.
-// NOTE: It will update the dht's peerstore with any new addresses
-// it finds for the given peer.
-func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
-	pmes, err := dht.getValueSingle(ctx, p, key)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Perhaps we were given closer peers
-	peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
-
-	if rec := pmes.GetRecord(); rec != nil {
-		// Success! We were given the value
-		logger.Debug("got value")
-
-		// make sure record is valid.
-		err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue())
-		if err != nil {
-			logger.Debug("received invalid record (discarded)")
-			// return a sentinal to signify an invalid record was received
-			err = errInvalidRecord
-			rec = new(recpb.Record)
-		}
-		return rec, peers, err
-	}
-
-	if len(peers) > 0 {
-		return nil, peers, nil
-	}
-
-	return nil, nil, routing.ErrNotFound
-}
-
-// getValueSingle simply performs the get value RPC with the given parameters
-func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (*pb.Message, error) {
-	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
-	return dht.sendRequest(ctx, p, pmes)
-}
 
 // getLocal attempts to retrieve the value from the datastore
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
@@ -717,17 +655,6 @@ func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
 	default:
 		return peer.AddrInfo{}
 	}
-}
-
-// findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
-func (dht *IpfsDHT) findPeerSingle(ctx context.Context, p peer.ID, id peer.ID) (*pb.Message, error) {
-	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
-	return dht.sendRequest(ctx, p, pmes)
-}
-
-func (dht *IpfsDHT) findProvidersSingle(ctx context.Context, p peer.ID, key multihash.Multihash) (*pb.Message, error) {
-	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
-	return dht.sendRequest(ctx, p, pmes)
 }
 
 // nearestPeersToQuery returns the routing tables closest peers.
@@ -870,15 +797,7 @@ func (dht *IpfsDHT) Host() host.Host {
 
 // Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
-	req := pb.NewMessage(pb.Message_PING, nil, 0)
-	resp, err := dht.sendRequest(ctx, p, req)
-	if err != nil {
-		return fmt.Errorf("sending request: %w", err)
-	}
-	if resp.Type != pb.Message_PING {
-		return fmt.Errorf("got unexpected response type: %v", resp.Type)
-	}
-	return nil
+	return dht.protoMessenger.Ping(ctx, p)
 }
 
 // newContextWithLocalTags returns a new context.Context with the InstanceID and

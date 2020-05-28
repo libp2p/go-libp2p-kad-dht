@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-msgio/protoio"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
@@ -208,12 +210,38 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 	}
 }
 
+type messageManager struct {
+	host      host.Host // the network services we need
+	strmap    map[peer.ID]*messageSender
+	smlk      sync.Mutex
+	protocols []protocol.ID
+}
+
+func (m *messageManager) streamDisconnect(ctx context.Context, p peer.ID) {
+	m.smlk.Lock()
+	defer m.smlk.Unlock()
+	ms, ok := m.strmap[p]
+	if !ok {
+		return
+	}
+	delete(m.strmap, p)
+
+	// Do this asynchronously as ms.lk can block for a while.
+	go func() {
+		if err := ms.lk.Lock(ctx); err != nil {
+			return
+		}
+		defer ms.lk.Unlock()
+		ms.invalidate()
+	}()
+}
+
 // sendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (m *messageManager) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
-	ms, err := dht.messageSenderForPeer(ctx, p)
+	ms, err := m.messageSenderForPeer(ctx, p)
 	if err != nil {
 		stats.Record(ctx,
 			metrics.SentRequests.M(1),
@@ -240,15 +268,15 @@ func (dht *IpfsDHT) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message
 		metrics.SentBytes.M(int64(pmes.Size())),
 		metrics.OutboundRequestLatency.M(float64(time.Since(start))/float64(time.Millisecond)),
 	)
-	dht.peerstore.RecordLatency(p, time.Since(start))
+	m.host.Peerstore().RecordLatency(p, time.Since(start))
 	return rpmes, nil
 }
 
 // sendMessage sends out a message
-func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+func (m *messageManager) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
-	ms, err := dht.messageSenderForPeer(ctx, p)
+	ms, err := m.messageSenderForPeer(ctx, p)
 	if err != nil {
 		stats.Record(ctx,
 			metrics.SentMessages.M(1),
@@ -274,22 +302,22 @@ func (dht *IpfsDHT) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message
 	return nil
 }
 
-func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messageSender, error) {
-	dht.smlk.Lock()
-	ms, ok := dht.strmap[p]
+func (m *messageManager) messageSenderForPeer(ctx context.Context, p peer.ID) (*messageSender, error) {
+	m.smlk.Lock()
+	ms, ok := m.strmap[p]
 	if ok {
-		dht.smlk.Unlock()
+		m.smlk.Unlock()
 		return ms, nil
 	}
-	ms = &messageSender{p: p, dht: dht, lk: newCtxMutex()}
-	dht.strmap[p] = ms
-	dht.smlk.Unlock()
+	ms = &messageSender{p: p, m: m, lk: newCtxMutex()}
+	m.strmap[p] = ms
+	m.smlk.Unlock()
 
 	if err := ms.prepOrInvalidate(ctx); err != nil {
-		dht.smlk.Lock()
-		defer dht.smlk.Unlock()
+		m.smlk.Lock()
+		defer m.smlk.Unlock()
 
-		if msCur, ok := dht.strmap[p]; ok {
+		if msCur, ok := m.strmap[p]; ok {
 			// Changed. Use the new one, old one is invalid and
 			// not in the map so we can just throw it away.
 			if ms != msCur {
@@ -297,7 +325,7 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 			}
 			// Not changed, remove the now invalid stream from the
 			// map.
-			delete(dht.strmap, p)
+			delete(m.strmap, p)
 		}
 		// Invalid but not in map. Must have been removed by a disconnect.
 		return nil, err
@@ -307,11 +335,11 @@ func (dht *IpfsDHT) messageSenderForPeer(ctx context.Context, p peer.ID) (*messa
 }
 
 type messageSender struct {
-	s   network.Stream
-	r   msgio.ReadCloser
-	lk  ctxMutex
-	p   peer.ID
-	dht *IpfsDHT
+	s  network.Stream
+	r  msgio.ReadCloser
+	lk ctxMutex
+	p  peer.ID
+	m  *messageManager
 
 	invalid   bool
 	singleMes int
@@ -352,7 +380,7 @@ func (ms *messageSender) prep(ctx context.Context) error {
 	// We only want to speak to peers using our primary protocols. We do not want to query any peer that only speaks
 	// one of the secondary "server" protocols that we happen to support (e.g. older nodes that we can respond to for
 	// backwards compatibility reasons).
-	nstr, err := ms.dht.host.NewStream(ctx, ms.p, ms.dht.protocols...)
+	nstr, err := ms.m.host.NewStream(ctx, ms.p, ms.m.protocols...)
 	if err != nil {
 		return err
 	}

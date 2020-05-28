@@ -173,22 +173,7 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		return
 	}
 
-	dht.smlk.Lock()
-	defer dht.smlk.Unlock()
-	ms, ok := dht.strmap[p]
-	if !ok {
-		return
-	}
-	delete(dht.strmap, p)
-
-	// Do this asynchronously as ms.lk can block for a while.
-	go func() {
-		if err := ms.lk.Lock(dht.Context()); err != nil {
-			return
-		}
-		defer ms.lk.Unlock()
-		ms.invalidate()
-	}()
+	dht.protoMessenger.m.streamDisconnect(dht.Context(), p)
 }
 
 func (nn *subscriberNotifee) Connected(network.Network, network.Conn)      {}

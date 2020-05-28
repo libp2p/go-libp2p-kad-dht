@@ -50,6 +50,7 @@ func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) 
 	wanOpts := append(options,
 		dht.QueryFilter(dht.PublicQueryFilter),
 		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
+		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, 2, 3, false)),
 	)
 	wan, err := dht.New(ctx, h, wanOpts...)
 	if err != nil {
@@ -91,6 +92,13 @@ func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
 		return dht.WAN.Provide(ctx, key, announce)
 	}
 	return dht.LAN.Provide(ctx, key, announce)
+}
+
+// PrintRoutingTableDiversityStats prints the diversity stats for the Routing Table.
+func (dht *DHT) PrintRoutingTableDiversityStats() {
+	if dht.WANActive() {
+		dht.WAN.PrintRoutingTableDiversityStats()
+	}
 }
 
 // FindProvidersAsync searches for peers who are able to provide a given key

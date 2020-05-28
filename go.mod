@@ -27,12 +27,16 @@ require (
 	github.com/libp2p/go-msgio v0.0.4
 	github.com/libp2p/go-netroute v0.1.2
 	github.com/multiformats/go-base32 v0.0.3
-	github.com/multiformats/go-multiaddr v0.2.1
+	github.com/multiformats/go-multiaddr v0.2.2
 	github.com/multiformats/go-multiaddr-net v0.1.5
 	github.com/multiformats/go-multihash v0.0.13
 	github.com/multiformats/go-multistream v0.1.1
 	github.com/stretchr/testify v1.5.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
+	github.com/yl2chen/cidranger v1.0.0
 	go.opencensus.io v0.22.3
 	go.uber.org/zap v1.14.1
 )
+
+replace github.com/libp2p/go-libp2p-kbucket => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-kbucket
+replace github.com/libp2p/go-libp2p-asn => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-asn

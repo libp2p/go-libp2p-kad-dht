@@ -39,4 +39,4 @@ require (
 )
 
 replace github.com/libp2p/go-libp2p-kbucket => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-kbucket
-replace github.com/libp2p/go-libp2p-asn => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-asn
+replace github.com/libp2p/go-libp2p-asn-util => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-asn-util

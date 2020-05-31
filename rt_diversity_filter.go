@@ -1,24 +1,22 @@
 package dht
 
 import (
-	"fmt"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	ma "github.com/multiformats/go-multiaddr"
-	"time"
+	"sync"
 )
 
 var _ peerdiversity.PeerIPGroupFilter = (*rtPeerIPGroupFilter)(nil)
 
 // locking is the responsibility of the caller
 type rtPeerIPGroupFilter struct {
-	h host.Host
+	mu sync.RWMutex
+	h  host.Host
 
 	maxPerCpl   int
 	maxForTable int
-
-	cplPeerCount map[int]int
 
 	cplIpGroupCount   map[int]map[peerdiversity.PeerIPGroupKey]int
 	tableIpGroupCount map[peerdiversity.PeerIPGroupKey]int
@@ -36,16 +34,18 @@ func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int, allowAll 
 		maxPerCpl:   maxPerCpl,
 		maxForTable: maxForTable,
 
-		cplPeerCount:      make(map[int]int),
 		cplIpGroupCount:   make(map[int]map[peerdiversity.PeerIPGroupKey]int),
 		tableIpGroupCount: make(map[peerdiversity.PeerIPGroupKey]int),
 
-		allowAll:allowAll,
+		allowAll: allowAll,
 	}
 
 }
 
 func (r *rtPeerIPGroupFilter) Allow(g peerdiversity.PeerGroupInfo) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.allowAll {
 		return true
 	}
@@ -53,19 +53,21 @@ func (r *rtPeerIPGroupFilter) Allow(g peerdiversity.PeerGroupInfo) bool {
 	cpl := g.Cpl
 
 	if r.tableIpGroupCount[key] >= r.maxForTable {
-		fmt.Println("\n Rejecting because table limit is hit")
+
 		return false
 	}
 
 	c, ok := r.cplIpGroupCount[cpl]
-	allow :=  !ok || c[key] < r.maxPerCpl
+	allow := !ok || c[key] < r.maxPerCpl
 	if !allow {
-		fmt.Println("\n Rejecting because CPL limit is hit")
 	}
 	return allow
 }
 
 func (r *rtPeerIPGroupFilter) Increment(g peerdiversity.PeerGroupInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	key := g.IPGroupKey
 	cpl := g.Cpl
 
@@ -75,11 +77,12 @@ func (r *rtPeerIPGroupFilter) Increment(g peerdiversity.PeerGroupInfo) {
 		r.cplIpGroupCount[cpl] = make(map[peerdiversity.PeerIPGroupKey]int)
 	}
 	r.cplIpGroupCount[cpl][key] = r.cplIpGroupCount[cpl][key] + 1
-
-	r.cplPeerCount[cpl] = r.cplPeerCount[cpl] + 1
 }
 
 func (r *rtPeerIPGroupFilter) Decrement(g peerdiversity.PeerGroupInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	key := g.IPGroupKey
 	cpl := g.Cpl
 
@@ -95,11 +98,6 @@ func (r *rtPeerIPGroupFilter) Decrement(g peerdiversity.PeerGroupInfo) {
 	if len(r.cplIpGroupCount[cpl]) == 0 {
 		delete(r.cplIpGroupCount, cpl)
 	}
-
-	r.cplPeerCount[cpl] = r.cplPeerCount[cpl] - 1
-	if r.cplPeerCount[cpl] == 0 {
-		delete(r.cplPeerCount, cpl)
-	}
 }
 
 func (r *rtPeerIPGroupFilter) PeerAddresses(p peer.ID) []ma.Multiaddr {
@@ -109,17 +107,4 @@ func (r *rtPeerIPGroupFilter) PeerAddresses(p peer.ID) []ma.Multiaddr {
 		addr = append(addr, c.RemoteMultiaddr())
 	}
 	return addr
-}
-
-func (r *rtPeerIPGroupFilter) PrintStats() {
-	fmt.Printf("\n -------------- Routing Table Peer Diversity Stats At %v----------------", time.Now().String())
-
-	for cpl := range r.cplIpGroupCount {
-		fmt.Printf("\n\t Cpl=%d\tTotalPeers=%d", cpl, r.cplPeerCount[cpl])
-		for k, v := range r.cplIpGroupCount[cpl] {
-			fmt.Printf("\n\t\t Prefix=%s\tNPeers=%d", k, v)
-		}
-	}
-	fmt.Println("\n-------------------------------------------------------------------")
-
 }

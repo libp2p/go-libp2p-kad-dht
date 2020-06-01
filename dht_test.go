@@ -2042,7 +2042,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		NamespacedValidator("v", blankValidator{}),
 		Mode(ModeServer),
 		BootstrapPeers(bootstrapAddrs[0]),
-		RoutingTablePeerDiversityFilter(NewRTPeerDiversityFilter(h, 2, 3)),
 	)
 	require.NoError(t, err)
 	dht2 := setupDHT(ctx, t, false)

@@ -20,14 +20,12 @@ type rtPeerIPGroupFilter struct {
 
 	cplIpGroupCount   map[int]map[peerdiversity.PeerIPGroupKey]int
 	tableIpGroupCount map[peerdiversity.PeerIPGroupKey]int
-
-	allowAll bool
 }
 
 // NewRTPeerDiversityFilter constructs the `PeerIPGroupFilter` that will be used to configure
 // the diversity filter for the Routing Table.
 // Please see the docs for `peerdiversity.PeerIPGroupFilter` AND `peerdiversity.Filter` for more details.
-func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int, allowAll bool) *rtPeerIPGroupFilter {
+func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int) *rtPeerIPGroupFilter {
 	return &rtPeerIPGroupFilter{
 		h: h,
 
@@ -36,8 +34,6 @@ func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int, allowAll 
 
 		cplIpGroupCount:   make(map[int]map[peerdiversity.PeerIPGroupKey]int),
 		tableIpGroupCount: make(map[peerdiversity.PeerIPGroupKey]int),
-
-		allowAll: allowAll,
 	}
 
 }
@@ -46,9 +42,6 @@ func (r *rtPeerIPGroupFilter) Allow(g peerdiversity.PeerGroupInfo) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if r.allowAll {
-		return true
-	}
 	key := g.IPGroupKey
 	cpl := g.Cpl
 

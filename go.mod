@@ -37,5 +37,3 @@ require (
 	go.opencensus.io v0.22.3
 	go.uber.org/zap v1.14.1
 )
-
-replace github.com/libp2p/go-libp2p-kbucket  => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-kbucket

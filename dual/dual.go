@@ -50,7 +50,7 @@ func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) 
 	wanOpts := append(options,
 		dht.QueryFilter(dht.PublicQueryFilter),
 		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
-		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, 2, 3, false)),
+		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, 2, 3)),
 	)
 	wan, err := dht.New(ctx, h, wanOpts...)
 	if err != nil {

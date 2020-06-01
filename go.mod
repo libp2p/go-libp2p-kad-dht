@@ -18,7 +18,7 @@ require (
 	github.com/libp2p/go-eventbus v0.1.0
 	github.com/libp2p/go-libp2p v0.8.2
 	github.com/libp2p/go-libp2p-core v0.5.4
-	github.com/libp2p/go-libp2p-kbucket v0.4.2
+	github.com/libp2p/go-libp2p-kbucket v0.4.3-0.20200601163705-6904e7977e6a
 	github.com/libp2p/go-libp2p-peerstore v0.2.4
 	github.com/libp2p/go-libp2p-record v0.1.2
 	github.com/libp2p/go-libp2p-routing-helpers v0.2.3
@@ -37,6 +37,3 @@ require (
 	go.opencensus.io v0.22.3
 	go.uber.org/zap v1.14.1
 )
-
-replace github.com/libp2p/go-libp2p-kbucket => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-kbucket
-replace github.com/libp2p/go-libp2p-asn-util => /Users/aarshshah/go/src/github.com/libp2p/go-libp2p-asn-util

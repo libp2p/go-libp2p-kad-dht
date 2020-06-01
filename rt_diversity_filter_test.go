@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
@@ -48,4 +49,39 @@ func TestRTPeerDiversityFilter(t *testing.T) {
 
 	// and then it dosen't work again
 	require.False(t, r.Allow(g2))
+}
+
+func TestRoutingTableEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	h := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
+	r := NewRTPeerDiversityFilter(h, 2, 3)
+
+	d, err := New(
+		ctx,
+		h,
+		testPrefix,
+		NamespacedValidator("v", blankValidator{}),
+		Mode(ModeServer),
+		DisableAutoRefresh(),
+		RoutingTablePeerDiversityFilter(r),
+	)
+	require.NoError(t, err)
+
+	// only 3 peers per prefix for a cpl
+	d2 := setupDHT(ctx, t, false, DisableAutoRefresh())
+	connect(t, ctx, d, d2)
+	waitForWellFormedTables(t, []*IpfsDHT{d}, 1, 1, 1*time.Second)
+
+	d3 := setupDHT(ctx, t, false, DisableAutoRefresh())
+	connect(t, ctx, d, d3)
+	waitForWellFormedTables(t, []*IpfsDHT{d}, 2, 2, 1*time.Second)
+
+	d4 := setupDHT(ctx, t, false, DisableAutoRefresh())
+	connect(t, ctx, d, d4)
+	waitForWellFormedTables(t, []*IpfsDHT{d}, 3, 3, 1*time.Second)
+
+	d5 := setupDHT(ctx, t, false, DisableAutoRefresh())
+	connectNoSync(t, ctx, d, d5)
+	time.Sleep(1 * time.Second)
+	require.Len(t, d.routingTable.ListPeers(), 3)
 }

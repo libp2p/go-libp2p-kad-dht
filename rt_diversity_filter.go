@@ -52,8 +52,6 @@ func (r *rtPeerIPGroupFilter) Allow(g peerdiversity.PeerGroupInfo) bool {
 
 	c, ok := r.cplIpGroupCount[cpl]
 	allow := !ok || c[key] < r.maxPerCpl
-	if !allow {
-	}
 	return allow
 }
 

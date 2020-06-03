@@ -365,7 +365,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 	// make a Routing Table Diversity Filter
 	var filter *peerdiversity.Filter
 	if dht.rtPeerDiversityFilter != nil {
-		df, err := peerdiversity.NewFilter(dht.rtPeerDiversityFilter, "RT", func(p peer.ID) int {
+		df, err := peerdiversity.NewFilter(dht.rtPeerDiversityFilter, "rt/diversity", func(p peer.ID) int {
 			return kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
 		})
 

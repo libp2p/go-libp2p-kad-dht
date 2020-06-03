@@ -94,10 +94,10 @@ func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
 	return dht.LAN.Provide(ctx, key, announce)
 }
 
-// PrintRoutingTableDiversityStats prints the diversity stats for the Routing Table.
+// GetRoutingTableDiversityStats prints the diversity stats for the Routing Table.
 func (dht *DHT) PrintRoutingTableDiversityStats() {
 	if dht.WANActive() {
-		dht.WAN.PrintRoutingTableDiversityStats()
+		dht.WAN.GetRoutingTableDiversityStats()
 	}
 }
 

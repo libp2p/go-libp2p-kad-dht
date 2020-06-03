@@ -400,10 +400,9 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 	return rt, err
 }
 
-// PrintRoutingTableDiversityStats prints the peer diversity stats for the Routing Table
-// if a rtPeerDiversityFilter has been configured.
-func (d *IpfsDHT) PrintRoutingTableDiversityStats() {
-	d.routingTable.PrintDiversityStats()
+// GetRoutingTableDiversityStats returns the diversity stats for the Routing Table.
+func (d *IpfsDHT) GetRoutingTableDiversityStats() []peerdiversity.CplDiversityStats {
+	return d.routingTable.GetDiversityStats()
 }
 
 // Mode allows introspection of the operation mode of the DHT

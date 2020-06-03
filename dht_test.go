@@ -2060,7 +2060,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	dht1.PrintRoutingTableDiversityStats()
+	dht1.GetRoutingTableDiversityStats()
 
 	require.Eventually(t, func() bool {
 		return dht1.routingTable.Size() == 2 && dht1.routingTable.Find(bootstrappers[0].self) != "" &&
@@ -2102,5 +2102,5 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 			rt.Find(bootstrappers[2].self) != "" && rt.Find(bootstrapcons[1].self) != "" && rt.Find(bootstrapcons[2].self) != ""
 	}, 5*time.Second, 500*time.Millisecond)
 
-	dht1.PrintRoutingTableDiversityStats()
+	dht1.GetRoutingTableDiversityStats()
 }

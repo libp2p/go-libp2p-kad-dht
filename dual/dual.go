@@ -4,6 +4,7 @@ package dual
 
 import (
 	"context"
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"sync"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -94,11 +95,12 @@ func (dht *DHT) Provide(ctx context.Context, key cid.Cid, announce bool) error {
 	return dht.LAN.Provide(ctx, key, announce)
 }
 
-// GetRoutingTableDiversityStats prints the diversity stats for the Routing Table.
-func (dht *DHT) PrintRoutingTableDiversityStats() {
+// GetRoutingTableDiversityStats fetches the Routing Table Diversity Stats.
+func (dht *DHT) GetRoutingTableDiversityStats() []peerdiversity.CplDiversityStats {
 	if dht.WANActive() {
-		dht.WAN.GetRoutingTableDiversityStats()
+		return dht.WAN.GetRoutingTableDiversityStats()
 	}
+	return nil
 }
 
 // FindProvidersAsync searches for peers who are able to provide a given key

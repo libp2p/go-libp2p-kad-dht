@@ -2,18 +2,20 @@ package dht
 
 import (
 	"fmt"
-	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
-	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/ipfs/go-ipns"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
+
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
+
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipfs/go-ipns"
 )
 
 // ModeOpt describes what mode the dht should operate in
@@ -406,7 +408,7 @@ func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
 	}
 }
 
-// \RoutingTablePeerDiversityFilter configures the implementation of the `PeerIPGroupFilter` that will be used
+// RoutingTablePeerDiversityFilter configures the implementation of the `PeerIPGroupFilter` that will be used
 // to construct the diversity filter for the Routing Table.
 // Please see the docs for `peerdiversity.PeerIPGroupFilter` AND `peerdiversity.Filter` for more details.
 func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option {

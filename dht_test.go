@@ -2028,7 +2028,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		bootstrapAddrs[i] = b
 	}
 
-	h := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 	//----------------
 	// We will initialize a DHT with 1 bootstrapper, connect it to another DHT,
 	// then remove the latter from the Routing Table
@@ -2037,7 +2036,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	// AutoRefresh needs to be enabled for this.
 	dht1, err := New(
 		ctx,
-		h,
+		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		Mode(ModeServer),
@@ -2057,11 +2056,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	require.NoError(t, dht1.host.Network().ClosePeer(dht2.self))
 	dht1.routingTable.RemovePeer(dht2.self)
 	require.NotContains(t, dht2.self, dht1.routingTable.ListPeers())
-
-	time.Sleep(1 * time.Second)
-
-	dht1.GetRoutingTableDiversityStats()
-
 	require.Eventually(t, func() bool {
 		return dht1.routingTable.Size() == 2 && dht1.routingTable.Find(bootstrappers[0].self) != "" &&
 			dht1.routingTable.Find(bootstrapcons[0].self) != ""
@@ -2101,6 +2095,4 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		return rt.Size() == 4 && rt.Find(bootstrappers[1].self) != "" &&
 			rt.Find(bootstrappers[2].self) != "" && rt.Find(bootstrapcons[1].self) != "" && rt.Find(bootstrapcons[2].self) != ""
 	}, 5*time.Second, 500*time.Millisecond)
-
-	dht1.GetRoutingTableDiversityStats()
 }

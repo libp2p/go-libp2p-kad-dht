@@ -10,7 +10,6 @@ import (
 
 var _ peerdiversity.PeerIPGroupFilter = (*rtPeerIPGroupFilter)(nil)
 
-// locking is the responsibility of the caller
 type rtPeerIPGroupFilter struct {
 	mu sync.RWMutex
 	h  host.Host
@@ -63,10 +62,10 @@ func (r *rtPeerIPGroupFilter) Increment(g peerdiversity.PeerGroupInfo) {
 	cpl := g.Cpl
 
 	r.tableIpGroupCount[key] = r.tableIpGroupCount[key] + 1
-	_, ok := r.cplIpGroupCount[cpl]
-	if !ok {
+	if _, ok := r.cplIpGroupCount[cpl]; !ok {
 		r.cplIpGroupCount[cpl] = make(map[peerdiversity.PeerIPGroupKey]int)
 	}
+
 	r.cplIpGroupCount[cpl][key] = r.cplIpGroupCount[cpl][key] + 1
 }
 

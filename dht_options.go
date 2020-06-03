@@ -4,15 +4,18 @@ import (
 	"fmt"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
-	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/ipfs/go-ipns"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
+
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
+
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipfs/go-ipns"
 )
 
 // ModeOpt describes what mode the dht should operate in
@@ -56,6 +59,7 @@ type config struct {
 		latencyTolerance    time.Duration
 		checkInterval       time.Duration
 		peerFilter          RouteTableFilterFunc
+		diversityFilter     peerdiversity.PeerIPGroupFilter
 	}
 
 	// set to true if we're operating in v1 dht compatible mode
@@ -400,6 +404,16 @@ func V1CompatibleMode(enable bool) Option {
 func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
 	return func(c *config) error {
 		c.bootstrapPeers = bootstrappers
+		return nil
+	}
+}
+
+// RoutingTablePeerDiversityFilter configures the implementation of the `PeerIPGroupFilter` that will be used
+// to construct the diversity filter for the Routing Table.
+// Please see the docs for `peerdiversity.PeerIPGroupFilter` AND `peerdiversity.Filter` for more details.
+func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option {
+	return func(c *config) error {
+		c.routingTable.diversityFilter = pg
 		return nil
 	}
 }

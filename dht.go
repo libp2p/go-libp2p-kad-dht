@@ -22,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 
@@ -126,6 +127,7 @@ type IpfsDHT struct {
 
 	queryPeerFilter        QueryFilterFunc
 	routingTablePeerFilter RouteTableFilterFunc
+	rtPeerDiversityFilter  peerdiversity.PeerIPGroupFilter
 
 	autoRefresh bool
 
@@ -283,7 +285,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		beta:                   cfg.resiliency,
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
-		fixLowPeersChan:        make(chan struct{}, 1),
+		rtPeerDiversityFilter:  cfg.routingTable.diversityFilter,
+
+		fixLowPeersChan: make(chan struct{}, 1),
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration
@@ -358,7 +362,21 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThr
 }
 
 func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThreshold time.Duration) (*kb.RoutingTable, error) {
-	rt, err := kb.NewRoutingTable(cfg.bucketSize, dht.selfKey, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold)
+	// make a Routing Table Diversity Filter
+	var filter *peerdiversity.Filter
+	if dht.rtPeerDiversityFilter != nil {
+		df, err := peerdiversity.NewFilter(dht.rtPeerDiversityFilter, "rt/diversity", func(p peer.ID) int {
+			return kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
+		})
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to construct peer diversity filter: %w", err)
+		}
+
+		filter = df
+	}
+
+	rt, err := kb.NewRoutingTable(cfg.bucketSize, dht.selfKey, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold, filter)
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -380,6 +398,11 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 	}
 
 	return rt, err
+}
+
+// GetRoutingTableDiversityStats returns the diversity stats for the Routing Table.
+func (d *IpfsDHT) GetRoutingTableDiversityStats() []peerdiversity.CplDiversityStats {
+	return d.routingTable.GetDiversityStats()
 }
 
 // Mode allows introspection of the operation mode of the DHT

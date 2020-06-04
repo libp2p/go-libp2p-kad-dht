@@ -118,7 +118,7 @@ type IpfsDHT struct {
 	routingTablePeerFilter RouteTableFilterFunc
 	rtPeerDiversityFilter  peerdiversity.PeerIPGroupFilter
 
-	queryDiversityFilter *peerdiversity.Filter
+	queryDiversityFilter peerdiversity.PeerIPGroupFilter
 
 	autoRefresh bool
 
@@ -277,6 +277,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
 		rtPeerDiversityFilter:  cfg.routingTable.diversityFilter,
+
+		queryDiversityFilter: cfg.queryDiversityFilter,
 
 		fixLowPeersChan: make(chan struct{}, 1),
 	}

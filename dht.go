@@ -118,6 +118,8 @@ type IpfsDHT struct {
 	routingTablePeerFilter RouteTableFilterFunc
 	rtPeerDiversityFilter  peerdiversity.PeerIPGroupFilter
 
+	queryDiversityFilter *peerdiversity.Filter
+
 	autoRefresh bool
 
 	// A set of bootstrap peers to fallback on if all other attempts to fix

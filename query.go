@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
+	ks "github.com/whyrusleeping/go-keyspace"
 	"math"
+	"math/big"
 	"sync"
 	"time"
 
@@ -38,6 +41,10 @@ type query struct {
 
 	dht *IpfsDHT
 
+	// df is the diversity filter we use to ensure that peers we contact during the query are as diverse as possible.
+	// for now, we measure diversity by IPv4 prefixes/IPv6 ASNs.
+	df *peerdiversity.Filter
+
 	// seedPeers is the set of peers that seed the query
 	seedPeers []peer.ID
 
@@ -46,6 +53,9 @@ type query struct {
 
 	// queryPeers is the set of peers known by this query and their respective states.
 	queryPeers *qpeerset.QueryPeerset
+
+	// dfRejectedPeers is the set of peers that have been rejected by the diversity filter till now.
+	dfRejectedPeers *qpeerset.QueryPeerset
 
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.
@@ -159,16 +169,17 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	}
 
 	q := &query{
-		id:         uuid.New(),
-		key:        target,
-		ctx:        ctx,
-		dht:        dht,
-		queryPeers: qpeerset.NewQueryPeerset(target),
-		seedPeers:  seedPeers,
-		peerTimes:  make(map[peer.ID]time.Duration),
-		terminated: false,
-		queryFn:    queryFn,
-		stopFn:     stopFn,
+		id:              uuid.New(),
+		key:             target,
+		ctx:             ctx,
+		dht:             dht,
+		queryPeers:      qpeerset.NewQueryPeerset(target),
+		dfRejectedPeers: qpeerset.NewQueryPeerset(target),
+		seedPeers:       seedPeers,
+		peerTimes:       make(map[peer.ID]time.Duration),
+		terminated:      false,
+		queryFn:         queryFn,
+		stopFn:          stopFn,
 	}
 
 	// run the query
@@ -306,6 +317,7 @@ func (q *query) run() {
 
 // spawnQuery starts one query, if an available heard peer is found
 func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
+	q.allowClosestFilteredPeer()
 	peers := q.queryPeers.GetSortedHeard()
 	if len(peers) == 0 {
 		return
@@ -356,7 +368,54 @@ func (q *query) isLookupTermination() bool {
 			return false
 		}
 	}
+
+	// all the closest beta diverse peers have ben queried.
+	// now, check if the closest peer in the set of filtered/non-diverse we've heard of till now
+	// is closer than the furthest Beta peer. If yes, the query is not complete.
+	clFiltered := q.dfRejectedPeers.GetClosestNotUnreachable(1)
+	if len(clFiltered) != 0 {
+		for _, p := range peers {
+			if kb.Closer(clFiltered[0], p, q.key) {
+				return false
+			}
+		}
+	}
+
 	return true
+}
+
+// TODO Remove duplication between this and above
+func (q *query) allowClosestFilteredPeer() {
+	peers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
+	for _, p := range peers {
+		if q.queryPeers.GetState(p) != qpeerset.PeerQueried {
+			return
+		}
+	}
+
+	// all the closest beta diverse peers have ben queried.
+	// now, check if the closest peer in the set of filtered/non-diverse we've heard of till now
+	// is closer than the furthest Beta peer. If yes, the query is not complete.
+	cps := q.dfRejectedPeers.GetClosestNotUnreachable(1)
+	if len(cps) != 0 {
+		cp := cps[0]
+		for _, p := range peers {
+			if kb.Closer(cp, p, q.key) {
+				// remove it from the fitered heard set
+				q.dfRejectedPeers.SetState(cp, qpeerset.PeerQueried)
+				// whitelist it in the filter
+				q.filter.WhitelistPeers(cp)
+				// add it has heard to the query peer set
+				q.queryPeers.TryAdd(cp, q.dfRejectedPeers.GetReferrer(cp))
+				return
+			}
+		}
+	}
+}
+
+func (qp *query) distanceToKey(p peer.ID) *big.Int {
+	k := ks.XORKeySpace.Key([]byte(qp.key))
+	return ks.XORKeySpace.Key([]byte(p)).Distance(k)
 }
 
 func (q *query) isStarvationTermination() bool {
@@ -461,7 +520,24 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
-		q.queryPeers.TryAdd(p, up.cause)
+
+		// add the peer as heard if it's a diverse peer.
+		if q.filter.TryAdd(p) {
+			// filter allowed the peer. Try to add it to the query set and remove it from
+			// the filter if it's not added to the query set.
+			if !q.queryPeers.TryAdd(p, up.cause) {
+				q.filter.Remove(p)
+			}
+		} else {
+			// filter didn't allow the peer. So, add it to the peers rejected by the diversity filter.
+			q.dfRejectedPeers.TryAdd(p, up.cause)
+		}
+
+		if q.filter.TryAdd(p) {
+			if !q.queryPeers.TryAdd(p, up.cause) {
+				q.filter.Remove(p)
+			}
+		}
 	}
 	for _, p := range up.queried {
 		if p == q.dht.self { // don't add self.

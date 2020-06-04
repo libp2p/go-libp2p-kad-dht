@@ -230,7 +230,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// listens to the fix low peers chan and tries to fix the Routing Table
 	dht.proc.Go(dht.fixLowPeersRoutine)
 
-	dht.proc.Go(dht.churnLoop)
+	dht.proc.Go(dht.rtPeerLoop)
 
 	return dht, nil
 }
@@ -605,7 +605,7 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	return dht.datastore.Put(mkDsKey(key), data)
 }
 
-func (dht *IpfsDHT) churnLoop(proc goprocess.Process) {
+func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 	bootstrapCount := 0
 	isBootsrapping := false
 	var timerCh <-chan time.Time

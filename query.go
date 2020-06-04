@@ -401,11 +401,11 @@ func (q *query) allowClosestFilteredPeer() {
 		cp := cps[0]
 		for _, p := range peers {
 			if kb.Closer(cp, p, q.key) {
-				// remove it from the fitered heard set
-				q.dfRejectedPeers.SetState(cp, qpeerset.PeerQueried)
+				// remove it from the reachable set of the filtered peers so we don't see it again.
+				q.dfRejectedPeers.SetState(cp, qpeerset.PeerUnreachable)
 				// whitelist it in the filter
-				q.filter.WhitelistPeers(cp)
-				// add it has heard to the query peer set
+				q.df.WhitelistPeers(cp)
+				// add it as heard to the query peer set
 				q.queryPeers.TryAdd(cp, q.dfRejectedPeers.GetReferrer(cp))
 				return
 			}

@@ -187,20 +187,6 @@ func (q *query) recordPeerIsValuable(p peer.ID) {
 		// not in routing table
 		return
 	}
-
-	// Protect useful peers, when they're actually useful. This will last
-	// through disconnects. However, we'll still evict them if they keep
-	// disconnecting from us.
-	//
-	// Restrict to buckets 0, 1 (75% of requests, max 40 peers), so we don't
-	// protect _too_ many peers.
-	commonPrefixLen := kb.CommonPrefixLen(q.dht.selfKey, kb.ConvertPeerID(p))
-	cmgr := q.dht.host.ConnManager()
-	if commonPrefixLen < usefulConnMgrProtectedBuckets {
-		cmgr.Protect(p, dhtUsefulTag)
-	} else {
-		cmgr.TagPeer(p, dhtUsefulTag, usefulConnMgrScore)
-	}
 }
 
 func (q *query) recordValuablePeers() {

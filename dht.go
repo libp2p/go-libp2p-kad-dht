@@ -48,17 +48,6 @@ const (
 	// manager "kbucket" tag. It is added with the common prefix length
 	// between two peer IDs.
 	baseConnMgrScore = 5
-
-	// UsefulConnMgrScore is given to peers that are among the first peers
-	// to respond to a query.
-	//
-	// This score is given to peers the first time they're useful and lasts
-	// until we disconnect from the peer.
-	usefulConnMgrScore = 20
-
-	// UsefulConnMgrProtectedBuckets is the number of buckets where useful
-	// peers are _protected_, instead of just given the useful score.
-	usefulConnMgrProtectedBuckets = 2
 )
 
 type mode int
@@ -74,8 +63,8 @@ const (
 )
 
 const (
-	dhtUsefulTag = "dht-useful"
-	kbucketTag   = "kbucket"
+	kbucketTag       = "kbucket"
+	protectedBuckets = 2
 )
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -380,17 +369,15 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
-		// We tag our closest peers with higher and higher scores so we
-		// stay connected to our nearest neighbors.
-		//
-		// We _also_ (elsewhere) protect useful peers in the furthest
-		// buckets (our "core" routing nodes) and give high scores to
-		// all other useful peers.
 		commonPrefixLen := kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
-		cmgr.TagPeer(p, kbucketTag, baseConnMgrScore+commonPrefixLen)
+		if commonPrefixLen < protectedBuckets {
+			cmgr.Protect(p, kbucketTag)
+		} else {
+			cmgr.TagPeer(p, kbucketTag, baseConnMgrScore)
+		}
 	}
 	rt.PeerRemoved = func(p peer.ID) {
-		cmgr.Unprotect(p, dhtUsefulTag)
+		cmgr.Unprotect(p, kbucketTag)
 		cmgr.UntagPeer(p, kbucketTag)
 
 		// try to fix the RT

@@ -56,23 +56,23 @@ func TestQPeerSet(t *testing.T) {
 
 	// add peer4
 	require.True(t, qp.TryAdd(peer4, oracle))
-	cl := qp.GetClosestNotUnreachable(2)
+	cl := qp.GetClosestNotUnreachableOrRejected(2)
 	require.Equal(t, []peer.ID{peer4, peer2}, cl)
-	cl = qp.GetClosestNotUnreachable(3)
+	cl = qp.GetClosestNotUnreachableOrRejected(3)
 	require.Equal(t, []peer.ID{peer4, peer2}, cl)
-	cl = qp.GetClosestNotUnreachable(1)
+	cl = qp.GetClosestNotUnreachableOrRejected(1)
 	require.Equal(t, []peer.ID{peer4}, cl)
 
 	// mark as unreachable & try to get it
 	qp.SetState(peer4, PeerUnreachable)
-	cl = qp.GetClosestNotUnreachable(1)
+	cl = qp.GetClosestNotUnreachableOrRejected(1)
 	require.Equal(t, []peer.ID{peer2}, cl)
 
 	// add peer1
 	require.True(t, qp.TryAdd(peer1, oracle))
-	cl = qp.GetClosestNotUnreachable(1)
+	cl = qp.GetClosestNotUnreachableOrRejected(1)
 	require.Equal(t, []peer.ID{peer1}, cl)
-	cl = qp.GetClosestNotUnreachable(2)
+	cl = qp.GetClosestNotUnreachableOrRejected(2)
 	require.Equal(t, []peer.ID{peer1, peer2}, cl)
 
 	// mark as waiting and assert

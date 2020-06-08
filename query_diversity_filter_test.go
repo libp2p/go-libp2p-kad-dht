@@ -19,7 +19,7 @@ func TestQueryDiversityFilter(t *testing.T) {
 	h := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
 	r := NewQueryDiversityFilter(h, 2)
 
-	// table should only have 2 for each prefix
+	// query should only have 2 for each prefix
 	key := "key"
 	g := peerdiversity.PeerGroupInfo{Cpl: 1, IPGroupKey: peerdiversity.PeerIPGroupKey(key)}
 	require.True(t, r.Allow(g))

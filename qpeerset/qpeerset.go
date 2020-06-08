@@ -20,6 +20,10 @@ const (
 	PeerQueried
 	// PeerUnreachable is applied to peers who have been queried and a response was not retrieved successfully.
 	PeerUnreachable
+	// PeerQueriedAndRejected is applied to peers who have been queried but were rejected by the diversity filter.
+	PeerQueriedAndRejected
+	// PeerRejected is applied to peers who have not been queried because they were rejected by the diversity filter.
+	PeerRejected
 )
 
 // QueryPeerset maintains the state of a Kademlia asynchronous lookup.
@@ -136,12 +140,13 @@ func (qp *QueryPeerset) GetWaitingPeers() (result []peer.ID) {
 	return
 }
 
-// GetClosestNotUnreachable returns the closest to the key peers, which are not in state PeerUnreachable.
+// GetClosestNotUnreachableOrRejected returns the closest to the key peers, which are not in state PeerUnreachable or in any of the "Rejected" states.
 // It returns count peers or less, if fewer peers meet the condition.
-func (qp *QueryPeerset) GetClosestNotUnreachable(count int) (result []peer.ID) {
+// The returned peers are sorted in ascending order by their distance to the key.
+func (qp *QueryPeerset) GetClosestNotUnreachableOrRejected(count int) (result []peer.ID) {
 	qp.sort()
 	for _, p := range qp.all {
-		if p.state != PeerUnreachable {
+		if p.state != PeerUnreachable && p.state != PeerRejected && p.state != PeerQueriedAndRejected {
 			result = append(result, p.id)
 		}
 	}
@@ -149,6 +154,17 @@ func (qp *QueryPeerset) GetClosestNotUnreachable(count int) (result []peer.ID) {
 		return result[:count]
 	}
 	return result
+}
+
+// GetClosestRejectedPeer returns the closest to the key peer, which is in PeerRejected or PeerQueriedAndRejected states.
+func (qp *QueryPeerset) GetClosestRejectedPeer() peer.ID {
+	qp.sort()
+	for _, p := range qp.all {
+		if p.state == PeerRejected || p.state == PeerQueriedAndRejected {
+			return p.id
+		}
+	}
+	return ""
 }
 
 // NumHeard returns the number of peers in state PeerHeard.

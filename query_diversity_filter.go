@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/libp2p/go-libp2p-core/host"
@@ -57,6 +58,10 @@ func (q *queryIPGroupFilter) Decrement(g peerdiversity.PeerGroupInfo) {
 	defer q.mu.Unlock()
 
 	key := g.IPGroupKey
+
+	if q.prefixGroupCount[key] == 0 {
+		panic(fmt.Errorf("cannot decrement state below zero for group key %s", string(key)))
+	}
 
 	q.prefixGroupCount[key] = q.prefixGroupCount[key] - 1
 	if q.prefixGroupCount[key] == 0 {

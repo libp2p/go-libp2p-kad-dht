@@ -41,6 +41,8 @@ import (
 var (
 	logger     = logging.Logger("dht")
 	baseLogger = logger.Desugar()
+
+	rtFreezeTimeout = 1 * time.Minute
 )
 
 const (
@@ -228,7 +230,9 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	go dht.persistRTPeersInPeerStore()
 
 	// listens to the fix low peers chan and tries to fix the Routing Table
-	dht.proc.Go(dht.fixLowPeersRoutine)
+	if !cfg.disableFixLowPeers {
+		dht.proc.Go(dht.fixLowPeersRoutine)
+	}
 
 	dht.proc.Go(dht.rtPeerLoop)
 
@@ -634,7 +638,7 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 		case <-dht.refreshFinishedCh:
 			bootstrapCount = bootstrapCount + 1
 			if bootstrapCount == 2 {
-				timerCh = time.NewTimer(1 * time.Minute).C
+				timerCh = time.NewTimer(rtFreezeTimeout).C
 			}
 
 			old := isBootsrapping

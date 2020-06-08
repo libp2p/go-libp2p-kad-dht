@@ -334,11 +334,11 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 	for _, p := range peers {
 		if q.dFilter != nil {
 			allowed := q.dFilter.TryAdd(p)
-			// TODO Maybe, we need a `Filter.Allow()` API ?
 			if !allowed {
 				q.queryPeers.SetState(p, qpeerset.PeerRejected)
 				continue
 			} else {
+				// TODO This is hacky. Maybe, we need a `Filter.Allow()` API ?
 				// don't let unqueried peers take up slots if they are valid.
 				q.dFilter.Remove(p)
 			}
@@ -412,17 +412,18 @@ func (q *query) allowClosestRejectedPeer() {
 	}
 
 	if q.dFilter != nil {
+		// If the closest non-diverse/rejected peer is closer to the key than the furthest
+		// peer among the Beta closest and queried peers:
+		// 1. If the rejected peer hasn't been queried, simply change it's state to "heard" and whitelist it in the filter so it can be queried.
+		// 2. If the rejected peer has already been queried, change it's state to "queried" and queue up all results returned by it for querying
+		//     by changing their state to "heard".
+
 		pl := peers[len(peers)-1]
 		cp := q.queryPeers.GetClosestRejectedPeer()
 		if len(cp) == 0 {
 			return
 		}
 
-		// If the closest non-diverse/rejected peer is closer to the key than the furthest
-		// peer among the Beta closest and queried peers:
-		// 1. If the rejected peer hasn't been queried, simply change it's state to "heard" and whitelist it in the filter so it can be queried.
-		// 2. If the rejected peer has already been queried, change it's state to "queried" and queue up all results returned by it for querying
-		//     by changing their state to "heard".
 		if kb.Closer(cp, pl, q.key) {
 			s := q.queryPeers.GetState(cp)
 			switch s {
@@ -440,6 +441,8 @@ func (q *query) allowClosestRejectedPeer() {
 					q.queryPeers.TryAdd(p, up.cause)
 				}
 				delete(q.rejectedResults, cp)
+			default:
+				panic(fmt.Errorf("state of peer %s should be one of the rejected states, but it is %d enum value", cp.Pretty(), s))
 			}
 		}
 	}

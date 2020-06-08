@@ -154,6 +154,8 @@ type IpfsDHT struct {
 
 	addPeerToRTChan   chan addPeerRTReq
 	refreshFinishedCh chan struct{}
+
+	rtFreezeTimeout time.Duration
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -352,6 +354,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		return nil, err
 	}
 	dht.ProviderManager = pm
+
+	dht.rtFreezeTimeout = rtFreezeTimeout
 
 	return dht, nil
 }
@@ -638,7 +642,7 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 		case <-dht.refreshFinishedCh:
 			bootstrapCount = bootstrapCount + 1
 			if bootstrapCount == 2 {
-				timerCh = time.NewTimer(rtFreezeTimeout).C
+				timerCh = time.NewTimer(dht.rtFreezeTimeout).C
 			}
 
 			old := isBootsrapping

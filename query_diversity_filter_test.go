@@ -2,15 +2,16 @@ package dht
 
 import (
 	"context"
-	"github.com/libp2p/go-libp2p-core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"testing"
 	"time"
+
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 )
 

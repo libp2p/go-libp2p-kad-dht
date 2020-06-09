@@ -351,7 +351,7 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 		break
 	}
 
-	if len(qp) == 0 {
+	if err := qp.Validate(); err != nil {
 		return
 	}
 
@@ -551,7 +551,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 	// main `queryPeers` set. Instead, mark it as queried but rejected and cache the query results
 	// in `rejectedResults` so we can process them later if we need them to finish the query.
 	qp := up.queried
-	if qp != q.dht.self && len(qp) != 0 {
+	if err := qp.Validate();err == nil && qp != q.dht.self {
 		if st := q.queryPeers.GetState(qp); st == qpeerset.PeerWaiting {
 			if q.dFilter != nil {
 				if !q.dFilter.TryAdd(qp) {

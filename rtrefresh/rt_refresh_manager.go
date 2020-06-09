@@ -290,5 +290,5 @@ func (r *RtRefreshManager) runRefreshDHTQuery(key string) error {
 		return nil
 	}
 
-	return fmt.Errorf("failed to run refresh DHT query for key=%s, err=%s", key, err)
+	return err
 }

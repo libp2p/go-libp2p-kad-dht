@@ -144,7 +144,7 @@ func (qp *QueryPeerset) GetClosestNInStates(n int, states ...PeerState) (result 
 	return result
 }
 
-// GetClosestInStates returns the closest to the key peers, which are in one of the given states.
+// GetClosestInStates returns the peers, which are in one of the given states.
 // The returned peers are sorted in ascending order by their distance to the key.
 func (qp *QueryPeerset) GetClosestInStates(states ...PeerState) (result []peer.ID) {
 	return qp.GetClosestNInStates(len(qp.all), states...)

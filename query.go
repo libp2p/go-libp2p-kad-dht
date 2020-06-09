@@ -430,7 +430,7 @@ func (q *query) allowClosestRejectedPeer() {
 
 	if q.dFilter != nil {
 		// If the closest non-diverse/rejected peer is closer to the key than the furthest
-		// peer among the Beta closest and queried peers simply change it's state to "heard" and whitelist it in the filter so it can be queried.
+		// peer among the Beta closest and queried peers, simply change it's state to "heard" and whitelist it in the filter so it can be queried.
 		pl := peers[len(peers)-1]
 		cp := q.queryPeers.GetClosestNInStates(1, qpeerset.PeerRejected)[0]
 		if err := cp.Validate(); err != nil {
@@ -477,14 +477,6 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 			q.dht.peerStoppedDHT(q.dht.ctx, p)
 		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
-
-		// we added this peer to the filter state when we selected it for querying.
-		// however, since this peer hasn't given us any information, we shouldn not
-		// "book a slot" in the filter state for it.
-		if q.dFilter != nil {
-			q.dFilter.Remove(p)
-		}
-
 		return
 	}
 
@@ -495,14 +487,6 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 			q.dht.peerStoppedDHT(q.dht.ctx, p)
 		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
-
-		// we added this peer to the filter state when we selected it for querying.
-		// however, since this peer hasn't given us any information, we shouldn not
-		// "book a slot" in the filter state for it.
-		if q.dFilter != nil {
-			q.dFilter.Remove(p)
-		}
-
 		return
 	}
 
@@ -582,6 +566,12 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		}
 		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
 			q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
+			// we added this peer to the filter state when we selected it for querying.
+			// however, since this peer hasn't given us any information, we should not
+			// "book a slot" in the filter state for it.
+			if q.dFilter != nil {
+				q.dFilter.Remove(p)
+			}
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the unreachable state from state %v", st))
 		}

@@ -276,7 +276,6 @@ type queryUpdate struct {
 	queried            []peer.ID
 	heard              []peer.ID
 	unreachable        []peer.ID
-	rejected           []peer.ID
 	queriedAndRejected []peer.ID
 
 	queryDuration time.Duration

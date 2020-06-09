@@ -52,9 +52,6 @@ type query struct {
 	// for now, we measure diversity by IPv4 prefixes/IPv6 ASNs.
 	dFilter *peerdiversity.Filter
 
-	// rejectedResults maps a queried peer rejected by the diversity filter to the results returned by it.
-	rejectedResults map[peer.ID]*queryUpdate
-
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.
 	terminated bool
@@ -188,7 +185,6 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 		}
 
 		q.dFilter = d
-		q.rejectedResults = make(map[peer.ID]*queryUpdate)
 	}
 
 	// run the query
@@ -244,7 +240,7 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	var peers []peer.ID
 	peerState := make(map[peer.ID]qpeerset.PeerState)
 	qp := q.queryPeers.GetClosestNInStates(q.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried,
-		qpeerset.PeerRejected, qpeerset.PeerQueriedAndRejected)
+		qpeerset.PeerRejected)
 	for _, p := range qp {
 		state := q.queryPeers.GetState(p)
 		peerState[p] = state
@@ -272,11 +268,11 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 }
 
 type queryUpdate struct {
-	cause              peer.ID
-	queried            []peer.ID
-	heard              []peer.ID
-	unreachable        []peer.ID
-	queriedAndRejected []peer.ID
+	cause       peer.ID
+	queried     []peer.ID
+	heard       []peer.ID
+	unreachable []peer.ID
+	rejected    []peer.ID
 
 	queryDuration time.Duration
 }
@@ -304,8 +300,14 @@ func (q *query) run() {
 
 		q.allowClosestRejectedPeer()
 
+		// calculate the maximum number of queries we could be spawning.
+		// Note: NumWaiting will be updated in spawnQuery
+		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
+
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
-		if ready, reason := q.isReadyToTerminate(); ready {
+		// it also returns the peers we should query next for a maximum of `maxNumQueriesToSpawn` peers.
+		ready, reason, qPeers := q.isReadyToTerminate(pathCtx, maxNumQueriesToSpawn)
+		if ready {
 			q.terminate(pathCtx, cancelPath, reason)
 		}
 
@@ -313,52 +315,15 @@ func (q *query) run() {
 			return
 		}
 
-		// if all "threads" are busy, wait until someone finishes
-		if q.queryPeers.NumWaiting() >= alpha {
-			continue
-		}
-
-		// spawn new queries, up to the parallelism allowance
-		// calculate the maximum number of queries we could be spawning.
-		// Note: NumWaiting will be updated in spawnQuery
-		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
 		// try spawning the queries, if there are no available peers to query then we won't spawn them
-		for j := 0; j < maxNumQueriesToSpawn; j++ {
-			q.spawnQuery(pathCtx, cause, ch)
+		for _, p := range qPeers {
+			q.spawnQuery(pathCtx, cause, p, ch)
 		}
 	}
 }
 
 // spawnQuery starts one query, if an available heard peer is found
-func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
-	var qp peer.ID
-	peers := q.queryPeers.GetClosestInStates(qpeerset.PeerHeard)
-
-	// The next peer we select for querying should be one that's not rejected by the filter.
-	for _, p := range peers {
-		if q.dFilter != nil {
-			allowed := q.dFilter.TryAdd(p)
-			if !allowed {
-				q.queryPeers.SetState(p, qpeerset.PeerRejected)
-				continue
-			} else {
-				// TODO This is hacky. Maybe, we need a `Filter.Allow()` API ?
-				// don't let unqueried peers take up slots if they are valid.
-				q.dFilter.Remove(p)
-			}
-		}
-
-		// TODO
-		// select a peer whose ASN does not conflict with that of an inflight request so we don't
-		// query peers that eventually end up rejected.
-		qp = p
-		break
-	}
-
-	if len(qp) == 0 {
-		return
-	}
-
+func (q *query) spawnQuery(ctx context.Context, cause peer.ID, queryPeer peer.ID, ch chan<- *queryUpdate) {
 	PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,
@@ -366,33 +331,77 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 			q.key,
 			NewLookupUpdateEvent(
 				cause,
-				q.queryPeers.GetReferrer(qp),
-				nil,           // heard
-				[]peer.ID{qp}, // waiting
-				nil,           // queried
-				nil,           // unreachable
+				q.queryPeers.GetReferrer(queryPeer),
+				nil,                  // heard
+				[]peer.ID{queryPeer}, // waiting
+				nil,                  // queried
+				nil,                  // unreachable
+				nil,                  // rejected
 			),
 			nil,
 			nil,
 		),
 	)
-	q.queryPeers.SetState(qp, qpeerset.PeerWaiting)
+	q.queryPeers.SetState(queryPeer, qpeerset.PeerWaiting)
 	q.waitGroup.Add(1)
-	go q.queryPeer(ctx, ch, qp)
+	go q.queryPeer(ctx, ch, queryPeer)
 }
 
-func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {
+func (q *query) isReadyToTerminate(ctx context.Context, nPeersToQuery int) (bool, LookupTerminationReason, []peer.ID) {
 	// give the application logic a chance to terminate
 	if q.stopFn() {
-		return true, LookupStopped
+		return true, LookupStopped, nil
 	}
 	if q.isStarvationTermination() {
-		return true, LookupStarvation
+		return true, LookupStarvation, nil
 	}
 	if q.isLookupTermination() {
-		return true, LookupCompleted
+		return true, LookupCompleted, nil
 	}
-	return false, -1
+
+	// The peers we query next should be ones that are not rejected by the filter.
+	var peersToQuery []peer.ID
+	peers := q.queryPeers.GetClosestInStates(qpeerset.PeerHeard)
+	for _, p := range peers {
+		if q.dFilter != nil {
+			allowed := q.dFilter.TryAdd(p)
+			if !allowed {
+				src := q.queryPeers.GetReferrer(p)
+				PublishLookupEvent(ctx,
+					NewLookupEvent(
+						q.dht.self,
+						q.id,
+						q.key,
+						NewLookupUpdateEvent(
+							src,
+							src,
+							nil,          // heard
+							nil,          // waiting
+							nil,          // queried
+							nil,          // unreachable
+							[]peer.ID{p}, // rejected
+						),
+						nil,
+						nil,
+					),
+				)
+				q.queryPeers.SetState(p, qpeerset.PeerRejected)
+				continue
+			}
+		}
+		peersToQuery = append(peersToQuery, p)
+	}
+
+	if len(peersToQuery) >= nPeersToQuery {
+		peersToQuery = peersToQuery[:nPeersToQuery]
+	}
+
+	// if there are not more peers to query, we are done.
+	if len(peersToQuery) == 0 {
+		return true, LookupCompleted, nil
+	}
+
+	return false, -1, peersToQuery
 }
 
 // From the set of all nodes that are not unreachable,
@@ -421,37 +430,16 @@ func (q *query) allowClosestRejectedPeer() {
 
 	if q.dFilter != nil {
 		// If the closest non-diverse/rejected peer is closer to the key than the furthest
-		// peer among the Beta closest and queried peers:
-		// 1. If the rejected peer hasn't been queried, simply change it's state to "heard" and whitelist it in the filter so it can be queried.
-		// 2. If the rejected peer has already been queried, change it's state to "queried" and queue up all results returned by it for querying
-		//     by changing their state to "heard".
-
+		// peer among the Beta closest and queried peers simply change it's state to "heard" and whitelist it in the filter so it can be queried.
 		pl := peers[len(peers)-1]
-		cp := q.queryPeers.GetClosestNInStates(1, qpeerset.PeerRejected, qpeerset.PeerQueriedAndRejected)[0]
+		cp := q.queryPeers.GetClosestNInStates(1, qpeerset.PeerRejected)[0]
 		if err := cp.Validate(); err != nil {
 			return
 		}
 
 		if kb.Closer(cp, pl, q.key) {
-			s := q.queryPeers.GetState(cp)
-			switch s {
-			case qpeerset.PeerRejected:
-				q.dFilter.WhitelistPeers(cp)
-				q.queryPeers.SetState(cp, qpeerset.PeerHeard)
-
-			case qpeerset.PeerQueriedAndRejected:
-				q.queryPeers.SetState(cp, qpeerset.PeerQueried)
-				up := q.rejectedResults[cp]
-				for _, p := range up.heard {
-					if p == q.dht.self { // don't add self.
-						continue
-					}
-					q.queryPeers.TryAdd(p, up.cause)
-				}
-				delete(q.rejectedResults, cp)
-			default:
-				panic(fmt.Errorf("state of peer %s should be one of the rejected states, but it is %d enum value", cp.Pretty(), s))
-			}
+			q.dFilter.WhitelistPeers(cp)
+			q.queryPeers.SetState(cp, qpeerset.PeerHeard)
 		}
 	}
 }
@@ -490,6 +478,13 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 
+		// we added this peer to the filter state when we selected it for querying.
+		// however, since this peer hasn't given us any information, we shouldn not
+		// "book a slot" in the filter state for it.
+		if q.dFilter != nil {
+			q.dFilter.Remove(p)
+		}
+
 		return
 	}
 
@@ -500,6 +495,13 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 			q.dht.peerStoppedDHT(q.dht.ctx, p)
 		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
+
+		// we added this peer to the filter state when we selected it for querying.
+		// however, since this peer hasn't given us any information, we shouldn not
+		// "book a slot" in the filter state for it.
+		if q.dFilter != nil {
+			q.dFilter.Remove(p)
+		}
 
 		return
 	}
@@ -528,17 +530,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		}
 	}
 
-	up := &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
-
-	// if the peer is rejected by the filter, we stash the actual results in `rejectedResults` for processing them later if required and pass
-	// a "this peer has been queried and rejected" update to  the state machine.
-	if q.shouldRejectQueriedPeer(p) {
-		q.rejectedResults[p] = up
-		ch <- &queryUpdate{cause: p, queryDuration: queryDuration, queriedAndRejected: []peer.ID{p}}
-		return
-	}
-
-	ch <- up
+	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
 }
 
 func (q *query) shouldRejectQueriedPeer(p peer.ID) bool {
@@ -562,6 +554,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 				nil,            // waiting
 				up.queried,     // queried
 				up.unreachable, // unreachable
+				nil,            // rejected
 			),
 			nil,
 		),
@@ -591,18 +584,6 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 			q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the unreachable state from state %v", st))
-		}
-	}
-
-	for _, p := range up.queriedAndRejected {
-		if p == q.dht.self { // don't add self.
-			continue
-		}
-		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
-			q.queryPeers.SetState(p, qpeerset.PeerQueriedAndRejected)
-			q.peerTimes[p] = up.queryDuration
-		} else {
-			panic(fmt.Errorf("kademlia protocol error: tried to transition to the queriedAndRejected state from state %v", st))
 		}
 	}
 }

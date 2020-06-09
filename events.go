@@ -101,6 +101,7 @@ func NewLookupUpdateEvent(
 	waiting []peer.ID,
 	queried []peer.ID,
 	unreachable []peer.ID,
+	rejected []peer.ID,
 ) *LookupUpdateEvent {
 	return &LookupUpdateEvent{
 		Cause:       OptPeerKadID(cause),
@@ -109,6 +110,7 @@ func NewLookupUpdateEvent(
 		Waiting:     NewPeerKadIDSlice(waiting),
 		Queried:     NewPeerKadIDSlice(queried),
 		Unreachable: NewPeerKadIDSlice(unreachable),
+		Rejected:    NewPeerKadIDSlice(rejected),
 	}
 }
 
@@ -127,6 +129,8 @@ type LookupUpdateEvent struct {
 	Queried []*PeerKadID
 	// Unreachable is a set of peers whose state in the lookup's peerset is being set to "unreachable".
 	Unreachable []*PeerKadID
+	// Rejected is a set of peers whose state in the lookup's peerset is being set to "rejected".
+	Rejected []*PeerKadID
 }
 
 // LookupTerminateEvent describes a lookup termination event.

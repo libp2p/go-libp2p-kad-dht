@@ -20,8 +20,6 @@ const (
 	PeerQueried
 	// PeerUnreachable is applied to peers who have been queried and a response was not retrieved successfully.
 	PeerUnreachable
-	// PeerQueriedAndRejected is applied to peers who have been queried but were rejected by the diversity filter.
-	PeerQueriedAndRejected
 	// PeerRejected is applied to peers who have not been queried because they were rejected by the diversity filter.
 	PeerRejected
 )

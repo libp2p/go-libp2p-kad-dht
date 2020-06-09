@@ -125,65 +125,39 @@ func (qp *QueryPeerset) GetReferrer(p peer.ID) peer.ID {
 	return qp.all[qp.find(p)].referredBy
 }
 
-// NumWaiting returns the number of peers in state PeerWaiting.
-func (qp *QueryPeerset) NumWaiting() int {
-	return len(qp.GetWaitingPeers())
-}
-
-// GetWaitingPeers returns a slice of all peers in state PeerWaiting, in an undefined order.
-func (qp *QueryPeerset) GetWaitingPeers() (result []peer.ID) {
-	for _, p := range qp.all {
-		if p.state == PeerWaiting {
-			result = append(result, p.id)
-		}
-	}
-	return
-}
-
-// GetClosestNotUnreachableOrRejected returns the closest to the key peers, which are not in state PeerUnreachable or in any of the "Rejected" states.
-// It returns count peers or less, if fewer peers meet the condition.
+// GetClosestNInStates returns the closest to the key peers, which are in one of the given states.
+// It returns n peers or less, if fewer peers meet the condition.
 // The returned peers are sorted in ascending order by their distance to the key.
-func (qp *QueryPeerset) GetClosestNotUnreachableOrRejected(count int) (result []peer.ID) {
+func (qp *QueryPeerset) GetClosestNInStates(n int, states ...PeerState) (result []peer.ID) {
 	qp.sort()
+	m := make(map[PeerState]struct{}, len(states))
+	for i := range states {
+		m[states[i]] = struct{}{}
+	}
+
 	for _, p := range qp.all {
-		if p.state != PeerUnreachable && p.state != PeerRejected && p.state != PeerQueriedAndRejected {
+		if _, ok := m[p.state]; ok {
 			result = append(result, p.id)
 		}
 	}
-	if len(result) >= count {
-		return result[:count]
+	if len(result) >= n {
+		return result[:n]
 	}
 	return result
 }
 
-// GetClosestRejectedPeer returns the closest to the key peer, which is in PeerRejected or PeerQueriedAndRejected states.
-func (qp *QueryPeerset) GetClosestRejectedPeer() peer.ID {
-	qp.sort()
-	for _, p := range qp.all {
-		if p.state == PeerRejected || p.state == PeerQueriedAndRejected {
-			return p.id
-		}
-	}
-	return ""
+// GetClosestInStates returns the closest to the key peers, which are in one of the given states.
+// The returned peers are sorted in ascending order by their distance to the key.
+func (qp *QueryPeerset) GetClosestInStates(states ...PeerState) (result []peer.ID) {
+	return qp.GetClosestNInStates(len(qp.all), states...)
 }
 
 // NumHeard returns the number of peers in state PeerHeard.
 func (qp *QueryPeerset) NumHeard() int {
-	return len(qp.GetHeardPeers())
+	return len(qp.GetClosestInStates(PeerHeard))
 }
 
-// GetHeardPeers returns a slice of all peers in state PeerHeard, in an undefined order.
-func (qp *QueryPeerset) GetHeardPeers() (result []peer.ID) {
-	for _, p := range qp.all {
-		if p.state == PeerHeard {
-			result = append(result, p.id)
-		}
-	}
-	return
-}
-
-// GetSortedHeard returns a slice of all peers in state PeerHeard, ordered by ascending distance to the target key.
-func (qp *QueryPeerset) GetSortedHeard() (result []peer.ID) {
-	qp.sort()
-	return qp.GetHeardPeers()
+// NumWaiting returns the number of peers in state PeerWaiting.
+func (qp *QueryPeerset) NumWaiting() int {
+	return len(qp.GetClosestInStates(PeerWaiting))
 }

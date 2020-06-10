@@ -2,6 +2,7 @@ package dht
 
 import (
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/host"
@@ -65,8 +66,9 @@ type config struct {
 	queryDiversityFilter peerdiversity.PeerIPGroupFilter
 
 	// set to true if we're operating in v1 dht compatible mode
-	v1CompatibleMode bool
-	bootstrapPeers   []peer.AddrInfo
+	v1CompatibleMode   bool
+	bootstrapPeers     []peer.AddrInfo
+	disableFixLowPeers bool
 }
 
 func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
@@ -426,6 +428,15 @@ func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option 
 func QueryDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option {
 	return func(c *config) error {
 		c.queryDiversityFilter = pg
+		return nil
+	}
+}
+
+// disableFixLowPeersRoutine disables the "fixLowPeers" routine in the DHT.
+// This is ONLY for tests.
+func disableFixLowPeersRoutine(t *testing.T) Option {
+	return func(c *config) error {
+		c.disableFixLowPeers = true
 		return nil
 	}
 }

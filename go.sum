@@ -219,6 +219,8 @@ github.com/libp2p/go-libp2p-kbucket v0.4.4 h1:XVYbmaO3lnscFxnrVO/bTMQx8HPRMgJuTF
 github.com/libp2p/go-libp2p-kbucket v0.4.4/go.mod h1:/PMj5dxV7yebkcXg7SD3OtXFdMNeqtS6UnByTRu1+Is=
 github.com/libp2p/go-libp2p-kbucket v0.4.5-0.20200610113932-d3a87f7f0488 h1:6fkj/InH4UhM6JTOgwYLXQ26lmMeIUpG6E8X9yMLPUw=
 github.com/libp2p/go-libp2p-kbucket v0.4.5-0.20200610113932-d3a87f7f0488/go.mod h1:12pr3Yg2qtBdwRjffaGJTa995rrMQxBk5a+KncHqTn4=
+github.com/libp2p/go-libp2p-kbucket v0.4.6 h1:09hF4woC+3ZNl3k5flPErUV5pXKq34LBhvupjn4qjW4=
+github.com/libp2p/go-libp2p-kbucket v0.4.6/go.mod h1:12pr3Yg2qtBdwRjffaGJTa995rrMQxBk5a+KncHqTn4=
 github.com/libp2p/go-libp2p-loggables v0.1.0 h1:h3w8QFfCt2UJl/0/NW4K829HX/0S4KD31PQ7m8UXXO8=
 github.com/libp2p/go-libp2p-loggables v0.1.0/go.mod h1:EyumB2Y6PrYjr55Q3/tiJ/o3xoDasoRYM7nOzEpoa90=
 github.com/libp2p/go-libp2p-mplex v0.2.0/go.mod h1:Ejl9IyjvXJ0T9iqUTE1jpYATQ9NM3g+OtR+EMMODbKo=

@@ -52,6 +52,7 @@ type query struct {
 	// for now, we measure diversity by IPv4 prefixes/IPv6 ASNs.
 	dFilter *peerdiversity.Filter
 
+	// whiteListedPeers is ONLY used to assert that we NEVER move a Whitelisted Peer(Rejected -> Heard) to the Rejected state.
 	whiteListedPeers map[peer.ID]struct{}
 
 	// terminated is set when the first worker thread encounters the termination condition.

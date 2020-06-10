@@ -33,7 +33,6 @@ require (
 	github.com/multiformats/go-multistream v0.1.1
 	github.com/stretchr/testify v1.5.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
-	github.com/yl2chen/cidranger v1.0.0
 	go.opencensus.io v0.22.3
 	go.uber.org/zap v1.14.1
 )

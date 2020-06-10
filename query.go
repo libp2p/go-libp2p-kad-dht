@@ -431,11 +431,11 @@ func (q *query) allowClosestRejectedPeer() {
 	if q.dFilter != nil {
 		// If the closest non-diverse/rejected peer is closer to the key than the furthest
 		// peer among the Beta closest and queried peers, simply change it's state to "heard" and whitelist it in the filter so it can be queried.
-		cp := q.queryPeers.GetClosestNInStates(1, qpeerset.PeerRejected)[0]
-		if err := cp.Validate(); err != nil {
+		cps := q.queryPeers.GetClosestNInStates(1, qpeerset.PeerRejected)
+		if len(cps) == 0 {
 			return
 		}
-
+		cp := cps[0]
 		if len(peers) == 0 || kb.Closer(cp, peers[len(peers)-1], q.key) {
 			q.dFilter.WhitelistPeers(cp)
 			q.queryPeers.SetState(cp, qpeerset.PeerHeard)

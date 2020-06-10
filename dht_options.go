@@ -63,6 +63,8 @@ type config struct {
 		diversityFilter     peerdiversity.PeerIPGroupFilter
 	}
 
+	queryDiversityFilter peerdiversity.PeerIPGroupFilter
+
 	// set to true if we're operating in v1 dht compatible mode
 	v1CompatibleMode   bool
 	bootstrapPeers     []peer.AddrInfo
@@ -125,7 +127,7 @@ var defaults = func(o *config) error {
 
 	o.bucketSize = defaultBucketSize
 	o.concurrency = 10
-	o.resiliency = 3
+	o.resiliency = 5
 
 	o.v1CompatibleMode = true
 
@@ -416,6 +418,16 @@ func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
 func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option {
 	return func(c *config) error {
 		c.routingTable.diversityFilter = pg
+		return nil
+	}
+}
+
+// QueryDiversityFilter configures the implementation of the `PeerIPGroupFilter` that will be used
+// to construct the diversity filter for DHT queries.
+// Please see the docs for `peerdiversity.PeerIPGroupFilter` AND `peerdiversity.Filter` for more details.
+func QueryDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option {
+	return func(c *config) error {
+		c.queryDiversityFilter = pg
 		return nil
 	}
 }

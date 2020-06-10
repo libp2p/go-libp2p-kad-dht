@@ -11,14 +11,14 @@ require (
 	github.com/ipfs/go-cid v0.0.5
 	github.com/ipfs/go-datastore v0.4.4
 	github.com/ipfs/go-detect-race v0.0.1
-	github.com/ipfs/go-ipfs-util v0.0.1
+	github.com/ipfs/go-ipfs-util v0.0.2
 	github.com/ipfs/go-ipns v0.0.2
 	github.com/ipfs/go-log v1.0.4
 	github.com/jbenet/goprocess v0.1.4
 	github.com/libp2p/go-eventbus v0.1.0
 	github.com/libp2p/go-libp2p v0.8.2
 	github.com/libp2p/go-libp2p-core v0.5.4
-	github.com/libp2p/go-libp2p-kbucket v0.4.4
+	github.com/libp2p/go-libp2p-kbucket v0.4.5-0.20200610113932-d3a87f7f0488
 	github.com/libp2p/go-libp2p-peerstore v0.2.4
 	github.com/libp2p/go-libp2p-record v0.1.2
 	github.com/libp2p/go-libp2p-routing-helpers v0.2.3

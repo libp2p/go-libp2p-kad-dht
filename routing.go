@@ -667,7 +667,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 			// Note: we consider PeerUnreachable to be a valid state because the peer may not support the DHT protocol
 			// and therefore the peer would fail the query. The fact that a peer that is returned can be a non-DHT
 			// server peer and is not identified as such is a bug.
-			dialedPeerDuringQuery = lookupRes.state[i] != qpeerset.PeerHeard
+			dialedPeerDuringQuery = lookupRes.state[i] != qpeerset.PeerHeard && lookupRes.state[i] != qpeerset.PeerRejected
 			break
 		}
 	}

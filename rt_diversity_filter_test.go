@@ -99,7 +99,7 @@ func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 
 	// it works after removing d2
 	d.routingTable.RemovePeer(d2.self)
-	b, err := d.routingTable.TryAddPeer(d3.self, true)
+	b, err := d.routingTable.TryAddPeer(d3.self, true, false)
 	require.NoError(t, err)
 	require.True(t, b)
 	require.Len(t, d.routingTable.ListPeers(), 1)

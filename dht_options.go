@@ -127,7 +127,7 @@ var defaults = func(o *config) error {
 
 	o.bucketSize = defaultBucketSize
 	o.concurrency = 10
-	o.resiliency = 3
+	o.resiliency = 5
 
 	o.v1CompatibleMode = true
 

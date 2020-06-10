@@ -272,7 +272,6 @@ type queryUpdate struct {
 	queried     []peer.ID
 	heard       []peer.ID
 	unreachable []peer.ID
-	rejected    []peer.ID
 
 	queryDuration time.Duration
 }
@@ -359,9 +358,10 @@ func (q *query) isReadyToTerminate(ctx context.Context, nPeersToQuery int) (bool
 		return true, LookupCompleted, nil
 	}
 
-	// The peers we query next should be ones that are not rejected by the filter.
+	// The peers we query next should be ones that are NOT rejected by the filter.
 	var peersToQuery []peer.ID
 	peers := q.queryPeers.GetClosestInStates(qpeerset.PeerHeard)
+	count := 0
 	for _, p := range peers {
 		if q.dFilter != nil {
 			allowed := q.dFilter.TryAdd(p)
@@ -390,10 +390,10 @@ func (q *query) isReadyToTerminate(ctx context.Context, nPeersToQuery int) (bool
 			}
 		}
 		peersToQuery = append(peersToQuery, p)
-	}
-
-	if len(peersToQuery) >= nPeersToQuery {
-		peersToQuery = peersToQuery[:nPeersToQuery]
+		count++
+		if count == nPeersToQuery {
+			break
+		}
 	}
 
 	// if there are not more peers to query, we are done.
@@ -515,10 +515,6 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	}
 
 	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
-}
-
-func (q *query) shouldRejectQueriedPeer(p peer.ID) bool {
-	return q.dFilter != nil && !q.dFilter.TryAdd(p)
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {

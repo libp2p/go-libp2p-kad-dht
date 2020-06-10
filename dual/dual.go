@@ -4,7 +4,7 @@ package dual
 
 import (
 	"context"
-	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
+	"fmt"
 	"sync"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	helper "github.com/libp2p/go-libp2p-routing-helpers"
 	ma "github.com/multiformats/go-multiaddr"
 
@@ -47,13 +48,58 @@ var (
 	maxPrefixCount       = 3
 )
 
+type config struct {
+	wan, lan []dht.Option
+}
+
+func (cfg *config) apply(opts ...Option) error {
+	for i, o := range opts {
+		if err := o(cfg); err != nil {
+			return fmt.Errorf("dual dht option %d failed: %w", i, err)
+		}
+	}
+}
+
+// Option is an option used to configure the Dual DHT.
+type Option func(*config) error
+
+// WanDHTOption applies the given DHT options to the WAN DHT.
+func WanDHTOption(opts ...dht.Option) Option {
+	return func(c *config) error {
+		c.wan = append(c.wan, opts...)
+		return nil
+	}
+}
+
+// LanDHTOption applies the given DHT options to the LAN DHT.
+func LanDHTOption(opts ...dht.Option) Option {
+	return func(c *config) error {
+		c.lan = append(c.lan, opts...)
+		return nil
+	}
+}
+
+// DHTOption applies the given DHT options to both the WAN and the LAN DHTs.
+func DHTOption(opts ...dht.Option) Option {
+	return func(c *config) error {
+		c.lan = append(c.lan, opts...)
+		c.wan = append(c.wan, opts...)
+		return nil
+	}
+}
+
 // New creates a new DualDHT instance. Options provided are forwarded on to the two concrete
 // IpfsDHT internal constructions, modulo additional options used by the Dual DHT to enforce
 // the LAN-vs-WAN distinction.
 // Note: query or routing table functional options provided as arguments to this function
 // will be overriden by this constructor.
-func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) {
-	wanOpts := append(options,
+func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
+	var cfg config
+	err := cfg.apply(options...)
+	if err != nil {
+		return nil, err
+	}
+	wanOpts := append(cfg.wan,
 		dht.QueryFilter(dht.PublicQueryFilter),
 		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
 		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
@@ -66,7 +112,7 @@ func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) 
 
 	// Unless overridden by user supplied options, the LAN DHT should default
 	// to 'AutoServer' mode.
-	lanOpts := append(options,
+	lanOpts := append(cfg.lan,
 		dht.ProtocolExtension(LanExtension),
 		dht.QueryFilter(dht.PrivateQueryFilter),
 		dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),

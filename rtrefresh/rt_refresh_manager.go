@@ -49,6 +49,8 @@ type RtRefreshManager struct {
 	successfulOutboundQueryGracePeriod time.Duration
 
 	triggerRefresh chan *triggerRefreshReq // channel to write refresh requests to.
+
+	refreshDoneCh chan struct{} // write to this channel after every refresh
 }
 
 func NewRtRefreshManager(h host.Host, rt *kbucket.RoutingTable, autoRefresh bool,
@@ -56,7 +58,8 @@ func NewRtRefreshManager(h host.Host, rt *kbucket.RoutingTable, autoRefresh bool
 	refreshQueryFnc func(ctx context.Context, key string) error,
 	refreshQueryTimeout time.Duration,
 	refreshInterval time.Duration,
-	successfulOutboundQueryGracePeriod time.Duration) (*RtRefreshManager, error) {
+	successfulOutboundQueryGracePeriod time.Duration,
+	refreshDoneCh chan struct{}) (*RtRefreshManager, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &RtRefreshManager{
@@ -75,6 +78,7 @@ func NewRtRefreshManager(h host.Host, rt *kbucket.RoutingTable, autoRefresh bool
 		successfulOutboundQueryGracePeriod: successfulOutboundQueryGracePeriod,
 
 		triggerRefresh: make(chan *triggerRefreshReq),
+		refreshDoneCh:  refreshDoneCh,
 	}, nil
 }
 
@@ -233,6 +237,12 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 				return merr
 			}
 		}
+	}
+
+	select {
+	case r.refreshDoneCh <- struct{}{}:
+	case <-r.ctx.Done():
+		return r.ctx.Err()
 	}
 
 	return merr

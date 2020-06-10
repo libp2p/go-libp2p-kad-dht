@@ -41,6 +41,8 @@ import (
 var (
 	logger     = logging.Logger("dht")
 	baseLogger = logger.Desugar()
+
+	rtFreezeTimeout = 1 * time.Minute
 )
 
 const (
@@ -66,6 +68,11 @@ const (
 	kbucketTag       = "kbucket"
 	protectedBuckets = 2
 )
+
+type addPeerRTReq struct {
+	p         peer.ID
+	queryPeer bool
+}
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
@@ -133,6 +140,11 @@ type IpfsDHT struct {
 	enableProviders, enableValues bool
 
 	fixLowPeersChan chan struct{}
+
+	addPeerToRTChan   chan addPeerRTReq
+	refreshFinishedCh chan struct{}
+
+	rtFreezeTimeout time.Duration
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -209,7 +221,11 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	go dht.persistRTPeersInPeerStore()
 
 	// listens to the fix low peers chan and tries to fix the Routing Table
-	dht.proc.Go(dht.fixLowPeersRoutine)
+	if !cfg.disableFixLowPeers {
+		dht.proc.Go(dht.fixLowPeersRoutine)
+	}
+
+	dht.proc.Go(dht.rtPeerLoop)
 
 	return dht, nil
 }
@@ -277,6 +293,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		rtPeerDiversityFilter:  cfg.routingTable.diversityFilter,
 
 		fixLowPeersChan: make(chan struct{}, 1),
+
+		addPeerToRTChan:   make(chan addPeerRTReq),
+		refreshFinishedCh: make(chan struct{}),
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration
@@ -325,6 +344,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	}
 	dht.ProviderManager = pm
 
+	dht.rtFreezeTimeout = rtFreezeTimeout
+
 	return dht, nil
 }
 
@@ -345,7 +366,8 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThr
 		queryFnc,
 		cfg.routingTable.refreshQueryTimeout,
 		cfg.routingTable.refreshInterval,
-		maxLastSuccessfulOutboundThreshold)
+		maxLastSuccessfulOutboundThreshold,
+		dht.refreshFinishedCh)
 
 	return r, err
 }
@@ -578,6 +600,50 @@ func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	return dht.datastore.Put(mkDsKey(key), data)
 }
 
+func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
+	bootstrapCount := 0
+	isBootsrapping := false
+	var timerCh <-chan time.Time
+
+	for {
+		select {
+		case <-timerCh:
+			dht.routingTable.MarkAllPeersIrreplaceable()
+		case addReq := <-dht.addPeerToRTChan:
+			prevSize := dht.routingTable.Size()
+			if prevSize == 0 {
+				isBootsrapping = true
+				bootstrapCount = 0
+				timerCh = nil
+			}
+			newlyAdded, err := dht.routingTable.TryAddPeer(addReq.p, addReq.queryPeer, isBootsrapping)
+			if err != nil {
+				// peer not added.
+				continue
+			}
+			if !newlyAdded && addReq.queryPeer {
+				// the peer is already in our RT, but we just successfully queried it and so let's give it a
+				// bump on the query time so we don't ping it too soon for a liveliness check.
+				dht.routingTable.UpdateLastSuccessfulOutboundQueryAt(addReq.p, time.Now())
+			}
+		case <-dht.refreshFinishedCh:
+			bootstrapCount = bootstrapCount + 1
+			if bootstrapCount == 2 {
+				timerCh = time.NewTimer(dht.rtFreezeTimeout).C
+			}
+
+			old := isBootsrapping
+			isBootsrapping = false
+			if old {
+				dht.rtRefreshManager.RefreshNoWait()
+			}
+
+		case <-proc.Closing():
+			return
+		}
+	}
+}
+
 // peerFound signals the routingTable that we've found a peer that
 // might support the DHT protocol.
 // If we have a connection a peer but no exchange of a query RPC ->
@@ -599,15 +665,10 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		newlyAdded, err := dht.routingTable.TryAddPeer(p, queryPeer)
-		if err != nil {
-			// peer not added.
+		select {
+		case dht.addPeerToRTChan <- addPeerRTReq{p, queryPeer}:
+		case <-dht.ctx.Done():
 			return
-		}
-		if !newlyAdded && queryPeer {
-			// the peer is already in our RT, but we just successfully queried it and so let's give it a
-			// bump on the query time so we don't ping it too soon for a liveliness check.
-			dht.routingTable.UpdateLastSuccessfulOutboundQueryAt(p, time.Now())
 		}
 	}
 }

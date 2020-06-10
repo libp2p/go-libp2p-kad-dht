@@ -38,7 +38,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 
 			p, err := rt.GenRandPeerID(uint(u))
 			require.NoError(t, err)
-			b, err := rt.TryAddPeer(p, true)
+			b, err := rt.TryAddPeer(p, true, false)
 			require.True(t, b)
 			require.NoError(t, err)
 			return nil
@@ -60,7 +60,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	lastCpl := 2 * (icpl + 1)
 	p, err := rt.GenRandPeerID(10)
 	require.NoError(t, err)
-	b, _ := rt.TryAddPeer(p, true)
+	b, _ := rt.TryAddPeer(p, true, false)
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
 	require.NoError(t, r.doRefresh(true))
@@ -83,7 +83,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	icpl = uint(6)
 	p, err = rt.GenRandPeerID(10)
 	require.NoError(t, err)
-	b, _ = rt.TryAddPeer(p, true)
+	b, _ = rt.TryAddPeer(p, true, false)
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
 	require.NoError(t, r.doRefresh(true))

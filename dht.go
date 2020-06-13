@@ -59,6 +59,8 @@ const (
 const (
 	kad1 protocol.ID = "/kad/1.0.0"
 	kad2 protocol.ID = "/kad/2.0.0"
+	// LanExtension is used to differentiate local protocol requests from those on the WAN DHT.
+	LanExtension protocol.ID = "/lan"
 )
 
 const (
@@ -247,13 +249,19 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		// 2. We'll have V1 peers in our routing table.
 		//
 		// In other words, we'll pollute the V2 network.
-		protocols = []protocol.ID{cfg.protocolPrefix + kad1}
-		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad1}
+		protocols = []protocol.ID{cfg.protocolPrefix + kad1,
+			cfg.protocolPrefix + LanExtension + kad1}
+		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad1,
+			cfg.protocolPrefix + LanExtension + kad1}
 	} else {
 		// In v2 mode, serve on both protocols, but only
 		// query/accept peers in v2 mode.
-		protocols = []protocol.ID{cfg.protocolPrefix + kad2}
-		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
+		protocols = []protocol.ID{cfg.protocolPrefix + kad2,
+			cfg.protocolPrefix + LanExtension + kad2}
+		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad2,
+			cfg.protocolPrefix + LanExtension + kad2,
+			cfg.protocolPrefix + kad1,
+			cfg.protocolPrefix + LanExtension + kad1}
 	}
 
 	dht := &IpfsDHT{

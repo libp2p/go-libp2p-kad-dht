@@ -12,7 +12,6 @@ import (
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	helper "github.com/libp2p/go-libp2p-routing-helpers"
@@ -27,9 +26,6 @@ type DHT struct {
 	WAN *dht.IpfsDHT
 	LAN *dht.IpfsDHT
 }
-
-// LanExtension is used to differentiate local protocol requests from those on the WAN DHT.
-const LanExtension protocol.ID = "/lan"
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
 // guarantee, but we can use them to aid refactoring.
@@ -59,7 +55,7 @@ func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) 
 	// Unless overridden by user supplied options, the LAN DHT should default
 	// to 'AutoServer' mode.
 	lanOpts := append(options,
-		dht.ProtocolExtension(LanExtension),
+		dht.ProtocolExtension(dht.LanExtension),
 		dht.QueryFilter(dht.PrivateQueryFilter),
 		dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),
 	)

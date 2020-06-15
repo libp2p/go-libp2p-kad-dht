@@ -42,11 +42,6 @@ var (
 	_ routing.ValueStore     = (*DHT)(nil)
 )
 
-var (
-	maxPrefixCountPerCpl = 2
-	maxPrefixCount       = 3
-)
-
 // New creates a new DualDHT instance. Options provided are forwarded on to the two concrete
 // IpfsDHT internal constructions, modulo additional options used by the Dual DHT to enforce
 // the LAN-vs-WAN distinction.
@@ -56,8 +51,7 @@ func New(ctx context.Context, h host.Host, options ...dht.Option) (*DHT, error) 
 	wanOpts := append(options,
 		dht.QueryFilter(dht.PublicQueryFilter),
 		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
-		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
-		dht.QueryDiversityFilter(dht.NewQueryDiversityFilter(h, maxPrefixCount)),
+		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, 2, 3)),
 	)
 	wan, err := dht.New(ctx, h, wanOpts...)
 	if err != nil {

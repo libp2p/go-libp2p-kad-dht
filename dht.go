@@ -226,7 +226,6 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // NewDHTClient creates a new DHT object with the given peer as the 'local'
 // host. IpfsDHT clients initialized with this function will not respond to DHT
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
-// NewDHTClient creates a new DHT object with the given peer as the 'local' host
 func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 	dht, err := New(ctx, h, Datastore(dstore), Mode(ModeClient))
 	if err != nil {

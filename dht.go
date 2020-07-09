@@ -375,7 +375,7 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 
 // fixLowPeersRoutine tries to get more peers into the routing table if we're below the threshold
 func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
-	timer := time.NewTimer(periodicBootstrapInterval)
+	timer := time.NewTicker(periodicBootstrapInterval)
 	defer timer.Stop()
 
 	for {

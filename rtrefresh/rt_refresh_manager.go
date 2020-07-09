@@ -262,7 +262,7 @@ func (r *RtRefreshManager) refreshCpl(cpl uint) error {
 		return fmt.Errorf("failed to generated query key for cpl=%d, err=%s", cpl, err)
 	}
 
-	logger.Infof("starting refreshing cpl %d with key %s (routing table size was %d)",
+	logger.Infof("starting refreshing cpl %d with key %x (routing table size was %d)",
 		cpl, key, r.rt.Size())
 
 	if err := r.runRefreshDHTQuery(key); err != nil {

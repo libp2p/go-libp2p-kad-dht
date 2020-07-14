@@ -58,6 +58,7 @@ func (cfg *config) apply(opts ...Option) error {
 			return fmt.Errorf("dual dht option %d failed: %w", i, err)
 		}
 	}
+	return nil
 }
 
 // Option is an option used to configure the Dual DHT.

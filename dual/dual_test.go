@@ -90,7 +90,7 @@ func setupDHT(ctx context.Context, t *testing.T, options ...dht.Option) *DHT {
 	d, err := New(
 		ctx,
 		bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport)),
-		append(baseOpts, options...)...,
+		append([]Option{WanDHTOption(baseOpts...)}, WanDHTOption(options...))...,
 	)
 	if err != nil {
 		t.Fatal(err)

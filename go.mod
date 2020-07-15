@@ -29,6 +29,7 @@ require (
 	github.com/multiformats/go-base32 v0.0.3
 	github.com/multiformats/go-multiaddr v0.2.2
 	github.com/multiformats/go-multiaddr-net v0.1.5
+	github.com/multiformats/go-multibase v0.0.3
 	github.com/multiformats/go-multihash v0.0.14
 	github.com/multiformats/go-multistream v0.1.2
 	github.com/stretchr/testify v1.6.1

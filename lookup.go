@@ -3,68 +3,14 @@ package dht
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	"github.com/ipfs/go-cid"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/multiformats/go-base32"
 )
-
-func tryFormatLoggableKey(k string) (string, error) {
-	if len(k) == 0 {
-		return "", fmt.Errorf("loggableKey is empty")
-	}
-	var proto, cstr string
-	if k[0] == '/' {
-		// it's a path (probably)
-		protoEnd := strings.IndexByte(k[1:], '/')
-		if protoEnd < 0 {
-			return k, fmt.Errorf("loggableKey starts with '/' but is not a path: %x", k)
-		}
-		proto = k[1 : protoEnd+1]
-		cstr = k[protoEnd+2:]
-	} else {
-		proto = "provider"
-		cstr = k
-	}
-
-	var encStr string
-	c, err := cid.Cast([]byte(cstr))
-	if err == nil {
-		encStr = c.String()
-	} else {
-		encStr = base32.RawStdEncoding.EncodeToString([]byte(cstr))
-	}
-
-	return fmt.Sprintf("/%s/%s", proto, encStr), nil
-}
-
-type loggableKeyBytes []byte
-
-func (lk loggableKeyString) String() string {
-	k := string(lk)
-	newKey, err := tryFormatLoggableKey(k)
-	if err == nil {
-		return newKey
-	}
-	return k
-}
-
-type loggableKeyString string
-
-func (lk loggableKeyBytes) String() string {
-	k := string(lk)
-	newKey, err := tryFormatLoggableKey(k)
-	if err == nil {
-		return newKey
-	}
-	return k
-}
 
 // GetClosestPeers is a Kademlia 'node lookup' operation. Returns a channel of
 // the K closest peers to the given key.

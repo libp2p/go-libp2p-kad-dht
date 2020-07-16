@@ -375,13 +375,13 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 
 // fixLowPeersRoutine tries to get more peers into the routing table if we're below the threshold
 func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
-	timer := time.NewTimer(periodicBootstrapInterval)
-	defer timer.Stop()
+	ticker := time.NewTicker(periodicBootstrapInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-dht.fixLowPeersChan:
-		case <-timer.C:
+		case <-ticker.C:
 		case <-proc.Closing():
 			return
 		}

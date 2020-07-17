@@ -16,7 +16,7 @@ func TestLoggableRecordKey(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to format key: %s", err)
 	}
-	if k != "/proto/"+c.String() {
+	if k != "/proto/"+lowercaseB32Encode(c.Bytes()) {
 		t.Error("expected path to be preserved as a loggable key")
 	}
 
@@ -40,37 +40,36 @@ func TestLoggableProviderKey(t *testing.T) {
 	}
 
 	// Test logging CIDv0 provider
-	c0ascidv1Raw := cid.NewCidV1(cid.Raw, c0.Hash())
-	k, err := tryFormatLoggableProviderKey(string(c0.Bytes()))
+	b32MH := lowercaseB32Encode(c0.Hash())
+	k, err := tryFormatLoggableProviderKey(c0.Bytes())
 	if err != nil {
 		t.Errorf("failed to format key: %s", err)
 	}
-	if k != c0ascidv1Raw.String() {
-		t.Error("expected cidv0 to be converted into CIDv1 b32 with Raw codec")
+	if k != b32MH {
+		t.Error("expected cidv0 to be converted into base32 multihash")
 	}
 
 	// Test logging CIDv1 provider (from older DHT implementations)
 	c1 := cid.NewCidV1(cid.DagProtobuf, c0.Hash())
-	k, err = tryFormatLoggableProviderKey(string(c1.Bytes()))
+	k, err = tryFormatLoggableProviderKey(c1.Hash())
 	if err != nil {
 		t.Errorf("failed to format key: %s", err)
 	}
-	if k != c1.String() {
-		t.Error("expected cidv1 to be displayed normally")
+	if k != b32MH {
+		t.Error("expected cidv1 to be converted into base32 multihash")
 	}
 
 	// Test logging multihash provider
-	c1ascidv1Raw := cid.NewCidV1(cid.Raw, c1.Hash())
-	k, err = tryFormatLoggableProviderKey(string(c1.Hash()))
+	k, err = tryFormatLoggableProviderKey(c1.Hash())
 	if err != nil {
 		t.Errorf("failed to format key: %s", err)
 	}
-	if k != c1ascidv1Raw.String() {
-		t.Error("expected multihash to be converted into CIDv1 b32 with Raw codec")
+	if k != b32MH {
+		t.Error("expected multihash to be displayed in base32")
 	}
 
 	for _, s := range []string{"/bla", "", "bla bla", "/bla/asdf", "/a/b/c"} {
-		if _, err := tryFormatLoggableProviderKey(s); err == nil {
+		if _, err := tryFormatLoggableProviderKey([]byte(s)); err == nil {
 			t.Errorf("expected to fail formatting: %s", s)
 		}
 	}

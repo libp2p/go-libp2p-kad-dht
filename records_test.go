@@ -204,7 +204,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(pkkey, rec)
+	err = dhtB.putLocal(ctx, pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(pkkey, rec)
+	err = dhtB.putLocal(ctx, pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestValuesDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				rec, _ := dhtB.getLocal(pkkey)
+				rec, _ := dhtB.getLocal(ctx, pkkey)
 				if rec != nil {
 					t.Fatal("node B should not have found the value locally")
 				}
@@ -374,7 +374,7 @@ func TestValuesDisabled(t *testing.T) {
 					t.Fatal("node A should not have found the value")
 				}
 			}
-			rec, _ := dhtA.getLocal(pkkey)
+			rec, _ := dhtA.getLocal(ctx, pkkey)
 			if rec != nil {
 				t.Fatal("node A should not have found the value locally")
 			}

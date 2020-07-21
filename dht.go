@@ -525,10 +525,10 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 }
 
 // getLocal attempts to retrieve the value from the datastore
-func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
+func (dht *IpfsDHT) getLocal(ctx context.Context, key string) (*recpb.Record, error) {
 	logger.Debugw("finding value in datastore", "key", loggableKeyString(key))
 
-	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
+	rec, err := dht.getRecordFromDatastore(ctx, mkDsKey(key))
 	if err != nil {
 		logger.Warnw("get local failed", "key", key, "error", err)
 		return nil, err
@@ -544,14 +544,14 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 }
 
 // putLocal stores the key value pair in the datastore
-func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
+func (dht *IpfsDHT) putLocal(ctx context.Context, key string, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
 		logger.Warnw("failed to put marshal record for local put", "error", err, "key", key)
 		return err
 	}
 
-	return dht.datastore.Put(mkDsKey(key), data)
+	return dht.datastore.Put(ctx, mkDsKey(key), data)
 }
 
 // peerFound signals the routingTable that we've found a peer that

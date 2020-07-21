@@ -61,7 +61,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	// setup response
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
-	rec, err := dht.checkLocalDatastore(k)
+	rec, err := dht.checkLocalDatastore(ctx, k)
 	if err != nil {
 		return nil, err
 	}
@@ -89,10 +89,10 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return resp, nil
 }
 
-func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
+func (dht *IpfsDHT) checkLocalDatastore(ctx context.Context, k []byte) (*recpb.Record, error) {
 	logger.Debugf("%s handleGetValue looking into ds", dht.self)
 	dskey := convertToDsKey(k)
-	buf, err := dht.datastore.Get(dskey)
+	buf, err := dht.datastore.Get(ctx, dskey)
 	logger.Debugf("%s handleGetValue looking into ds GOT %v", dht.self, buf)
 
 	if err == ds.ErrNotFound {
@@ -131,7 +131,7 @@ func (dht *IpfsDHT) checkLocalDatastore(k []byte) (*recpb.Record, error) {
 	// may be computationally expensive
 
 	if recordIsBad {
-		err := dht.datastore.Delete(dskey)
+		err := dht.datastore.Delete(ctx, dskey)
 		if err != nil {
 			logger.Error("Failed to delete bad record from datastore: ", err)
 		}
@@ -187,7 +187,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from
 	// overwriting a record with a higher sequence number.
-	existing, err := dht.getRecordFromDatastore(dskey)
+	existing, err := dht.getRecordFromDatastore(ctx, dskey)
 	if err != nil {
 		return nil, err
 	}
@@ -213,14 +213,14 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		return nil, err
 	}
 
-	err = dht.datastore.Put(dskey, data)
+	err = dht.datastore.Put(ctx, dskey, data)
 	return pmes, err
 }
 
 // returns nil, nil when either nothing is found or the value found doesn't properly validate.
 // returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *IpfsDHT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
-	buf, err := dht.datastore.Get(dskey)
+func (dht *IpfsDHT) getRecordFromDatastore(ctx context.Context, dskey ds.Key) (*recpb.Record, error) {
+	buf, err := dht.datastore.Get(ctx, dskey)
 	if err == ds.ErrNotFound {
 		return nil, nil
 	}

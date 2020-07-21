@@ -1891,7 +1891,7 @@ func TestProtocolUpgrade(t *testing.T) {
 	// Add record into local DHT only
 	rec := record.MakePutRecord("/v/crow", []byte("caw"))
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dhtC.putLocal(string(rec.Key), rec)
+	err = dhtC.putLocal(ctx, string(rec.Key), rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1908,7 +1908,7 @@ func TestProtocolUpgrade(t *testing.T) {
 	// Add record into local DHT only
 	rec = record.MakePutRecord("/v/bee", []byte("buzz"))
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(string(rec.Key), rec)
+	err = dhtB.putLocal(ctx, string(rec.Key), rec)
 	if err != nil {
 		t.Fatal(err)
 	}

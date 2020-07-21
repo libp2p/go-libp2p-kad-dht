@@ -93,6 +93,7 @@ func TestProvidersDatastore(t *testing.T) {
 }
 
 func TestProvidersSerialization(t *testing.T) {
+	ctx := context.Background()
 	dstore := dssync.MutexWrap(ds.NewMapDatastore())
 
 	k := u.Hash(([]byte("my key!")))
@@ -101,17 +102,17 @@ func TestProvidersSerialization(t *testing.T) {
 	pt1 := time.Now()
 	pt2 := pt1.Add(time.Hour)
 
-	err := writeProviderEntry(dstore, k, p1, pt1)
+	err := writeProviderEntry(ctx, dstore, k, p1, pt1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = writeProviderEntry(dstore, k, p2, pt2)
+	err = writeProviderEntry(ctx, dstore, k, p2, pt2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pset, err := loadProviderSet(dstore, k)
+	pset, err := loadProviderSet(ctx, dstore, k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +207,7 @@ func TestProvidesExpire(t *testing.T) {
 		t.Fatal("providers map not cleaned up")
 	}
 
-	res, err := ds.Query(dsq.Query{Prefix: ProvidersKeyPrefix})
+	res, err := ds.Query(ctx, dsq.Query{Prefix: ProvidersKeyPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}

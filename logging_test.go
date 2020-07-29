@@ -16,7 +16,7 @@ func TestLoggableRecordKey(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to format key: %s", err)
 	}
-	if k != "/proto/"+lowercaseB32Encode(c.Bytes()) {
+	if k != "/proto/"+multibaseB32Encode(c.Bytes()) {
 		t.Error("expected path to be preserved as a loggable key")
 	}
 
@@ -40,7 +40,7 @@ func TestLoggableProviderKey(t *testing.T) {
 	}
 
 	// Test logging CIDv0 provider
-	b32MH := lowercaseB32Encode(c0.Hash())
+	b32MH := multibaseB32Encode(c0.Hash())
 	k, err := tryFormatLoggableProviderKey(c0.Bytes())
 	if err != nil {
 		t.Errorf("failed to format key: %s", err)

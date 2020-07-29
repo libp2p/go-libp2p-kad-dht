@@ -5,12 +5,17 @@ import (
 	"strings"
 
 	"github.com/ipfs/go-cid"
-	"github.com/multiformats/go-base32"
+	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
 )
 
-func lowercaseB32Encode(k []byte) string {
-	return strings.ToLower(base32.RawStdEncoding.EncodeToString(k))
+func multibaseB32Encode(k []byte) string {
+	res, err := multibase.Encode(multibase.Base32, k)
+	if err != nil {
+		// Should be unreachable
+		panic(err)
+	}
+	return res
 }
 
 func tryFormatLoggableRecordKey(k string) (string, error) {
@@ -22,16 +27,16 @@ func tryFormatLoggableRecordKey(k string) (string, error) {
 		// it's a path (probably)
 		protoEnd := strings.IndexByte(k[1:], '/')
 		if protoEnd < 0 {
-			return "", fmt.Errorf("loggableRecordKey starts with '/' but is not a path: %s", lowercaseB32Encode([]byte(k)))
+			return "", fmt.Errorf("loggableRecordKey starts with '/' but is not a path: %s", multibaseB32Encode([]byte(k)))
 		}
 		proto = k[1 : protoEnd+1]
 		cstr = k[protoEnd+2:]
 
-		encStr := lowercaseB32Encode([]byte(cstr))
+		encStr := multibaseB32Encode([]byte(cstr))
 		return fmt.Sprintf("/%s/%s", proto, encStr), nil
 	}
 
-	return "", fmt.Errorf("loggableRecordKey is not a path: %s", lowercaseB32Encode([]byte(cstr)))
+	return "", fmt.Errorf("loggableRecordKey is not a path: %s", multibaseB32Encode([]byte(cstr)))
 }
 
 type loggableRecordKeyString string
@@ -71,7 +76,7 @@ func tryFormatLoggableProviderKey(k []byte) (string, error) {
 		return "", fmt.Errorf("loggableProviderKey is empty")
 	}
 
-	encodedKey := lowercaseB32Encode(k)
+	encodedKey := multibaseB32Encode(k)
 
 	// The DHT used to provide CIDs, but now provides multihashes
 	// TODO: Drop this when enough of the network has upgraded

@@ -34,6 +34,9 @@ type mockConn struct {
 	remote peer.AddrInfo
 }
 
+var _ network.Conn = (*mockConn)(nil)
+
+func (m *mockConn) ID() string                         { return "0" }
 func (m *mockConn) Close() error                       { return nil }
 func (m *mockConn) NewStream() (network.Stream, error) { return nil, nil }
 func (m *mockConn) GetStreams() []network.Stream       { return []network.Stream{} }

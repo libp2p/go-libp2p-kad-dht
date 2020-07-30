@@ -12,13 +12,14 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/libp2p/go-msgio/protoio"
 
-	ggio "github.com/gogo/protobuf/io"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+
 	u "github.com/ipfs/go-ipfs-util"
 )
 
@@ -144,8 +145,8 @@ func TestGetFailures(t *testing.T) {
 		host2.SetStreamHandler(proto, func(s network.Stream) {
 			defer s.Close()
 
-			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-			pbw := ggio.NewDelimitedWriter(s)
+			pbr := protoio.NewDelimitedReader(s, network.MessageSizeMax)
+			pbw := protoio.NewDelimitedWriter(s)
 
 			pmes := new(pb.Message)
 			if err := pbr.ReadMsg(pmes); err != nil {
@@ -199,8 +200,8 @@ func TestGetFailures(t *testing.T) {
 		}
 		defer s.Close()
 
-		pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-		pbw := ggio.NewDelimitedWriter(s)
+		pbr := protoio.NewDelimitedReader(s, network.MessageSizeMax)
+		pbw := protoio.NewDelimitedWriter(s)
 
 		if err := pbw.WriteMsg(&req); err != nil {
 			t.Fatal(err)
@@ -250,8 +251,8 @@ func TestNotFound(t *testing.T) {
 			host.SetStreamHandler(proto, func(s network.Stream) {
 				defer s.Close()
 
-				pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-				pbw := ggio.NewDelimitedWriter(s)
+				pbr := protoio.NewDelimitedReader(s, network.MessageSizeMax)
+				pbw := protoio.NewDelimitedWriter(s)
 
 				pmes := new(pb.Message)
 				if err := pbr.ReadMsg(pmes); err != nil {
@@ -347,8 +348,8 @@ func TestLessThanKResponses(t *testing.T) {
 			host.SetStreamHandler(proto, func(s network.Stream) {
 				defer s.Close()
 
-				pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-				pbw := ggio.NewDelimitedWriter(s)
+				pbr := protoio.NewDelimitedReader(s, network.MessageSizeMax)
+				pbw := protoio.NewDelimitedWriter(s)
 
 				pmes := new(pb.Message)
 				if err := pbr.ReadMsg(pmes); err != nil {
@@ -416,8 +417,8 @@ func TestMultipleQueries(t *testing.T) {
 		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
 			defer s.Close()
 
-			pbr := ggio.NewDelimitedReader(s, network.MessageSizeMax)
-			pbw := ggio.NewDelimitedWriter(s)
+			pbr := protoio.NewDelimitedReader(s, network.MessageSizeMax)
+			pbw := protoio.NewDelimitedWriter(s)
 
 			pmes := new(pb.Message)
 			if err := pbr.ReadMsg(pmes); err != nil {

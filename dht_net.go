@@ -11,11 +11,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-msgio/protoio"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-
-	ggio "github.com/gogo/protobuf/io"
 
 	"github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
@@ -34,7 +33,7 @@ var ErrReadTimeout = fmt.Errorf("timed out reading response")
 // packet for every single write.
 type bufferedDelimitedWriter struct {
 	*bufio.Writer
-	ggio.WriteCloser
+	protoio.WriteCloser
 }
 
 var writerPool = sync.Pool{
@@ -42,7 +41,7 @@ var writerPool = sync.Pool{
 		w := bufio.NewWriter(nil)
 		return &bufferedDelimitedWriter{
 			Writer:      w,
-			WriteCloser: ggio.NewDelimitedWriter(w),
+			WriteCloser: protoio.NewDelimitedWriter(w),
 		}
 	},
 }

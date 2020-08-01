@@ -290,6 +290,10 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 }
 
 func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
+	return dht.getValuesSeeded(ctx, key, stopQuery, nil)
+}
+
+func (dht *IpfsDHT) getValuesSeeded(ctx context.Context, key string, stopQuery chan struct{}, seedPeers []peer.ID) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
@@ -365,6 +369,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					return false
 				}
 			},
+			seedPeers,
 		)
 
 		if err != nil {
@@ -372,7 +377,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 		}
 		lookupResCh <- lookupRes
 
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && seedPeers == nil {
 			dht.refreshRTIfNoShortcut(kb.ConvertKey(key), lookupRes)
 		}
 	}()
@@ -525,6 +530,10 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 }
 
 func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
+	dht.findProvidersAsyncRoutineSeeded(ctx, key, count, peerOut, nil)
+}
+
+func (dht *IpfsDHT) findProvidersAsyncRoutineSeeded(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, seedPeers []peer.ID) {
 	logger.Debugw("finding providers", "key", key)
 
 	defer close(peerOut)
@@ -608,15 +617,20 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		func() bool {
 			return !findAll && ps.Size() >= count
 		},
+		seedPeers,
 	)
 
-	if err == nil && ctx.Err() == nil {
+	if err == nil && ctx.Err() == nil && seedPeers == nil {
 		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
 	}
 }
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+	return dht.FindPeerSeeded(ctx, id, nil)
+}
+
+func (dht *IpfsDHT) FindPeerSeeded(ctx context.Context, id peer.ID, seedPeers []peer.ID) (peer.AddrInfo, error) {
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err
 	}
@@ -655,6 +669,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 		func() bool {
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
+		seedPeers,
 	)
 
 	if err != nil {

@@ -20,8 +20,6 @@ const (
 	PeerQueried
 	// PeerUnreachable is applied to peers who have been queried and a response was not retrieved successfully.
 	PeerUnreachable
-	// PeerRejected is applied to peers who have not been queried because they were rejected by the diversity filter.
-	PeerRejected
 )
 
 // QueryPeerset maintains the state of a Kademlia asynchronous lookup.

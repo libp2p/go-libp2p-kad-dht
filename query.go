@@ -13,11 +13,9 @@ import (
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 
+	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
-
-	"github.com/google/uuid"
 )
 
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
@@ -47,13 +45,6 @@ type query struct {
 
 	// queryPeers is the set of peers known by this query and their respective states.
 	queryPeers *qpeerset.QueryPeerset
-
-	// dFilter is the diversity filter we use to ensure that peers we contact during the query are as diverse as possible.
-	// for now, we measure diversity by IPv4 prefixes/IPv6 ASNs.
-	dFilter *peerdiversity.Filter
-
-	// whiteListedPeers is ONLY used to assert that we NEVER move a Whitelisted Peer(Rejected -> Heard) to the Rejected state.
-	whiteListedPeers map[peer.ID]struct{}
 
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.
@@ -98,7 +89,7 @@ func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, qu
 	// by stateless query functions (e.g. GetClosestPeers and therefore Provide and PutValue)
 	queryPeers := make([]peer.ID, 0, len(lookupRes.peers))
 	for i, p := range lookupRes.peers {
-		if state := lookupRes.state[i]; state == qpeerset.PeerHeard || state == qpeerset.PeerWaiting || state == qpeerset.PeerRejected {
+		if state := lookupRes.state[i]; state == qpeerset.PeerHeard || state == qpeerset.PeerWaiting {
 			queryPeers = append(queryPeers, p)
 		}
 	}
@@ -179,18 +170,6 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 		stopFn:     stopFn,
 	}
 
-	if dht.queryDiversityFilter != nil {
-		d, err := peerdiversity.NewFilter(dht.queryDiversityFilter, "dht/query", func(p peer.ID) int {
-			return kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to contruct diversity filter for query: %w", err)
-		}
-
-		q.dFilter = d
-		q.whiteListedPeers = make(map[peer.ID]struct{})
-	}
-
 	// run the query
 	q.run()
 
@@ -243,8 +222,7 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	// extract the top K not unreachable peers
 	var peers []peer.ID
 	peerState := make(map[peer.ID]qpeerset.PeerState)
-	qp := q.queryPeers.GetClosestNInStates(q.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried,
-		qpeerset.PeerRejected)
+	qp := q.queryPeers.GetClosestNInStates(q.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
 	for _, p := range qp {
 		state := q.queryPeers.GetState(p)
 		peerState[p] = state
@@ -301,8 +279,6 @@ func (q *query) run() {
 			q.terminate(pathCtx, cancelPath, LookupCancelled)
 		}
 
-		q.allowClosestRejectedPeer()
-
 		// calculate the maximum number of queries we could be spawning.
 		// Note: NumWaiting will be updated in spawnQuery
 		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
@@ -339,7 +315,6 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, queryPeer peer.ID
 				[]peer.ID{queryPeer}, // waiting
 				nil,                  // queried
 				nil,                  // unreachable
-				nil,                  // rejected
 			),
 			nil,
 			nil,
@@ -362,42 +337,11 @@ func (q *query) isReadyToTerminate(ctx context.Context, nPeersToQuery int) (bool
 		return true, LookupCompleted, nil
 	}
 
-	// The peers we query next should be ones that are NOT rejected by the filter.
+	// The peers we query next should be ones that we have only Heard about.
 	var peersToQuery []peer.ID
 	peers := q.queryPeers.GetClosestInStates(qpeerset.PeerHeard)
 	count := 0
 	for _, p := range peers {
-		if q.dFilter != nil {
-			allowed := q.dFilter.TryAdd(p)
-			if !allowed {
-				src := q.queryPeers.GetReferrer(p)
-				PublishLookupEvent(ctx,
-					NewLookupEvent(
-						q.dht.self,
-						q.id,
-						q.key,
-						NewLookupUpdateEvent(
-							src,
-							src,
-							nil,          // heard
-							nil,          // waiting
-							nil,          // queried
-							nil,          // unreachable
-							[]peer.ID{p}, // rejected
-						),
-						nil,
-						nil,
-					),
-				)
-
-				// sanity check: we should NEVER REJECT a whitelisted peer as that can cause Heard -> Rejected -> Heard -> Rejected cycles.
-				if _, ok := q.whiteListedPeers[p]; ok {
-					panic(fmt.Errorf("invalid state: rejecting whitelisted peer %s", p))
-				}
-				q.queryPeers.SetState(p, qpeerset.PeerRejected)
-				continue
-			}
-		}
 		peersToQuery = append(peersToQuery, p)
 		count++
 		if count == nPeersToQuery {
@@ -427,32 +371,6 @@ func (q *query) isLookupTermination() bool {
 
 func (q *query) isStarvationTermination() bool {
 	return q.queryPeers.NumHeard() == 0 && q.queryPeers.NumWaiting() == 0
-}
-
-func (q *query) allowClosestRejectedPeer() {
-	peers := q.queryPeers.GetClosestNInStates(q.dht.beta, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
-	for _, p := range peers {
-		if q.queryPeers.GetState(p) != qpeerset.PeerQueried {
-			return
-		}
-	}
-
-	if q.dFilter != nil {
-		// If a rejected peer is closer to the key than the furthest
-		// peer among the Beta closest and queried peers, simply change it's state to "heard" and whitelist it in the filter so it can be queried.
-		cps := q.queryPeers.GetClosestInStates(qpeerset.PeerRejected)
-		if len(cps) == 0 {
-			return
-		}
-
-		for _, cp := range cps {
-			if len(peers) == 0 || kb.Closer(cp, peers[len(peers)-1], q.key) {
-				q.dFilter.WhitelistPeers(cp)
-				q.whiteListedPeers[cp] = struct{}{}
-				q.queryPeers.SetState(cp, qpeerset.PeerHeard)
-			}
-		}
-	}
 }
 
 func (q *query) terminate(ctx context.Context, cancel context.CancelFunc, reason LookupTerminationReason) {
@@ -545,7 +463,6 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 				nil,            // waiting
 				up.queried,     // queried
 				up.unreachable, // unreachable
-				nil,            // rejected
 			),
 			nil,
 		),
@@ -574,12 +491,6 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 
 		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
 			q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
-			// we added this peer to the filter state when we selected it for querying.
-			// however, since this peer hasn't given us any information, we should not
-			// "book a slot" in the filter state for it.
-			if q.dFilter != nil {
-				q.dFilter.Remove(p)
-			}
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the unreachable state from state %v", st))
 		}

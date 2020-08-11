@@ -104,7 +104,6 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 		dht.QueryFilter(dht.PublicQueryFilter),
 		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
 		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
-		dht.QueryDiversityFilter(dht.NewQueryDiversityFilter(h, maxPrefixCount)),
 	)
 	wan, err := dht.New(ctx, h, wanOpts...)
 	if err != nil {

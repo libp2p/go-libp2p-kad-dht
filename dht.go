@@ -125,8 +125,6 @@ type IpfsDHT struct {
 	routingTablePeerFilter RouteTableFilterFunc
 	rtPeerDiversityFilter  peerdiversity.PeerIPGroupFilter
 
-	queryDiversityFilter peerdiversity.PeerIPGroupFilter
-
 	autoRefresh bool
 
 	// A set of bootstrap peers to fallback on if all other attempts to fix
@@ -293,8 +291,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		queryPeerFilter:        cfg.queryPeerFilter,
 		routingTablePeerFilter: cfg.routingTable.peerFilter,
 		rtPeerDiversityFilter:  cfg.routingTable.diversityFilter,
-
-		queryDiversityFilter: cfg.queryDiversityFilter,
 
 		fixLowPeersChan: make(chan struct{}, 1),
 

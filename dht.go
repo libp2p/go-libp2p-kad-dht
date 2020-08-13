@@ -387,6 +387,10 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 	}
 
 	rt, err := kb.NewRoutingTable(cfg.bucketSize, dht.selfKey, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold, filter)
+	if err != nil {
+		return nil, err
+	}
+
 	cmgr := dht.host.ConnManager()
 
 	rt.PeerAdded = func(p peer.ID) {
@@ -409,8 +413,8 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 }
 
 // GetRoutingTableDiversityStats returns the diversity stats for the Routing Table.
-func (d *IpfsDHT) GetRoutingTableDiversityStats() []peerdiversity.CplDiversityStats {
-	return d.routingTable.GetDiversityStats()
+func (dht *IpfsDHT) GetRoutingTableDiversityStats() []peerdiversity.CplDiversityStats {
+	return dht.routingTable.GetDiversityStats()
 }
 
 // Mode allows introspection of the operation mode of the DHT
@@ -541,19 +545,19 @@ func (dht *IpfsDHT) getValueOrPeers(ctx context.Context, p peer.ID, key string) 
 	// Perhaps we were given closer peers
 	peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
-	if record := pmes.GetRecord(); record != nil {
+	if rec := pmes.GetRecord(); rec != nil {
 		// Success! We were given the value
 		logger.Debug("got value")
 
 		// make sure record is valid.
-		err = dht.Validator.Validate(string(record.GetKey()), record.GetValue())
+		err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue())
 		if err != nil {
 			logger.Debug("received invalid record (discarded)")
 			// return a sentinal to signify an invalid record was received
 			err = errInvalidRecord
-			record = new(recpb.Record)
+			rec = new(recpb.Record)
 		}
-		return record, peers, err
+		return rec, peers, err
 	}
 
 	if len(peers) > 0 {

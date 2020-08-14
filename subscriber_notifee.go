@@ -85,7 +85,9 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 				// with our new address to all peers we are connected to. However, we might not necessarily be connected
 				// to our closet peers & so in the true spirit of Zen, searching for ourself in the network really is the best way
 				// to to forge connections with those matter.
-				dht.rtRefreshManager.RefreshNoWait()
+				if dht.autoRefresh || dht.testAddressUpdateProcessing {
+					dht.rtRefreshManager.RefreshNoWait()
+				}
 			case event.EvtPeerProtocolsUpdated:
 				handlePeerChangeEvent(dht, evt.Peer)
 			case event.EvtPeerIdentificationCompleted:

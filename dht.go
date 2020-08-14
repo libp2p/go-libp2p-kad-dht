@@ -145,6 +145,9 @@ type IpfsDHT struct {
 	refreshFinishedCh chan struct{}
 
 	rtFreezeTimeout time.Duration
+
+	// configuration variables for tests
+	testAddressUpdateProcessing bool
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -186,6 +189,8 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.enableValues = cfg.enableValues
 
 	dht.Validator = cfg.validator
+
+	dht.testAddressUpdateProcessing = cfg.testAddressUpdateProcessing
 
 	dht.auto = cfg.mode
 	switch cfg.mode {

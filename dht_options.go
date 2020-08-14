@@ -64,9 +64,12 @@ type config struct {
 	}
 
 	// set to true if we're operating in v1 dht compatible mode
-	v1CompatibleMode   bool
-	bootstrapPeers     []peer.AddrInfo
-	disableFixLowPeers bool
+	v1CompatibleMode bool
+	bootstrapPeers   []peer.AddrInfo
+
+	// test specific config options
+	disableFixLowPeers          bool
+	testAddressUpdateProcessing bool
 }
 
 func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
@@ -425,6 +428,16 @@ func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option 
 func disableFixLowPeersRoutine(t *testing.T) Option {
 	return func(c *config) error {
 		c.disableFixLowPeers = true
+		return nil
+	}
+}
+
+// forceAddressUpdateProcessing forces the DHT to handle changes to the hosts addresses.
+// This occurs even when AutoRefresh has been disabled.
+// This is ONLY for tests.
+func forceAddressUpdateProcessing(t *testing.T) Option {
+	return func(c *config) error {
+		c.testAddressUpdateProcessing = true
 		return nil
 	}
 }

@@ -15,7 +15,7 @@ import (
 func TestSelfWalkOnAddressChange(t *testing.T) {
 	ctx := context.Background()
 	// create three DHT instances with auto refresh disabled
-	d1 := setupDHT(ctx, t, false, DisableAutoRefresh())
+	d1 := setupDHT(ctx, t, false, DisableAutoRefresh(), forceAddressUpdateProcessing(t))
 	d2 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	d3 := setupDHT(ctx, t, false, DisableAutoRefresh())
 

@@ -469,7 +469,7 @@ func (dht *IpfsDHT) putValueToPeer(ctx context.Context, p peer.ID, rec *recpb.Re
 	pmes.Record = rec
 	rpmes, err := dht.sendRequest(ctx, p, pmes)
 	if err != nil {
-		logger.Debugw("failed to put value to peer", "to", p, "key", loggableKeyBytes(rec.Key), "error", err)
+		logger.Debugw("failed to put value to peer", "to", p, "key", loggableRecordKeyBytes(rec.Key), "error", err)
 		return err
 	}
 
@@ -526,17 +526,17 @@ func (dht *IpfsDHT) getValueSingle(ctx context.Context, p peer.ID, key string) (
 
 // getLocal attempts to retrieve the value from the datastore
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
-	logger.Debugw("finding value in datastore", "key", loggableKeyString(key))
+	logger.Debugw("finding value in datastore", "key", loggableRecordKeyString(key))
 
 	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
 	if err != nil {
-		logger.Warnw("get local failed", "key", key, "error", err)
+		logger.Warnw("get local failed", "key", loggableRecordKeyString(key), "error", err)
 		return nil, err
 	}
 
 	// Double check the key. Can't hurt.
 	if rec != nil && string(rec.GetKey()) != key {
-		logger.Errorw("BUG: found a DHT record that didn't match it's key", "expected", key, "got", rec.GetKey())
+		logger.Errorw("BUG: found a DHT record that didn't match it's key", "expected", loggableRecordKeyString(key), "got", rec.GetKey())
 		return nil, nil
 
 	}
@@ -547,7 +547,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
-		logger.Warnw("failed to put marshal record for local put", "error", err, "key", key)
+		logger.Warnw("failed to put marshal record for local put", "error", err, "key", loggableRecordKeyString(key))
 		return err
 	}
 

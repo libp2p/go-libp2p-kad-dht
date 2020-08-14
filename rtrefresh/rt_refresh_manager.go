@@ -13,6 +13,7 @@ import (
 
 	"github.com/hashicorp/go-multierror"
 	logging "github.com/ipfs/go-log"
+	"github.com/multiformats/go-base32"
 )
 
 var logger = logging.Logger("dht/RtRefreshManager")
@@ -263,7 +264,7 @@ func (r *RtRefreshManager) refreshCpl(cpl uint) error {
 	}
 
 	logger.Infof("starting refreshing cpl %d with key %s (routing table size was %d)",
-		cpl, key, r.rt.Size())
+		cpl, loggableRawKeyString(key), r.rt.Size())
 
 	if err := r.runRefreshDHTQuery(key); err != nil {
 		return fmt.Errorf("failed to refresh cpl=%d, err=%s", cpl, err)
@@ -291,4 +292,18 @@ func (r *RtRefreshManager) runRefreshDHTQuery(key string) error {
 	}
 
 	return err
+}
+
+type loggableRawKeyString string
+
+func (lk loggableRawKeyString) String() string {
+	k := string(lk)
+
+	if len(k) == 0 {
+		return k
+	}
+
+	encStr := base32.RawStdEncoding.EncodeToString([]byte(k))
+
+	return encStr
 }

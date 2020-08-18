@@ -8,13 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 
+	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 )
@@ -223,7 +222,7 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	// extract the top K not unreachable peers
 	var peers []peer.ID
 	peerState := make(map[peer.ID]qpeerset.PeerState)
-	qp := q.queryPeers.GetClosestNotUnreachable(q.dht.bucketSize)
+	qp := q.queryPeers.GetClosestNInStates(q.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
 	for _, p := range qp {
 		state := q.queryPeers.GetState(p)
 		peerState[p] = state
@@ -251,10 +250,11 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 }
 
 type queryUpdate struct {
-	cause         peer.ID
-	heard         []peer.ID
-	queried       []peer.ID
-	unreachable   []peer.ID
+	cause       peer.ID
+	queried     []peer.ID
+	heard       []peer.ID
+	unreachable []peer.ID
+
 	queryDuration time.Duration
 }
 
@@ -279,8 +279,14 @@ func (q *query) run() {
 			q.terminate(pathCtx, cancelPath, LookupCancelled)
 		}
 
+		// calculate the maximum number of queries we could be spawning.
+		// Note: NumWaiting will be updated in spawnQuery
+		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
+
 		// termination is triggered on end-of-lookup conditions or starvation of unused peers
-		if ready, reason := q.isReadyToTerminate(); ready {
+		// it also returns the peers we should query next for a maximum of `maxNumQueriesToSpawn` peers.
+		ready, reason, qPeers := q.isReadyToTerminate(pathCtx, maxNumQueriesToSpawn)
+		if ready {
 			q.terminate(pathCtx, cancelPath, reason)
 		}
 
@@ -288,29 +294,15 @@ func (q *query) run() {
 			return
 		}
 
-		// if all "threads" are busy, wait until someone finishes
-		if q.queryPeers.NumWaiting() >= alpha {
-			continue
-		}
-
-		// spawn new queries, up to the parallelism allowance
-		// calculate the maximum number of queries we could be spawning.
-		// Note: NumWaiting will be updated in spawnQuery
-		maxNumQueriesToSpawn := alpha - q.queryPeers.NumWaiting()
 		// try spawning the queries, if there are no available peers to query then we won't spawn them
-		for j := 0; j < maxNumQueriesToSpawn; j++ {
-			q.spawnQuery(pathCtx, cause, ch)
+		for _, p := range qPeers {
+			q.spawnQuery(pathCtx, cause, p, ch)
 		}
 	}
 }
 
 // spawnQuery starts one query, if an available heard peer is found
-func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryUpdate) {
-	peers := q.queryPeers.GetSortedHeard()
-	if len(peers) == 0 {
-		return
-	}
-
+func (q *query) spawnQuery(ctx context.Context, cause peer.ID, queryPeer peer.ID, ch chan<- *queryUpdate) {
 	PublishLookupEvent(ctx,
 		NewLookupEvent(
 			q.dht.self,
@@ -318,39 +310,52 @@ func (q *query) spawnQuery(ctx context.Context, cause peer.ID, ch chan<- *queryU
 			q.key,
 			NewLookupUpdateEvent(
 				cause,
-				q.queryPeers.GetReferrer(peers[0]),
-				nil,                 // heard
-				[]peer.ID{peers[0]}, // waiting
-				nil,                 // queried
-				nil,                 // unreachable
+				q.queryPeers.GetReferrer(queryPeer),
+				nil,                  // heard
+				[]peer.ID{queryPeer}, // waiting
+				nil,                  // queried
+				nil,                  // unreachable
 			),
 			nil,
 			nil,
 		),
 	)
-	q.queryPeers.SetState(peers[0], qpeerset.PeerWaiting)
+	q.queryPeers.SetState(queryPeer, qpeerset.PeerWaiting)
 	q.waitGroup.Add(1)
-	go q.queryPeer(ctx, ch, peers[0])
+	go q.queryPeer(ctx, ch, queryPeer)
 }
 
-func (q *query) isReadyToTerminate() (bool, LookupTerminationReason) {
+func (q *query) isReadyToTerminate(ctx context.Context, nPeersToQuery int) (bool, LookupTerminationReason, []peer.ID) {
 	// give the application logic a chance to terminate
 	if q.stopFn() {
-		return true, LookupStopped
+		return true, LookupStopped, nil
 	}
 	if q.isStarvationTermination() {
-		return true, LookupStarvation
+		return true, LookupStarvation, nil
 	}
 	if q.isLookupTermination() {
-		return true, LookupCompleted
+		return true, LookupCompleted, nil
 	}
-	return false, -1
+
+	// The peers we query next should be ones that we have only Heard about.
+	var peersToQuery []peer.ID
+	peers := q.queryPeers.GetClosestInStates(qpeerset.PeerHeard)
+	count := 0
+	for _, p := range peers {
+		peersToQuery = append(peersToQuery, p)
+		count++
+		if count == nPeersToQuery {
+			break
+		}
+	}
+
+	return false, -1, peersToQuery
 }
 
 // From the set of all nodes that are not unreachable,
 // if the closest beta nodes are all queried, the lookup can terminate.
 func (q *query) isLookupTermination() bool {
-	peers := q.queryPeers.GetClosestNotUnreachable(q.dht.beta)
+	peers := q.queryPeers.GetClosestNInStates(q.dht.beta, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
 	for _, p := range peers {
 		if q.queryPeers.GetState(p) != qpeerset.PeerQueried {
 			return false
@@ -478,6 +483,7 @@ func (q *query) updateState(ctx context.Context, up *queryUpdate) {
 		if p == q.dht.self { // don't add self.
 			continue
 		}
+
 		if st := q.queryPeers.GetState(p); st == qpeerset.PeerWaiting {
 			q.queryPeers.SetState(p, qpeerset.PeerUnreachable)
 		} else {

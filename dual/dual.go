@@ -96,31 +96,42 @@ func DHTOption(opts ...dht.Option) Option {
 // will be overriden by this constructor.
 func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 	var cfg config
-	err := cfg.apply(options...)
+	err := cfg.apply(
+		WanDHTOption(
+			dht.QueryFilter(dht.PublicQueryFilter),
+			dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
+			dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
+		),
+	)
 	if err != nil {
 		return nil, err
 	}
-	wanOpts := append(cfg.wan,
-		dht.QueryFilter(dht.PublicQueryFilter),
-		dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
-		dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
+	err = cfg.apply(
+		LanDHTOption(
+			dht.ProtocolExtension(LanExtension),
+			dht.QueryFilter(dht.PrivateQueryFilter),
+			dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),
+		),
 	)
-	wan, err := dht.New(ctx, h, wanOpts...)
+	if err != nil {
+		return nil, err
+	}
+	err = cfg.apply(options...)
+	if err != nil {
+		return nil, err
+	}
+
+	wan, err := dht.New(ctx, h, cfg.wan...)
 	if err != nil {
 		return nil, err
 	}
 
 	// Unless overridden by user supplied options, the LAN DHT should default
 	// to 'AutoServer' mode.
-	lanOpts := append(cfg.lan,
-		dht.ProtocolExtension(LanExtension),
-		dht.QueryFilter(dht.PrivateQueryFilter),
-		dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),
-	)
 	if wan.Mode() != dht.ModeClient {
-		lanOpts = append(lanOpts, dht.Mode(dht.ModeServer))
+		cfg.lan = append([]dht.Option{dht.Mode(dht.ModeServer)}, cfg.lan...)
 	}
-	lan, err := dht.New(ctx, h, lanOpts...)
+	lan, err := dht.New(ctx, h, cfg.lan...)
 	if err != nil {
 		return nil, err
 	}

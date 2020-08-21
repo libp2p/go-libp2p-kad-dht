@@ -129,7 +129,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 	// Unless overridden by user supplied options, the LAN DHT should default
 	// to 'AutoServer' mode.
 	if wan.Mode() != dht.ModeClient {
-		cfg.lan = append([]dht.Option{dht.Mode(dht.ModeServer)}, cfg.lan...)
+		cfg.lan = append(cfg.lan, dht.Mode(dht.ModeServer))
 	}
 	lan, err := dht.New(ctx, h, cfg.lan...)
 	if err != nil {

@@ -28,7 +28,6 @@ require (
 	github.com/libp2p/go-netroute v0.1.3
 	github.com/multiformats/go-base32 v0.0.3
 	github.com/multiformats/go-multiaddr v0.3.1
-	github.com/multiformats/go-multiaddr-net v0.2.0
 	github.com/multiformats/go-multibase v0.0.3
 	github.com/multiformats/go-multihash v0.0.14
 	github.com/multiformats/go-multistream v0.1.2

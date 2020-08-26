@@ -13,7 +13,7 @@ import (
 	netroute "github.com/libp2p/go-netroute"
 
 	ma "github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr-net"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 // QueryFilterFunc is a filter applied when considering peers to dial when querying

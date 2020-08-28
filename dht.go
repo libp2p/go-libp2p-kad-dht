@@ -61,7 +61,6 @@ const (
 
 const (
 	kad1 protocol.ID = "/kad/1.0.0"
-	kad2 protocol.ID = "/kad/2.0.0"
 )
 
 const (
@@ -260,23 +259,9 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	var protocols, serverProtocols []protocol.ID
 
-	// check if custom test protocols were set
-	if cfg.v1CompatibleMode {
-		// In compat mode, query/serve using the old protocol.
-		//
-		// DO NOT accept requests on the new protocol. Otherwise:
-		// 1. We'll end up in V2 routing tables.
-		// 2. We'll have V1 peers in our routing table.
-		//
-		// In other words, we'll pollute the V2 network.
-		protocols = []protocol.ID{cfg.protocolPrefix + kad1}
-		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad1}
-	} else {
-		// In v2 mode, serve on both protocols, but only
-		// query/accept peers in v2 mode.
-		protocols = []protocol.ID{cfg.protocolPrefix + kad2}
-		serverProtocols = []protocol.ID{cfg.protocolPrefix + kad2, cfg.protocolPrefix + kad1}
-	}
+	v1proto := cfg.protocolPrefix + kad1
+	protocols = []protocol.ID{v1proto}
+	serverProtocols = []protocol.ID{v1proto}
 
 	dht := &IpfsDHT{
 		datastore:              cfg.datastore,

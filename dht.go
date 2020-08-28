@@ -260,6 +260,11 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	var protocols, serverProtocols []protocol.ID
 
 	v1proto := cfg.protocolPrefix + kad1
+
+	if cfg.v1ProtocolOverride != "" {
+		v1proto = cfg.v1ProtocolOverride
+	}
+
 	protocols = []protocol.ID{v1proto}
 	serverProtocols = []protocol.ID{v1proto}
 

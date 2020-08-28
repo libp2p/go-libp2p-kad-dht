@@ -1867,6 +1867,37 @@ func TestInvalidKeys(t *testing.T) {
 	}
 }
 
+func TestV1ProtocolOverride(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d1 := setupDHT(ctx, t, false, V1ProtocolOverride("/myproto") )
+	d2 := setupDHT(ctx, t, false, V1ProtocolOverride("/myproto") )
+	d3 := setupDHT(ctx, t, false, V1ProtocolOverride("/myproto2"))
+	d4 := setupDHT(ctx, t, false)
+
+	dhts := []*IpfsDHT{d1,d2,d3,d4}
+
+	for i, dout := range dhts {
+		for _, din := range dhts[i+1:] {
+			connectNoSync(t, ctx, dout, din)
+		}
+	}
+
+	wait(t, ctx, d1, d2)
+	wait(t, ctx, d2, d1)
+
+	time.Sleep(time.Second)
+
+	if d1.RoutingTable().Size() != 1 || d2.routingTable.Size() != 1 {
+		t.Fatal("should have one peer in the routing table")
+	}
+
+	if d3.RoutingTable().Size() > 0  || d4.RoutingTable().Size() > 0{
+		t.Fatal("should have an empty routing table")
+	}
+}
+
 func TestRoutingFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

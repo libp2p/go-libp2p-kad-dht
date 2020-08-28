@@ -39,19 +39,20 @@ const DefaultPrefix protocol.ID = "/ipfs"
 
 // Options is a structure containing all the options that can be used when constructing a DHT.
 type config struct {
-	datastore        ds.Batching
-	validator        record.Validator
-	validatorChanged bool // if true implies that the validator has been changed and that defaults should not be used
-	mode             ModeOpt
-	protocolPrefix   protocol.ID
-	bucketSize       int
-	concurrency      int
-	resiliency       int
-	maxRecordAge     time.Duration
-	enableProviders  bool
-	enableValues     bool
-	providersOptions []providers.Option
-	queryPeerFilter  QueryFilterFunc
+	datastore          ds.Batching
+	validator          record.Validator
+	validatorChanged   bool // if true implies that the validator has been changed and that defaults should not be used
+	mode               ModeOpt
+	protocolPrefix     protocol.ID
+	v1ProtocolOverride protocol.ID
+	bucketSize         int
+	concurrency        int
+	resiliency         int
+	maxRecordAge       time.Duration
+	enableProviders    bool
+	enableValues       bool
+	providersOptions   []providers.Option
+	queryPeerFilter    QueryFilterFunc
 
 	routingTable struct {
 		refreshQueryTimeout time.Duration
@@ -271,6 +272,18 @@ func ProtocolPrefix(prefix protocol.ID) Option {
 func ProtocolExtension(ext protocol.ID) Option {
 	return func(c *config) error {
 		c.protocolPrefix += ext
+		return nil
+	}
+}
+
+// V1ProtocolOverride overrides the protocolID used for /kad/1.0.0 with another. This is an
+// advanced feature, and should only be used to handle legacy networks that have not been
+// using protocolIDs of the form /app/kad/1.0.0.
+//
+// This option will override and ignore the ProtocolPrefix and ProtocolExtension options
+func V1ProtocolOverride(proto protocol.ID) Option {
+	return func(c *config) error {
+		c.v1ProtocolOverride = proto
 		return nil
 	}
 }

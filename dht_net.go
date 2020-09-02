@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-msgio/protoio"
@@ -64,10 +63,12 @@ func (w *bufferedDelimitedWriter) Flush() error {
 
 // handleNewStream implements the network.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s network.Stream) {
-	defer s.Reset() //nolint
 	if dht.handleNewMessage(s) {
-		// Gracefully close the stream for writes.
-		s.Close()
+		// If we exited without error, close gracefully.
+		_ = s.Close()
+	} else {
+		// otherwise, send an error.
+		_ = s.Reset()
 	}
 }
 
@@ -392,14 +393,15 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			continue
 		}
 
+		var err error
 		if ms.singleMes > streamReuseTries {
-			go helpers.FullClose(ms.s)
+			err = ms.s.Close()
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++
 		}
 
-		return nil
+		return err
 	}
 }
 
@@ -442,14 +444,15 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			continue
 		}
 
+		var err error
 		if ms.singleMes > streamReuseTries {
-			go helpers.FullClose(ms.s)
+			err = ms.s.Close()
 			ms.s = nil
 		} else if retry {
 			ms.singleMes++
 		}
 
-		return mes, nil
+		return mes, err
 	}
 }
 

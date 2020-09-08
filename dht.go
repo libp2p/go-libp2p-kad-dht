@@ -417,7 +417,7 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 	return dht.auto
 }
 
-// fixLowPeersRoutine tries to get more peers into the routing table if we're below the threshold
+// fixLowPeersRouting manages simultaneous requests to fixLowPeers
 func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 	ticker := time.NewTicker(periodicBootstrapInterval)
 	defer ticker.Stop()
@@ -430,62 +430,67 @@ func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 			return
 		}
 
-		if dht.routingTable.Size() > minRTRefreshThreshold {
-			continue
+		dht.fixLowPeers(dht.Context())
+	}
+
+}
+
+// fixLowPeers tries to get more peers into the routing table if we're below the threshold
+func (dht *IpfsDHT) fixLowPeers(ctx context.Context) {
+	if dht.routingTable.Size() > minRTRefreshThreshold {
+		return
+	}
+
+	// we try to add all peers we are connected to to the Routing Table
+	// in case they aren't already there.
+	for _, p := range dht.host.Network().Peers() {
+		dht.peerFound(ctx, p, false)
+	}
+
+	// TODO Active Bootstrapping
+	// We should first use non-bootstrap peers we knew of from previous
+	// snapshots of the Routing Table before we connect to the bootstrappers.
+	// See https://github.com/libp2p/go-libp2p-kad-dht/issues/387.
+	if dht.routingTable.Size() == 0 {
+		if len(dht.bootstrapPeers) == 0 {
+			// No point in continuing, we have no peers!
+			return
 		}
 
-		// we try to add all peers we are connected to to the Routing Table
-		// in case they aren't already there.
-		for _, p := range dht.host.Network().Peers() {
-			dht.peerFound(dht.Context(), p, false)
-		}
-
-		// TODO Active Bootstrapping
-		// We should first use non-bootstrap peers we knew of from previous
-		// snapshots of the Routing Table before we connect to the bootstrappers.
-		// See https://github.com/libp2p/go-libp2p-kad-dht/issues/387.
-		if dht.routingTable.Size() == 0 {
-			if len(dht.bootstrapPeers) == 0 {
-				// No point in continuing, we have no peers!
-				continue
+		found := 0
+		for _, i := range rand.Perm(len(dht.bootstrapPeers)) {
+			ai := dht.bootstrapPeers[i]
+			err := dht.Host().Connect(ctx, ai)
+			if err == nil {
+				found++
+			} else {
+				logger.Warnw("failed to bootstrap", "peer", ai.ID, "error", err)
 			}
 
-			found := 0
-			for _, i := range rand.Perm(len(dht.bootstrapPeers)) {
-				ai := dht.bootstrapPeers[i]
-				err := dht.Host().Connect(dht.Context(), ai)
-				if err == nil {
-					found++
-				} else {
-					logger.Warnw("failed to bootstrap", "peer", ai.ID, "error", err)
-				}
-
-				// Wait for two bootstrap peers, or try them all.
-				//
-				// Why two? In theory, one should be enough
-				// normally. However, if the network were to
-				// restart and everyone connected to just one
-				// bootstrapper, we'll end up with a mostly
-				// partitioned network.
-				//
-				// So we always bootstrap with two random peers.
-				if found == maxNBoostrappers {
-					break
-				}
+			// Wait for two bootstrap peers, or try them all.
+			//
+			// Why two? In theory, one should be enough
+			// normally. However, if the network were to
+			// restart and everyone connected to just one
+			// bootstrapper, we'll end up with a mostly
+			// partitioned network.
+			//
+			// So we always bootstrap with two random peers.
+			if found == maxNBoostrappers {
+				break
 			}
-		}
-
-		// if we still don't have peers in our routing table(probably because Identify hasn't completed),
-		// there is no point in triggering a Refresh.
-		if dht.routingTable.Size() == 0 {
-			continue
-		}
-
-		if dht.autoRefresh {
-			dht.rtRefreshManager.RefreshNoWait()
 		}
 	}
 
+	// if we still don't have peers in our routing table(probably because Identify hasn't completed),
+	// there is no point in triggering a Refresh.
+	if dht.routingTable.Size() == 0 {
+		return
+	}
+
+	if dht.autoRefresh {
+		dht.rtRefreshManager.RefreshNoWait()
+	}
 }
 
 // TODO This is hacky, horrible and the programmer needs to have his mother called a hamster.

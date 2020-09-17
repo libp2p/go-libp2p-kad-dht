@@ -216,6 +216,8 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// handle providers
 	dht.proc.AddChild(dht.ProviderManager.Process())
 
+	dht.fixLowPeers()
+
 	if err := dht.rtRefreshManager.Start(); err != nil {
 		return nil, err
 	}

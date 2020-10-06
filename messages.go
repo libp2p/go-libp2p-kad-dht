@@ -18,11 +18,19 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
 
+// ProtocolMessenger can be used for sending DHT messages to peers and processing their responses.
+// This decouples the wire protocol format from both the DHT protocol implementation and from the implementation of the
+// routing.Routing interface.
+//
+// TODO: This is still strongly coupled with the existing implementation of what happens when a peer actually sends a
+// message on the wire (e.g. reusing streams, reusing connections, metrics tracking, etc.).
 type ProtocolMessenger struct {
 	m         *messageManager
 	validator record.Validator
 }
 
+// NewProtocolMessenger creates a new ProtocolMessenger that is used for sending DHT messages to peers and processing
+// their responses.
 func NewProtocolMessenger(host host.Host, protocols []protocol.ID, validator record.Validator) *ProtocolMessenger {
 	return &ProtocolMessenger{
 		m: &messageManager{
@@ -34,7 +42,7 @@ func NewProtocolMessenger(host host.Host, protocols []protocol.ID, validator rec
 	}
 }
 
-// putValueToPeer stores the given key/value pair at the peer 'p'
+// PutValue asks a peer to store the given key/value pair.
 func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb.Record) error {
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
@@ -52,8 +60,8 @@ func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb
 	return nil
 }
 
-// GetValue queries a particular peer p for the value for
-// key. It returns the value and a list of closer peers.
+// GetValue asks a peer for the value corresponding to the given key. Also returns the K closest peers to the key
+// as described in GetClosestPeers.
 func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
 	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
 	respMsg, err := pm.m.sendRequest(ctx, p, pmes)
@@ -72,7 +80,7 @@ func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string
 		err = pm.validator.Validate(string(rec.GetKey()), rec.GetValue())
 		if err != nil {
 			logger.Debug("received invalid record (discarded)")
-			// return a sentinal to signify an invalid record was received
+			// return a sentinel to signify an invalid record was received
 			err = errInvalidRecord
 			rec = new(recpb.Record)
 		}
@@ -86,7 +94,9 @@ func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string
 	return nil, nil, routing.ErrNotFound
 }
 
-// findPeerSingle asks peer 'p' if they know where the peer with id 'id' is
+// GetClosestPeers asks a peer to return the K (a DHT-wide parameter) DHT server peers closest in XOR space to the id
+// Note: If the peer happens to know another peer whose peerID exactly matches the given id it will return that peer
+// even if that peer is not a DHT server node.
 func (pm *ProtocolMessenger) GetClosestPeers(ctx context.Context, p peer.ID, id peer.ID) ([]*peer.AddrInfo, error) {
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
 	respMsg, err := pm.m.sendRequest(ctx, p, pmes)
@@ -97,14 +107,15 @@ func (pm *ProtocolMessenger) GetClosestPeers(ctx context.Context, p peer.ID, id 
 	return peers, nil
 }
 
+// PutProvider asks a peer to store that we are a provider for the given key.
 func (pm *ProtocolMessenger) PutProvider(ctx context.Context, p peer.ID, key multihash.Multihash, host host.Host) error {
 	pi := peer.AddrInfo{
 		ID:    host.ID(),
 		Addrs: host.Addrs(),
 	}
 
-	// // only share WAN-friendly addresses ??
-	// pi.Addrs = addrutil.WANShareableAddrs(pi.Addrs)
+	// TODO: We may want to limit the type of addresses in our provider records
+	// For example, in a WAN-only DHT prohibit sharing non-WAN addresses (e.g. 192.168.0.100)
 	if len(pi.Addrs) < 1 {
 		return fmt.Errorf("no known addresses for self, cannot put provider")
 	}
@@ -115,6 +126,8 @@ func (pm *ProtocolMessenger) PutProvider(ctx context.Context, p peer.ID, key mul
 	return pm.m.sendMessage(ctx, p, pmes)
 }
 
+// GetProviders asks a peer for the providers it knows of for a given key. Also returns the K closest peers to the key
+// as described in GetClosestPeers.
 func (pm *ProtocolMessenger) GetProviders(ctx context.Context, p peer.ID, key multihash.Multihash) ([]*peer.AddrInfo, []*peer.AddrInfo, error) {
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
 	respMsg, err := pm.m.sendRequest(ctx, p, pmes)

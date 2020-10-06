@@ -96,6 +96,7 @@ type IpfsDHT struct {
 	proc goprocess.Process
 
 	protoMessenger *ProtocolMessenger
+	messageMgr     *messageManager
 
 	plk sync.Mutex
 
@@ -187,7 +188,15 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.disableFixLowPeers = cfg.disableFixLowPeers
 
 	dht.Validator = cfg.validator
-	dht.protoMessenger = NewProtocolMessenger(dht.host, dht.protocols, dht.Validator)
+	dht.messageMgr = &messageManager{
+		host:      h,
+		strmap:    make(map[peer.ID]*messageSender),
+		protocols: dht.protocols,
+	}
+	dht.protoMessenger, err = NewProtocolMessenger(dht.messageMgr, WithValidator(dht.Validator))
+	if err != nil {
+		return nil, err
+	}
 
 	dht.testAddressUpdateProcessing = cfg.testAddressUpdateProcessing
 

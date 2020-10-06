@@ -173,7 +173,7 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		return
 	}
 
-	dht.protoMessenger.m.streamDisconnect(dht.Context(), p)
+	dht.messageMgr.streamDisconnect(dht.Context(), p)
 }
 
 func (nn *subscriberNotifee) Connected(network.Network, network.Conn)      {}

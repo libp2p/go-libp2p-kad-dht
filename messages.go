@@ -8,7 +8,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	record "github.com/libp2p/go-libp2p-record"
@@ -25,28 +24,48 @@ import (
 // TODO: This is still strongly coupled with the existing implementation of what happens when a peer actually sends a
 // message on the wire (e.g. reusing streams, reusing connections, metrics tracking, etc.).
 type ProtocolMessenger struct {
-	m         *messageManager
+	m         MessageSender
 	validator record.Validator
+}
+
+type ProtocolMessengerOption func(*ProtocolMessenger) error
+
+func WithValidator(validator record.Validator) ProtocolMessengerOption {
+	return func(messenger *ProtocolMessenger) error {
+		messenger.validator = validator
+		return nil
+	}
 }
 
 // NewProtocolMessenger creates a new ProtocolMessenger that is used for sending DHT messages to peers and processing
 // their responses.
-func NewProtocolMessenger(host host.Host, protocols []protocol.ID, validator record.Validator) *ProtocolMessenger {
-	return &ProtocolMessenger{
-		m: &messageManager{
-			host:      host,
-			strmap:    make(map[peer.ID]*messageSender),
-			protocols: protocols,
-		},
-		validator: validator,
+func NewProtocolMessenger(msgSender MessageSender, opts ...ProtocolMessengerOption) (*ProtocolMessenger, error) {
+	pm := &ProtocolMessenger{
+		m: msgSender,
 	}
+
+	for _, o := range opts {
+		if err := o(pm); err != nil {
+			return nil, err
+		}
+	}
+
+	return pm, nil
+}
+
+// MessageSender handles sending wire protocol messages to a given peer
+type MessageSender interface {
+	// SendRequest sends a peer a message and waits for its response
+	SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error)
+	// SendMessage sends a peer a message without waiting on a response
+	SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error
 }
 
 // PutValue asks a peer to store the given key/value pair.
 func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb.Record) error {
 	pmes := pb.NewMessage(pb.Message_PUT_VALUE, rec.Key, 0)
 	pmes.Record = rec
-	rpmes, err := pm.m.sendRequest(ctx, p, pmes)
+	rpmes, err := pm.m.SendRequest(ctx, p, pmes)
 	if err != nil {
 		logger.Debugw("failed to put value to peer", "to", p, "key", loggableRecordKeyBytes(rec.Key), "error", err)
 		return err
@@ -64,7 +83,7 @@ func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb
 // as described in GetClosestPeers.
 func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string) (*recpb.Record, []*peer.AddrInfo, error) {
 	pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(key), 0)
-	respMsg, err := pm.m.sendRequest(ctx, p, pmes)
+	respMsg, err := pm.m.SendRequest(ctx, p, pmes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,7 +118,7 @@ func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string
 // even if that peer is not a DHT server node.
 func (pm *ProtocolMessenger) GetClosestPeers(ctx context.Context, p peer.ID, id peer.ID) ([]*peer.AddrInfo, error) {
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(id), 0)
-	respMsg, err := pm.m.sendRequest(ctx, p, pmes)
+	respMsg, err := pm.m.SendRequest(ctx, p, pmes)
 	if err != nil {
 		return nil, err
 	}
@@ -123,14 +142,14 @@ func (pm *ProtocolMessenger) PutProvider(ctx context.Context, p peer.ID, key mul
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, key, 0)
 	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{pi})
 
-	return pm.m.sendMessage(ctx, p, pmes)
+	return pm.m.SendMessage(ctx, p, pmes)
 }
 
 // GetProviders asks a peer for the providers it knows of for a given key. Also returns the K closest peers to the key
 // as described in GetClosestPeers.
 func (pm *ProtocolMessenger) GetProviders(ctx context.Context, p peer.ID, key multihash.Multihash) ([]*peer.AddrInfo, []*peer.AddrInfo, error) {
 	pmes := pb.NewMessage(pb.Message_GET_PROVIDERS, key, 0)
-	respMsg, err := pm.m.sendRequest(ctx, p, pmes)
+	respMsg, err := pm.m.SendRequest(ctx, p, pmes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,7 +161,7 @@ func (pm *ProtocolMessenger) GetProviders(ctx context.Context, p peer.ID, key mu
 // Ping sends a ping message to the passed peer and waits for a response.
 func (pm *ProtocolMessenger) Ping(ctx context.Context, p peer.ID) error {
 	req := pb.NewMessage(pb.Message_PING, nil, 0)
-	resp, err := pm.m.sendRequest(ctx, p, req)
+	resp, err := pm.m.SendRequest(ctx, p, req)
 	if err != nil {
 		return fmt.Errorf("sending request: %w", err)
 	}

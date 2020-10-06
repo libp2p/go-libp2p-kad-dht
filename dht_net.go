@@ -212,8 +212,8 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 
 type messageManager struct {
 	host      host.Host // the network services we need
-	strmap    map[peer.ID]*messageSender
 	smlk      sync.Mutex
+	strmap    map[peer.ID]*messageSender
 	protocols []protocol.ID
 }
 
@@ -236,9 +236,9 @@ func (m *messageManager) streamDisconnect(ctx context.Context, p peer.ID) {
 	}()
 }
 
-// sendRequest sends out a request, but also makes sure to
+// SendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (m *messageManager) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (m *messageManager) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
 	ms, err := m.messageSenderForPeer(ctx, p)
@@ -272,8 +272,8 @@ func (m *messageManager) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Me
 	return rpmes, nil
 }
 
-// sendMessage sends out a message
-func (m *messageManager) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+// SendMessage sends out a message
+func (m *messageManager) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
 	ms, err := m.messageSenderForPeer(ctx, p)

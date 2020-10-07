@@ -14,6 +14,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -31,7 +32,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return routing.ErrNotSupported
 	}
 
-	logger.Debugw("putting value", "key", LoggableRecordKeyString(key))
+	logger.Debugw("putting value", "key", internal.LoggableRecordKeyString(key))
 
 	// don't even allow local users to put bad values.
 	if err := dht.Validator.Validate(key, value); err != nil {
@@ -127,7 +128,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	if best == nil {
 		return nil, routing.ErrNotFound
 	}
-	logger.Debugf("GetValue %v %x", LoggableRecordKeyString(key), best)
+	logger.Debugf("GetValue %v %x", internal.LoggableRecordKeyString(key), best)
 	return best, nil
 }
 
@@ -246,7 +247,7 @@ loop:
 				}
 				sel, err := dht.Validator.Select(key, [][]byte{best, v.Val})
 				if err != nil {
-					logger.Warnw("failed to select best value", "key", LoggableRecordKeyString(key), "error", err)
+					logger.Warnw("failed to select best value", "key", internal.LoggableRecordKeyString(key), "error", err)
 					continue
 				}
 				if sel != 1 {
@@ -292,7 +293,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
-	logger.Debugw("finding value", "key", LoggableRecordKeyString(key))
+	logger.Debugw("finding value", "key", internal.LoggableRecordKeyString(key))
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {
@@ -398,7 +399,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return fmt.Errorf("invalid cid: undefined")
 	}
 	keyMH := key.Hash()
-	logger.Debugw("providing", "cid", key, "mh", LoggableProviderRecordBytes(keyMH))
+	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
 	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
@@ -448,7 +449,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
-			logger.Debugf("putProvider(%s, %s)", LoggableProviderRecordBytes(keyMH), p)
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
 			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
 			if err != nil {
 				logger.Debug(err)
@@ -497,7 +498,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 
 	keyMH := key.Hash()
 
-	logger.Debugw("finding providers", "cid", key, "mh", LoggableProviderRecordBytes(keyMH))
+	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut)
 	return peerOut
 }

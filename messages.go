@@ -14,6 +14,7 @@ import (
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-multihash"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
 
@@ -67,7 +68,7 @@ func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb
 	pmes.Record = rec
 	rpmes, err := pm.m.SendRequest(ctx, p, pmes)
 	if err != nil {
-		logger.Debugw("failed to put value to peer", "to", p, "key", LoggableRecordKeyBytes(rec.Key), "error", err)
+		logger.Debugw("failed to put value to peer", "to", p, "key", internal.LoggableRecordKeyBytes(rec.Key), "error", err)
 		return err
 	}
 

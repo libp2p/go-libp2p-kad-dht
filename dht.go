@@ -540,17 +540,17 @@ var errInvalidRecord = errors.New("received invalid record")
 
 // getLocal attempts to retrieve the value from the datastore
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
-	logger.Debugw("finding value in datastore", "key", loggableRecordKeyString(key))
+	logger.Debugw("finding value in datastore", "key", LoggableRecordKeyString(key))
 
 	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
 	if err != nil {
-		logger.Warnw("get local failed", "key", loggableRecordKeyString(key), "error", err)
+		logger.Warnw("get local failed", "key", LoggableRecordKeyString(key), "error", err)
 		return nil, err
 	}
 
 	// Double check the key. Can't hurt.
 	if rec != nil && string(rec.GetKey()) != key {
-		logger.Errorw("BUG: found a DHT record that didn't match it's key", "expected", loggableRecordKeyString(key), "got", rec.GetKey())
+		logger.Errorw("BUG: found a DHT record that didn't match it's key", "expected", LoggableRecordKeyString(key), "got", rec.GetKey())
 		return nil, nil
 
 	}
@@ -561,7 +561,7 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
-		logger.Warnw("failed to put marshal record for local put", "error", err, "key", loggableRecordKeyString(key))
+		logger.Warnw("failed to put marshal record for local put", "error", err, "key", LoggableRecordKeyString(key))
 		return err
 	}
 

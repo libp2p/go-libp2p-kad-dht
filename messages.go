@@ -67,7 +67,7 @@ func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb
 	pmes.Record = rec
 	rpmes, err := pm.m.SendRequest(ctx, p, pmes)
 	if err != nil {
-		logger.Debugw("failed to put value to peer", "to", p, "key", loggableRecordKeyBytes(rec.Key), "error", err)
+		logger.Debugw("failed to put value to peer", "to", p, "key", LoggableRecordKeyBytes(rec.Key), "error", err)
 		return err
 	}
 

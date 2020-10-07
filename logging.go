@@ -20,14 +20,14 @@ func multibaseB32Encode(k []byte) string {
 
 func tryFormatLoggableRecordKey(k string) (string, error) {
 	if len(k) == 0 {
-		return "", fmt.Errorf("loggableRecordKey is empty")
+		return "", fmt.Errorf("LoggableRecordKey is empty")
 	}
 	var proto, cstr string
 	if k[0] == '/' {
 		// it's a path (probably)
 		protoEnd := strings.IndexByte(k[1:], '/')
 		if protoEnd < 0 {
-			return "", fmt.Errorf("loggableRecordKey starts with '/' but is not a path: %s", multibaseB32Encode([]byte(k)))
+			return "", fmt.Errorf("LoggableRecordKey starts with '/' but is not a path: %s", multibaseB32Encode([]byte(k)))
 		}
 		proto = k[1 : protoEnd+1]
 		cstr = k[protoEnd+2:]
@@ -36,12 +36,12 @@ func tryFormatLoggableRecordKey(k string) (string, error) {
 		return fmt.Sprintf("/%s/%s", proto, encStr), nil
 	}
 
-	return "", fmt.Errorf("loggableRecordKey is not a path: %s", multibaseB32Encode([]byte(cstr)))
+	return "", fmt.Errorf("LoggableRecordKey is not a path: %s", multibaseB32Encode([]byte(cstr)))
 }
 
-type loggableRecordKeyString string
+type LoggableRecordKeyString string
 
-func (lk loggableRecordKeyString) String() string {
+func (lk LoggableRecordKeyString) String() string {
 	k := string(lk)
 	newKey, err := tryFormatLoggableRecordKey(k)
 	if err == nil {
@@ -50,9 +50,9 @@ func (lk loggableRecordKeyString) String() string {
 	return err.Error()
 }
 
-type loggableRecordKeyBytes []byte
+type LoggableRecordKeyBytes []byte
 
-func (lk loggableRecordKeyBytes) String() string {
+func (lk LoggableRecordKeyBytes) String() string {
 	k := string(lk)
 	newKey, err := tryFormatLoggableRecordKey(k)
 	if err == nil {
@@ -61,9 +61,9 @@ func (lk loggableRecordKeyBytes) String() string {
 	return err.Error()
 }
 
-type loggableProviderRecordBytes []byte
+type LoggableProviderRecordBytes []byte
 
-func (lk loggableProviderRecordBytes) String() string {
+func (lk LoggableProviderRecordBytes) String() string {
 	newKey, err := tryFormatLoggableProviderKey(lk)
 	if err == nil {
 		return newKey
@@ -73,7 +73,7 @@ func (lk loggableProviderRecordBytes) String() string {
 
 func tryFormatLoggableProviderKey(k []byte) (string, error) {
 	if len(k) == 0 {
-		return "", fmt.Errorf("loggableProviderKey is empty")
+		return "", fmt.Errorf("LoggableProviderKey is empty")
 	}
 
 	encodedKey := multibaseB32Encode(k)
@@ -88,5 +88,5 @@ func tryFormatLoggableProviderKey(k []byte) (string, error) {
 		return encodedKey, nil
 	}
 
-	return "", fmt.Errorf("loggableProviderKey is not a Multihash or CID: %s", encodedKey)
+	return "", fmt.Errorf("LoggableProviderKey is not a Multihash or CID: %s", encodedKey)
 }

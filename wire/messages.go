@@ -1,4 +1,4 @@
-package dht
+package wire
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 
+	logging "github.com/ipfs/go-log"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-multihash"
@@ -17,6 +18,8 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
+
+var logger = logging.Logger("dht")
 
 // ProtocolMessenger can be used for sending DHT messages to peers and processing their responses.
 // This decouples the wire protocol format from both the DHT protocol implementation and from the implementation of the

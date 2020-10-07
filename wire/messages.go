@@ -104,8 +104,7 @@ func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string
 		if err != nil {
 			logger.Debug("received invalid record (discarded)")
 			// return a sentinel to signify an invalid record was received
-			err = internal.ErrInvalidRecord
-			rec = new(recpb.Record)
+			return nil, peers, internal.ErrInvalidRecord
 		}
 		return rec, peers, err
 	}

@@ -329,7 +329,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					return nil, err
 				default:
 					return nil, err
-				case nil, errInvalidRecord:
+				case nil, internal.ErrInvalidRecord:
 					// in either of these cases, we want to keep going
 				}
 

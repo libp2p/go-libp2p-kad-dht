@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -536,8 +535,6 @@ func (dht *IpfsDHT) persistRTPeersInPeerStore() {
 		}
 	}
 }
-
-var errInvalidRecord = errors.New("received invalid record")
 
 // getLocal attempts to retrieve the value from the datastore
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {

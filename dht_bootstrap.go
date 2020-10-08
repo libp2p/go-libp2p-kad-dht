@@ -58,7 +58,7 @@ func GetDefaultBootstrapPeerAddrInfos() []peer.AddrInfo {
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the
 // IpfsRouter interface.
 func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
-	dht.fixLowPeers(ctx)
+	dht.fixRTIfNeeded()
 	dht.rtRefreshManager.RefreshNoWait()
 	return nil
 }

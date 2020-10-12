@@ -25,8 +25,8 @@ var logger = logging.Logger("dht")
 // This decouples the wire protocol format from both the DHT protocol implementation and from the implementation of the
 // routing.Routing interface.
 //
-// TODO: This is still strongly coupled with the existing implementation of what happens when a peer actually sends a
-// message on the wire (e.g. reusing streams, reusing connections, metrics tracking, etc.).
+// Note: the ProtocolMessenger's MessageSender still needs to deal with some wire protocol details such as using
+// varint-delineated protobufs
 type ProtocolMessenger struct {
 	m         MessageSender
 	validator record.Validator

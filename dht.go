@@ -20,7 +20,6 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
-	"github.com/libp2p/go-libp2p-kad-dht/wire"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
@@ -96,7 +95,7 @@ type IpfsDHT struct {
 	ctx  context.Context
 	proc goprocess.Process
 
-	protoMessenger *wire.ProtocolMessenger
+	protoMessenger *pb.ProtocolMessenger
 	messageMgr     *messageManager
 
 	plk sync.Mutex
@@ -194,7 +193,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		strmap:    make(map[peer.ID]*messageSender),
 		protocols: dht.protocols,
 	}
-	dht.protoMessenger, err = wire.NewProtocolMessenger(dht.messageMgr, wire.WithValidator(dht.Validator))
+	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.messageMgr, pb.WithValidator(dht.Validator))
 	if err != nil {
 		return nil, err
 	}

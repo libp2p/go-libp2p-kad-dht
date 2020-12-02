@@ -218,13 +218,20 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// handle providers
 	dht.proc.AddChild(dht.ProviderManager.Process())
 
-	dht.proc.Go(dht.populatePeers)
-
 	// go-routine to make sure we ALWAYS have RT peer addresses in the peerstore
 	// since RT membership is decoupled from connectivity
 	go dht.persistRTPeersInPeerStore()
 
 	dht.proc.Go(dht.rtPeerLoop)
+
+	// Fill routing table with currently connected peers that are DHT servers
+	dht.plk.Lock()
+	for _, p := range dht.host.Network().Peers() {
+		dht.peerFound(dht.ctx, p, false)
+	}
+	dht.plk.Unlock()
+
+	dht.proc.Go(dht.populatePeers)
 
 	return dht, nil
 }

@@ -64,7 +64,7 @@ type config struct {
 		diversityFilter     peerdiversity.PeerIPGroupFilter
 	}
 
-	bootstrapPeers   []peer.AddrInfo
+	bootstrapPeers []peer.AddrInfo
 
 	// test specific config options
 	disableFixLowPeers          bool

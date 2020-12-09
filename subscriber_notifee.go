@@ -56,13 +56,6 @@ func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
 	// register for network notifications
 	dht.host.Network().Notify(nn)
 
-	// Fill routing table with currently connected peers that are DHT servers
-	dht.plk.Lock()
-	defer dht.plk.Unlock()
-	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(dht.ctx, p, false)
-	}
-
 	return nn, nil
 }
 

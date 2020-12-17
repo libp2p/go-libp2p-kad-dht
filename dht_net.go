@@ -63,7 +63,10 @@ func (w *bufferedDelimitedWriter) Flush() error {
 
 // handleNewStream implements the network.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s network.Stream) {
-	s.SetReadDeadline(time.Now().Add(dhtReadMessageTimeout))
+	if err := s.SetReadDeadline(time.Now().Add(dhtReadMessageTimeout)); err != nil {
+		logger.Warnf("failed to set read deadline for stream: %s", err)
+		return
+	}
 
 	if dht.handleNewMessage(s) {
 		// If we exited without error, close gracefully.

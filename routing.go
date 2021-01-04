@@ -138,7 +138,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 	responsesNeeded := 0
 	if !cfg.Offline {
-		responsesNeeded = getQuorum(&cfg, defaultQuorum)
+		responsesNeeded = getQuorum(&cfg)
 	}
 
 	stopCh := make(chan struct{})

@@ -21,10 +21,10 @@ func Quorum(n int) routing.Option {
 	}
 }
 
-func getQuorum(opts *routing.Options, ndefault int) int {
+func getQuorum(opts *routing.Options) int {
 	responsesNeeded, ok := opts.Other[quorumOptionKey{}].(int)
 	if !ok {
-		responsesNeeded = ndefault
+		responsesNeeded = defaultQuorum
 	}
 	return responsesNeeded
 }

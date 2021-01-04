@@ -34,6 +34,12 @@ func (dht *IpfsDHT) PutValueExtended(ctx context.Context, key string, value []by
 
 	logger.Debugw("putting value", "key", internal.LoggableRecordKeyString(key))
 
+	var cfg routing.Options
+	if err := cfg.Apply(opts...); err != nil {
+		return nil, err
+	}
+	seedPeerOpts := dhtrouting.GetSeedPeers(&cfg)
+
 	// don't even allow local users to put bad values.
 	if err := dht.Validator.Validate(key, value); err != nil {
 		return nil, err
@@ -64,7 +70,7 @@ func (dht *IpfsDHT) PutValueExtended(ctx context.Context, key string, value []by
 		return nil, err
 	}
 
-	pchan, err := dht.GetClosestPeers(ctx, key)
+	pchan, err := dht.GetClosestPeersSeeded(ctx, key, seedPeerOpts.SeedPeers, seedPeerOpts.UseRTPeers)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +157,10 @@ func (dht *IpfsDHT) SearchValueExtended(ctx context.Context, key string, opts ..
 		responsesNeeded = dhtrouting.GetQuorum(&cfg)
 	}
 
+	seedPeerOpts := dhtrouting.GetSeedPeers(&cfg)
+
 	stopCh := make(chan struct{})
-	valCh, lookupRes := dht.getValues(ctx, key, stopCh)
+	valCh, lookupRes := dht.getValues(ctx, key, seedPeerOpts, stopCh)
 
 	out := make(chan []byte)
 	peers := make(chan []peer.ID, 1)
@@ -226,7 +234,7 @@ func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []R
 
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	valCh, _ := dht.getValues(queryCtx, key, nil)
+	valCh, _ := dht.getValues(queryCtx, key, dhtrouting.SeedPeersOptions{UseRTPeers: true}, nil)
 
 	out := make([]RecvdVal, 0, nvals)
 	for val := range valCh {
@@ -304,7 +312,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, seedPeerOpts dhtrouting.SeedPeersOptions, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
@@ -380,6 +388,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					return false
 				}
 			},
+			seedPeerOpts.SeedPeers, seedPeerOpts.UseRTPeers,
 		)
 
 		if err != nil {
@@ -416,6 +425,12 @@ func (dht *IpfsDHT) ProvideExtended(ctx context.Context, key cid.Cid, brdcst boo
 	keyMH := key.Hash()
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
+	var cfg routing.Options
+	if err := cfg.Apply(opts...); err != nil {
+		return nil, err
+	}
+	seedPeerOpts := dhtrouting.GetSeedPeers(&cfg)
+
 	// add self locally
 	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
 	if !brdcst {
@@ -444,7 +459,7 @@ func (dht *IpfsDHT) ProvideExtended(ctx context.Context, key cid.Cid, brdcst boo
 	}
 
 	var exceededDeadline bool
-	peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
+	peers, err := dht.GetClosestPeersSeeded(closerCtx, string(keyMH), seedPeerOpts.SeedPeers, seedPeerOpts.UseRTPeers)
 	switch err {
 	case context.DeadlineExceeded:
 		// If the _inner_ deadline has been exceeded but the _outer_
@@ -516,6 +531,7 @@ func (dht *IpfsDHT) FindProvidersAsyncExtended(ctx context.Context, key cid.Cid,
 	}
 
 	count := dhtrouting.GetQuorum(&cfg)
+	seedPeerOpts := dhtrouting.GetSeedPeers(&cfg)
 
 	chSize := count
 	if count == 0 {
@@ -527,7 +543,7 @@ func (dht *IpfsDHT) FindProvidersAsyncExtended(ctx context.Context, key cid.Cid,
 	keyMH := key.Hash()
 
 	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
-	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut, closestPeersOut)
+	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, seedPeerOpts, peerOut, closestPeersOut)
 	return peerOut, closestPeersOut, nil
 }
 
@@ -541,7 +557,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 	return providers
 }
 
-func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, closestPeersOut chan []peer.ID) {
+func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, seedPeerOpts dhtrouting.SeedPeersOptions, peerOut chan peer.AddrInfo, closestPeersOut chan []peer.ID) {
 	defer close(peerOut)
 	defer close(closestPeersOut)
 
@@ -620,6 +636,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		func() bool {
 			return !findAll && ps.Size() >= count
 		},
+		seedPeerOpts.SeedPeers, seedPeerOpts.UseRTPeers,
 	)
 
 	if lookupRes != nil {
@@ -638,6 +655,12 @@ func (dht *IpfsDHT) FindPeerExtended(ctx context.Context, id peer.ID, opts ...ro
 	}
 
 	logger.Debugw("finding peer", "peer", id)
+
+	var cfg routing.Options
+	if err := cfg.Apply(opts...); err != nil {
+		return peer.AddrInfo{}, nil, err
+	}
+	seedPeerOpts := dhtrouting.GetSeedPeers(&cfg)
 
 	// Check if were already connected to them
 	if pi := dht.FindLocal(id); pi.ID != "" {
@@ -670,6 +693,7 @@ func (dht *IpfsDHT) FindPeerExtended(ctx context.Context, id peer.ID, opts ...ro
 		func() bool {
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
+		seedPeerOpts.SeedPeers, seedPeerOpts.UseRTPeers,
 	)
 
 	if err != nil {

@@ -17,6 +17,11 @@ import (
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
+	return dht.GetClosestPeersSeeded(ctx, key, nil, true)
+}
+
+// GetClosestPeersSeeded is the Kademlia 'node lookup' operation
+func (dht *IpfsDHT) GetClosestPeersSeeded(ctx context.Context, key string, seedPeers []peer.ID, useRTPeers bool) (<-chan peer.ID, error) {
 	if key == "" {
 		return nil, fmt.Errorf("can't lookup empty key")
 	}
@@ -45,6 +50,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 			return peers, err
 		},
 		func() bool { return false },
+		seedPeers, useRTPeers,
 	)
 
 	if err != nil {

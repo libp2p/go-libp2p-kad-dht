@@ -75,8 +75,9 @@ func (pm *ProtocolMessenger) PutValue(ctx context.Context, p peer.ID, rec *recpb
 	}
 
 	if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
-		logger.Infow("value not put correctly", "put-message", pmes, "get-message", rpmes)
-		return errors.New("value not put correctly")
+		const errStr = "value not put correctly"
+		logger.Infow(errStr, "put-message", pmes, "get-message", rpmes)
+		return errors.New(errStr)
 	}
 
 	return nil

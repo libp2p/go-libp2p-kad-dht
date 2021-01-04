@@ -58,3 +58,49 @@ func GetSeedPeers(opts *routing.Options) SeedPeersOptions {
 	}
 	return seedPeersOpts
 }
+
+type updateDuringGetOptionKey struct{}
+
+// UpdateDuringGet is a DHT option that tells the DHT if it should update peers with
+// old data while doing a Get
+//
+// Default: true for Get/SearchValue, and false otherwise
+func UpdateDuringGet(updateDuringGet bool) routing.Option {
+	return func(opts *routing.Options) error {
+		if opts.Other == nil {
+			opts.Other = make(map[interface{}]interface{}, 1)
+		}
+		opts.Other[updateDuringGetOptionKey{}] = updateDuringGet
+		return nil
+	}
+}
+
+func getUpdateDuringGet(opts *routing.Options, defaulValue bool) bool {
+	updateDuringGet, ok := opts.Other[updateDuringGetOptionKey{}].(bool)
+	if !ok {
+		updateDuringGet = defaulValue
+	}
+	return updateDuringGet
+}
+
+type processorsOptionKey struct{}
+
+// WithProcessors is a DHT option that tells the DHT which processors it should use
+// (and the order to apply them) on lookup results.
+func WithProcessors(processors ...Processor) routing.Option {
+	return func(opts *routing.Options) error {
+		if opts.Other == nil {
+			opts.Other = make(map[interface{}]interface{}, 1)
+		}
+		opts.Other[processorsOptionKey{}] = processors
+		return nil
+	}
+}
+
+func GetProcessors(opts *routing.Options) []Processor {
+	processors, ok := opts.Other[processorsOptionKey{}].([]Processor)
+	if !ok {
+		processors = nil
+	}
+	return processors
+}

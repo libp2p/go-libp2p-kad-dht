@@ -16,6 +16,7 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
+	dhtrouting "github.com/libp2p/go-libp2p-kad-dht/routing"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/multiformats/go-multihash"
@@ -138,7 +139,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 	responsesNeeded := 0
 	if !cfg.Offline {
-		responsesNeeded = getQuorum(&cfg)
+		responsesNeeded = dhtrouting.GetQuorum(&cfg)
 	}
 
 	stopCh := make(chan struct{})

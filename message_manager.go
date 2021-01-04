@@ -19,16 +19,16 @@ import (
 	"go.opencensus.io/tag"
 )
 
-// messageManager is responsible for sending requests and messages to peers efficiently, including reuse of streams.
+// messageSenderImpl is responsible for sending requests and messages to peers efficiently, including reuse of streams.
 // It also tracks metrics for sent requests and messages.
-type messageManager struct {
+type messageSenderImpl struct {
 	host      host.Host // the network services we need
 	smlk      sync.Mutex
 	strmap    map[peer.ID]*peerMessageSender
 	protocols []protocol.ID
 }
 
-func (m *messageManager) streamDisconnect(ctx context.Context, p peer.ID) {
+func (m *messageSenderImpl) streamDisconnect(ctx context.Context, p peer.ID) {
 	m.smlk.Lock()
 	defer m.smlk.Unlock()
 	ms, ok := m.strmap[p]
@@ -49,7 +49,7 @@ func (m *messageManager) streamDisconnect(ctx context.Context, p peer.ID) {
 
 // SendRequest sends out a request, but also makes sure to
 // measure the RTT for latency measurements.
-func (m *messageManager) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+func (m *messageSenderImpl) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
 	ms, err := m.messageSenderForPeer(ctx, p)
@@ -84,7 +84,7 @@ func (m *messageManager) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Me
 }
 
 // SendMessage sends out a message
-func (m *messageManager) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+func (m *messageSenderImpl) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
 
 	ms, err := m.messageSenderForPeer(ctx, p)
@@ -113,7 +113,7 @@ func (m *messageManager) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Me
 	return nil
 }
 
-func (m *messageManager) messageSenderForPeer(ctx context.Context, p peer.ID) (*peerMessageSender, error) {
+func (m *messageSenderImpl) messageSenderForPeer(ctx context.Context, p peer.ID) (*peerMessageSender, error) {
 	m.smlk.Lock()
 	ms, ok := m.strmap[p]
 	if ok {
@@ -151,7 +151,7 @@ type peerMessageSender struct {
 	r  msgio.ReadCloser
 	lk ctxMutex
 	p  peer.ID
-	m  *messageManager
+	m  *messageSenderImpl
 
 	invalid   bool
 	singleMes int

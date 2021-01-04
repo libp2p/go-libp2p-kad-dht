@@ -14,7 +14,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -32,7 +32,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return routing.ErrNotSupported
 	}
 
-	logger.Debugw("putting value", "key", loggableRecordKeyString(key))
+	logger.Debugw("putting value", "key", internal.LoggableRecordKeyString(key))
 
 	// don't even allow local users to put bad values.
 	if err := dht.Validator.Validate(key, value); err != nil {
@@ -81,7 +81,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 				ID:   p,
 			})
 
-			err := dht.putValueToPeer(ctx, p, rec)
+			err := dht.protoMessenger.PutValue(ctx, p, rec)
 			if err != nil {
 				logger.Debugf("failed putting value to peer: %s", err)
 			}
@@ -128,7 +128,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	if best == nil {
 		return nil, routing.ErrNotFound
 	}
-	logger.Debugf("GetValue %v %x", loggableRecordKeyString(key), best)
+	logger.Debugf("GetValue %v %x", internal.LoggableRecordKeyString(key), best)
 	return best, nil
 }
 
@@ -247,7 +247,7 @@ loop:
 				}
 				sel, err := dht.Validator.Select(key, [][]byte{best, v.Val})
 				if err != nil {
-					logger.Warnw("failed to select best value", "key", loggableRecordKeyString(key), "error", err)
+					logger.Warnw("failed to select best value", "key", internal.LoggableRecordKeyString(key), "error", err)
 					continue
 				}
 				if sel != 1 {
@@ -281,7 +281,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 			}
 			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
 			defer cancel()
-			err := dht.putValueToPeer(ctx, p, fixupRec)
+			err := dht.protoMessenger.PutValue(ctx, p, fixupRec)
 			if err != nil {
 				logger.Debug("Error correcting DHT entry: ", err)
 			}
@@ -293,7 +293,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
-	logger.Debugw("finding value", "key", loggableRecordKeyString(key))
+	logger.Debugw("finding value", "key", internal.LoggableRecordKeyString(key))
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {
@@ -316,7 +316,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					ID:   p,
 				})
 
-				rec, peers, err := dht.getValueOrPeers(ctx, p, key)
+				rec, peers, err := dht.protoMessenger.GetValue(ctx, p, key)
 				switch err {
 				case routing.ErrNotFound:
 					// in this case, they responded with nothing,
@@ -329,7 +329,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					return nil, err
 				default:
 					return nil, err
-				case nil, errInvalidRecord:
+				case nil, internal.ErrInvalidRecord:
 					// in either of these cases, we want to keep going
 				}
 
@@ -399,7 +399,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return fmt.Errorf("invalid cid: undefined")
 	}
 	keyMH := key.Hash()
-	logger.Debugw("providing", "cid", key, "mh", loggableProviderRecordBytes(keyMH))
+	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
 	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
@@ -444,18 +444,13 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
-	mes, err := dht.makeProvRecord(keyMH)
-	if err != nil {
-		return err
-	}
-
 	wg := sync.WaitGroup{}
 	for p := range peers {
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
-			logger.Debugf("putProvider(%s, %s)", loggableProviderRecordBytes(keyMH), p)
-			err := dht.sendMessage(ctx, p, mes)
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
 			if err != nil {
 				logger.Debug(err)
 			}
@@ -466,22 +461,6 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return context.DeadlineExceeded
 	}
 	return ctx.Err()
-}
-func (dht *IpfsDHT) makeProvRecord(key []byte) (*pb.Message, error) {
-	pi := peer.AddrInfo{
-		ID:    dht.self,
-		Addrs: dht.host.Addrs(),
-	}
-
-	// // only share WAN-friendly addresses ??
-	// pi.Addrs = addrutil.WANShareableAddrs(pi.Addrs)
-	if len(pi.Addrs) < 1 {
-		return nil, fmt.Errorf("no known addresses for self, cannot put provider")
-	}
-
-	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, key, 0)
-	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{pi})
-	return pmes, nil
 }
 
 // FindProviders searches until the context expires.
@@ -519,7 +498,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 
 	keyMH := key.Hash()
 
-	logger.Debugw("finding providers", "cid", key, "mh", loggableProviderRecordBytes(keyMH))
+	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut)
 	return peerOut
 }
@@ -562,14 +541,12 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 				ID:   p,
 			})
 
-			pmes, err := dht.findProvidersSingle(ctx, p, key)
+			provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
 			if err != nil {
 				return nil, err
 			}
 
-			logger.Debugf("%d provider entries", len(pmes.GetProviderPeers()))
-			provs := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
-			logger.Debugf("%d provider entries decoded", len(provs))
+			logger.Debugf("%d provider entries", len(provs))
 
 			// Add unique providers from request, up to 'count'
 			for _, prov := range provs {
@@ -591,17 +568,15 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 			}
 
 			// Give closer peers back to the query to be queried
-			closer := pmes.GetCloserPeers()
-			peers := pb.PBPeersToPeerInfos(closer)
-			logger.Debugf("got closer peers: %d %s", len(peers), peers)
+			logger.Debugf("got closer peers: %d %s", len(closest), closest)
 
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:      routing.PeerResponse,
 				ID:        p,
-				Responses: peers,
+				Responses: closest,
 			})
 
-			return peers, nil
+			return closest, nil
 		},
 		func() bool {
 			return !findAll && ps.Size() >= count
@@ -634,12 +609,11 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 				ID:   p,
 			})
 
-			pmes, err := dht.findPeerSingle(ctx, p, id)
+			peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, id)
 			if err != nil {
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}
-			peers := pb.PBPeersToPeerInfos(pmes.GetCloserPeers())
 
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{

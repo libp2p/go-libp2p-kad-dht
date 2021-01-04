@@ -14,6 +14,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
 	u "github.com/ipfs/go-ipfs-util"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
@@ -167,7 +168,7 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 
 	// Make sure the record is valid (not expired, valid signature etc)
 	if err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
-		logger.Infow("bad dht record in PUT", "from", p, "key", loggableRecordKeyBytes(rec.GetKey()), "error", err)
+		logger.Infow("bad dht record in PUT", "from", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()), "error", err)
 		return nil, err
 	}
 
@@ -196,11 +197,11 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		recs := [][]byte{rec.GetValue(), existing.GetValue()}
 		i, err := dht.Validator.Select(string(rec.GetKey()), recs)
 		if err != nil {
-			logger.Warnw("dht record passed validation but failed select", "from", p, "key", loggableRecordKeyBytes(rec.GetKey()), "error", err)
+			logger.Warnw("dht record passed validation but failed select", "from", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()), "error", err)
 			return nil, err
 		}
 		if i != 0 {
-			logger.Infow("DHT record in PUT older than existing record (ignoring)", "peer", p, "key", loggableRecordKeyBytes(rec.GetKey()))
+			logger.Infow("DHT record in PUT older than existing record (ignoring)", "peer", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()))
 			return nil, errors.New("old record")
 		}
 	}
@@ -344,7 +345,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		return nil, fmt.Errorf("handleAddProvider key is empty")
 	}
 
-	logger.Debugf("adding provider", "from", p, "key", loggableProviderRecordBytes(key))
+	logger.Debugf("adding provider", "from", p, "key", internal.LoggableProviderRecordBytes(key))
 
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())

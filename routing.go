@@ -26,24 +26,23 @@ import (
 
 // Basic Put/Get
 
-// PutValue adds value corresponding to given Key.
-// This is the top level "Store" operation of the DHT
-func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
+// PutValueExtended adds value corresponding to given Key.
+func (dht *IpfsDHT) PutValueExtended(ctx context.Context, key string, value []byte, opts ...routing.Option) ([]peer.ID, error) {
 	if !dht.enableValues {
-		return routing.ErrNotSupported
+		return nil, routing.ErrNotSupported
 	}
 
 	logger.Debugw("putting value", "key", internal.LoggableRecordKeyString(key))
 
 	// don't even allow local users to put bad values.
 	if err := dht.Validator.Validate(key, value); err != nil {
-		return err
+		return nil, err
 	}
 
 	old, err := dht.getLocal(key)
 	if err != nil {
 		// Means something is wrong with the datastore.
-		return err
+		return nil, err
 	}
 
 	// Check if we have an old value that's not the same as the new one.
@@ -51,10 +50,10 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		// Check to see if the new one is better.
 		i, err := dht.Validator.Select(key, [][]byte{value, old.GetValue()})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if i != 0 {
-			return fmt.Errorf("can't replace a newer value with an older value")
+			return nil, fmt.Errorf("can't replace a newer value with an older value")
 		}
 	}
 
@@ -62,16 +61,18 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
 	err = dht.putLocal(key, rec)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pchan, err := dht.GetClosestPeers(ctx, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	closestPeers := make([]peer.ID, 0, dht.bucketSize)
 	wg := sync.WaitGroup{}
 	for p := range pchan {
+		closestPeers = append(closestPeers, p)
 		wg.Add(1)
 		go func(p peer.ID) {
 			ctx, cancel := context.WithCancel(ctx)
@@ -90,7 +91,15 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	}
 	wg.Wait()
 
-	return nil
+	return closestPeers, nil
+}
+
+// PutValue adds value corresponding to given Key.
+// This is the top level "Store" operation of the DHT
+
+func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
+	_, err = dht.PutValueExtended(ctx, key, value, opts...)
+	return err
 }
 
 // RecvdVal stores a value and the peer from which we got the value.
@@ -126,15 +135,15 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	return best, nil
 }
 
-// SearchValue searches for the value corresponding to given Key and streams the results.
-func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
+// SearchValueExtended searches for the value corresponding to given Key and streams the results.
+func (dht *IpfsDHT) SearchValueExtended(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, <-chan []peer.ID, error) {
 	if !dht.enableValues {
-		return nil, routing.ErrNotSupported
+		return nil, nil, routing.ErrNotSupported
 	}
 
 	var cfg routing.Options
 	if err := cfg.Apply(opts...); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	responsesNeeded := 0
@@ -146,33 +155,45 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	valCh, lookupRes := dht.getValues(ctx, key, stopCh)
 
 	out := make(chan []byte)
+	peers := make(chan []peer.ID, 1)
 	go func() {
 		defer close(out)
+		defer close(peers)
 		best, peersWithBest, aborted := dht.searchValueQuorum(ctx, key, valCh, stopCh, out, responsesNeeded)
+
+		var l *lookupWithFollowupResult
+		select {
+		case l = <-lookupRes:
+		case <-ctx.Done():
+			return
+		}
+
+		if l == nil {
+			return
+		}
+
 		if best == nil || aborted {
+			peers <- l.peers
 			return
 		}
 
 		updatePeers := make([]peer.ID, 0, dht.bucketSize)
-		select {
-		case l := <-lookupRes:
-			if l == nil {
-				return
+		for _, p := range l.peers {
+			if _, ok := peersWithBest[p]; !ok {
+				updatePeers = append(updatePeers, p)
 			}
-
-			for _, p := range l.peers {
-				if _, ok := peersWithBest[p]; !ok {
-					updatePeers = append(updatePeers, p)
-				}
-			}
-		case <-ctx.Done():
-			return
 		}
 
 		dht.updatePeerValues(dht.Context(), key, best, updatePeers)
 	}()
 
-	return out, nil
+	return out, peers, nil
+}
+
+// SearchValue searches for the value corresponding to given Key and streams the results.
+func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
+	out, _, err := dht.SearchValueExtended(ctx, key, opts...)
+	return out, err
 }
 
 func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
@@ -385,12 +406,12 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 // Some DHTs store values directly, while an indirect store stores pointers to
 // locations of the value, similarly to Coral and Mainline DHT.
 
-// Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+// ProvideExtended makes this node announce that it can provide a value for the given key
+func (dht *IpfsDHT) ProvideExtended(ctx context.Context, key cid.Cid, brdcst bool, opts ...routing.Option) ([]peer.ID, error) {
 	if !dht.enableProviders {
-		return routing.ErrNotSupported
+		return nil, routing.ErrNotSupported
 	} else if !key.Defined() {
-		return fmt.Errorf("invalid cid: undefined")
+		return nil, fmt.Errorf("invalid cid: undefined")
 	}
 	keyMH := key.Hash()
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
@@ -398,7 +419,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	// add self locally
 	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
 	if !brdcst {
-		return nil
+		return nil, nil
 	}
 
 	closerCtx := ctx
@@ -408,7 +429,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 
 		if timeout < 0 {
 			// timed out
-			return context.DeadlineExceeded
+			return nil, context.DeadlineExceeded
 		} else if timeout < 10*time.Second {
 			// Reserve 10% for the final put.
 			deadline = deadline.Add(-timeout / 10)
@@ -430,16 +451,18 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		// context is still fine, provide the value to the closest peers
 		// we managed to find, even if they're not the _actual_ closest peers.
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 		exceededDeadline = true
 	case nil:
 	default:
-		return err
+		return nil, err
 	}
 
+	closestPeers := make([]peer.ID, 0, dht.bucketSize)
 	wg := sync.WaitGroup{}
 	for p := range peers {
+		closestPeers = append(closestPeers, p)
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
@@ -452,9 +475,15 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 	wg.Wait()
 	if exceededDeadline {
-		return context.DeadlineExceeded
+		return nil, context.DeadlineExceeded
 	}
-	return ctx.Err()
+	return closestPeers, ctx.Err()
+}
+
+// Provide makes this node announce that it can provide a value for the given key
+func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	_, err = dht.ProvideExtended(ctx, key, brdcst)
+	return err
 }
 
 // FindProviders searches until the context expires.
@@ -472,33 +501,49 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 	return providers, nil
 }
 
-// FindProvidersAsync is the same thing as FindProviders, but returns a channel.
-// Peers will be returned on the channel as soon as they are found, even before
-// the search query completes. If count is zero then the query will run until it
-// completes. Note: not reading from the returned channel may block the query
-// from progressing.
-func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+// FindProvidersAsyncExtended searches until the context expires.
+func (dht *IpfsDHT) FindProvidersAsyncExtended(ctx context.Context, key cid.Cid, opts ...routing.Option) (<-chan peer.AddrInfo, <-chan []peer.ID, error) {
 	if !dht.enableProviders || !key.Defined() {
-		peerOut := make(chan peer.AddrInfo)
+		peerOut, closestPeers := make(chan peer.AddrInfo), make(chan []peer.ID)
 		close(peerOut)
-		return peerOut
+		close(closestPeers)
+		return peerOut, closestPeers, routing.ErrNotSupported
 	}
+
+	var cfg routing.Options
+	if err := cfg.Apply(opts...); err != nil {
+		return nil, nil, err
+	}
+
+	count := dhtrouting.GetQuorum(&cfg)
 
 	chSize := count
 	if count == 0 {
 		chSize = 1
 	}
 	peerOut := make(chan peer.AddrInfo, chSize)
+	closestPeersOut := make(chan []peer.ID, 1)
 
 	keyMH := key.Hash()
 
 	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
-	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut)
-	return peerOut
+	go dht.findProvidersAsyncRoutine(ctx, keyMH, count, peerOut, closestPeersOut)
+	return peerOut, closestPeersOut, nil
 }
 
-func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
+// FindProvidersAsync is the same thing as FindProviders, but returns a channel.
+// Peers will be returned on the channel as soon as they are found, even before
+// the search query completes. If count is zero then the query will run until it
+// completes. Note: not reading from the returned channel may block the query
+// from progressing.
+func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+	providers, _, _ := dht.FindProvidersAsyncExtended(ctx, key, dhtrouting.Quorum(count))
+	return providers
+}
+
+func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, closestPeersOut chan []peer.ID) {
 	defer close(peerOut)
+	defer close(closestPeersOut)
 
 	findAll := count == 0
 	var ps *peer.Set
@@ -577,22 +622,26 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		},
 	)
 
+	if lookupRes != nil {
+		closestPeersOut <- lookupRes.peers
+	}
+
 	if err == nil && ctx.Err() == nil {
 		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
 	}
 }
 
-// FindPeer searches for a peer with given ID.
-func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+// FindPeerExtended searches for a peer with given ID.
+func (dht *IpfsDHT) FindPeerExtended(ctx context.Context, id peer.ID, opts ...routing.Option) (peer.AddrInfo, []peer.ID, error) {
 	if err := id.Validate(); err != nil {
-		return peer.AddrInfo{}, err
+		return peer.AddrInfo{}, nil, err
 	}
 
 	logger.Debugw("finding peer", "peer", id)
 
 	// Check if were already connected to them
 	if pi := dht.FindLocal(id); pi.ID != "" {
-		return pi, nil
+		return pi, nil, nil
 	}
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, string(id),
@@ -624,7 +673,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	)
 
 	if err != nil {
-		return peer.AddrInfo{}, err
+		return peer.AddrInfo{}, nil, err
 	}
 
 	dialedPeerDuringQuery := false
@@ -642,8 +691,14 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	// to the peer.
 	connectedness := dht.host.Network().Connectedness(id)
 	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
-		return dht.peerstore.PeerInfo(id), nil
+		return dht.peerstore.PeerInfo(id), lookupRes.peers, nil
 	}
 
-	return peer.AddrInfo{}, routing.ErrNotFound
+	return peer.AddrInfo{}, lookupRes.peers, routing.ErrNotFound
+}
+
+// FindPeer searches for a peer with given ID.
+func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
+	pid, _, err := dht.FindPeerExtended(ctx, id)
+	return pid, err
 }

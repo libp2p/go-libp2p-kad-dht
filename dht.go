@@ -536,7 +536,10 @@ func (dht *IpfsDHT) persistRTPeersInPeerStore() {
 	}
 }
 
-// getLocal attempts to retrieve the value from the datastore
+// getLocal attempts to retrieve the value from the datastore.
+//
+// returns nil, nil when either nothing is found or the value found doesn't properly validate.
+// returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
 func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 	logger.Debugw("finding value in datastore", "key", internal.LoggableRecordKeyString(key))
 

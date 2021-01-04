@@ -190,7 +190,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.Validator = cfg.validator
 	dht.messageMgr = &messageManager{
 		host:      h,
-		strmap:    make(map[peer.ID]*messageSender),
+		strmap:    make(map[peer.ID]*peerMessageSender),
 		protocols: dht.protocols,
 	}
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.messageMgr, pb.WithValidator(dht.Validator))

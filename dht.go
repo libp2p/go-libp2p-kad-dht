@@ -246,8 +246,8 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 // NewDHT creates a new DHT object with the given peer as the 'local' host.
 // IpfsDHT's initialized with this function will respond to DHT requests,
 // whereas IpfsDHT's initialized with NewDHTClient will not.
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, Datastore(dstore))
+func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching, protocolPrefix protocol.ID) *IpfsDHT {
+	dht, err := New(ctx, h, Datastore(dstore), ProtocolPrefix(protocolPrefix))
 	if err != nil {
 		panic(err)
 	}
@@ -257,8 +257,8 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // NewDHTClient creates a new DHT object with the given peer as the 'local'
 // host. IpfsDHT clients initialized with this function will not respond to DHT
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
-func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, Datastore(dstore), Mode(ModeClient))
+func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching, protocolPrefix protocol.ID) *IpfsDHT {
+	dht, err := New(ctx, h, Datastore(dstore), Mode(ModeClient), ProtocolPrefix(protocolPrefix))
 	if err != nil {
 		panic(err)
 	}

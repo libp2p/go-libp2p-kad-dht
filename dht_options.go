@@ -71,8 +71,8 @@ type config struct {
 	testAddressUpdateProcessing bool
 }
 
-func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
-func emptyRTFilter(_ *IpfsDHT, conns []network.Conn) bool { return true }
+func emptyQueryFilter(_ *KadDHT, ai peer.AddrInfo) bool  { return true }
+func emptyRTFilter(_ *KadDHT, conns []network.Conn) bool { return true }
 
 // apply applies the given options to this Option
 func (c *config) apply(opts ...Option) error {

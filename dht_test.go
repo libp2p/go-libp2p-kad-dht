@@ -103,7 +103,7 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 
 var testPrefix = ProtocolPrefix("/test")
 
-func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *IpfsDHT {
+func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *KadDHT {
 	baseOpts := []Option{
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
@@ -127,9 +127,9 @@ func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option)
 	return d
 }
 
-func setupDHTS(t *testing.T, ctx context.Context, n int, options ...Option) []*IpfsDHT {
+func setupDHTS(t *testing.T, ctx context.Context, n int, options ...Option) []*KadDHT {
 	addrs := make([]ma.Multiaddr, n)
-	dhts := make([]*IpfsDHT, n)
+	dhts := make([]*KadDHT, n)
 	peers := make([]peer.ID, n)
 
 	sanityAddrsMap := make(map[string]struct{})
@@ -155,7 +155,7 @@ func setupDHTS(t *testing.T, ctx context.Context, n int, options ...Option) []*I
 	return dhts
 }
 
-func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+func connectNoSync(t *testing.T, ctx context.Context, a, b *KadDHT) {
 	t.Helper()
 
 	idB := b.self
@@ -171,7 +171,7 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	}
 }
 
-func wait(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+func wait(t *testing.T, ctx context.Context, a, b *KadDHT) {
 	t.Helper()
 
 	// loop until connection notification has been received.
@@ -185,14 +185,14 @@ func wait(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 	}
 }
 
-func connect(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
+func connect(t *testing.T, ctx context.Context, a, b *KadDHT) {
 	t.Helper()
 	connectNoSync(t, ctx, a, b)
 	wait(t, ctx, a, b)
 	wait(t, ctx, b, a)
 }
 
-func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
+func bootstrap(t *testing.T, ctx context.Context, dhts []*KadDHT) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -263,7 +263,7 @@ func TestValueGetSet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var dhts [5]*IpfsDHT
+	var dhts [5]*KadDHT
 
 	for i := range dhts {
 		dhts[i] = setupDHT(ctx, t, false)
@@ -671,7 +671,7 @@ func TestLocalProvides(t *testing.T) {
 }
 
 // if minPeers or avgPeers is 0, dont test for it.
-func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int, timeout time.Duration) {
+func waitForWellFormedTables(t *testing.T, dhts []*KadDHT, minPeers, avgPeers int, timeout time.Duration) {
 	// test "well-formed-ness" (>= minPeers peers in every routing table)
 	t.Helper()
 
@@ -709,7 +709,7 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 	}
 }
 
-func printRoutingTables(dhts []*IpfsDHT) {
+func printRoutingTables(dhts []*KadDHT) {
 	// the routing tables should be full now. let's inspect them.
 	fmt.Printf("checking routing table of %d\n", len(dhts))
 	for _, dht := range dhts {
@@ -804,7 +804,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	// we ONLY init bootstrap on A
 	dhtA.RefreshRoutingTable()
 	// and wait for one round to complete i.e. A should be connected to both B & C
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 2, 2, 20*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{dhtA}, 2, 2, 20*time.Second)
 
 	// now we create two new peers
 	dhtD := setupDHT(ctx, t, false)
@@ -826,7 +826,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	connect(t, ctx, dhtA, dhtD)
 
 	// and because of the above bootstrap, A also discovers E !
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{dhtA}, 4, 4, 20*time.Second)
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }
 
@@ -907,7 +907,7 @@ func TestPeriodicRefresh(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, dht := range dhts {
 		wg.Add(1)
-		go func(d *IpfsDHT) {
+		go func(d *KadDHT) {
 			<-d.RefreshRoutingTable()
 			wg.Done()
 		}(dht)
@@ -983,7 +983,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	getProvider := func(dht *IpfsDHT, k cid.Cid) {
+	getProvider := func(dht *KadDHT, k cid.Cid) {
 		defer wg.Done()
 
 		expected := providers[k]
@@ -1422,7 +1422,7 @@ func testFindPeerQuery(t *testing.T,
 	var wg sync.WaitGroup
 	for _, dht := range dhts {
 		wg.Add(1)
-		go func(d *IpfsDHT) {
+		go func(d *KadDHT) {
 			<-d.RefreshRoutingTable()
 			wg.Done()
 		}(dht)
@@ -1516,7 +1516,7 @@ func TestFixLowPeers(t *testing.T) {
 		require.NoError(t, mainD.Host().Connect(ctx, peer.AddrInfo{ID: d.self}))
 	}
 
-	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold+4, 5*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold+4, 5*time.Second)
 
 	// run a refresh on all of them
 	for _, d := range dhts {
@@ -1530,7 +1530,7 @@ func TestFixLowPeers(t *testing.T) {
 	}
 
 	// but we will still get enough peers in the RT because of fix low Peers
-	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
 }
 
 func TestProvideDisabled(t *testing.T) {
@@ -1625,19 +1625,19 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	connect(t, ctx, dhtA, dhtB)
 
 	// now assert both have each other in their RT
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{dhtA, dhtB}, 1, 1, 10*time.Second)
 
 	// dhtB becomes a client
 	require.NoError(t, dhtB.setMode(modeClient))
 
 	// which means that dhtA should evict it from it's RT
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 0, 0, 10*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{dhtA}, 0, 0, 10*time.Second)
 
 	// dhtB becomes a server
 	require.NoError(t, dhtB.setMode(modeServer))
 
 	// which means dhtA should have it in the RT again because of fixLowPeers
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 1, 1, 10*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{dhtA}, 1, 1, 10*time.Second)
 }
 
 func TestGetSetPluggedProtocol(t *testing.T) {
@@ -1876,7 +1876,7 @@ func TestV1ProtocolOverride(t *testing.T) {
 	d3 := setupDHT(ctx, t, false, V1ProtocolOverride("/myproto2"))
 	d4 := setupDHT(ctx, t, false)
 
-	dhts := []*IpfsDHT{d1, d2, d3, d4}
+	dhts := []*KadDHT{d1, d2, d3, d4}
 
 	for i, dout := range dhts {
 		for _, din := range dhts[i+1:] {

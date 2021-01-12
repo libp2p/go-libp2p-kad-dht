@@ -17,11 +17,11 @@ import (
 // identification events to trigger inclusion in the routing table, and we consume Disconnected events to eject peers
 // from it.
 type subscriberNotifee struct {
-	dht  *IpfsDHT
+	dht  *KadDHT
 	subs event.Subscription
 }
 
-func newSubscriberNotifiee(dht *IpfsDHT) (*subscriberNotifee, error) {
+func newSubscriberNotifiee(dht *KadDHT) (*subscriberNotifee, error) {
 	bufSize := eventbus.BufSize(256)
 
 	evts := []interface{}{
@@ -102,7 +102,7 @@ func (nn *subscriberNotifee) subscribe(proc goprocess.Process) {
 	}
 }
 
-func handlePeerChangeEvent(dht *IpfsDHT, p peer.ID) {
+func handlePeerChangeEvent(dht *KadDHT, p peer.ID) {
 	valid, err := dht.validRTPeer(p)
 	if err != nil {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
@@ -115,7 +115,7 @@ func handlePeerChangeEvent(dht *IpfsDHT, p peer.ID) {
 	}
 }
 
-func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {
+func handleLocalReachabilityChangedEvent(dht *KadDHT, e event.EvtLocalReachabilityChanged) {
 	var target mode
 
 	switch e.Reachability {
@@ -145,7 +145,7 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 // validRTPeer returns true if the peer supports the DHT protocol and false otherwise. Supporting the DHT protocol means
 // supporting the primary protocols, we do not want to add peers that are speaking obsolete secondary protocols to our
 // routing table
-func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
+func (dht *KadDHT) validRTPeer(p peer.ID) (bool, error) {
 	b, err := dht.peerstore.FirstSupportedProtocol(p, dht.protocolsStrs...)
 	if len(b) == 0 || err != nil {
 		return false, err

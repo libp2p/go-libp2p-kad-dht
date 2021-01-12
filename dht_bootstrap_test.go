@@ -19,7 +19,7 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	d2 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	d3 := setupDHT(ctx, t, false, DisableAutoRefresh())
 
-	var connectedTo *IpfsDHT
+	var connectedTo *KadDHT
 	// connect d1 to whoever is "further"
 	if kb.CommonPrefixLen(kb.ConvertPeerID(d1.self), kb.ConvertPeerID(d2.self)) <=
 		kb.CommonPrefixLen(kb.ConvertPeerID(d1.self), kb.ConvertPeerID(d3.self)) {
@@ -34,14 +34,14 @@ func TestSelfWalkOnAddressChange(t *testing.T) {
 	connect(t, ctx, d2, d3)
 
 	// d1 should have ONLY 1 peer in it's RT
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 1, 1, 2*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d1}, 1, 1, 2*time.Second)
 	require.Equal(t, connectedTo.self, d1.routingTable.ListPeers()[0])
 
 	// now emit the address change event
 	em, err := d1.host.EventBus().Emitter(&event.EvtLocalAddressesUpdated{})
 	require.NoError(t, err)
 	require.NoError(t, em.Emit(event.EvtLocalAddressesUpdated{}))
-	waitForWellFormedTables(t, []*IpfsDHT{d1}, 2, 2, 2*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d1}, 2, 2, 2*time.Second)
 	// it should now have both peers in the RT
 	ps := d1.routingTable.ListPeers()
 	require.Contains(t, ps, d2.self)
@@ -80,8 +80,8 @@ func TestBootstrappersReplacable(t *testing.T) {
 	defer d.host.Close()
 	defer d.Close()
 
-	var d1 *IpfsDHT
-	var d2 *IpfsDHT
+	var d1 *KadDHT
+	var d2 *KadDHT
 
 	// d1 & d2 have a cpl of 0
 	for {
@@ -108,8 +108,8 @@ func TestBootstrappersReplacable(t *testing.T) {
 	require.Len(t, d.routingTable.ListPeers(), 2)
 
 	// d3 & d4 with cpl=0 will go in as d1 & d2 are replacable.
-	var d3 *IpfsDHT
-	var d4 *IpfsDHT
+	var d3 *KadDHT
+	var d4 *KadDHT
 
 	for {
 		d3 = setupDHT(ctx, t, false, disableFixLowPeersRoutine(t))
@@ -142,7 +142,7 @@ func TestBootstrappersReplacable(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// adding d5 fails because RT is frozen
-	var d5 *IpfsDHT
+	var d5 *KadDHT
 	for {
 		d5 = setupDHT(ctx, t, false, disableFixLowPeersRoutine(t))
 		if kb.CommonPrefixLen(d.selfKey, d5.selfKey) == 0 {

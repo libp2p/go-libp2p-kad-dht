@@ -17,7 +17,7 @@ type pubkrs struct {
 
 // GetPublicKey gets the public key when given a Peer ID. It will extract from
 // the Peer ID if inlined or ask the node it belongs to or ask the DHT.
-func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, error) {
+func (dht *KadDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, error) {
 	logger.Debugf("getPublicKey for: %s", p)
 
 	// Check locally. Will also try to extract the public key from the peer
@@ -68,7 +68,7 @@ func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, err
 	return nil, err
 }
 
-func (dht *IpfsDHT) getPublicKeyFromDHT(ctx context.Context, p peer.ID) (ci.PubKey, error) {
+func (dht *KadDHT) getPublicKeyFromDHT(ctx context.Context, p peer.ID) (ci.PubKey, error) {
 	// Only retrieve one value, because the public key is immutable
 	// so there's no need to retrieve multiple versions
 	pkkey := routing.KeyForPublicKey(p)
@@ -89,7 +89,7 @@ func (dht *IpfsDHT) getPublicKeyFromDHT(ctx context.Context, p peer.ID) (ci.PubK
 	return pubk, nil
 }
 
-func (dht *IpfsDHT) getPublicKeyFromNode(ctx context.Context, p peer.ID) (ci.PubKey, error) {
+func (dht *KadDHT) getPublicKeyFromNode(ctx context.Context, p peer.ID) (ci.PubKey, error) {
 	// check locally, just in case...
 	pk := dht.peerstore.PubKey(p)
 	if pk != nil {

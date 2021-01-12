@@ -68,8 +68,8 @@ func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	var d2 *IpfsDHT
-	var d3 *IpfsDHT
+	var d2 *KadDHT
+	var d3 *KadDHT
 
 	for {
 		d2 = setupDHT(ctx, t, false)
@@ -125,15 +125,15 @@ func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
 	// only 3 peers per prefix for the table.
 	d2 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	connect(t, ctx, d, d2)
-	waitForWellFormedTables(t, []*IpfsDHT{d}, 1, 1, 1*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d}, 1, 1, 1*time.Second)
 
 	d3 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	connect(t, ctx, d, d3)
-	waitForWellFormedTables(t, []*IpfsDHT{d}, 2, 2, 1*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d}, 2, 2, 1*time.Second)
 
 	d4 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	connect(t, ctx, d, d4)
-	waitForWellFormedTables(t, []*IpfsDHT{d}, 3, 3, 1*time.Second)
+	waitForWellFormedTables(t, []*KadDHT{d}, 3, 3, 1*time.Second)
 
 	d5 := setupDHT(ctx, t, false, DisableAutoRefresh())
 	connectNoSync(t, ctx, d, d5)

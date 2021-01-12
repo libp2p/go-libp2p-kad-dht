@@ -33,9 +33,9 @@ type customRtHelper struct {
 	allow peer.ID
 }
 
-func MkFilterForPeer() (func(d *dht.IpfsDHT, conns []network.Conn) bool, *customRtHelper) {
+func MkFilterForPeer() (func(d *dht.KadDHT, conns []network.Conn) bool, *customRtHelper) {
 	helper := customRtHelper{}
-	f := func(_ *dht.IpfsDHT, conns []network.Conn) bool {
+	f := func(_ *dht.KadDHT, conns []network.Conn) bool {
 		for _, c := range conns {
 			if c.RemotePeer() == helper.allow {
 				return true
@@ -98,7 +98,7 @@ func setupDHT(ctx context.Context, t *testing.T, options ...dht.Option) *DHT {
 	return d
 }
 
-func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
+func connect(ctx context.Context, t *testing.T, a, b *dht.KadDHT) {
 	t.Helper()
 	bid := b.PeerID()
 	baddr := b.Host().Peerstore().Addrs(bid)
@@ -112,7 +112,7 @@ func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	wait(ctx, t, a, b)
 }
 
-func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
+func wait(ctx context.Context, t *testing.T, a, b *dht.KadDHT) {
 	t.Helper()
 	for a.RoutingTable().Find(b.PeerID()) == "" {
 		//fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
@@ -124,7 +124,7 @@ func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	}
 }
 
-func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.IpfsDHT) {
+func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.KadDHT, *dht.KadDHT) {
 	t.Helper()
 	baseOpts := []dht.Option{
 		dht.NamespacedValidator("v", blankValidator{}),

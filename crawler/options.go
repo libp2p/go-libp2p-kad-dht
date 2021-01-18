@@ -1,18 +1,20 @@
 package crawler
 
 import (
-	"github.com/libp2p/go-libp2p-core/protocol"
 	"time"
+
+	"github.com/libp2p/go-libp2p-core/protocol"
 )
 
 // Option DHT Crawler option type.
 type Option func(*options) error
 
 type options struct {
-	protocols     []protocol.ID
-	parallelism   int
-	crawlInterval time.Duration
-	perMsgTimeout time.Duration
+	protocols      []protocol.ID
+	parallelism    int
+	crawlInterval  time.Duration
+	connectTimeout time.Duration
+	perMsgTimeout  time.Duration
 }
 
 // defaults are the default crawler options. This option will be automatically
@@ -21,6 +23,7 @@ var defaults = func(o *options) error {
 	o.protocols = []protocol.ID{"/ipfs/kad/1.0.0"}
 	o.parallelism = 1000
 	o.crawlInterval = time.Hour
+	o.connectTimeout = time.Second * 5
 	o.perMsgTimeout = time.Second * 5
 
 	return nil
@@ -46,6 +49,14 @@ func WithParallelism(parallelism int) Option {
 func WithMsgTimeout(timeout time.Duration) Option {
 	return func(o *options) error {
 		o.perMsgTimeout = timeout
+		return nil
+	}
+}
+
+// WithConnectTimeout defines the time for peer connection before timing out
+func WithConnectTimeout(timeout time.Duration) Option {
+	return func(o *options) error {
+		o.connectTimeout = timeout
 		return nil
 	}
 }

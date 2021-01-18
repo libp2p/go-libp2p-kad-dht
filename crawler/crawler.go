@@ -19,12 +19,15 @@ import (
 
 var logger = logging.Logger("dht-crawler")
 
+// Crawler connects to hosts in the DHT to track routing tables of peers.
 type Crawler struct {
-	parallelism int
-	host        host.Host
-	dhtRPC      *pb.ProtocolMessenger
+	parallelism    int
+	connectTimeout time.Duration
+	host           host.Host
+	dhtRPC         *pb.ProtocolMessenger
 }
 
+// New creates a new Crawler
 func New(host host.Host, opts ...Option) (*Crawler, error) {
 	o := new(options)
 	if err := defaults(o); err != nil {
@@ -42,9 +45,10 @@ func New(host host.Host, opts ...Option) (*Crawler, error) {
 	}
 
 	return &Crawler{
-		parallelism: o.parallelism,
-		host:        host,
-		dhtRPC:      pm,
+		parallelism:    o.parallelism,
+		connectTimeout: o.connectTimeout,
+		host:           host,
+		dhtRPC:         pm,
 	}, nil
 }
 
@@ -109,9 +113,13 @@ func (ms *messageSender) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Me
 	return w.WriteMsg(pmes)
 }
 
+// HandleQueryResult is a callback on successful peer query
 type HandleQueryResult func(p peer.ID, rtPeers []*peer.AddrInfo)
+
+// HandleQueryFail is a callback on failed peer query
 type HandleQueryFail func(p peer.ID, err error)
 
+// Run crawls dht peers from an initial seed of `startingPeers`
 func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handleSuccess HandleQueryResult, handleFail HandleQueryFail) {
 	jobs := make(chan peer.ID, 1)
 	results := make(chan *queryResult, 1)
@@ -123,7 +131,7 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 		go func() {
 			defer wg.Done()
 			for p := range jobs {
-				res := queryPeer(ctx, c.host, c.dhtRPC, p)
+				res := c.queryPeer(ctx, p)
 				results <- res
 			}
 		}()
@@ -186,16 +194,16 @@ type queryResult struct {
 	err  error
 }
 
-func queryPeer(ctx context.Context, host host.Host, dhtRPC *pb.ProtocolMessenger, nextPeer peer.ID) *queryResult {
-	tmpRT, err := kbucket.NewRoutingTable(20, kbucket.ConvertPeerID(nextPeer), time.Hour, host.Peerstore(), time.Hour, nil)
+func (c *Crawler) queryPeer(ctx context.Context, nextPeer peer.ID) *queryResult {
+	tmpRT, err := kbucket.NewRoutingTable(20, kbucket.ConvertPeerID(nextPeer), time.Hour, c.host.Peerstore(), time.Hour, nil)
 	if err != nil {
 		logger.Errorf("error creating rt for peer %v : %v", nextPeer, err)
 		return &queryResult{nextPeer, nil, err}
 	}
 
-	connCtx, cancel := context.WithTimeout(ctx, time.Second*5)
+	connCtx, cancel := context.WithTimeout(ctx, c.connectTimeout)
 	defer cancel()
-	err = host.Connect(connCtx, peer.AddrInfo{ID: nextPeer})
+	err = c.host.Connect(connCtx, peer.AddrInfo{ID: nextPeer})
 	if err != nil {
 		logger.Errorf("could not connect to peer %v: %v", nextPeer, err)
 		return &queryResult{nextPeer, nil, err}
@@ -208,7 +216,7 @@ func queryPeer(ctx context.Context, host host.Host, dhtRPC *pb.ProtocolMessenger
 		if err != nil {
 			panic(err)
 		}
-		peers, err := dhtRPC.GetClosestPeers(ctx, nextPeer, generatePeer)
+		peers, err := c.dhtRPC.GetClosestPeers(ctx, nextPeer, generatePeer)
 		if err != nil {
 			logger.Debugf("error finding data on peer %v with cpl %d : %v", nextPeer, cpl, err)
 			retErr = err

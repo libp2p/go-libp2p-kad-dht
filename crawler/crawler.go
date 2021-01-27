@@ -140,7 +140,7 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 	defer wg.Wait()
 	defer close(jobs)
 
-	toDial := make([]*peer.AddrInfo, 0, 1000)
+	toDial := make([]*peer.AddrInfo, 0, len(startingPeers))
 	peersSeen := make(map[peer.ID]struct{})
 
 	for _, ai := range startingPeers {

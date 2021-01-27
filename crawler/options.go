@@ -12,7 +12,6 @@ type Option func(*options) error
 type options struct {
 	protocols      []protocol.ID
 	parallelism    int
-	crawlInterval  time.Duration
 	connectTimeout time.Duration
 	perMsgTimeout  time.Duration
 }
@@ -22,7 +21,6 @@ type options struct {
 var defaults = func(o *options) error {
 	o.protocols = []protocol.ID{"/ipfs/kad/1.0.0"}
 	o.parallelism = 1000
-	o.crawlInterval = time.Hour
 	o.connectTimeout = time.Second * 5
 	o.perMsgTimeout = time.Second * 5
 

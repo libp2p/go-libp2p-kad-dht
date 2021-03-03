@@ -66,7 +66,7 @@ func PublicQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool {
 
 	var hasPublicAddr bool
 	for _, a := range ai.Addrs {
-		if !isRelayAddr(a) && isPublicAddr(a) {
+		if isRelayAddr(a) || isPublicAddr(a) {
 			hasPublicAddr = true
 		}
 	}

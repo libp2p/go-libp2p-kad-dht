@@ -1177,6 +1177,62 @@ func TestFindPeer(t *testing.T) {
 	}
 }
 
+func TestFindPeerWithQueryFilter(t *testing.T) {
+	// t.Skip("skipping test to debug another")
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	filteredPeer := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
+	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ *IpfsDHT, ai peer.AddrInfo) bool {
+		return ai.ID != filteredPeer.ID()
+	}))
+	defer func() {
+		for i := 0; i < 4; i++ {
+			dhts[i].Close()
+			dhts[i].host.Close()
+		}
+	}()
+
+	connect(t, ctx, dhts[0], dhts[1])
+	connect(t, ctx, dhts[1], dhts[2])
+	connect(t, ctx, dhts[1], dhts[3])
+
+	err := filteredPeer.Connect(ctx, peer.AddrInfo{
+		ID:dhts[2].host.ID(),
+		Addrs:dhts[2].host.Addrs(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, maxLoops:=0, 5; i<maxLoops; i++ {
+		if len(dhts[2].host.Network().ConnsToPeer(filteredPeer.ID())) > 0 {
+			break
+		}
+		if i == maxLoops {
+			t.Fatal("failed to connect to the filtered peer")
+		}
+	}
+
+	ctxT, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	p, err := dhts[0].FindPeer(ctxT, filteredPeer.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.ID == "" {
+		t.Fatal("Failed to find peer.")
+	}
+
+	if p.ID != filteredPeer.ID() {
+		t.Fatal("Didnt find expected peer.")
+	}
+}
+
 func TestConnectCollision(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()

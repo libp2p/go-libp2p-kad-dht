@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/libp2p/go-libp2p-core/event"
@@ -154,6 +155,10 @@ func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
 	return dht.routingTablePeerFilter == nil || dht.routingTablePeerFilter(dht, dht.Host().Network().ConnsToPeer(p)), nil
 }
 
+type disconnector interface {
+	StreamDisconnect(ctx context.Context, p peer.ID)
+}
+
 func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 	dht := nn.dht
 	select {
@@ -173,7 +178,9 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		return
 	}
 
-	dht.msgSender.streamDisconnect(dht.Context(), p)
+	if ms, ok := dht.msgSender.(disconnector); ok {
+		ms.StreamDisconnect(dht.Context(), p)
+	}
 }
 
 func (nn *subscriberNotifee) Connected(network.Network, network.Conn)      {}

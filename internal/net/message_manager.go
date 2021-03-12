@@ -1,8 +1,14 @@
-package dht
+package net
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	logging "github.com/ipfs/go-log"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-msgio/protoio"
+	"io"
 	"sync"
 	"time"
 
@@ -12,12 +18,18 @@ import (
 	"github.com/libp2p/go-libp2p-core/protocol"
 
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	"github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
+
+var dhtReadMessageTimeout = 10 * time.Second
+
+// ErrReadTimeout is an error that occurs when no message is read within the timeout period.
+var ErrReadTimeout = fmt.Errorf("timed out reading response")
+
+var logger = logging.Logger("dht")
 
 // messageSenderImpl is responsible for sending requests and messages to peers efficiently, including reuse of streams.
 // It also tracks metrics for sent requests and messages.
@@ -28,7 +40,15 @@ type messageSenderImpl struct {
 	protocols []protocol.ID
 }
 
-func (m *messageSenderImpl) streamDisconnect(ctx context.Context, p peer.ID) {
+func NewMessageSenderImpl(h host.Host, protos []protocol.ID) pb.MessageSender {
+	return &messageSenderImpl{
+		host:      h,
+		strmap:    make(map[peer.ID]*peerMessageSender),
+		protocols: protos,
+	}
+}
+
+func (m *messageSenderImpl) StreamDisconnect(ctx context.Context, p peer.ID) {
 	m.smlk.Lock()
 	defer m.smlk.Unlock()
 	ms, ok := m.strmap[p]
@@ -120,7 +140,7 @@ func (m *messageSenderImpl) messageSenderForPeer(ctx context.Context, p peer.ID)
 		m.smlk.Unlock()
 		return ms, nil
 	}
-	ms = &peerMessageSender{p: p, m: m, lk: newCtxMutex()}
+	ms = &peerMessageSender{p: p, m: m, lk: internal.NewCtxMutex()}
 	m.strmap[p] = ms
 	m.smlk.Unlock()
 
@@ -149,7 +169,7 @@ func (m *messageSenderImpl) messageSenderForPeer(ctx context.Context, p peer.ID)
 type peerMessageSender struct {
 	s  network.Stream
 	r  msgio.ReadCloser
-	lk ctxMutex
+	lk internal.CtxMutex
 	p  peer.ID
 	m  *messageSenderImpl
 
@@ -297,7 +317,7 @@ func (ms *peerMessageSender) SendRequest(ctx context.Context, pmes *pb.Message) 
 }
 
 func (ms *peerMessageSender) writeMsg(pmes *pb.Message) error {
-	return writeMsg(ms.s, pmes)
+	return WriteMsg(ms.s, pmes)
 }
 
 func (ms *peerMessageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
@@ -324,4 +344,38 @@ func (ms *peerMessageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) er
 	case <-t.C:
 		return ErrReadTimeout
 	}
+}
+
+// The Protobuf writer performs multiple small writes when writing a message.
+// We need to buffer those writes, to make sure that we're not sending a new
+// packet for every single write.
+type bufferedDelimitedWriter struct {
+	*bufio.Writer
+	protoio.WriteCloser
+}
+
+var writerPool = sync.Pool{
+	New: func() interface{} {
+		w := bufio.NewWriter(nil)
+		return &bufferedDelimitedWriter{
+			Writer:      w,
+			WriteCloser: protoio.NewDelimitedWriter(w),
+		}
+	},
+}
+
+func WriteMsg(w io.Writer, mes *pb.Message) error {
+	bw := writerPool.Get().(*bufferedDelimitedWriter)
+	bw.Reset(w)
+	err := bw.WriteMsg(mes)
+	if err == nil {
+		err = bw.Flush()
+	}
+	bw.Reset(nil)
+	writerPool.Put(bw)
+	return err
+}
+
+func (w *bufferedDelimitedWriter) Flush() error {
+	return w.Writer.Flush()
 }

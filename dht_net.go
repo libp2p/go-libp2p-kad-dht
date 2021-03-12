@@ -1,15 +1,12 @@
 package dht
 
 import (
-	"bufio"
-	"fmt"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-msgio/protoio"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
@@ -19,45 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-var dhtReadMessageTimeout = 10 * time.Second
 var dhtStreamIdleTimeout = 1 * time.Minute
 
 // ErrReadTimeout is an error that occurs when no message is read within the timeout period.
-var ErrReadTimeout = fmt.Errorf("timed out reading response")
-
-// The Protobuf writer performs multiple small writes when writing a message.
-// We need to buffer those writes, to make sure that we're not sending a new
-// packet for every single write.
-type bufferedDelimitedWriter struct {
-	*bufio.Writer
-	protoio.WriteCloser
-}
-
-var writerPool = sync.Pool{
-	New: func() interface{} {
-		w := bufio.NewWriter(nil)
-		return &bufferedDelimitedWriter{
-			Writer:      w,
-			WriteCloser: protoio.NewDelimitedWriter(w),
-		}
-	},
-}
-
-func writeMsg(w io.Writer, mes *pb.Message) error {
-	bw := writerPool.Get().(*bufferedDelimitedWriter)
-	bw.Reset(w)
-	err := bw.WriteMsg(mes)
-	if err == nil {
-		err = bw.Flush()
-	}
-	bw.Reset(nil)
-	writerPool.Put(bw)
-	return err
-}
-
-func (w *bufferedDelimitedWriter) Flush() error {
-	return w.Writer.Flush()
-}
+var ErrReadTimeout = net.ErrReadTimeout
 
 // handleNewStream implements the network.StreamHandler
 func (dht *IpfsDHT) handleNewStream(s network.Stream) {
@@ -180,7 +142,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		}
 
 		// send out response msg
-		err = writeMsg(s, resp)
+		err = net.WriteMsg(s, resp)
 		if err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			if c := baseLogger.Check(zap.DebugLevel, "error writing response"); c != nil {

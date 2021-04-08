@@ -327,10 +327,10 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 						ID:   p,
 					})
 					return nil, err
-				default:
-					return nil, err
 				case nil, internal.ErrInvalidRecord:
 					// in either of these cases, we want to keep going
+				default:
+					return nil, err
 				}
 
 				// TODO: What should happen if the record is invalid?

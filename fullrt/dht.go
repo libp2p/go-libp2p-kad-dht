@@ -4,36 +4,39 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/gogo/protobuf/proto"
-	"github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
-	u "github.com/ipfs/go-ipfs-util"
-	logging "github.com/ipfs/go-log"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/multiformats/go-base32"
+	"github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multihash"
+
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
+
+	"github.com/gogo/protobuf/proto"
+	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	u "github.com/ipfs/go-ipfs-util"
+	logging "github.com/ipfs/go-log"
+
+	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/crawler"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	dht_pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/multiformats/go-base32"
-	"github.com/multiformats/go-multiaddr"
-	"github.com/multiformats/go-multihash"
-	"sync"
-	"sync/atomic"
-	"time"
-
-	kaddht "github.com/libp2p/go-libp2p-kad-dht"
-	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 
 	"github.com/libp2p/go-libp2p-xor/kademlia"
 	kadkey "github.com/libp2p/go-libp2p-xor/key"
@@ -51,10 +54,11 @@ type FullRT struct {
 	datastore                     ds.Datastore
 	h                             host.Host
 
+	crawlerInterval time.Duration
 	crawler        *crawler.Crawler
 	protoMessenger *dht_pb.ProtocolMessenger
 
-	filterFromTable dht.QueryFilterFunc
+	filterFromTable kaddht.QueryFilterFunc
 	rtLk            sync.RWMutex
 	rt              *trie.Trie
 
@@ -69,16 +73,30 @@ type FullRT struct {
 	bucketSize int
 
 	triggerRefresh chan struct{}
+
+	waitFrac float64
+	timeoutPerOp time.Duration
+
+	provideManyParallelism int
 }
 
-func NewFullRT(ctx context.Context, h host.Host, validator record.Validator, ds ds.Batching) (*FullRT, error) {
-	ms := net.NewMessageSenderImpl(h, []protocol.ID{"/ipfs/kad/1.0.0"})
-	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(validator))
+// NewFullRT creates a DHT client that tracks the full network. It takes a protocol prefix for the given network,
+// For example, the protocol /ipfs/kad/1.0.0 has the prefix /ipfs.
+func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opts ... Option) (*FullRT, error) {
+	cfg := &config{}
+	for _, o := range opts {
+		if err := o(cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	ms := net.NewMessageSenderImpl(h, []protocol.ID{protocolPrefix + "/kad/1.0.0"})
+	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(cfg.validator))
 	if err != nil {
 		return nil, err
 	}
 
-	pm, err := providers.NewProviderManager(ctx, h.ID(), ds)
+	pm, err := providers.NewProviderManager(ctx, h.ID(), cfg.datastore)
 	if err != nil {
 		return nil, err
 	}
@@ -88,20 +106,20 @@ func NewFullRT(ctx context.Context, h host.Host, validator record.Validator, ds 
 		return nil, err
 	}
 
-	bsPeersNormal := dht.GetDefaultBootstrapPeerAddrInfos()
-	bsPeers := make([]*peer.AddrInfo, len(bsPeersNormal))
-	for i, ai := range bsPeersNormal {
+	var bsPeers []*peer.AddrInfo
+
+	for _, ai := range cfg.bootstrapPeers {
 		tmpai := ai
-		bsPeers[i] = &tmpai
+		bsPeers = append(bsPeers, &tmpai)
 	}
 
 	rt := &FullRT{
 		ctx:             ctx,
 		enableValues:    true,
 		enableProviders: true,
-		Validator:       validator,
+		Validator:       cfg.validator,
 		ProviderManager: pm,
-		datastore:       ds,
+		datastore:       cfg.datastore,
 		h:               h,
 		crawler:         c,
 		protoMessenger:  protoMessenger,
@@ -114,6 +132,13 @@ func NewFullRT(ctx context.Context, h host.Host, validator record.Validator, ds 
 		bootstrapPeers: bsPeers,
 
 		triggerRefresh: make(chan struct{}),
+
+		waitFrac: 0.3,
+		timeoutPerOp: 5 * time.Second,
+
+		crawlerInterval: time.Minute * 60,
+
+		provideManyParallelism: 10,
 	}
 
 	go rt.runCrawler(ctx)
@@ -147,7 +172,7 @@ func (dht *FullRT) Stat() map[string]peer.ID {
 }
 
 func (dht *FullRT) runCrawler(ctx context.Context) {
-	t := time.NewTicker(time.Minute * 60)
+	t := time.NewTicker(dht.crawlerInterval)
 
 	m := make(map[peer.ID]*crawlVal)
 	mxLk := sync.Mutex{}
@@ -344,14 +369,14 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 		return err
 	}
 
-	successes := putToMany(ctx, func(ctx context.Context, p peer.ID) error {
+	successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type: routing.Value,
 			ID:   p,
 		})
 		err := dht.protoMessenger.PutValue(ctx, p, rec)
 		return err
-	}, peers, 0.3, time.Second*5)
+	}, peers)
 
 	if successes == 0 {
 		return fmt.Errorf("failed to complete put")
@@ -594,7 +619,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 	go func() {
 		defer close(valCh)
 		defer close(lookupResCh)
-		queryFn := func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		queryFn := func(ctx context.Context, p peer.ID) error {
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -611,9 +636,9 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 					Type: routing.PeerResponse,
 					ID:   p,
 				})
-				return nil, err
+				return nil
 			default:
-				return nil, err
+				return err
 			case nil, internal.ErrInvalidRecord:
 				// in either of these cases, we want to keep going
 			}
@@ -629,7 +654,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 				select {
 				case valCh <- rv:
 				case <-ctx.Done():
-					return nil, ctx.Err()
+					return ctx.Err()
 				}
 			}
 
@@ -640,15 +665,10 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 				Responses: peers,
 			})
 
-			return peers, err
+			return nil
 		}
 
-		for i := range peers {
-			p := peers[i]
-			go func() {
-				queryFn(ctx, p)
-			}()
-		}
+		dht.execOnMany(ctx, queryFn, peers)
 	}()
 	return valCh, lookupResCh
 }
@@ -710,31 +730,31 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 		return err
 	}
 
-	successes := putToMany(ctx, func(ctx context.Context, p peer.ID) error {
+	successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
 		err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.h)
 		return err
-	}, peers, 0.3, time.Second*5)
+	}, peers)
 
 	if exceededDeadline {
 		return context.DeadlineExceeded
 	}
 
 	if successes == 0 {
-		return fmt.Errorf("could not complete provide")
+		return fmt.Errorf("failed to complete provide")
 	}
 
 	return ctx.Err()
 }
 
-func putToMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID, waitFrac float64, timeoutPerOp time.Duration) int {
+func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID) int {
 	putctx, cancel := context.WithCancel(ctx)
 
 	waitAllCh := make(chan struct{}, len(peers))
-	numSuccessfulToWaitFor := int(float64(len(peers)) * waitFrac)
+	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
 	waitSuccessCh := make(chan struct{}, numSuccessfulToWaitFor)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			fnCtx, fnCancel := context.WithTimeout(putctx, timeoutPerOp)
+			fnCtx, fnCancel := context.WithTimeout(putctx, dht.timeoutPerOp)
 			defer fnCancel()
 			err := fn(fnCtx, p)
 			if err != nil {
@@ -775,52 +795,51 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 		keysAsPeerIDs = append(keysAsPeerIDs, peer.ID(k))
 	}
 	sortedKeys := kb.SortClosestPeers(keysAsPeerIDs, kb.ID(make([]byte, 32)))
-	for _, k := range sortedKeys {
+
+	var anyProvidesSuccessful uint64 = 0
+
+	fn := func(k peer.ID) error {
 		peers, err := dht.GetClosestPeers(ctx, string(k))
 		if err != nil {
 			return err
 		}
-		sendMsgToSome(ctx, peers, func(ctx context.Context, p peer.ID) error {
+		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
 			return dht.protoMessenger.PutProvider(ctx, p, multihash.Multihash(k), dht.h)
-		})
-	}
-	return nil
-}
-
-func sendMsgToSome(ctx context.Context, peers []peer.ID, sendFn func(context.Context, peer.ID) error) {
-	groupSendCtx, cancel := context.WithCancel(ctx)
-
-	waitAllCh := make(chan struct{}, len(peers))
-	numSuccessfulToWaitFor := int(float64(len(peers)) * 0.3)
-	waitSuccessCh := make(chan struct{}, numSuccessfulToWaitFor)
-	for _, p := range peers {
-		go func(p peer.ID) {
-			err := sendFn(groupSendCtx, p)
-			if err != nil {
-				logger.Debug(err)
-			} else {
-				waitSuccessCh <- struct{}{}
-			}
-			waitAllCh <- struct{}{}
-		}(p)
-	}
-
-	numSuccess, numDone := 0, 0
-	t := time.NewTimer(time.Hour)
-	for numDone != len(peers) {
-		select {
-		case <-waitAllCh:
-			numDone++
-		case <-waitSuccessCh:
-			if numSuccess >= numSuccessfulToWaitFor {
-				t.Reset(time.Millisecond * 500)
-			}
-			numSuccess++
-			numDone++
-		case <-t.C:
-			cancel()
+		}, peers)
+		if successes == 0 {
+			return fmt.Errorf("no successful provides")
 		}
+		return nil
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(dht.provideManyParallelism)
+	chunkSize := len(sortedKeys)/dht.provideManyParallelism
+	for i := 0; i < dht.provideManyParallelism; i++ {
+		var chunk []peer.ID
+		if i == dht.provideManyParallelism - 1 {
+			chunk = sortedKeys[i*chunkSize:]
+		} else {
+			chunk = sortedKeys[i*chunkSize:i*(chunkSize+1)]
+		}
+		go func() {
+			defer wg.Done()
+			for _, key := range chunk {
+				if err := fn(key); err != nil {
+					logger.Infow("failed to complete provide of key :%v. %w", internal.LoggableProviderRecordBytes(key), err)
+				} else {
+					atomic.CompareAndSwapUint64(&anyProvidesSuccessful, 0, 1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if anyProvidesSuccessful == 0 {
+		return fmt.Errorf("failed to complete provides")
+	}
+
+	return nil
 }
 
 // FindProviders searches until the context expires.
@@ -901,18 +920,17 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 	queryctx, cancelquery := context.WithCancel(ctx)
 	defer cancelquery()
 
-	for i := range peers {
-		p := peers[i]
-		go func() {
+
+	fn := func(ctx context.Context, p peer.ID) error {
 			// For DHT query command
-			routing.PublishQueryEvent(queryctx, &routing.QueryEvent{
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
 				ID:   p,
 			})
 
-			provs, closest, err := dht.protoMessenger.GetProviders(queryctx, p, key)
+			provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
 			if err != nil {
-				return
+				return err
 			}
 
 			logger.Debugf("%d provider entries", len(provs))
@@ -925,15 +943,15 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 					logger.Debugf("using provider: %s", prov)
 					select {
 					case peerOut <- *prov:
-					case <-queryctx.Done():
+					case <-ctx.Done():
 						logger.Debug("context timed out sending more providers")
-						return
+						return ctx.Err()
 					}
 				}
 				if !findAll && ps.Size() >= count {
 					logger.Debugf("got enough providers (%d/%d)", ps.Size(), count)
 					cancelquery()
-					return
+					return nil
 				}
 			}
 
@@ -945,8 +963,10 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 				ID:        p,
 				Responses: closest,
 			})
-		}()
+		return nil
 	}
+
+	dht.execOnMany(queryctx, fn, peers)
 }
 
 // FindPeer searches for a peer with given ID.
@@ -1003,26 +1023,21 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 		}
 	}()
 
-	wg := sync.WaitGroup{}
-	wg.Add(len(peers))
-	for i := range peers {
-		p := peers[i]
-		go func() {
-			defer wg.Done()
+	fn := func(ctx context.Context, p peer.ID) error {
 			// For DHT query command
-			routing.PublishQueryEvent(queryctx, &routing.QueryEvent{
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
 				ID:   p,
 			})
 
-			peers, err := dht.protoMessenger.GetClosestPeers(queryctx, p, id)
+			peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, id)
 			if err != nil {
 				logger.Debugf("error getting closer peers: %s", err)
-				return
+				return err
 			}
 
 			// For DHT query command
-			routing.PublishQueryEvent(queryctx, &routing.QueryEvent{
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:      routing.PeerResponse,
 				ID:        p,
 				Responses: peers,
@@ -1032,16 +1047,16 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 				if a.ID == id {
 					select {
 					case addrsCh <- a:
-					case <-queryctx.Done():
-						return
+					case <-ctx.Done():
+						return ctx.Err()
 					}
-					return
+					return nil
 				}
 			}
-		}()
+			return nil
 	}
 
-	wg.Wait()
+	dht.execOnMany(queryctx, fn, peers)
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.

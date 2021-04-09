@@ -7,8 +7,8 @@ import (
 )
 
 type config struct {
-	validator record.Validator
-	datastore ds.Batching
+	validator      record.Validator
+	datastore      ds.Batching
 	bootstrapPeers []peer.AddrInfo
 }
 

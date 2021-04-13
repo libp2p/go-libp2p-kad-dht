@@ -57,6 +57,7 @@ type FullRT struct {
 	crawlerInterval time.Duration
 	crawler         *crawler.Crawler
 	protoMessenger  *dht_pb.ProtocolMessenger
+	messageSender   dht_pb.MessageSender
 
 	filterFromTable kaddht.QueryFilterFunc
 	rtLk            sync.RWMutex
@@ -122,6 +123,7 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 		datastore:       cfg.datastore,
 		h:               h,
 		crawler:         c,
+		messageSender:   ms,
 		protoMessenger:  protoMessenger,
 		filterFromTable: kaddht.PublicQueryFilter,
 		rt:              trie.New(),
@@ -799,13 +801,29 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 
 	var anyProvidesSuccessful uint64 = 0
 
+	// Compute addresses once for all provides
+	pi := peer.AddrInfo{
+		ID:    dht.h.ID(),
+		Addrs: dht.h.Addrs(),
+	}
+	pbPeers := dht_pb.RawPeerInfosToPBPeers([]peer.AddrInfo{pi})
+
+	// TODO: We may want to limit the type of addresses in our provider records
+	// For example, in a WAN-only DHT prohibit sharing non-WAN addresses (e.g. 192.168.0.100)
+	if len(pi.Addrs) < 1 {
+		return fmt.Errorf("no known addresses for self, cannot put provider")
+	}
+
 	fn := func(k peer.ID) error {
 		peers, err := dht.GetClosestPeers(ctx, string(k))
 		if err != nil {
 			return err
 		}
 		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
-			return dht.protoMessenger.PutProvider(ctx, p, multihash.Multihash(k), dht.h)
+			pmes := dht_pb.NewMessage(dht_pb.Message_ADD_PROVIDER, multihash.Multihash(k), 0)
+			pmes.ProviderPeers = pbPeers
+
+			return dht.messageSender.SendMessage(ctx, p, pmes)
 		}, peers)
 		if successes == 0 {
 			return fmt.Errorf("no successful provides")

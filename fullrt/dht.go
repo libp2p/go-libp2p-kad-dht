@@ -45,6 +45,8 @@ import (
 
 var logger = logging.Logger("fullrtdht")
 
+// FullRT is an experimental DHT client that is under development. Expect breaking changes to occur in this client
+// until it stabilizes.
 type FullRT struct {
 	ctx context.Context
 
@@ -55,9 +57,11 @@ type FullRT struct {
 	h                             host.Host
 
 	crawlerInterval time.Duration
-	crawler         *crawler.Crawler
-	protoMessenger  *dht_pb.ProtocolMessenger
-	messageSender   dht_pb.MessageSender
+	lastCrawlTime   time.Time
+
+	crawler        *crawler.Crawler
+	protoMessenger *dht_pb.ProtocolMessenger
+	messageSender  dht_pb.MessageSender
 
 	filterFromTable kaddht.QueryFilterFunc
 	rtLk            sync.RWMutex
@@ -173,6 +177,28 @@ func (dht *FullRT) Stat() map[string]peer.ID {
 	return newMap
 }
 
+func (dht *FullRT) Ready() bool {
+	dht.rtLk.RLock()
+	lastCrawlTime := dht.lastCrawlTime
+	dht.rtLk.RUnlock()
+
+	if time.Since(lastCrawlTime) > dht.crawlerInterval {
+		return false
+	}
+
+	// TODO: This function needs to be better defined. Perhaps based on going through the peer map and seeing when the
+	// last time we were connected to any of them was.
+	dht.peerAddrsLk.RLock()
+	rtSize := len(dht.keyToPeerMap)
+	dht.peerAddrsLk.RUnlock()
+
+	if rtSize > len(dht.bootstrapPeers)+1 {
+		return true
+	}
+
+	return false
+}
+
 func (dht *FullRT) runCrawler(ctx context.Context) {
 	t := time.NewTicker(dht.crawlerInterval)
 
@@ -215,8 +241,7 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 				return
 			})
 		dur := time.Since(start)
-		fmt.Printf("crawl took %v\n", dur)
-		start = time.Now()
+		logger.Infof("crawl took %v", dur)
 
 		peerAddrs := make(map[peer.ID][]multiaddr.Multiaddr)
 		kPeerMap := make(map[string]peer.ID)
@@ -238,10 +263,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 
 		dht.rtLk.Lock()
 		dht.rt = newRt
+		dht.lastCrawlTime = time.Now()
 		dht.rtLk.Unlock()
-
-		dur = time.Since(start)
-		fmt.Printf("processing crawl took %v\n", dur)
 	}
 }
 

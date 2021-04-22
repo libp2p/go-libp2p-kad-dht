@@ -146,6 +146,9 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 	for _, ai := range startingPeers {
 		toDial = append(toDial, ai)
 		peersSeen[ai.ID] = struct{}{}
+		extendAddrs := c.host.Peerstore().Addrs(ai.ID)
+		extendAddrs = append(extendAddrs, ai.Addrs...)
+		c.host.Peerstore().AddAddrs(ai.ID, extendAddrs, time.Hour)
 	}
 
 	numQueried := 0
@@ -205,7 +208,7 @@ func (c *Crawler) queryPeer(ctx context.Context, nextPeer peer.ID) *queryResult 
 	defer cancel()
 	err = c.host.Connect(connCtx, peer.AddrInfo{ID: nextPeer})
 	if err != nil {
-		logger.Errorf("could not connect to peer %v: %v", nextPeer, err)
+		logger.Infof("could not connect to peer %v: %v", nextPeer, err)
 		return &queryResult{nextPeer, nil, err}
 	}
 
@@ -228,5 +231,10 @@ func (c *Crawler) queryPeer(ctx context.Context, nextPeer peer.ID) *queryResult 
 			}
 		}
 	}
+
+	if retErr != nil {
+		return &queryResult{nextPeer, nil, retErr}
+	}
+
 	return &queryResult{nextPeer, localPeers, retErr}
 }

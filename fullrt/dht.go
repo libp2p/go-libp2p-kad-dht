@@ -22,6 +22,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
 	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
 
@@ -87,21 +88,39 @@ type FullRT struct {
 
 // NewFullRT creates a DHT client that tracks the full network. It takes a protocol prefix for the given network,
 // For example, the protocol /ipfs/kad/1.0.0 has the prefix /ipfs.
-func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opts ...Option) (*FullRT, error) {
-	cfg := &config{}
-	for _, o := range opts {
-		if err := o(cfg); err != nil {
-			return nil, err
-		}
+//
+// FullRT is an experimental DHT client that is under development. Expect breaking changes to occur in this client
+// until it stabilizes.
+//
+// Not all of the standard DHT options are supported in this DHT.
+func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, options ...kaddht.Option) (*FullRT, error) {
+	cfg := &internalConfig.Config{
+		Datastore:        dssync.MutexWrap(ds.NewMapDatastore()),
+		Validator:        record.NamespacedValidator{},
+		ValidatorChanged: false,
+		EnableProviders:  true,
+		EnableValues:     true,
+		ProtocolPrefix:   protocolPrefix,
 	}
 
-	ms := net.NewMessageSenderImpl(h, []protocol.ID{protocolPrefix + "/kad/1.0.0"})
-	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(cfg.validator))
+	if err := cfg.Apply(options...); err != nil {
+		return nil, err
+	}
+	if err := cfg.ApplyFallbacks(h); err != nil {
+		return nil, err
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	ms := net.NewMessageSenderImpl(h, []protocol.ID{cfg.ProtocolPrefix + "/kad/1.0.0"})
+	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(cfg.Validator))
 	if err != nil {
 		return nil, err
 	}
 
-	pm, err := providers.NewProviderManager(ctx, h.ID(), cfg.datastore)
+	pm, err := providers.NewProviderManager(ctx, h.ID(), cfg.Datastore)
 	if err != nil {
 		return nil, err
 	}
@@ -113,18 +132,18 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 
 	var bsPeers []*peer.AddrInfo
 
-	for _, ai := range cfg.bootstrapPeers {
+	for _, ai := range cfg.BootstrapPeers {
 		tmpai := ai
 		bsPeers = append(bsPeers, &tmpai)
 	}
 
 	rt := &FullRT{
 		ctx:             ctx,
-		enableValues:    true,
-		enableProviders: true,
-		Validator:       cfg.validator,
+		enableValues:    cfg.EnableValues,
+		enableProviders: cfg.EnableProviders,
+		Validator:       cfg.Validator,
 		ProviderManager: pm,
-		datastore:       cfg.datastore,
+		datastore:       cfg.Datastore,
 		h:               h,
 		crawler:         c,
 		messageSender:   ms,
@@ -132,7 +151,7 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 		filterFromTable: kaddht.PublicQueryFilter,
 		rt:              trie.New(),
 		keyToPeerMap:    make(map[string]peer.ID),
-		bucketSize:      20,
+		bucketSize:      cfg.BucketSize,
 
 		peerAddrs:      make(map[peer.ID][]multiaddr.Multiaddr),
 		bootstrapPeers: bsPeers,

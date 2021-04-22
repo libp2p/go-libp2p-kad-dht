@@ -33,7 +33,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	dht_pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
-	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
 	record "github.com/libp2p/go-libp2p-record"
@@ -211,11 +210,7 @@ func (dht *FullRT) Ready() bool {
 	rtSize := len(dht.keyToPeerMap)
 	dht.peerAddrsLk.RUnlock()
 
-	if rtSize > len(dht.bootstrapPeers)+1 {
-		return true
-	}
-
-	return false
+	return rtSize > len(dht.bootstrapPeers)+1
 }
 
 func (dht *FullRT) runCrawler(ctx context.Context) {
@@ -241,9 +236,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		for k, v := range m {
 			addrs = append(addrs, &peer.AddrInfo{ID: k, Addrs: v.addrs})
 		}
-		for _, ai := range dht.bootstrapPeers {
-			addrs = append(addrs, ai)
-		}
+
+		addrs = append(addrs, dht.bootstrapPeers...)
 		dht.peerAddrsLk.Unlock()
 
 		start := time.Now()
@@ -256,9 +250,7 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 					addrs: addrs,
 				}
 			},
-			func(p peer.ID, err error) {
-				return
-			})
+			func(p peer.ID, err error) {})
 		dur := time.Since(start)
 		logger.Infof("crawl took %v", dur)
 
@@ -618,7 +610,7 @@ func (dht *FullRT) updatePeerValues(ctx context.Context, key string, val []byte,
 				}
 				return
 			}
-			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+			ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 			defer cancel()
 			err := dht.protoMessenger.PutValue(ctx, p, fixupRec)
 			if err != nil {
@@ -629,12 +621,7 @@ func (dht *FullRT) updatePeerValues(ctx context.Context, key string, val []byte,
 }
 
 type lookupWithFollowupResult struct {
-	peers []peer.ID            // the top K not unreachable peers at the end of the query
-	state []qpeerset.PeerState // the peer states at the end of the query
-
-	// indicates that neither the lookup nor the followup has been prematurely terminated by an external condition such
-	// as context cancellation or the stop function being called.
-	completed bool
+	peers []peer.ID // the top K not unreachable peers at the end of the query
 }
 
 func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
@@ -713,6 +700,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 		}
 
 		dht.execOnMany(ctx, queryFn, peers)
+		lookupResCh <- &lookupWithFollowupResult{peers: peers}
 	}()
 	return valCh, lookupResCh
 }
@@ -1103,7 +1091,12 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 	defer cancelquery()
 
 	addrsCh := make(chan *peer.AddrInfo, 1)
+	newAddrs := make([]multiaddr.Multiaddr, 0)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		addrsSoFar := make(map[multiaddr.Multiaddr]struct{})
 		for {
 			select {
@@ -1112,22 +1105,12 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 					return
 				}
 
-				newAddrs := make([]multiaddr.Multiaddr, 0)
 				for _, a := range ai.Addrs {
 					_, found := addrsSoFar[a]
 					if !found {
 						newAddrs = append(newAddrs, a)
 						addrsSoFar[a] = struct{}{}
 					}
-				}
-
-				err := dht.h.Connect(ctx, peer.AddrInfo{
-					ID:    id,
-					Addrs: ai.Addrs,
-				})
-				if err == nil {
-					cancelquery()
-					return
 				}
 			case <-ctx.Done():
 				return
@@ -1169,6 +1152,14 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 	}
 
 	dht.execOnMany(queryctx, fn, peers)
+
+	close(addrsCh)
+	wg.Wait()
+
+	_ = dht.h.Connect(ctx, peer.AddrInfo{
+		ID:    id,
+		Addrs: newAddrs,
+	})
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.

@@ -34,9 +34,9 @@ type customRtHelper struct {
 	allow peer.ID
 }
 
-func MkFilterForPeer() (func(d *dht.IpfsDHT, conns []network.Conn) bool, *customRtHelper) {
+func MkFilterForPeer() (func(_ interface{}, conns []network.Conn) bool, *customRtHelper) {
 	helper := customRtHelper{}
-	f := func(_ *dht.IpfsDHT, conns []network.Conn) bool {
+	f := func(_ interface{}, conns []network.Conn) bool {
 		for _, c := range conns {
 			if c.RemotePeer() == helper.allow {
 				return true

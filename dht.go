@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -164,15 +165,15 @@ var (
 // If the Routing Table has more than "minRTRefreshThreshold" peers, we consider a peer as a Routing Table candidate ONLY when
 // we successfully get a query response from it OR if it send us a query.
 func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
-	var cfg config
-	if err := cfg.apply(append([]Option{defaults}, options...)...); err != nil {
+	var cfg dhtcfg.Config
+	if err := cfg.Apply(append([]Option{dhtcfg.Defaults}, options...)...); err != nil {
 		return nil, err
 	}
-	if err := cfg.applyFallbacks(h); err != nil {
+	if err := cfg.ApplyFallbacks(h); err != nil {
 		return nil, err
 	}
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -181,30 +182,30 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
 	}
 
-	dht.autoRefresh = cfg.routingTable.autoRefresh
+	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
-	dht.maxRecordAge = cfg.maxRecordAge
-	dht.enableProviders = cfg.enableProviders
-	dht.enableValues = cfg.enableValues
-	dht.disableFixLowPeers = cfg.disableFixLowPeers
+	dht.maxRecordAge = cfg.MaxRecordAge
+	dht.enableProviders = cfg.EnableProviders
+	dht.enableValues = cfg.EnableValues
+	dht.disableFixLowPeers = cfg.DisableFixLowPeers
 
-	dht.Validator = cfg.validator
+	dht.Validator = cfg.Validator
 	dht.msgSender = net.NewMessageSenderImpl(h, dht.protocols)
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender, pb.WithValidator(dht.Validator))
 	if err != nil {
 		return nil, err
 	}
 
-	dht.testAddressUpdateProcessing = cfg.testAddressUpdateProcessing
+	dht.testAddressUpdateProcessing = cfg.TestAddressUpdateProcessing
 
-	dht.auto = cfg.mode
-	switch cfg.mode {
+	dht.auto = cfg.Mode
+	switch cfg.Mode {
 	case ModeAuto, ModeClient:
 		dht.mode = modeClient
 	case ModeAutoServer, ModeServer:
 		dht.mode = modeServer
 	default:
-		return nil, fmt.Errorf("invalid dht mode %d", cfg.mode)
+		return nil, fmt.Errorf("invalid dht mode %d", cfg.Mode)
 	}
 
 	if dht.mode == modeServer {
@@ -262,20 +263,20 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
+func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 	var protocols, serverProtocols []protocol.ID
 
-	v1proto := cfg.protocolPrefix + kad1
+	v1proto := cfg.ProtocolPrefix + kad1
 
-	if cfg.v1ProtocolOverride != "" {
-		v1proto = cfg.v1ProtocolOverride
+	if cfg.V1ProtocolOverride != "" {
+		v1proto = cfg.V1ProtocolOverride
 	}
 
 	protocols = []protocol.ID{v1proto}
 	serverProtocols = []protocol.ID{v1proto}
 
 	dht := &IpfsDHT{
-		datastore:              cfg.datastore,
+		datastore:              cfg.Datastore,
 		self:                   h.ID(),
 		selfKey:                kb.ConvertPeerID(h.ID()),
 		peerstore:              h.Peerstore(),
@@ -284,12 +285,12 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		protocols:              protocols,
 		protocolsStrs:          protocol.ConvertToStrings(protocols),
 		serverProtocols:        serverProtocols,
-		bucketSize:             cfg.bucketSize,
-		alpha:                  cfg.concurrency,
-		beta:                   cfg.resiliency,
-		queryPeerFilter:        cfg.queryPeerFilter,
-		routingTablePeerFilter: cfg.routingTable.peerFilter,
-		rtPeerDiversityFilter:  cfg.routingTable.diversityFilter,
+		bucketSize:             cfg.BucketSize,
+		alpha:                  cfg.Concurrency,
+		beta:                   cfg.Resiliency,
+		queryPeerFilter:        cfg.QueryPeerFilter,
+		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
+		rtPeerDiversityFilter:  cfg.RoutingTable.DiversityFilter,
 
 		fixLowPeersChan: make(chan struct{}, 1),
 
@@ -303,12 +304,12 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	// query a peer as part of our refresh cycle.
 	// To grok the Math Wizardy that produced these exact equations, please be patient as a document explaining it will
 	// be published soon.
-	if cfg.concurrency < cfg.bucketSize { // (alpha < K)
-		l1 := math.Log(float64(1) / float64(cfg.bucketSize))                              //(Log(1/K))
-		l2 := math.Log(float64(1) - (float64(cfg.concurrency) / float64(cfg.bucketSize))) // Log(1 - (alpha / K))
-		maxLastSuccessfulOutboundThreshold = time.Duration(l1 / l2 * float64(cfg.routingTable.refreshInterval))
+	if cfg.Concurrency < cfg.BucketSize { // (alpha < K)
+		l1 := math.Log(float64(1) / float64(cfg.BucketSize))                              //(Log(1/K))
+		l2 := math.Log(float64(1) - (float64(cfg.Concurrency) / float64(cfg.BucketSize))) // Log(1 - (alpha / K))
+		maxLastSuccessfulOutboundThreshold = time.Duration(l1 / l2 * float64(cfg.RoutingTable.RefreshInterval))
 	} else {
-		maxLastSuccessfulOutboundThreshold = cfg.routingTable.refreshInterval
+		maxLastSuccessfulOutboundThreshold = cfg.RoutingTable.RefreshInterval
 	}
 
 	// construct routing table
@@ -318,7 +319,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
 	}
 	dht.routingTable = rt
-	dht.bootstrapPeers = cfg.bootstrapPeers
+	dht.bootstrapPeers = cfg.BootstrapPeers
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -337,7 +338,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	pm, err := providers.NewProviderManager(dht.ctx, h.ID(), cfg.datastore, cfg.providersOptions...)
+	pm, err := providers.NewProviderManager(dht.ctx, h.ID(), cfg.Datastore, cfg.ProvidersOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +349,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg config) (*IpfsDHT, error) {
 	return dht, nil
 }
 
-func makeRtRefreshManager(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThreshold time.Duration) (*rtrefresh.RtRefreshManager, error) {
+func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutboundThreshold time.Duration) (*rtrefresh.RtRefreshManager, error) {
 	keyGenFnc := func(cpl uint) (string, error) {
 		p, err := dht.routingTable.GenRandPeerID(cpl)
 		return string(p), err
@@ -360,18 +361,18 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThr
 	}
 
 	r, err := rtrefresh.NewRtRefreshManager(
-		dht.host, dht.routingTable, cfg.routingTable.autoRefresh,
+		dht.host, dht.routingTable, cfg.RoutingTable.AutoRefresh,
 		keyGenFnc,
 		queryFnc,
-		cfg.routingTable.refreshQueryTimeout,
-		cfg.routingTable.refreshInterval,
+		cfg.RoutingTable.RefreshQueryTimeout,
+		cfg.RoutingTable.RefreshInterval,
 		maxLastSuccessfulOutboundThreshold,
 		dht.refreshFinishedCh)
 
 	return r, err
 }
 
-func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThreshold time.Duration) (*kb.RoutingTable, error) {
+func makeRoutingTable(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutboundThreshold time.Duration) (*kb.RoutingTable, error) {
 	// make a Routing Table Diversity Filter
 	var filter *peerdiversity.Filter
 	if dht.rtPeerDiversityFilter != nil {
@@ -386,7 +387,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg config, maxLastSuccessfulOutboundThresho
 		filter = df
 	}
 
-	rt, err := kb.NewRoutingTable(cfg.bucketSize, dht.selfKey, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold, filter)
+	rt, err := kb.NewRoutingTable(cfg.BucketSize, dht.selfKey, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold, filter)
 	if err != nil {
 		return nil, err
 	}

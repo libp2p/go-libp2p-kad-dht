@@ -1165,7 +1165,7 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 	defer cancel()
 
 	filteredPeer := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
-	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ *IpfsDHT, ai peer.AddrInfo) bool {
+	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ interface{}, ai peer.AddrInfo) bool {
 		return ai.ID != filteredPeer.ID()
 	}))
 	defer func() {

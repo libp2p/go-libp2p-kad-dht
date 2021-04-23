@@ -858,7 +858,7 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 		keysAsPeerIDs = append(keysAsPeerIDs, peer.ID(k))
 	}
 
-	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn)
+	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, true)
 }
 
 func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) error {
@@ -896,13 +896,14 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 		return nil
 	}
 
-	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn)
+	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, false)
 }
 
-func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, k peer.ID) error) error {
+func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, k peer.ID) error, isProvRec bool) error {
 	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
 
 	var anySendsSuccessful uint64 = 0
+	var numSendsSuccessful uint64 = 0
 
 	wg := sync.WaitGroup{}
 	wg.Add(dht.bulkSendParallelism)
@@ -923,13 +924,20 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			for ki, key := range chunk {
 				if loopIndex == 0 {
 					if ki%100 == 0 {
-						logger.Infof("reprovide goroutine: %v pct done - %d/%d done - %d total", (ki*100)/len(chunk), ki, len(chunk), len(sortedKeys))
+						logger.Infof("bulk sending goroutine: %v pct done - %d/%d done - %d total", (ki*100)/len(chunk), ki, len(chunk), len(sortedKeys))
 					}
 				}
 				if err := fn(ctx, key); err != nil {
-					logger.Infof("failed to complete provide of key :%v. %v", internal.LoggableProviderRecordBytes(key), err)
+					var l interface{}
+					if isProvRec {
+						l = internal.LoggableProviderRecordBytes(key)
+					} else {
+						l = internal.LoggableRecordKeyString(key)
+					}
+					logger.Infof("failed to complete bulk sending of key :%v. %v", l, err)
 				} else {
 					atomic.CompareAndSwapUint64(&anySendsSuccessful, 0, 1)
+					atomic.AddUint64(&numSendsSuccessful, 1)
 				}
 			}
 		}()
@@ -937,8 +945,10 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	wg.Wait()
 
 	if anySendsSuccessful == 0 {
-		return fmt.Errorf("failed to complete provides")
+		return fmt.Errorf("failed to complete bulk sending")
 	}
+
+	logger.Infof("bulk send complete: %d of %d successful", numSendsSuccessful, len(keys))
 
 	return nil
 }

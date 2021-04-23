@@ -1166,10 +1166,14 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 	close(addrsCh)
 	wg.Wait()
 
-	_ = dht.h.Connect(ctx, peer.AddrInfo{
-		ID:    id,
-		Addrs: newAddrs,
-	})
+	if len(newAddrs) > 0 {
+		connctx, cancelconn := context.WithTimeout(ctx, time.Second*5)
+		defer cancelconn()
+		_ = dht.h.Connect(connctx, peer.AddrInfo{
+			ID:    id,
+			Addrs: newAddrs,
+		})
+	}
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.

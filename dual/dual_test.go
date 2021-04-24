@@ -15,6 +15,8 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+
+	dhtrouting "github.com/libp2p/go-libp2p-kad-dht/routing"
 )
 
 var wancid, lancid cid.Cid
@@ -263,7 +265,7 @@ func TestSearchValue(t *testing.T) {
 
 	_ = wan.PutValue(ctx, "/v/hello", []byte("valid"))
 
-	valCh, err := d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
+	valCh, err := d.SearchValue(ctx, "/v/hello", dhtrouting.Quorum(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +293,7 @@ func TestSearchValue(t *testing.T) {
 		t.Error(err)
 	}
 
-	valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
+	valCh, err = d.SearchValue(ctx, "/v/hello", dhtrouting.Quorum(0))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -76,9 +76,9 @@ type lookupWithFollowupResult struct {
 //
 // After the lookup is complete the query function is run (unless stopped) against all of the top K peers from the
 // lookup that have not already been successfully queried.
-func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
+func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, seedPeers []peer.ID, useRTPeers bool) (*lookupWithFollowupResult, error) {
 	// run the query
-	lookupRes, err := dht.runQuery(ctx, target, queryFn, stopFn)
+	lookupRes, err := dht.runQuery(ctx, target, queryFn, stopFn, seedPeers, useRTPeers)
 	if err != nil {
 		return nil, err
 	}
@@ -145,10 +145,23 @@ processFollowUp:
 	return lookupRes, nil
 }
 
-func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
+func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, manuallySeededPeers []peer.ID, useRTPeers bool) (*lookupWithFollowupResult, error) {
 	// pick the K closest peers to the key in our Routing table.
 	targetKadID := kb.ConvertKey(target)
-	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
+
+	seedPeerSet := peer.NewSet()
+	for _, p := range manuallySeededPeers {
+		seedPeerSet.Add(p)
+	}
+
+	if manuallySeededPeers == nil || useRTPeers {
+		RTSeedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
+		for _, p := range RTSeedPeers {
+			seedPeerSet.Add(p)
+		}
+	}
+
+	seedPeers := seedPeerSet.Peers()
 	if len(seedPeers) == 0 {
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,

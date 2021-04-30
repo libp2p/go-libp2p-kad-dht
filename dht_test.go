@@ -1483,7 +1483,7 @@ func testFindPeerQuery(t *testing.T,
 	require.NoError(t, err)
 
 	var outpeers []peer.ID
-	for p := range out {
+	for _, p := range out {
 		outpeers = append(outpeers, p)
 	}
 
@@ -1521,7 +1521,7 @@ func TestFindClosestPeers(t *testing.T) {
 	}
 
 	var out []peer.ID
-	for p := range peers {
+	for _, p := range peers {
 		out = append(out, p)
 	}
 
@@ -2112,18 +2112,16 @@ func TestPreconnectedNodes(t *testing.T) {
 	}
 
 	// See if it works
-	peerCh, err := d2.GetClosestPeers(ctx, "testkey")
+	peers, err := d2.GetClosestPeers(ctx, "testkey")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	select {
-	case p := <-peerCh:
-		if p == h1.ID() {
-			break
-		}
+	if len(peers) != 1 {
+		t.Fatal("why is there more than one peer?")
+	}
+
+	if peers[0] != h1.ID() {
 		t.Fatal("could not find peer")
-	case <-ctx.Done():
-		t.Fatal("test hung")
 	}
 }

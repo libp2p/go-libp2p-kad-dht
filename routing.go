@@ -65,13 +65,13 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	pchan, err := dht.GetClosestPeers(ctx, key)
+	peers, err := dht.GetClosestPeers(ctx, key)
 	if err != nil {
 		return err
 	}
 
 	wg := sync.WaitGroup{}
-	for p := range pchan {
+	for _, p := range peers {
 		wg.Add(1)
 		go func(p peer.ID) {
 			ctx, cancel := context.WithCancel(ctx)
@@ -446,7 +446,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 
 	wg := sync.WaitGroup{}
-	for p := range peers {
+	for _, p := range peers {
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()

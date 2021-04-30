@@ -53,7 +53,7 @@ func TestFilterCaching(t *testing.T) {
 	d := setupDHT(ctx, t, true)
 
 	remote, _ := manet.FromIP(net.IPv4(8, 8, 8, 8))
-	if PrivateRoutingTableFilter(d, []network.Conn{&mockConn{
+	if privRTFilter(d, []network.Conn{&mockConn{
 		local:  d.Host().Peerstore().PeerInfo(d.Host().ID()),
 		remote: peer.AddrInfo{ID: "", Addrs: []ma.Multiaddr{remote}},
 	}}) {

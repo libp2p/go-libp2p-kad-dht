@@ -152,7 +152,7 @@ func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
 		return false, err
 	}
 
-	return dht.routingTablePeerFilter == nil || dht.routingTablePeerFilter(dht, dht.Host().Network().ConnsToPeer(p)), nil
+	return dht.routingTablePeerFilter == nil || dht.routingTablePeerFilter(dht, p), nil
 }
 
 type disconnector interface {

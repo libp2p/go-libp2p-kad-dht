@@ -3,12 +3,12 @@ package dht
 import (
 	"bytes"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 
 	"github.com/google/gopacket/routing"
@@ -83,12 +83,13 @@ var _ QueryFilterFunc = PublicQueryFilter
 
 // PublicRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a public network
-func PublicRoutingTableFilter(dht interface{}, conns []network.Conn) bool {
+func PublicRoutingTableFilter(dht interface{}, p peer.ID) bool {
+	d := dht.(hasHost)
+
+	conns := d.Host().Network().ConnsToPeer(p)
 	if len(conns) == 0 {
 		return false
 	}
-
-	d := dht.(hasHost)
 
 	// Do we have a public address for this peer?
 	id := conns[0].RemotePeer()
@@ -145,12 +146,19 @@ func getCachedRouter() routing.Router {
 
 // PrivateRoutingTableFilter allows a peer to be added to the routing table if the connections to that peer indicate
 // that it is on a private network
-func PrivateRoutingTableFilter(dht interface{}, conns []network.Conn) bool {
+func PrivateRoutingTableFilter(dht interface{}, p peer.ID) bool {
 	d := dht.(hasHost)
+	conns := d.Host().Network().ConnsToPeer(p)
+	return privRTFilter(d, conns)
+}
+
+func privRTFilter(dht interface{}, conns []network.Conn) bool {
+	d := dht.(hasHost)
+	h := d.Host()
 
 	router := getCachedRouter()
 	myAdvertisedIPs := make([]net.IP, 0)
-	for _, a := range d.Host().Addrs() {
+	for _, a := range h.Addrs() {
 		if isPublicAddr(a) && !isRelayAddr(a) {
 			ip, err := manet.ToIP(a)
 			if err != nil {

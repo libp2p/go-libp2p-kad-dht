@@ -2,12 +2,12 @@ package dual
 
 import (
 	"context"
+	"github.com/libp2p/go-libp2p-core/host"
 	"testing"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	peerstore "github.com/libp2p/go-libp2p-core/peerstore"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -34,9 +34,17 @@ type customRtHelper struct {
 	allow peer.ID
 }
 
-func MkFilterForPeer() (func(_ interface{}, conns []network.Conn) bool, *customRtHelper) {
+func MkFilterForPeer() (func(_ interface{}, p peer.ID) bool, *customRtHelper) {
 	helper := customRtHelper{}
-	f := func(_ interface{}, conns []network.Conn) bool {
+
+	type hasHost interface {
+		Host() host.Host
+	}
+
+	f := func(dht interface{}, p peer.ID) bool {
+		d := dht.(hasHost)
+		conns := d.Host().Network().ConnsToPeer(p)
+
 		for _, c := range conns {
 			if c.RemotePeer() == helper.allow {
 				return true

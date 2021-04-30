@@ -8,7 +8,6 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-ipns"
 	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
@@ -29,7 +28,7 @@ type QueryFilterFunc func(dht interface{}, ai peer.AddrInfo) bool
 
 // RouteTableFilterFunc is a filter applied when considering connections to keep in
 // the local route table.
-type RouteTableFilterFunc func(dht interface{}, conns []network.Conn) bool
+type RouteTableFilterFunc func(dht interface{}, p peer.ID) bool
 
 // Config is a structure containing all the options that can be used when constructing a DHT.
 type Config struct {
@@ -65,8 +64,8 @@ type Config struct {
 	TestAddressUpdateProcessing bool
 }
 
-func EmptyQueryFilter(_ interface{}, ai peer.AddrInfo) bool  { return true }
-func EmptyRTFilter(_ interface{}, conns []network.Conn) bool { return true }
+func EmptyQueryFilter(_ interface{}, ai peer.AddrInfo) bool { return true }
+func EmptyRTFilter(_ interface{}, p peer.ID) bool           { return true }
 
 // Apply applies the given options to this Option
 func (c *Config) Apply(opts ...Option) error {

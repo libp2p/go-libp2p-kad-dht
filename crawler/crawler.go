@@ -119,6 +119,8 @@ type HandleQueryResult func(p peer.ID, rtPeers []*peer.AddrInfo)
 // HandleQueryFail is a callback on failed peer query
 type HandleQueryFail func(p peer.ID, err error)
 
+const startAddressDur time.Duration = time.Minute * 30
+
 // Run crawls dht peers from an initial seed of `startingPeers`
 func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handleSuccess HandleQueryResult, handleFail HandleQueryFail) {
 	jobs := make(chan peer.ID, 1)
@@ -140,15 +142,27 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 	defer wg.Wait()
 	defer close(jobs)
 
-	toDial := make([]*peer.AddrInfo, 0, len(startingPeers))
+	var toDial []*peer.AddrInfo
 	peersSeen := make(map[peer.ID]struct{})
 
+	numSkipped := 0
 	for _, ai := range startingPeers {
+		extendAddrs := c.host.Peerstore().Addrs(ai.ID)
+		if len(ai.Addrs) > 0 {
+			extendAddrs = append(extendAddrs, ai.Addrs...)
+			c.host.Peerstore().AddAddrs(ai.ID, extendAddrs, startAddressDur)
+		}
+		if len(extendAddrs) == 0 {
+			numSkipped++
+			continue
+		}
+
 		toDial = append(toDial, ai)
 		peersSeen[ai.ID] = struct{}{}
-		extendAddrs := c.host.Peerstore().Addrs(ai.ID)
-		extendAddrs = append(extendAddrs, ai.Addrs...)
-		c.host.Peerstore().AddAddrs(ai.ID, extendAddrs, time.Hour)
+	}
+
+	if numSkipped > 0 {
+		logger.Infof("%d starting peers were skipped due to lack of addresses. Starting crawl with %d peers", numSkipped, len(toDial))
 	}
 
 	numQueried := 0
@@ -168,7 +182,7 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 				logger.Debugf("peer %v had %d peers", res.peer, len(res.data))
 				rtPeers := make([]*peer.AddrInfo, 0, len(res.data))
 				for p, ai := range res.data {
-					c.host.Peerstore().AddAddrs(p, ai.Addrs, time.Hour)
+					c.host.Peerstore().AddAddrs(p, ai.Addrs, time.Minute*30)
 					if _, ok := peersSeen[p]; !ok {
 						peersSeen[p] = struct{}{}
 						toDial = append(toDial, ai)
@@ -208,7 +222,7 @@ func (c *Crawler) queryPeer(ctx context.Context, nextPeer peer.ID) *queryResult 
 	defer cancel()
 	err = c.host.Connect(connCtx, peer.AddrInfo{ID: nextPeer})
 	if err != nil {
-		logger.Infof("could not connect to peer %v: %v", nextPeer, err)
+		logger.Debugf("could not connect to peer %v: %v", nextPeer, err)
 		return &queryResult{nextPeer, nil, err}
 	}
 

@@ -213,6 +213,10 @@ func (dht *FullRT) Ready() bool {
 	return rtSize > len(dht.bootstrapPeers)+1
 }
 
+func (dht *FullRT) Host() host.Host {
+	return dht.h
+}
+
 func (dht *FullRT) runCrawler(ctx context.Context) {
 	t := time.NewTicker(dht.crawlerInterval)
 
@@ -233,17 +237,37 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 
 		var addrs []*peer.AddrInfo
 		dht.peerAddrsLk.Lock()
-		for k, v := range m {
-			addrs = append(addrs, &peer.AddrInfo{ID: k, Addrs: v.addrs})
+		for k := range m {
+			addrs = append(addrs, &peer.AddrInfo{ID: k}) // Addrs: v.addrs
 		}
 
 		addrs = append(addrs, dht.bootstrapPeers...)
 		dht.peerAddrsLk.Unlock()
 
+		for k := range m {
+			delete(m, k)
+		}
+
 		start := time.Now()
 		dht.crawler.Run(ctx, addrs,
 			func(p peer.ID, rtPeers []*peer.AddrInfo) {
-				addrs := dht.h.Peerstore().Addrs(p)
+				conns := dht.h.Network().ConnsToPeer(p)
+				var addrs []multiaddr.Multiaddr
+				for _, conn := range conns {
+					addr := conn.RemoteMultiaddr()
+					addrs = append(addrs, addr)
+				}
+
+				if len(addrs) == 0 {
+					logger.Debugf("no connections to %v after successful query. keeping addresses from the peerstore", p)
+					addrs = dht.h.Peerstore().Addrs(p)
+				}
+
+				keep := kaddht.PublicRoutingTableFilter(dht, p)
+				if !keep {
+					return
+				}
+
 				mxLk.Lock()
 				defer mxLk.Unlock()
 				m[p] = &crawlVal{
@@ -356,6 +380,11 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 			logger.Errorf("key not found in map")
 		}
 		dht.kMapLk.RUnlock()
+		dht.peerAddrsLk.RLock()
+		peerAddrs := dht.peerAddrs[p]
+		dht.peerAddrsLk.RUnlock()
+
+		dht.h.Peerstore().AddAddrs(p, peerAddrs, peerstore.TempAddrTTL)
 		peers = append(peers, p)
 	}
 	return peers, nil

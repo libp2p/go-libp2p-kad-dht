@@ -1479,13 +1479,8 @@ func testFindPeerQuery(t *testing.T,
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
 
-	out, err := guy.GetClosestPeers(ctx, val)
+	outpeers, err := guy.GetClosestPeers(ctx, val)
 	require.NoError(t, err)
-
-	var outpeers []peer.ID
-	for _, p := range out {
-		outpeers = append(outpeers, p)
-	}
 
 	sort.Sort(peer.IDSlice(outpeers))
 
@@ -1520,13 +1515,8 @@ func TestFindClosestPeers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var out []peer.ID
-	for _, p := range peers {
-		out = append(out, p)
-	}
-
-	if len(out) < querier.beta {
-		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(out), querier.beta)
+	if len(peers) < querier.beta {
+		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(peers), querier.beta)
 	}
 }
 

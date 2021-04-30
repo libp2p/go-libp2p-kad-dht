@@ -15,6 +15,7 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	"github.com/multiformats/go-multiaddr"
 )
 
 var wancid, lancid cid.Cid
@@ -356,14 +357,20 @@ func TestFindPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Addrs) != 1 {
-		t.Fatalf("expeced find peer to find 1 address, found %d", len(p.Addrs))
-	}
+	assertUniqueMultiaddrs(t, p.Addrs)
 	p, err = d.FindPeer(ctx, wan.PeerID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Addrs) != 1 {
-		t.Fatalf("expeced find peer to find addresses, found %d", len(p.Addrs))
+	assertUniqueMultiaddrs(t, p.Addrs)
+}
+
+func assertUniqueMultiaddrs(t *testing.T, addrs []multiaddr.Multiaddr) {
+	set := make(map[string]bool)
+	for _, addr := range addrs {
+		if set[string(addr.Bytes())] {
+			t.Errorf("duplicate address %s", addr)
+		}
+		set[string(addr.Bytes())] = true
 	}
 }

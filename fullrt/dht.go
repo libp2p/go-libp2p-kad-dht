@@ -931,7 +931,7 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, k peer.ID) error, isProvRec bool) error {
 	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
 
-	var anySendsSuccessful uint64 = 0
+	var numSends uint64 = 0
 	var numSendsSuccessful uint64 = 0
 
 	wg := sync.WaitGroup{}
@@ -946,15 +946,12 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			chunk = sortedKeys[i*chunkSize : end]
 		}
 
-		loopIndex := i
-
 		go func() {
 			defer wg.Done()
-			for ki, key := range chunk {
-				if loopIndex == 0 {
-					if ki%100 == 0 {
-						logger.Infof("bulk sending goroutine: %v pct done - %d/%d done - %d total", (ki*100)/len(chunk), ki, len(chunk), len(sortedKeys))
-					}
+			for _, key := range chunk {
+				sendsSoFar := atomic.AddUint64(&numSends, 1)
+				if uint64(len(sortedKeys))%sendsSoFar == 0 {
+					logger.Infof("bulk sending goroutine: %v pct done - %d/%d done", sendsSoFar/uint64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
 				}
 				if err := fn(ctx, key); err != nil {
 					var l interface{}
@@ -965,7 +962,6 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					}
 					logger.Infof("failed to complete bulk sending of key :%v. %v", l, err)
 				} else {
-					atomic.CompareAndSwapUint64(&anySendsSuccessful, 0, 1)
 					atomic.AddUint64(&numSendsSuccessful, 1)
 				}
 			}
@@ -973,7 +969,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	}
 	wg.Wait()
 
-	if anySendsSuccessful == 0 {
+	if numSendsSuccessful == 0 {
 		return fmt.Errorf("failed to complete bulk sending")
 	}
 

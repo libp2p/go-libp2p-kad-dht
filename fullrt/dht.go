@@ -941,6 +941,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	wg := sync.WaitGroup{}
 	wg.Add(dht.bulkSendParallelism)
 	chunkSize := len(sortedKeys) / dht.bulkSendParallelism
+	onePctKeys := uint64(len(sortedKeys)) / 100
 	for i := 0; i < dht.bulkSendParallelism; i++ {
 		var chunk []peer.ID
 		end := (i + 1) * chunkSize
@@ -954,7 +955,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			defer wg.Done()
 			for _, key := range chunk {
 				sendsSoFar := atomic.AddUint64(&numSends, 1)
-				if uint64(len(sortedKeys))%sendsSoFar == 0 {
+				if sendsSoFar%onePctKeys == 0 {
 					logger.Infof("bulk sending goroutine: %v pct done - %d/%d done", sendsSoFar/uint64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
 				}
 				if err := fn(ctx, key); err != nil {

@@ -929,6 +929,10 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 }
 
 func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, k peer.ID) error, isProvRec bool) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
 	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
 
 	var numSends uint64 = 0

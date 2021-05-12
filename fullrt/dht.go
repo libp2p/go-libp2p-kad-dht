@@ -92,8 +92,13 @@ type FullRT struct {
 // until it stabilizes.
 //
 // Not all of the standard DHT options are supported in this DHT.
-func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, options ...kaddht.Option) (*FullRT, error) {
-	cfg := &internalConfig.Config{
+func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
+	var fullrtcfg config
+	if err := fullrtcfg.apply(options...); err != nil {
+		return nil, err
+	}
+
+	dhtcfg := &internalConfig.Config{
 		Datastore:        dssync.MutexWrap(ds.NewMapDatastore()),
 		Validator:        record.NamespacedValidator{},
 		ValidatorChanged: false,
@@ -102,24 +107,24 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 		ProtocolPrefix:   protocolPrefix,
 	}
 
-	if err := cfg.Apply(options...); err != nil {
+	if err := dhtcfg.Apply(fullrtcfg.dhtOpts...); err != nil {
 		return nil, err
 	}
-	if err := cfg.ApplyFallbacks(h); err != nil {
-		return nil, err
-	}
-
-	if err := cfg.Validate(); err != nil {
+	if err := dhtcfg.ApplyFallbacks(h); err != nil {
 		return nil, err
 	}
 
-	ms := net.NewMessageSenderImpl(h, []protocol.ID{cfg.ProtocolPrefix + "/kad/1.0.0"})
-	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(cfg.Validator))
+	if err := dhtcfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	ms := net.NewMessageSenderImpl(h, []protocol.ID{dhtcfg.ProtocolPrefix + "/kad/1.0.0"})
+	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(dhtcfg.Validator))
 	if err != nil {
 		return nil, err
 	}
 
-	pm, err := providers.NewProviderManager(ctx, h.ID(), cfg.Datastore)
+	pm, err := providers.NewProviderManager(ctx, h.ID(), dhtcfg.Datastore)
 	if err != nil {
 		return nil, err
 	}
@@ -131,18 +136,18 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 
 	var bsPeers []*peer.AddrInfo
 
-	for _, ai := range cfg.BootstrapPeers {
+	for _, ai := range dhtcfg.BootstrapPeers {
 		tmpai := ai
 		bsPeers = append(bsPeers, &tmpai)
 	}
 
 	rt := &FullRT{
 		ctx:             ctx,
-		enableValues:    cfg.EnableValues,
-		enableProviders: cfg.EnableProviders,
-		Validator:       cfg.Validator,
+		enableValues:    dhtcfg.EnableValues,
+		enableProviders: dhtcfg.EnableProviders,
+		Validator:       dhtcfg.Validator,
 		ProviderManager: pm,
-		datastore:       cfg.Datastore,
+		datastore:       dhtcfg.Datastore,
 		h:               h,
 		crawler:         c,
 		messageSender:   ms,
@@ -150,7 +155,7 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 		filterFromTable: kaddht.PublicQueryFilter,
 		rt:              trie.New(),
 		keyToPeerMap:    make(map[string]peer.ID),
-		bucketSize:      cfg.BucketSize,
+		bucketSize:      dhtcfg.BucketSize,
 
 		peerAddrs:      make(map[peer.ID][]multiaddr.Multiaddr),
 		bootstrapPeers: bsPeers,

@@ -4,10 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-kad-dht/internal"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-msgio/protoio"
 	"io"
 	"sync"
 	"time"
@@ -17,11 +13,16 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 
-	"github.com/libp2p/go-libp2p-kad-dht/metrics"
-
+	logging "github.com/ipfs/go-log"
 	"github.com/libp2p/go-msgio"
+	"github.com/libp2p/go-msgio/protoio"
+
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
+
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 )
 
 var dhtReadMessageTimeout = 10 * time.Second

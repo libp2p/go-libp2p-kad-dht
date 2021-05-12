@@ -2,11 +2,13 @@ package net
 
 import (
 	"context"
+	"testing"
+
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
-	"testing"
 )
 
 func TestInvalidMessageSenderTracking(t *testing.T) {

@@ -161,6 +161,12 @@ type disconnector interface {
 
 func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 	dht := nn.dht
+
+	ms, ok := dht.msgSender.(disconnector)
+	if !ok {
+		return
+	}
+
 	select {
 	case <-dht.Process().Closing():
 		return
@@ -178,9 +184,7 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 		return
 	}
 
-	if ms, ok := dht.msgSender.(disconnector); ok {
-		ms.OnDisconnect(dht.Context(), p)
-	}
+	ms.OnDisconnect(dht.Context(), p)
 }
 
 func (nn *subscriberNotifee) Connected(network.Network, network.Conn)      {}

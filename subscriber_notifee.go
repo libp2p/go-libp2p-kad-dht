@@ -156,7 +156,7 @@ func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
 }
 
 type disconnector interface {
-	StreamDisconnect(ctx context.Context, p peer.ID)
+	OnDisconnect(ctx context.Context, p peer.ID)
 }
 
 func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
@@ -179,7 +179,7 @@ func (nn *subscriberNotifee) Disconnected(n network.Network, v network.Conn) {
 	}
 
 	if ms, ok := dht.msgSender.(disconnector); ok {
-		ms.StreamDisconnect(dht.Context(), p)
+		ms.OnDisconnect(dht.Context(), p)
 	}
 }
 

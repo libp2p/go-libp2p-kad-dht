@@ -49,7 +49,7 @@ func NewMessageSenderImpl(h host.Host, protos []protocol.ID) pb.MessageSender {
 	}
 }
 
-func (m *messageSenderImpl) StreamDisconnect(ctx context.Context, p peer.ID) {
+func (m *messageSenderImpl) OnDisconnect(ctx context.Context, p peer.ID) {
 	m.smlk.Lock()
 	defer m.smlk.Unlock()
 	ms, ok := m.strmap[p]

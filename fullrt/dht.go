@@ -48,7 +48,9 @@ var logger = logging.Logger("fullrtdht")
 // FullRT is an experimental DHT client that is under development. Expect breaking changes to occur in this client
 // until it stabilizes.
 type FullRT struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	enableValues, enableProviders bool
 	Validator                     record.Validator
@@ -92,7 +94,7 @@ type FullRT struct {
 // until it stabilizes.
 //
 // Not all of the standard DHT options are supported in this DHT.
-func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
+func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
 	var fullrtcfg config
 	if err := fullrtcfg.apply(options...); err != nil {
 		return nil, err
@@ -124,13 +126,16 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 		return nil, err
 	}
 
-	pm, err := providers.NewProviderManager(ctx, h.ID(), dhtcfg.Datastore)
+	c, err := crawler.New(h, crawler.WithParallelism(200))
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := crawler.New(h, crawler.WithParallelism(200))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pm, err := providers.NewProviderManager(ctx, h.ID(), dhtcfg.Datastore)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -142,7 +147,9 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 	}
 
 	rt := &FullRT{
-		ctx:             ctx,
+		ctx:    ctx,
+		cancel: cancel,
+
 		enableValues:    dhtcfg.EnableValues,
 		enableProviders: dhtcfg.EnableProviders,
 		Validator:       dhtcfg.Validator,
@@ -170,6 +177,7 @@ func NewFullRT(ctx context.Context, h host.Host, protocolPrefix protocol.ID, opt
 		bulkSendParallelism: 10,
 	}
 
+	rt.wg.Add(1)
 	go rt.runCrawler(ctx)
 
 	return rt, nil
@@ -186,6 +194,8 @@ func (dht *FullRT) TriggerRefresh(ctx context.Context) error {
 		return ctx.Err()
 	case dht.triggerRefresh <- struct{}{}:
 		return nil
+	case <-dht.ctx.Done():
+		return fmt.Errorf("dht is closed")
 	}
 }
 
@@ -223,6 +233,7 @@ func (dht *FullRT) Host() host.Host {
 }
 
 func (dht *FullRT) runCrawler(ctx context.Context) {
+	defer dht.wg.Done()
 	t := time.NewTicker(dht.crawlerInterval)
 
 	m := make(map[peer.ID]*crawlVal)
@@ -306,6 +317,13 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		dht.lastCrawlTime = time.Now()
 		dht.rtLk.Unlock()
 	}
+}
+
+func (dht *FullRT) Close() error {
+	dht.cancel()
+	err := dht.ProviderManager.Process().Close()
+	dht.wg.Wait()
+	return err
 }
 
 func (dht *FullRT) Bootstrap(ctx context.Context) error {

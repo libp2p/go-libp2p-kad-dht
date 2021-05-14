@@ -2,12 +2,12 @@ package dual
 
 import (
 	"context"
-	"github.com/libp2p/go-libp2p-core/host"
 	"testing"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	peerstore "github.com/libp2p/go-libp2p-core/peerstore"
 	dht "github.com/libp2p/go-libp2p-kad-dht"

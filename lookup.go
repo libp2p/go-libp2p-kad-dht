@@ -16,7 +16,7 @@ import (
 //
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
-func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan peer.ID, error) {
+func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
 	if key == "" {
 		return nil, fmt.Errorf("can't lookup empty key")
 	}
@@ -51,17 +51,10 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) (<-chan pee
 		return nil, err
 	}
 
-	out := make(chan peer.ID, dht.bucketSize)
-	defer close(out)
-
-	for _, p := range lookupRes.peers {
-		out <- p
-	}
-
 	if ctx.Err() == nil && lookupRes.completed {
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}
 
-	return out, ctx.Err()
+	return lookupRes.peers, ctx.Err()
 }

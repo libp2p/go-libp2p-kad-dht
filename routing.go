@@ -15,6 +15,7 @@ import (
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -64,13 +65,13 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	pchan, err := dht.GetClosestPeers(ctx, key)
+	peers, err := dht.GetClosestPeers(ctx, key)
 	if err != nil {
 		return err
 	}
 
 	wg := sync.WaitGroup{}
-	for p := range pchan {
+	for _, p := range peers {
 		wg.Add(1)
 		go func(p peer.ID) {
 			ctx, cancel := context.WithCancel(ctx)
@@ -109,7 +110,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	if err := cfg.Apply(opts...); err != nil {
 		return nil, err
 	}
-	opts = append(opts, Quorum(getQuorum(&cfg, defaultQuorum)))
+	opts = append(opts, Quorum(internalConfig.GetQuorum(&cfg)))
 
 	responses, err := dht.SearchValue(ctx, key, opts...)
 	if err != nil {
@@ -145,7 +146,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 	responsesNeeded := 0
 	if !cfg.Offline {
-		responsesNeeded = getQuorum(&cfg, defaultQuorum)
+		responsesNeeded = internalConfig.GetQuorum(&cfg)
 	}
 
 	stopCh := make(chan struct{})
@@ -445,7 +446,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 
 	wg := sync.WaitGroup{}
-	for p := range peers {
+	for _, p := range peers {
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()

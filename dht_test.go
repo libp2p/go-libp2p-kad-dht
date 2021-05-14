@@ -562,28 +562,6 @@ func TestValueGetInvalid(t *testing.T) {
 	testSetGet("valid", "newer", nil)
 }
 
-func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dht := setupDHT(ctx, t, false)
-	defer dht.Close()
-
-	foo := peer.ID("asdasd")
-	_, err := dht.msgSender.messageSenderForPeer(ctx, foo)
-	if err == nil {
-		t.Fatal("that shouldnt have succeeded")
-	}
-
-	dht.msgSender.smlk.Lock()
-	mscnt := len(dht.msgSender.strmap)
-	dht.msgSender.smlk.Unlock()
-
-	if mscnt > 0 {
-		t.Fatal("should have no message senders in map")
-	}
-}
-
 func TestProvides(t *testing.T) {
 	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1187,7 +1165,7 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 	defer cancel()
 
 	filteredPeer := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
-	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ *IpfsDHT, ai peer.AddrInfo) bool {
+	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ interface{}, ai peer.AddrInfo) bool {
 		return ai.ID != filteredPeer.ID()
 	}))
 	defer func() {
@@ -1501,13 +1479,8 @@ func testFindPeerQuery(t *testing.T,
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
 
-	out, err := guy.GetClosestPeers(ctx, val)
+	outpeers, err := guy.GetClosestPeers(ctx, val)
 	require.NoError(t, err)
-
-	var outpeers []peer.ID
-	for p := range out {
-		outpeers = append(outpeers, p)
-	}
 
 	sort.Sort(peer.IDSlice(outpeers))
 
@@ -1542,13 +1515,8 @@ func TestFindClosestPeers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var out []peer.ID
-	for p := range peers {
-		out = append(out, p)
-	}
-
-	if len(out) < querier.beta {
-		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(out), querier.beta)
+	if len(peers) < querier.beta {
+		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(peers), querier.beta)
 	}
 }
 
@@ -2134,18 +2102,16 @@ func TestPreconnectedNodes(t *testing.T) {
 	}
 
 	// See if it works
-	peerCh, err := d2.GetClosestPeers(ctx, "testkey")
+	peers, err := d2.GetClosestPeers(ctx, "testkey")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	select {
-	case p := <-peerCh:
-		if p == h1.ID() {
-			break
-		}
+	if len(peers) != 1 {
+		t.Fatal("why is there more than one peer?")
+	}
+
+	if peers[0] != h1.ID() {
 		t.Fatal("could not find peer")
-	case <-ctx.Done():
-		t.Fatal("test hung")
 	}
 }

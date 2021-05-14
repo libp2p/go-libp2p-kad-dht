@@ -5,22 +5,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
+	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 
 	ds "github.com/ipfs/go-datastore"
-	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/ipfs/go-ipns"
 )
 
 // ModeOpt describes what mode the dht should operate in
-type ModeOpt int
+type ModeOpt = dhtcfg.ModeOpt
 
 const (
 	// ModeAuto utilizes EvtLocalReachabilityChanged events sent over the event bus to dynamically switch the DHT
@@ -37,143 +34,13 @@ const (
 // DefaultPrefix is the application specific prefix attached to all DHT protocols by default.
 const DefaultPrefix protocol.ID = "/ipfs"
 
-// Options is a structure containing all the options that can be used when constructing a DHT.
-type config struct {
-	datastore          ds.Batching
-	validator          record.Validator
-	validatorChanged   bool // if true implies that the validator has been changed and that defaults should not be used
-	mode               ModeOpt
-	protocolPrefix     protocol.ID
-	v1ProtocolOverride protocol.ID
-	bucketSize         int
-	concurrency        int
-	resiliency         int
-	maxRecordAge       time.Duration
-	enableProviders    bool
-	enableValues       bool
-	providersOptions   []providers.Option
-	queryPeerFilter    QueryFilterFunc
-
-	routingTable struct {
-		refreshQueryTimeout time.Duration
-		refreshInterval     time.Duration
-		autoRefresh         bool
-		latencyTolerance    time.Duration
-		checkInterval       time.Duration
-		peerFilter          RouteTableFilterFunc
-		diversityFilter     peerdiversity.PeerIPGroupFilter
-	}
-
-	bootstrapPeers []peer.AddrInfo
-
-	// test specific config options
-	disableFixLowPeers          bool
-	testAddressUpdateProcessing bool
-}
-
-func emptyQueryFilter(_ *IpfsDHT, ai peer.AddrInfo) bool  { return true }
-func emptyRTFilter(_ *IpfsDHT, conns []network.Conn) bool { return true }
-
-// apply applies the given options to this Option
-func (c *config) apply(opts ...Option) error {
-	for i, opt := range opts {
-		if err := opt(c); err != nil {
-			return fmt.Errorf("dht option %d failed: %s", i, err)
-		}
-	}
-	return nil
-}
-
-// applyFallbacks sets default values that could not be applied during config creation since they are dependent
-// on other configuration parameters (e.g. optA is by default 2x optB) and/or on the Host
-func (c *config) applyFallbacks(h host.Host) error {
-	if !c.validatorChanged {
-		nsval, ok := c.validator.(record.NamespacedValidator)
-		if ok {
-			if _, pkFound := nsval["pk"]; !pkFound {
-				nsval["pk"] = record.PublicKeyValidator{}
-			}
-			if _, ipnsFound := nsval["ipns"]; !ipnsFound {
-				nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
-			}
-		} else {
-			return fmt.Errorf("the default validator was changed without being marked as changed")
-		}
-	}
-	return nil
-}
-
-// Option DHT option type.
-type Option func(*config) error
-
-const defaultBucketSize = 20
-
-// defaults are the default DHT options. This option will be automatically
-// prepended to any options you pass to the DHT constructor.
-var defaults = func(o *config) error {
-	o.validator = record.NamespacedValidator{}
-	o.datastore = dssync.MutexWrap(ds.NewMapDatastore())
-	o.protocolPrefix = DefaultPrefix
-	o.enableProviders = true
-	o.enableValues = true
-	o.queryPeerFilter = emptyQueryFilter
-
-	o.routingTable.latencyTolerance = time.Minute
-	o.routingTable.refreshQueryTimeout = 1 * time.Minute
-	o.routingTable.refreshInterval = 10 * time.Minute
-	o.routingTable.autoRefresh = true
-	o.routingTable.peerFilter = emptyRTFilter
-	o.maxRecordAge = time.Hour * 36
-
-	o.bucketSize = defaultBucketSize
-	o.concurrency = 10
-	o.resiliency = 3
-
-	return nil
-}
-
-func (c *config) validate() error {
-	if c.protocolPrefix != DefaultPrefix {
-		return nil
-	}
-	if c.bucketSize != defaultBucketSize {
-		return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
-	}
-	if !c.enableProviders {
-		return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)
-	}
-	if !c.enableValues {
-		return fmt.Errorf("protocol prefix %s must have values enabled", DefaultPrefix)
-	}
-
-	nsval, isNSVal := c.validator.(record.NamespacedValidator)
-	if !isNSVal {
-		return fmt.Errorf("protocol prefix %s must use a namespaced validator", DefaultPrefix)
-	}
-
-	if len(nsval) != 2 {
-		return fmt.Errorf("protocol prefix %s must have exactly two namespaced validators - /pk and /ipns", DefaultPrefix)
-	}
-
-	if pkVal, pkValFound := nsval["pk"]; !pkValFound {
-		return fmt.Errorf("protocol prefix %s must support the /pk namespaced validator", DefaultPrefix)
-	} else if _, ok := pkVal.(record.PublicKeyValidator); !ok {
-		return fmt.Errorf("protocol prefix %s must use the record.PublicKeyValidator for the /pk namespace", DefaultPrefix)
-	}
-
-	if ipnsVal, ipnsValFound := nsval["ipns"]; !ipnsValFound {
-		return fmt.Errorf("protocol prefix %s must support the /ipns namespaced validator", DefaultPrefix)
-	} else if _, ok := ipnsVal.(ipns.Validator); !ok {
-		return fmt.Errorf("protocol prefix %s must use ipns.Validator for the /ipns namespace", DefaultPrefix)
-	}
-	return nil
-}
+type Option = dhtcfg.Option
 
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
 func RoutingTableLatencyTolerance(latency time.Duration) Option {
-	return func(c *config) error {
-		c.routingTable.latencyTolerance = latency
+	return func(c *dhtcfg.Config) error {
+		c.RoutingTable.LatencyTolerance = latency
 		return nil
 	}
 }
@@ -181,8 +48,8 @@ func RoutingTableLatencyTolerance(latency time.Duration) Option {
 // RoutingTableRefreshQueryTimeout sets the timeout for routing table refresh
 // queries.
 func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
-	return func(c *config) error {
-		c.routingTable.refreshQueryTimeout = timeout
+	return func(c *dhtcfg.Config) error {
+		c.RoutingTable.RefreshQueryTimeout = timeout
 		return nil
 	}
 }
@@ -194,8 +61,8 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 // 1. Then searching for a random key in each bucket that hasn't been queried in
 //    the last refresh period.
 func RoutingTableRefreshPeriod(period time.Duration) Option {
-	return func(c *config) error {
-		c.routingTable.refreshInterval = period
+	return func(c *dhtcfg.Config) error {
+		c.RoutingTable.RefreshInterval = period
 		return nil
 	}
 }
@@ -204,8 +71,8 @@ func RoutingTableRefreshPeriod(period time.Duration) Option {
 //
 // Defaults to an in-memory (temporary) map.
 func Datastore(ds ds.Batching) Option {
-	return func(c *config) error {
-		c.datastore = ds
+	return func(c *dhtcfg.Config) error {
+		c.Datastore = ds
 		return nil
 	}
 }
@@ -214,8 +81,8 @@ func Datastore(ds ds.Batching) Option {
 //
 // Defaults to ModeAuto.
 func Mode(m ModeOpt) Option {
-	return func(c *config) error {
-		c.mode = m
+	return func(c *dhtcfg.Config) error {
+		c.Mode = m
 		return nil
 	}
 }
@@ -227,9 +94,9 @@ func Mode(m ModeOpt) Option {
 // implies that the user wants to control the validators and therefore the default
 // public key and IPNS validators will not be added.
 func Validator(v record.Validator) Option {
-	return func(c *config) error {
-		c.validator = v
-		c.validatorChanged = true
+	return func(c *dhtcfg.Config) error {
+		c.Validator = v
+		c.ValidatorChanged = true
 		return nil
 	}
 }
@@ -246,8 +113,8 @@ func Validator(v record.Validator) Option {
 // myValidator)`, all records with keys starting with `/ipns/` will be validated
 // with `myValidator`.
 func NamespacedValidator(ns string, v record.Validator) Option {
-	return func(c *config) error {
-		nsval, ok := c.validator.(record.NamespacedValidator)
+	return func(c *dhtcfg.Config) error {
+		nsval, ok := c.Validator.(record.NamespacedValidator)
 		if !ok {
 			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
 		}
@@ -261,8 +128,8 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 //
 // Defaults to dht.DefaultPrefix
 func ProtocolPrefix(prefix protocol.ID) Option {
-	return func(c *config) error {
-		c.protocolPrefix = prefix
+	return func(c *dhtcfg.Config) error {
+		c.ProtocolPrefix = prefix
 		return nil
 	}
 }
@@ -270,8 +137,8 @@ func ProtocolPrefix(prefix protocol.ID) Option {
 // ProtocolExtension adds an application specific protocol to the DHT protocol. For example,
 // /ipfs/lan/kad/1.0.0 instead of /ipfs/kad/1.0.0. extension should be of the form /lan.
 func ProtocolExtension(ext protocol.ID) Option {
-	return func(c *config) error {
-		c.protocolPrefix += ext
+	return func(c *dhtcfg.Config) error {
+		c.ProtocolPrefix += ext
 		return nil
 	}
 }
@@ -282,8 +149,8 @@ func ProtocolExtension(ext protocol.ID) Option {
 //
 // This option will override and ignore the ProtocolPrefix and ProtocolExtension options
 func V1ProtocolOverride(proto protocol.ID) Option {
-	return func(c *config) error {
-		c.v1ProtocolOverride = proto
+	return func(c *dhtcfg.Config) error {
+		c.V1ProtocolOverride = proto
 		return nil
 	}
 }
@@ -292,8 +159,8 @@ func V1ProtocolOverride(proto protocol.ID) Option {
 //
 // The default value is 20.
 func BucketSize(bucketSize int) Option {
-	return func(c *config) error {
-		c.bucketSize = bucketSize
+	return func(c *dhtcfg.Config) error {
+		c.BucketSize = bucketSize
 		return nil
 	}
 }
@@ -302,8 +169,8 @@ func BucketSize(bucketSize int) Option {
 //
 // The default value is 10.
 func Concurrency(alpha int) Option {
-	return func(c *config) error {
-		c.concurrency = alpha
+	return func(c *dhtcfg.Config) error {
+		c.Concurrency = alpha
 		return nil
 	}
 }
@@ -313,8 +180,8 @@ func Concurrency(alpha int) Option {
 //
 // The default value is 3.
 func Resiliency(beta int) Option {
-	return func(c *config) error {
-		c.resiliency = beta
+	return func(c *dhtcfg.Config) error {
+		c.Resiliency = beta
 		return nil
 	}
 }
@@ -326,8 +193,8 @@ func Resiliency(beta int) Option {
 // until the year 2020 (a great time in the future). For that record to stick around
 // it must be rebroadcasted more frequently than once every 'MaxRecordAge'
 func MaxRecordAge(maxAge time.Duration) Option {
-	return func(c *config) error {
-		c.maxRecordAge = maxAge
+	return func(c *dhtcfg.Config) error {
+		c.MaxRecordAge = maxAge
 		return nil
 	}
 }
@@ -336,8 +203,8 @@ func MaxRecordAge(maxAge time.Duration) Option {
 // table. This means that we will neither refresh the routing table periodically
 // nor when the routing table size goes below the minimum threshold.
 func DisableAutoRefresh() Option {
-	return func(c *config) error {
-		c.routingTable.autoRefresh = false
+	return func(c *dhtcfg.Config) error {
+		c.RoutingTable.AutoRefresh = false
 		return nil
 	}
 }
@@ -349,8 +216,8 @@ func DisableAutoRefresh() Option {
 // WARNING: do not change this unless you're using a forked DHT (i.e., a private
 // network and/or distinct DHT protocols with the `Protocols` option).
 func DisableProviders() Option {
-	return func(c *config) error {
-		c.enableProviders = false
+	return func(c *dhtcfg.Config) error {
+		c.EnableProviders = false
 		return nil
 	}
 }
@@ -363,8 +230,8 @@ func DisableProviders() Option {
 // WARNING: do not change this unless you're using a forked DHT (i.e., a private
 // network and/or distinct DHT protocols with the `Protocols` option).
 func DisableValues() Option {
-	return func(c *config) error {
-		c.enableValues = false
+	return func(c *dhtcfg.Config) error {
+		c.EnableValues = false
 		return nil
 	}
 }
@@ -375,16 +242,16 @@ func DisableValues() Option {
 // them in between. These options are passed to the provider manager allowing
 // customisation of things like the GC interval and cache implementation.
 func ProvidersOptions(opts []providers.Option) Option {
-	return func(c *config) error {
-		c.providersOptions = opts
+	return func(c *dhtcfg.Config) error {
+		c.ProvidersOptions = opts
 		return nil
 	}
 }
 
 // QueryFilter sets a function that approves which peers may be dialed in a query
 func QueryFilter(filter QueryFilterFunc) Option {
-	return func(c *config) error {
-		c.queryPeerFilter = filter
+	return func(c *dhtcfg.Config) error {
+		c.QueryPeerFilter = filter
 		return nil
 	}
 }
@@ -392,8 +259,8 @@ func QueryFilter(filter QueryFilterFunc) Option {
 // RoutingTableFilter sets a function that approves which peers may be added to the routing table. The host should
 // already have at least one connection to the peer under consideration.
 func RoutingTableFilter(filter RouteTableFilterFunc) Option {
-	return func(c *config) error {
-		c.routingTable.peerFilter = filter
+	return func(c *dhtcfg.Config) error {
+		c.RoutingTable.PeerFilter = filter
 		return nil
 	}
 }
@@ -401,8 +268,8 @@ func RoutingTableFilter(filter RouteTableFilterFunc) Option {
 // BootstrapPeers configures the bootstrapping nodes that we will connect to to seed
 // and refresh our Routing Table if it becomes empty.
 func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
-	return func(c *config) error {
-		c.bootstrapPeers = bootstrappers
+	return func(c *dhtcfg.Config) error {
+		c.BootstrapPeers = bootstrappers
 		return nil
 	}
 }
@@ -411,8 +278,8 @@ func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
 // to construct the diversity filter for the Routing Table.
 // Please see the docs for `peerdiversity.PeerIPGroupFilter` AND `peerdiversity.Filter` for more details.
 func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option {
-	return func(c *config) error {
-		c.routingTable.diversityFilter = pg
+	return func(c *dhtcfg.Config) error {
+		c.RoutingTable.DiversityFilter = pg
 		return nil
 	}
 }
@@ -420,8 +287,8 @@ func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option 
 // disableFixLowPeersRoutine disables the "fixLowPeers" routine in the DHT.
 // This is ONLY for tests.
 func disableFixLowPeersRoutine(t *testing.T) Option {
-	return func(c *config) error {
-		c.disableFixLowPeers = true
+	return func(c *dhtcfg.Config) error {
+		c.DisableFixLowPeers = true
 		return nil
 	}
 }
@@ -430,8 +297,8 @@ func disableFixLowPeersRoutine(t *testing.T) Option {
 // This occurs even when AutoRefresh has been disabled.
 // This is ONLY for tests.
 func forceAddressUpdateProcessing(t *testing.T) Option {
-	return func(c *config) error {
-		c.testAddressUpdateProcessing = true
+	return func(c *dhtcfg.Config) error {
+		c.TestAddressUpdateProcessing = true
 		return nil
 	}
 }

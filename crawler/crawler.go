@@ -119,7 +119,7 @@ type HandleQueryResult func(p peer.ID, rtPeers []*peer.AddrInfo)
 // HandleQueryFail is a callback on failed peer query
 type HandleQueryFail func(p peer.ID, err error)
 
-const startAddressDur time.Duration = time.Minute * 30
+const dialAddressExtendDur time.Duration = time.Minute * 30
 
 // Run crawls dht peers from an initial seed of `startingPeers`
 func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handleSuccess HandleQueryResult, handleFail HandleQueryFail) {
@@ -150,7 +150,7 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 		extendAddrs := c.host.Peerstore().Addrs(ai.ID)
 		if len(ai.Addrs) > 0 {
 			extendAddrs = append(extendAddrs, ai.Addrs...)
-			c.host.Peerstore().AddAddrs(ai.ID, extendAddrs, startAddressDur)
+			c.host.Peerstore().AddAddrs(ai.ID, extendAddrs, dialAddressExtendDur)
 		}
 		if len(extendAddrs) == 0 {
 			numSkipped++
@@ -182,7 +182,7 @@ func (c *Crawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo, handl
 				logger.Debugf("peer %v had %d peers", res.peer, len(res.data))
 				rtPeers := make([]*peer.AddrInfo, 0, len(res.data))
 				for p, ai := range res.data {
-					c.host.Peerstore().AddAddrs(p, ai.Addrs, time.Minute*30)
+					c.host.Peerstore().AddAddrs(p, ai.Addrs, dialAddressExtendDur)
 					if _, ok := peersSeen[p]; !ok {
 						peersSeen[p] = struct{}{}
 						toDial = append(toDial, ai)

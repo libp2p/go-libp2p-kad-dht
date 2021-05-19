@@ -464,7 +464,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 		})
 		err := dht.protoMessenger.PutValue(ctx, p, rec)
 		return err
-	}, peers)
+	}, peers, true)
 
 	if successes == 0 {
 		return fmt.Errorf("failed to complete put")
@@ -751,7 +751,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 			return nil
 		}
 
-		dht.execOnMany(ctx, queryFn, peers)
+		dht.execOnMany(ctx, queryFn, peers, false)
 		lookupResCh <- &lookupWithFollowupResult{peers: peers}
 	}()
 	return valCh, lookupResCh
@@ -817,7 +817,7 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
 		err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.h)
 		return err
-	}, peers)
+	}, peers, true)
 
 	if exceededDeadline {
 		return context.DeadlineExceeded
@@ -830,45 +830,71 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	return ctx.Err()
 }
 
-func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID) int {
+// execOnMany executes the given function on each of the peers, although it may only wait for a certain chunk of peers
+// to respond before considering the results "good enough" and returning.
+//
+// If sloppyExit is true then this function will return without waiting for all of its internal goroutines to close.
+// If sloppyExit is true then the passed in function MUST be able to safely complete an arbitrary amount of time after
+// execOnMany has returned (e.g. do not write to resources that might get closed or set to nil and therefore result in
+// a panic instead of just returning an error).
+func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID, sloppyExit bool) int {
 	if len(peers) == 0 {
 		return 0
 	}
 
-	putctx, cancel := context.WithCancel(ctx)
+	// having a buffer that can take all of the elements is basically a hack to allow for sloppy exits that clean up
+	// the goroutines after the function is done rather than before
+	errCh := make(chan error, len(peers))
+	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
+
+	putctx, cancel := context.WithTimeout(ctx, dht.timeoutPerOp)
 	defer cancel()
 
-	waitAllCh := make(chan struct{}, len(peers))
-	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
-	waitSuccessCh := make(chan struct{}, numSuccessfulToWaitFor)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			fnCtx, fnCancel := context.WithTimeout(putctx, dht.timeoutPerOp)
-			defer fnCancel()
-			err := fn(fnCtx, p)
-			if err != nil {
-				logger.Debug(err)
-			} else {
-				waitSuccessCh <- struct{}{}
-			}
-			waitAllCh <- struct{}{}
+			errCh <- fn(putctx, p)
 		}(p)
 	}
 
-	numSuccess, numDone := 0, 0
-	t := time.NewTimer(time.Hour)
-	for numDone != len(peers) {
+	var numDone, numSuccess, successSinceLastTick int
+	var ticker *time.Ticker
+	var tickChan <-chan time.Time
+
+	for numDone < len(peers) {
 		select {
-		case <-waitAllCh:
+		case err := <-errCh:
 			numDone++
-		case <-waitSuccessCh:
-			if numSuccess >= numSuccessfulToWaitFor {
-				t.Reset(time.Millisecond * 500)
+			if err == nil {
+				numSuccess++
+				if numSuccess >= numSuccessfulToWaitFor && ticker == nil {
+					// Once there are enough successes, wait a little longer
+					ticker = time.NewTicker(time.Millisecond * 500)
+					defer ticker.Stop()
+					tickChan = ticker.C
+					successSinceLastTick = numSuccess
+				}
+				// This is equivalent to numSuccess * 2 + numFailures >= len(peers) and is a heuristic that seems to be
+				// performing reasonably.
+				// TODO: Make this metric more configurable
+				// TODO: Have better heuristics in this function whether determined from observing static network
+				// properties or dynamically calculating them
+				if numSuccess+numDone >= len(peers) {
+					cancel()
+					if sloppyExit {
+						return numSuccess
+					}
+				}
 			}
-			numSuccess++
-			numDone++
-		case <-t.C:
-			cancel()
+		case <-tickChan:
+			if numSuccess > successSinceLastTick {
+				// If there were additional successes, then wait another tick
+				successSinceLastTick = numSuccess
+			} else {
+				cancel()
+				if sloppyExit {
+					return numSuccess
+				}
+			}
 		}
 	}
 	return numSuccess
@@ -902,7 +928,7 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 			pmes.ProviderPeers = pbPeers
 
 			return dht.messageSender.SendMessage(ctx, p, pmes)
-		}, peers)
+		}, peers, true)
 		if successes == 0 {
 			return fmt.Errorf("no successful provides")
 		}
@@ -945,7 +971,7 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
 			keyStr := string(k)
 			return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
-		}, peers)
+		}, peers, true)
 		if successes == 0 {
 			return fmt.Errorf("no successful puts")
 		}
@@ -1170,7 +1196,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		return nil
 	}
 
-	dht.execOnMany(queryctx, fn, peers)
+	dht.execOnMany(queryctx, fn, peers, false)
 }
 
 // FindPeer searches for a peer with given ID.
@@ -1255,7 +1281,7 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 		return nil
 	}
 
-	dht.execOnMany(queryctx, fn, peers)
+	dht.execOnMany(queryctx, fn, peers, false)
 
 	close(addrsCh)
 	wg.Wait()

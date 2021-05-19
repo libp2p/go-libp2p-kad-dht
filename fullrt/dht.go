@@ -834,9 +834,9 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 	putctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	waitFailCh := make(chan struct{}, len(peers))
+	waitFailCh := make(chan struct{})
+	waitSuccessCh := make(chan struct{})
 	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
-	waitSuccessCh := make(chan struct{}, numSuccessfulToWaitFor)
 	for _, p := range peers {
 		go func(p peer.ID) {
 			fnCtx, fnCancel := context.WithTimeout(putctx, dht.timeoutPerOp)
@@ -860,6 +860,9 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 			numFail++
 		case <-waitSuccessCh:
 			if numSuccess >= numSuccessfulToWaitFor {
+				if !t.Stop() {
+					<-t.C
+				}
 				t.Reset(time.Millisecond * 500)
 			}
 			numSuccess++

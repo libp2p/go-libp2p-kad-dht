@@ -126,10 +126,10 @@ type IpfsDHT struct {
 
 	autoRefresh bool
 
-	// A set of bootstrap peers to fallback on if all other attempts to fix
+	// A function returning a set of bootstrap peers to fallback on if all other attempts to fix
 	// the routing table fail (or, e.g., this is the first time this node is
 	// connecting to the network).
-	bootstrapPeers []peer.AddrInfo
+	bootstrapPeers func() []peer.AddrInfo
 
 	maxRecordAge time.Duration
 
@@ -473,15 +473,16 @@ func (dht *IpfsDHT) fixLowPeers(ctx context.Context) {
 	// We should first use non-bootstrap peers we knew of from previous
 	// snapshots of the Routing Table before we connect to the bootstrappers.
 	// See https://github.com/libp2p/go-libp2p-kad-dht/issues/387.
-	if dht.routingTable.Size() == 0 {
-		if len(dht.bootstrapPeers) == 0 {
+	if dht.routingTable.Size() == 0 && dht.bootstrapPeers != nil {
+		bootstrapPeers := dht.bootstrapPeers()
+		if len(bootstrapPeers) == 0 {
 			// No point in continuing, we have no peers!
 			return
 		}
 
 		found := 0
-		for _, i := range rand.Perm(len(dht.bootstrapPeers)) {
-			ai := dht.bootstrapPeers[i]
+		for _, i := range rand.Perm(len(bootstrapPeers)) {
+			ai := bootstrapPeers[i]
 			err := dht.Host().Connect(ctx, ai)
 			if err == nil {
 				found++

@@ -1994,7 +1994,9 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		Mode(ModeServer),
-		BootstrapPeers(bootstrapAddrs[0]),
+		BootstrapPeers(func() []peer.AddrInfo {
+			return []peer.AddrInfo{bootstrapAddrs[0]}
+		}),
 	)
 	require.NoError(t, err)
 	dht2 := setupDHT(ctx, t, false)
@@ -2028,7 +2030,9 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		Mode(ModeServer),
-		BootstrapPeers(bootstrapAddrs[1], bootstrapAddrs[2]),
+		BootstrapPeers(func() []peer.AddrInfo {
+			return []peer.AddrInfo{bootstrapAddrs[1], bootstrapAddrs[2]}
+		}),
 	)
 	require.NoError(t, err)
 

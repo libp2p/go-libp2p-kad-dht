@@ -57,7 +57,7 @@ type Config struct {
 		DiversityFilter     peerdiversity.PeerIPGroupFilter
 	}
 
-	BootstrapPeers []peer.AddrInfo
+	BootstrapPeers func() []peer.AddrInfo
 
 	// test specific Config options
 	DisableFixLowPeers          bool

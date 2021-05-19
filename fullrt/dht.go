@@ -834,7 +834,7 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 	putctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	waitAllCh := make(chan struct{}, len(peers))
+	waitFailCh := make(chan struct{}, len(peers))
 	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
 	waitSuccessCh := make(chan struct{}, numSuccessfulToWaitFor)
 	for _, p := range peers {
@@ -844,25 +844,25 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 			err := fn(fnCtx, p)
 			if err != nil {
 				logger.Debug(err)
+				waitFailCh <- struct{}{}
 			} else {
 				waitSuccessCh <- struct{}{}
 			}
-			waitAllCh <- struct{}{}
 		}(p)
 	}
 
-	numSuccess, numDone := 0, 0
+	var numFail, numSuccess int
 	t := time.NewTimer(time.Hour)
-	for numDone != len(peers) {
+	defer t.Stop()
+	for numFail+numSuccess != len(peers) {
 		select {
-		case <-waitAllCh:
-			numDone++
+		case <-waitFailCh:
+			numFail++
 		case <-waitSuccessCh:
 			if numSuccess >= numSuccessfulToWaitFor {
 				t.Reset(time.Millisecond * 500)
 			}
 			numSuccess++
-			numDone++
 		case <-t.C:
 			cancel()
 		}

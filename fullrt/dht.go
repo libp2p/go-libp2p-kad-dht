@@ -852,7 +852,10 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 	}
 
 	var numFail, numSuccess int
-	t := time.NewTimer(time.Hour)
+	t := time.NewTimer(0)
+	if !t.Stop() {
+		<-t.C
+	}
 	defer t.Stop()
 	for numFail+numSuccess != len(peers) {
 		select {

@@ -978,7 +978,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			defer wg.Done()
 			for _, key := range chunk {
 				sendsSoFar := atomic.AddUint64(&numSends, 1)
-				if sendsSoFar%onePctKeys == 0 {
+				if onePctKeys > 0 && sendsSoFar%onePctKeys == 0 {
 					logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
 				}
 				if err := fn(ctx, key); err != nil {

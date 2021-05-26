@@ -831,6 +831,10 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 }
 
 func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID) int {
+	if len(peers) == 0 {
+		return 0
+	}
+
 	putctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

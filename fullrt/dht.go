@@ -962,43 +962,39 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	var numSendsSuccessful uint64 = 0
 
 	wg := sync.WaitGroup{}
-	wg.Add(dht.bulkSendParallelism)
-	chunkSize := len(sortedKeys) / dht.bulkSendParallelism
 	onePctKeys := uint64(len(sortedKeys)) / 100
-	for i := 0; i < dht.bulkSendParallelism; i++ {
-		var chunk []peer.ID
-		end := (i + 1) * chunkSize
-		if end > len(sortedKeys) {
-			chunk = sortedKeys[i*chunkSize:]
-		} else {
-			chunk = sortedKeys[i*chunkSize : end]
-		}
 
-		go func() {
-			defer wg.Done()
-			for _, key := range chunk {
-				if ctx.Err() != nil {
-					break
-				}
-
-				sendsSoFar := atomic.AddUint64(&numSends, 1)
-				if onePctKeys > 0 && sendsSoFar%onePctKeys == 0 {
-					logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
-				}
-				if err := fn(ctx, key); err != nil {
-					var l interface{}
-					if isProvRec {
-						l = internal.LoggableProviderRecordBytes(key)
-					} else {
-						l = internal.LoggableRecordKeyString(key)
-					}
-					logger.Infof("failed to complete bulk sending of key :%v. %v", l, err)
-				} else {
-					atomic.AddUint64(&numSendsSuccessful, 1)
-				}
+	bulkSendFn := func(chunk []peer.ID) {
+		defer wg.Done()
+		for _, key := range chunk {
+			if ctx.Err() != nil {
+				break
 			}
-		}()
+
+			sendsSoFar := atomic.AddUint64(&numSends, 1)
+			if onePctKeys > 0 && sendsSoFar%onePctKeys == 0 {
+				logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
+			}
+			if err := fn(ctx, key); err != nil {
+				var l interface{}
+				if isProvRec {
+					l = internal.LoggableProviderRecordBytes(key)
+				} else {
+					l = internal.LoggableRecordKeyString(key)
+				}
+				logger.Infof("failed to complete bulk sending of key :%v. %v", l, err)
+			} else {
+				atomic.AddUint64(&numSendsSuccessful, 1)
+			}
+		}
 	}
+
+	keyGroups := divideIntoGroups(sortedKeys, dht.bulkSendParallelism)
+	wg.Add(len(keyGroups))
+	for _, chunk := range keyGroups {
+		go bulkSendFn(chunk)
+	}
+
 	wg.Wait()
 
 	if numSendsSuccessful == 0 {
@@ -1008,6 +1004,39 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	logger.Infof("bulk send complete: %d of %d successful", numSendsSuccessful, len(keys))
 
 	return nil
+}
+
+// divideIntoGroups divides the set of keys into (at most) the number of groups
+func divideIntoGroups(keys []peer.ID, groups int) [][]peer.ID {
+	var keyGroups [][]peer.ID
+	if len(keys) < groups {
+		for i := 0; i < len(keys); i++ {
+			keyGroups = append(keyGroups, keys[i:i+1])
+		}
+		return keyGroups
+	}
+
+	chunkSize := len(keys) / groups
+	remainder := len(keys) % groups
+
+	start := 0
+	end := chunkSize
+	for i := 0; i < groups; i++ {
+		var chunk []peer.ID
+		// distribute the remainder as one extra entry per parallel thread
+		if remainder > 0 {
+			chunk = keys[start : end+1]
+			remainder--
+			start = end + 1
+			end = end + 1 + chunkSize
+		} else {
+			chunk = keys[start:end]
+			start = end
+			end = end + chunkSize
+		}
+		keyGroups = append(keyGroups, chunk)
+	}
+	return keyGroups
 }
 
 // FindProviders searches until the context expires.

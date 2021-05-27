@@ -989,6 +989,10 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		}
 	}
 
+	// divide the keys into groups so that we can talk to more peers at a time, because the keys are sorted in
+	// XOR/Kadmelia space consecutive puts will be too the same, or nearly the same, set of peers. Working in parallel
+	// means less waiting on individual dials to complete and also continuing to make progress even if one segment of
+	// the network is being slow, or we are maxing out the connection, stream, etc. to those peers.
 	keyGroups := divideIntoGroups(sortedKeys, dht.bulkSendParallelism)
 	wg.Add(len(keyGroups))
 	for _, chunk := range keyGroups {

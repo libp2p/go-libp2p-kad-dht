@@ -267,7 +267,18 @@ func RoutingTableFilter(filter RouteTableFilterFunc) Option {
 
 // BootstrapPeers configures the bootstrapping nodes that we will connect to to seed
 // and refresh our Routing Table if it becomes empty.
-func BootstrapPeers(getBootstrapPeers func() []peer.AddrInfo) Option {
+func BootstrapPeers(bootstrappers ...peer.AddrInfo) Option {
+	return func(c *dhtcfg.Config) error {
+		c.BootstrapPeers = func() []peer.AddrInfo {
+			return bootstrappers
+		}
+		return nil
+	}
+}
+
+// BootstrapPeersFunc configures the function that returns the bootstrapping nodes that we will
+// connect to to seed and refresh our Routing Table if it becomes empty.
+func BootstrapPeersFunc(getBootstrapPeers func() []peer.AddrInfo) Option {
 	return func(c *dhtcfg.Config) error {
 		c.BootstrapPeers = getBootstrapPeers
 		return nil

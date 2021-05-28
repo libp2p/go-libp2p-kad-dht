@@ -1991,9 +1991,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		Mode(ModeServer),
-		BootstrapPeers(func() []peer.AddrInfo {
-			return []peer.AddrInfo{bootstrapAddrs[0]}
-		}),
+		BootstrapPeers(bootstrapAddrs[0]),
 	)
 	require.NoError(t, err)
 	dht2 := setupDHT(ctx, t, false)
@@ -2027,9 +2025,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
 		Mode(ModeServer),
-		BootstrapPeers(func() []peer.AddrInfo {
-			return []peer.AddrInfo{bootstrapAddrs[1], bootstrapAddrs[2]}
-		}),
+		BootstrapPeers(bootstrapAddrs[1], bootstrapAddrs[2]),
 	)
 	require.NoError(t, err)
 
@@ -2050,6 +2046,32 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		return rt.Size() == 4 && rt.Find(bootstrappers[1].self) != "" &&
 			rt.Find(bootstrappers[2].self) != "" && rt.Find(bootstrapcons[1].self) != "" && rt.Find(bootstrapcons[2].self) != ""
 	}, 5*time.Second, 500*time.Millisecond)
+}
+
+func TestBootstrapPeersFunc(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bootstrapFuncA := func() []peer.AddrInfo {
+		return []peer.AddrInfo{}
+	}
+	dhtA := setupDHT(ctx, t, false, BootstrapPeersFunc(bootstrapFuncA))
+
+	bootstrapPeersB := []peer.AddrInfo{}
+	bootstrapFuncB := func() []peer.AddrInfo {
+		return bootstrapPeersB
+	}
+	dhtB := setupDHT(ctx, t, false, BootstrapPeersFunc(bootstrapFuncB))
+	require.Equal(t, 0, len(dhtB.host.Network().Peers()))
+
+	addrA := peer.AddrInfo{
+		ID:    dhtA.self,
+		Addrs: dhtA.host.Addrs(),
+	}
+
+	bootstrapPeersB = []peer.AddrInfo{addrA}
+	dhtB.fixLowPeers(ctx)
+	require.NotEqual(t, 0, len(dhtB.host.Network().Peers()))
 }
 
 func TestPreconnectedNodes(t *testing.T) {

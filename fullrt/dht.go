@@ -175,7 +175,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 		crawlerInterval: time.Minute * 60,
 
-		bulkSendParallelism: 10,
+		bulkSendParallelism: 40,
 	}
 
 	rt.wg.Add(1)
@@ -973,7 +973,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	numPeers := len(dht.keyToPeerMap)
 	dht.kMapLk.RUnlock()
 
-	chunkSize := (len(sortedKeys) * dht.bucketSize) / numPeers
+	chunkSize := (len(sortedKeys) * dht.bucketSize * 2) / numPeers
 	if chunkSize == 0 {
 		chunkSize = 1
 	}

@@ -967,15 +967,15 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		return nil
 	}
 
-	keysPerPeer := make(map[peer.ID][]peer.ID)
-	for _, k := range keys {
-		peers, err := dht.GetClosestPeers(ctx, string(k))
-		if err != nil {
-			return err
-		}
-		for _, p := range peers {
-			keysPerPeer[p] = append(keysPerPeer[p], k)
-		}
+	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
+
+	dht.kMapLk.RLock()
+	numPeers := len(dht.keyToPeerMap)
+	dht.kMapLk.RUnlock()
+
+	chunkSize := (len(sortedKeys) * dht.bucketSize) / numPeers
+	if chunkSize == 0 {
+		chunkSize = 1
 	}
 
 	successMapLk := sync.Mutex{}
@@ -983,7 +983,12 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
 
-	workCh := make(chan peer.ID, 1)
+	type workMessage struct {
+		p    peer.ID
+		keys []peer.ID
+	}
+
+	workCh := make(chan workMessage, 1)
 	wg := sync.WaitGroup{}
 	wg.Add(dht.bulkSendParallelism)
 	for i := 0; i < dht.bulkSendParallelism; i++ {
@@ -991,10 +996,11 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			defer wg.Done()
 			for {
 				select {
-				case p, ok := <-workCh:
+				case wmsg, ok := <-workCh:
 					if !ok {
 						return
 					}
+					p, workKeys := wmsg.p, wmsg.keys
 					dht.peerAddrsLk.RLock()
 					peerAddrs := dht.peerAddrs[p]
 					dht.peerAddrsLk.RUnlock()
@@ -1002,8 +1008,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 						continue
 					}
 					dht.h.ConnManager().Protect(p, connmgrTag)
-					keys := keysPerPeer[p]
-					for _, k := range keys {
+					for _, k := range workKeys {
 						if err := fn(ctx, p, k); err == nil {
 							successMapLk.Lock()
 							keySuccesses[k]++
@@ -1020,22 +1025,38 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		}()
 	}
 
-	onePctPeers := len(keysPerPeer) / 100
-
-	peersSoFar := 0
-	for p := range keysPerPeer {
-		peersSoFar++
-		if onePctPeers > 0 && peersSoFar%onePctPeers == 0 {
-			logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(peersSoFar)/float64(len(keysPerPeer)), peersSoFar, len(keysPerPeer))
-		}
-
-		select {
-		case workCh <- p:
-		case <-ctx.Done():
+	keyGroups := divideIntoChunks(sortedKeys, chunkSize)
+	sendsSoFar := 0
+	for _, g := range keyGroups {
+		if ctx.Err() != nil {
 			break
 		}
+
+		keysPerPeer := make(map[peer.ID][]peer.ID)
+		for _, k := range g {
+			peers, err := dht.GetClosestPeers(ctx, string(k))
+			if err == nil {
+				for _, p := range peers {
+					keysPerPeer[p] = append(keysPerPeer[p], k)
+				}
+			}
+		}
+
+	keyloop:
+		for p, workKeys := range keysPerPeer {
+			select {
+			case workCh <- workMessage{p: p, keys: workKeys}:
+			case <-ctx.Done():
+				break keyloop
+			}
+		}
+		sendsSoFar += len(g)
+		logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
 	}
+
 	close(workCh)
+
+	logger.Infof("bulk send complete, waiting on goroutines to close")
 
 	wg.Wait()
 
@@ -1047,12 +1068,29 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	}
 
 	if numSendsSuccessful == 0 {
+		logger.Infof("bulk send failed")
 		return fmt.Errorf("failed to complete bulk sending")
 	}
 
 	logger.Infof("bulk send complete: %d of %d successful", numSendsSuccessful, len(keys))
 
 	return nil
+}
+
+// divideIntoChunks divides the set of keys into groups of (at most) chunkSize
+func divideIntoChunks(keys []peer.ID, chunkSize int) [][]peer.ID {
+	var keyChunks [][]peer.ID
+	var nextChunk []peer.ID
+	chunkProgress := 0
+	for _, k := range keys {
+		nextChunk = append(nextChunk, k)
+		chunkProgress++
+		if chunkProgress == chunkSize {
+			keyChunks = append(keyChunks, nextChunk)
+			chunkProgress = 0
+		}
+	}
+	return keyChunks
 }
 
 // divideIntoGroups divides the set of keys into (at most) the number of groups

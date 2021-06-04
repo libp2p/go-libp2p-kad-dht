@@ -978,29 +978,44 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		}
 	}
 
+	successMapLk := sync.Mutex{}
 	keySuccesses := make(map[peer.ID]int)
 
 	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
 
-	workCh := make(chan peer.ID)
+	workCh := make(chan peer.ID, 1)
 	wg := sync.WaitGroup{}
 	wg.Add(dht.bulkSendParallelism)
 	for i := 0; i < dht.bulkSendParallelism; i++ {
 		go func() {
 			defer wg.Done()
-			select {
-			case p := <-workCh:
-				keys := keysPerPeer[p]
-				for _, k := range keys {
+			for {
+				select {
+				case p, ok := <-workCh:
+					if !ok {
+						return
+					}
+					dht.peerAddrsLk.RLock()
+					peerAddrs := dht.peerAddrs[p]
+					dht.peerAddrsLk.RUnlock()
+					if err := dht.h.Connect(ctx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
+						continue
+					}
 					dht.h.ConnManager().Protect(p, connmgrTag)
-					_ = dht.h.Connect(ctx, peer.AddrInfo{ID: p})
-					if err := fn(ctx, p, k); err == nil {
-						keySuccesses[k]++
+					keys := keysPerPeer[p]
+					for _, k := range keys {
+						if err := fn(ctx, p, k); err == nil {
+							successMapLk.Lock()
+							keySuccesses[k]++
+							successMapLk.Unlock()
+						} else if ctx.Err() != nil {
+							break
+						}
 					}
 					dht.h.ConnManager().Unprotect(p, connmgrTag)
+				case <-ctx.Done():
+					return
 				}
-			case <-ctx.Done():
-				return
 			}
 		}()
 	}
@@ -1020,6 +1035,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			break
 		}
 	}
+	close(workCh)
 
 	wg.Wait()
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -918,21 +919,11 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 		return fmt.Errorf("no known addresses for self, cannot put provider")
 	}
 
-	fn := func(ctx context.Context, k peer.ID) error {
-		peers, err := dht.GetClosestPeers(ctx, string(k))
-		if err != nil {
-			return err
-		}
-		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
-			pmes := dht_pb.NewMessage(dht_pb.Message_ADD_PROVIDER, multihash.Multihash(k), 0)
-			pmes.ProviderPeers = pbPeers
+	fn := func(ctx context.Context, p, k peer.ID) error {
+		pmes := dht_pb.NewMessage(dht_pb.Message_ADD_PROVIDER, multihash.Multihash(k), 0)
+		pmes.ProviderPeers = pbPeers
 
-			return dht.messageSender.SendMessage(ctx, p, pmes)
-		}, peers, true)
-		if successes == 0 {
-			return fmt.Errorf("no successful provides")
-		}
-		return nil
+		return dht.messageSender.SendMessage(ctx, p, pmes)
 	}
 
 	keysAsPeerIDs := make([]peer.ID, 0, len(keys))
@@ -963,73 +954,81 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 		return fmt.Errorf("does not support duplicate keys")
 	}
 
-	fn := func(ctx context.Context, k peer.ID) error {
-		peers, err := dht.GetClosestPeers(ctx, string(k))
-		if err != nil {
-			return err
-		}
-		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
-			keyStr := string(k)
-			return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
-		}, peers, true)
-		if successes == 0 {
-			return fmt.Errorf("no successful puts")
-		}
-		return nil
+	fn := func(ctx context.Context, p, k peer.ID) error {
+		keyStr := string(k)
+		return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
 	}
 
 	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, false)
 }
 
-func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, k peer.ID) error, isProvRec bool) error {
+func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, target, k peer.ID) error, isProvRec bool) error {
 	if len(keys) == 0 {
 		return nil
 	}
 
-	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
-
-	var numSends uint64 = 0
-	var numSendsSuccessful uint64 = 0
-
-	wg := sync.WaitGroup{}
-	onePctKeys := uint64(len(sortedKeys)) / 100
-
-	bulkSendFn := func(chunk []peer.ID) {
-		defer wg.Done()
-		for _, key := range chunk {
-			if ctx.Err() != nil {
-				break
-			}
-
-			sendsSoFar := atomic.AddUint64(&numSends, 1)
-			if onePctKeys > 0 && sendsSoFar%onePctKeys == 0 {
-				logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
-			}
-			if err := fn(ctx, key); err != nil {
-				var l interface{}
-				if isProvRec {
-					l = internal.LoggableProviderRecordBytes(key)
-				} else {
-					l = internal.LoggableRecordKeyString(key)
-				}
-				logger.Infof("failed to complete bulk sending of key :%v. %v", l, err)
-			} else {
-				atomic.AddUint64(&numSendsSuccessful, 1)
-			}
+	keysPerPeer := make(map[peer.ID][]peer.ID)
+	for _, k := range keys {
+		peers, err := dht.GetClosestPeers(ctx, string(k))
+		if err != nil {
+			return err
+		}
+		for _, p := range peers {
+			keysPerPeer[p] = append(keysPerPeer[p], k)
 		}
 	}
 
-	// divide the keys into groups so that we can talk to more peers at a time, because the keys are sorted in
-	// XOR/Kadmelia space consecutive puts will be too the same, or nearly the same, set of peers. Working in parallel
-	// means less waiting on individual dials to complete and also continuing to make progress even if one segment of
-	// the network is being slow, or we are maxing out the connection, stream, etc. to those peers.
-	keyGroups := divideIntoGroups(sortedKeys, dht.bulkSendParallelism)
-	wg.Add(len(keyGroups))
-	for _, chunk := range keyGroups {
-		go bulkSendFn(chunk)
+	keySuccesses := make(map[peer.ID]int)
+
+	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
+
+	workCh := make(chan peer.ID)
+	wg := sync.WaitGroup{}
+	wg.Add(dht.bulkSendParallelism)
+	for i := 0; i < dht.bulkSendParallelism; i++ {
+		go func() {
+			defer wg.Done()
+			select {
+			case p := <-workCh:
+				keys := keysPerPeer[p]
+				for _, k := range keys {
+					dht.h.ConnManager().Protect(p, connmgrTag)
+					_ = dht.h.Connect(ctx, peer.AddrInfo{ID: p})
+					if err := fn(ctx, p, k); err == nil {
+						keySuccesses[k]++
+					}
+					dht.h.ConnManager().Unprotect(p, connmgrTag)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}()
+	}
+
+	onePctPeers := len(keysPerPeer) / 100
+
+	peersSoFar := 0
+	for p := range keysPerPeer {
+		peersSoFar++
+		if onePctPeers > 0 && peersSoFar%onePctPeers == 0 {
+			logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(peersSoFar)/float64(len(keysPerPeer)), peersSoFar, len(keysPerPeer))
+		}
+
+		select {
+		case workCh <- p:
+		case <-ctx.Done():
+			break
+		}
 	}
 
 	wg.Wait()
+
+	numSendsSuccessful := 0
+	for _, v := range keySuccesses {
+		if v > 0 {
+			numSendsSuccessful++
+		}
+	}
 
 	if numSendsSuccessful == 0 {
 		return fmt.Errorf("failed to complete bulk sending")

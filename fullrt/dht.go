@@ -1042,6 +1042,8 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			}
 		}
 
+		logger.Infof("bulk send: %d peers for group size %d", len(keysPerPeer), len(g))
+
 	keyloop:
 		for p, workKeys := range keysPerPeer {
 			select {

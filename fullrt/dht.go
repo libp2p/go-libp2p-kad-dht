@@ -1004,19 +1004,26 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					dht.peerAddrsLk.RLock()
 					peerAddrs := dht.peerAddrs[p]
 					dht.peerAddrsLk.RUnlock()
-					if err := dht.h.Connect(ctx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
+					dialCtx, dialCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
+					if err := dht.h.Connect(dialCtx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
+						dialCancel()
 						continue
 					}
+					dialCancel()
 					dht.h.ConnManager().Protect(p, connmgrTag)
 					for _, k := range workKeys {
-						if err := fn(ctx, p, k); err == nil {
+						fnCtx, fnCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
+						if err := fn(fnCtx, p, k); err == nil {
 							successMapLk.Lock()
 							keySuccesses[k]++
 							successMapLk.Unlock()
 						} else if ctx.Err() != nil {
+							fnCancel()
 							break
 						}
+						fnCancel()
 					}
+
 					dht.h.ConnManager().Unprotect(p, connmgrTag)
 				case <-ctx.Done():
 					return

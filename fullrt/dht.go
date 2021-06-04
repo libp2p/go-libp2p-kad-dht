@@ -1090,6 +1090,7 @@ func divideIntoChunks(keys []peer.ID, chunkSize int) [][]peer.ID {
 		if chunkProgress == chunkSize {
 			keyChunks = append(keyChunks, nextChunk)
 			chunkProgress = 0
+			nextChunk = make([]peer.ID, 0, len(nextChunk))
 		}
 	}
 	return keyChunks

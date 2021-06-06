@@ -969,13 +969,6 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
 
-	allkeys := make(map[peer.ID]struct{})
-	for _, k := range keys {
-		allkeys[k] = struct{}{}
-	}
-
-	logger.Infof("bulk send: number of key %d, unique %d", len(keys), len(allkeys))
-
 	dht.kMapLk.RLock()
 	numPeers := len(dht.keyToPeerMap)
 	dht.kMapLk.RUnlock()
@@ -985,10 +978,16 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		chunkSize = 1
 	}
 
-	successMapLk := sync.Mutex{}
+	successMapLk := sync.RWMutex{}
 	keySuccesses := make(map[peer.ID]int)
 	keyFailures := make(map[peer.ID]int)
 	numSkipped := 0
+
+	for _, k := range keys {
+		keySuccesses[k] = 0
+	}
+	logger.Infof("bulk send: number of keys %d, unique %d", len(keys), len(keySuccesses))
+	numSuccessfulToWaitFor := int(float64(dht.bucketSize) * dht.waitFrac)
 
 	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
 
@@ -1025,7 +1024,16 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					dialCancel()
 					dht.h.ConnManager().Protect(p, connmgrTag)
 					for _, k := range workKeys {
-						fnCtx, fnCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
+						successMapLk.RLock()
+						thresholdMet := keySuccesses[k] >= numSuccessfulToWaitFor
+						successMapLk.RUnlock()
+
+						queryTimeout := dht.timeoutPerOp
+						if thresholdMet {
+							queryTimeout = time.Millisecond * 500
+						}
+
+						fnCtx, fnCancel := context.WithTimeout(ctx, queryTimeout)
 						if err := fn(fnCtx, p, k); err == nil {
 							successMapLk.Lock()
 							keySuccesses[k]++
@@ -1078,7 +1086,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			}
 		}
 		sendsSoFar += len(g)
-		logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
+		logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(keySuccesses)), sendsSoFar, len(keySuccesses))
 	}
 
 	close(workCh)

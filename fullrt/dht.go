@@ -980,6 +980,8 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	successMapLk := sync.Mutex{}
 	keySuccesses := make(map[peer.ID]int)
+	keyFailures := make(map[peer.ID]int)
+	numSkipped := 0
 
 	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
 
@@ -1007,6 +1009,9 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					dialCtx, dialCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
 					if err := dht.h.Connect(dialCtx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
 						dialCancel()
+						successMapLk.Lock()
+						numSkipped++
+						successMapLk.Unlock()
 						continue
 					}
 					dialCancel()
@@ -1017,9 +1022,14 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 							successMapLk.Lock()
 							keySuccesses[k]++
 							successMapLk.Unlock()
-						} else if ctx.Err() != nil {
-							fnCancel()
-							break
+						} else {
+							successMapLk.Lock()
+							keyFailures[k]++
+							successMapLk.Unlock()
+							if ctx.Err() != nil {
+								fnCancel()
+								break
+							}
 						}
 						fnCancel()
 					}
@@ -1076,12 +1086,20 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		}
 	}
 
+	numFails := 0
+	for _, v := range keyFailures {
+		if v > 0 {
+			numFails++
+		}
+	}
+
 	if numSendsSuccessful == 0 {
 		logger.Infof("bulk send failed")
 		return fmt.Errorf("failed to complete bulk sending")
 	}
 
-	logger.Infof("bulk send complete: %d of %d successful", numSendsSuccessful, len(keys))
+	logger.Infof("bulk send complete: %d of %d successful. %d skipped peers, %d successmap, %d fails, %d failsmap",
+		numSendsSuccessful, len(keys), numSkipped, len(keySuccesses), numFails, len(keyFailures))
 
 	return nil
 }

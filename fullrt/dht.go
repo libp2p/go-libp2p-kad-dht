@@ -967,7 +967,24 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		return nil
 	}
 
-	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
+	successMapLk := sync.RWMutex{}
+	keySuccesses := make(map[peer.ID]int)
+	keyFailures := make(map[peer.ID]int)
+	numSkipped := 0
+
+	for _, k := range keys {
+		keySuccesses[k] = 0
+	}
+
+	logger.Infof("bulk send: number of keys %d, unique %d", len(keys), len(keySuccesses))
+	numSuccessfulToWaitFor := int(float64(dht.bucketSize) * dht.waitFrac * 1.2)
+
+	sortedKeys := make([]peer.ID, 0, len(keySuccesses))
+	for k := range keySuccesses {
+		sortedKeys = append(sortedKeys, k)
+	}
+
+	sortedKeys = kb.SortClosestPeers(sortedKeys, kb.ID(make([]byte, 32)))
 
 	dht.kMapLk.RLock()
 	numPeers := len(dht.keyToPeerMap)
@@ -977,17 +994,6 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	if chunkSize == 0 {
 		chunkSize = 1
 	}
-
-	successMapLk := sync.RWMutex{}
-	keySuccesses := make(map[peer.ID]int)
-	keyFailures := make(map[peer.ID]int)
-	numSkipped := 0
-
-	for _, k := range keys {
-		keySuccesses[k] = 0
-	}
-	logger.Infof("bulk send: number of keys %d, unique %d", len(keys), len(keySuccesses))
-	numSuccessfulToWaitFor := int(float64(dht.bucketSize) * dht.waitFrac)
 
 	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
 
@@ -1030,6 +1036,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 						queryTimeout := dht.timeoutPerOp
 						if thresholdMet {
+							continue
 							queryTimeout = time.Millisecond * 500
 						}
 

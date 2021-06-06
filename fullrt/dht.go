@@ -967,13 +967,18 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		return nil
 	}
 
+	type report struct {
+		successes   int
+		failures    int
+		lastSuccess time.Time
+	}
+
 	successMapLk := sync.RWMutex{}
-	keySuccesses := make(map[peer.ID]int)
-	keyFailures := make(map[peer.ID]int)
+	keySuccesses := make(map[peer.ID]*report)
 	numSkipped := 0
 
 	for _, k := range keys {
-		keySuccesses[k] = 0
+		keySuccesses[k] = &report{}
 	}
 
 	logger.Infof("bulk send: number of keys %d, unique %d", len(keys), len(keySuccesses))
@@ -1031,23 +1036,27 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					dht.h.ConnManager().Protect(p, connmgrTag)
 					for _, k := range workKeys {
 						successMapLk.RLock()
-						thresholdMet := keySuccesses[k] >= numSuccessfulToWaitFor
+						keyReport := keySuccesses[k]
 						successMapLk.RUnlock()
 
 						queryTimeout := dht.timeoutPerOp
-						if thresholdMet {
-							continue
+						if keyReport.successes >= numSuccessfulToWaitFor {
+							if time.Since(keyReport.lastSuccess) > time.Millisecond*500 {
+								continue
+							}
 							queryTimeout = time.Millisecond * 500
 						}
 
 						fnCtx, fnCancel := context.WithTimeout(ctx, queryTimeout)
 						if err := fn(fnCtx, p, k); err == nil {
 							successMapLk.Lock()
-							keySuccesses[k]++
+							s := keySuccesses[k]
+							s.successes++
+							s.lastSuccess = time.Now()
 							successMapLk.Unlock()
 						} else {
 							successMapLk.Lock()
-							keyFailures[k]++
+							keySuccesses[k].failures++
 							successMapLk.Unlock()
 							if ctx.Err() != nil {
 								fnCancel()
@@ -1103,17 +1112,12 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	wg.Wait()
 
 	numSendsSuccessful := 0
+	numFails := 0
 	for _, v := range keySuccesses {
-		if v > 0 {
+		if v.successes > 0 {
 			numSendsSuccessful++
 		}
-	}
-
-	numFails := 0
-	for _, v := range keyFailures {
-		if v > 0 {
-			numFails++
-		}
+		numFails += v.failures
 	}
 
 	if numSendsSuccessful == 0 {
@@ -1121,8 +1125,8 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		return fmt.Errorf("failed to complete bulk sending")
 	}
 
-	logger.Infof("bulk send complete: %d of %d successful. %d skipped peers, %d successmap, %d fails, %d failsmap",
-		numSendsSuccessful, len(keys), numSkipped, len(keySuccesses), numFails, len(keyFailures))
+	logger.Infof("bulk send complete: %d keys, %d unique, %d successful, %d skipped peers, %d fails",
+		len(keys), len(keySuccesses), numSendsSuccessful, numSkipped, numFails)
 
 	return nil
 }

@@ -1036,7 +1036,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					dht.h.ConnManager().Protect(p, connmgrTag)
 					for _, k := range workKeys {
 						successMapLk.RLock()
-						keyReport := keySuccesses[k]
+						keyReport := *keySuccesses[k]
 						successMapLk.RUnlock()
 
 						queryTimeout := dht.timeoutPerOp
@@ -1052,7 +1052,9 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 							successMapLk.Lock()
 							s := keySuccesses[k]
 							s.successes++
-							s.lastSuccess = time.Now()
+							if s.successes >= numSuccessfulToWaitFor {
+								s.lastSuccess = time.Now()
+							}
 							successMapLk.Unlock()
 						} else {
 							successMapLk.Lock()

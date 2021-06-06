@@ -969,6 +969,13 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
 
+	allkeys := make(map[peer.ID]struct{})
+	for _, k := range keys {
+		allkeys[k] = struct{}{}
+	}
+
+	logger.Infof("bulk send: number of key %d, unique %d", len(keys), len(allkeys))
+
 	dht.kMapLk.RLock()
 	numPeers := len(dht.keyToPeerMap)
 	dht.kMapLk.RUnlock()
@@ -996,6 +1003,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	for i := 0; i < dht.bulkSendParallelism; i++ {
 		go func() {
 			defer wg.Done()
+			defer logger.Infof("bulk send goroutine done")
 			for {
 				select {
 				case wmsg, ok := <-workCh:
@@ -1118,6 +1126,7 @@ func divideIntoChunks(keys []peer.ID, chunkSize int) [][]peer.ID {
 			nextChunk = make([]peer.ID, 0, len(nextChunk))
 		}
 	}
+	keyChunks = append(keyChunks, nextChunk)
 	return keyChunks
 }
 

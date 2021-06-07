@@ -1115,10 +1115,14 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	numSendsSuccessful := 0
 	numFails := 0
+	successHist := make(map[int]int)
+	failHist := make(map[int]int)
 	for _, v := range keySuccesses {
 		if v.successes > 0 {
 			numSendsSuccessful++
 		}
+		successHist[v.successes]++
+		failHist[v.failures]++
 		numFails += v.failures
 	}
 
@@ -1129,6 +1133,8 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	logger.Infof("bulk send complete: %d keys, %d unique, %d successful, %d skipped peers, %d fails",
 		len(keys), len(keySuccesses), numSendsSuccessful, numSkipped, numFails)
+
+	logger.Infof("bulk send summary: sucessHist %v, failHist %v", successHist, failHist)
 
 	return nil
 }

@@ -175,7 +175,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 		crawlerInterval: time.Minute * 60,
 
-		bulkSendParallelism: 40,
+		bulkSendParallelism: 20,
 	}
 
 	rt.wg.Add(1)
@@ -1013,7 +1013,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	for i := 0; i < dht.bulkSendParallelism; i++ {
 		go func() {
 			defer wg.Done()
-			defer logger.Infof("bulk send goroutine done")
+			defer logger.Debugf("bulk send goroutine done")
 			for {
 				select {
 				case wmsg, ok := <-workCh:
@@ -1093,7 +1093,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 			}
 		}
 
-		logger.Infof("bulk send: %d peers for group size %d", len(keysPerPeer), len(g))
+		logger.Debugf("bulk send: %d peers for group size %d", len(keysPerPeer), len(g))
 
 	keyloop:
 		for p, workKeys := range keysPerPeer {
@@ -1109,7 +1109,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	close(workCh)
 
-	logger.Infof("bulk send complete, waiting on goroutines to close")
+	logger.Debugf("bulk send complete, waiting on goroutines to close")
 
 	wg.Wait()
 

@@ -302,3 +302,12 @@ func forceAddressUpdateProcessing(t *testing.T) Option {
 		return nil
 	}
 }
+
+// EnableSmartRecords in the DHT. From now on the DHT
+// supports getting
+func EnableSmartRecords() Option {
+	return func(c *dhtcfg.Config) error {
+		c.SmartRecords = true
+		return nil
+	}
+}

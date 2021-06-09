@@ -26,6 +26,7 @@ import (
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	sr "github.com/libp2p/go-smart-record/protocol"
 
 	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
@@ -148,6 +149,10 @@ type IpfsDHT struct {
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
+
+	// smart records
+	srClient sr.SmartRecordClient
+	srServer sr.SmartRecordServer
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -180,6 +185,18 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht, err := makeDHT(ctx, h, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
+	}
+
+	// Start smart record service if enabled
+	if cfg.SmartRecords {
+		dht.srServer, err = sr.NewSmartRecordServer(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't start smart record server: %v", err)
+		}
+		dht.srClient, err = sr.NewSmartRecordClient(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't start smart record client: %v", err)
+		}
 	}
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh

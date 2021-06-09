@@ -16,24 +16,26 @@ require (
 	github.com/ipfs/go-log v1.0.5
 	github.com/jbenet/goprocess v0.1.4
 	github.com/libp2p/go-eventbus v0.2.1
-	github.com/libp2p/go-libp2p v0.13.0
-	github.com/libp2p/go-libp2p-core v0.8.0
+	github.com/libp2p/go-libp2p v0.13.1-0.20210420165741-6a5da01b0449
+	github.com/libp2p/go-libp2p-core v0.8.6-0.20210415043615-525a0b130172
 	github.com/libp2p/go-libp2p-kbucket v0.4.7
 	github.com/libp2p/go-libp2p-peerstore v0.2.7
 	github.com/libp2p/go-libp2p-record v0.1.3
 	github.com/libp2p/go-libp2p-routing-helpers v0.2.3
-	github.com/libp2p/go-libp2p-swarm v0.4.0
+	github.com/libp2p/go-libp2p-swarm v0.4.3
 	github.com/libp2p/go-libp2p-testing v0.4.0
 	github.com/libp2p/go-libp2p-xor v0.0.0-20200501025846-71e284145d58
 	github.com/libp2p/go-msgio v0.0.6
 	github.com/libp2p/go-netroute v0.1.6
+	github.com/libp2p/go-routing-language v0.0.0-20210526172636-c5ae98fb671d
+	github.com/libp2p/go-smart-record v0.0.0-20210604060018-ac3a8103b85a
 	github.com/multiformats/go-base32 v0.0.3
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/multiformats/go-multibase v0.0.3
 	github.com/multiformats/go-multihash v0.0.15
-	github.com/multiformats/go-multistream v0.2.0
+	github.com/multiformats/go-multistream v0.2.1
 	github.com/stretchr/testify v1.6.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
-	go.opencensus.io v0.22.4
+	go.opencensus.io v0.23.0
 	go.uber.org/zap v1.16.0
 )

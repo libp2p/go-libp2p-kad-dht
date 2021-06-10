@@ -1113,7 +1113,10 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	numSendsSuccessful := 0
 	numFails := 0
+	// generate a histogram of how many successful sends occurred per key
 	successHist := make(map[int]int)
+	// generate a histogram of how many failed sends occurred per key
+	// this does not include sends to peers that were skipped and had no messages sent to them at all
 	failHist := make(map[int]int)
 	for _, v := range keySuccesses {
 		if v.successes > 0 {
@@ -1132,7 +1135,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	logger.Infof("bulk send complete: %d keys, %d unique, %d successful, %d skipped peers, %d fails",
 		len(keys), len(keySuccesses), numSendsSuccessful, numSkipped, numFails)
 
-	logger.Infof("bulk send summary: sucessHist %v, failHist %v", successHist, failHist)
+	logger.Infof("bulk send summary: successHist %v, failHist %v", successHist, failHist)
 
 	return nil
 }

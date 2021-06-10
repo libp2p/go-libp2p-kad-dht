@@ -971,11 +971,11 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		successes   int
 		failures    int
 		lastSuccess time.Time
+		mx          sync.RWMutex
 	}
 
-	successMapLk := sync.RWMutex{}
-	keySuccesses := make(map[peer.ID]*report)
-	numSkipped := 0
+	keySuccesses := make(map[peer.ID]*report, len(keys))
+	var numSkipped int64
 
 	for _, k := range keys {
 		keySuccesses[k] = &report{}
@@ -1027,39 +1027,37 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 					dialCtx, dialCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
 					if err := dht.h.Connect(dialCtx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
 						dialCancel()
-						successMapLk.Lock()
-						numSkipped++
-						successMapLk.Unlock()
+						atomic.AddInt64(&numSkipped, 1)
 						continue
 					}
 					dialCancel()
 					dht.h.ConnManager().Protect(p, connmgrTag)
 					for _, k := range workKeys {
-						successMapLk.RLock()
-						keyReport := *keySuccesses[k]
-						successMapLk.RUnlock()
+						keyReport := keySuccesses[k]
 
 						queryTimeout := dht.timeoutPerOp
+						keyReport.mx.RLock()
 						if keyReport.successes >= numSuccessfulToWaitFor {
 							if time.Since(keyReport.lastSuccess) > time.Millisecond*500 {
+								keyReport.mx.RUnlock()
 								continue
 							}
 							queryTimeout = time.Millisecond * 500
 						}
+						keyReport.mx.RUnlock()
 
 						fnCtx, fnCancel := context.WithTimeout(ctx, queryTimeout)
 						if err := fn(fnCtx, p, k); err == nil {
-							successMapLk.Lock()
-							s := keySuccesses[k]
-							s.successes++
-							if s.successes >= numSuccessfulToWaitFor {
-								s.lastSuccess = time.Now()
+							keyReport.mx.Lock()
+							keyReport.successes++
+							if keyReport.successes >= numSuccessfulToWaitFor {
+								keyReport.lastSuccess = time.Now()
 							}
-							successMapLk.Unlock()
+							keyReport.mx.Unlock()
 						} else {
-							successMapLk.Lock()
-							keySuccesses[k].failures++
-							successMapLk.Unlock()
+							keyReport.mx.Lock()
+							keyReport.failures++
+							keyReport.mx.Unlock()
 							if ctx.Err() != nil {
 								fnCancel()
 								break

@@ -1066,7 +1066,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		}()
 	}
 
-	keyGroups := divideIntoChunks(sortedKeys, chunkSize)
+	keyGroups := divideByChunkSize(sortedKeys, chunkSize)
 	sendsSoFar := 0
 	for _, g := range keyGroups {
 		if ctx.Err() != nil {
@@ -1132,8 +1132,16 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	return nil
 }
 
-// divideIntoChunks divides the set of keys into groups of (at most) chunkSize
-func divideIntoChunks(keys []peer.ID, chunkSize int) [][]peer.ID {
+// divideByChunkSize divides the set of keys into groups of (at most) chunkSize. Chunk size must be greater than 0.
+func divideByChunkSize(keys []peer.ID, chunkSize int) [][]peer.ID {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	if chunkSize < 1 {
+		panic(fmt.Sprintf("fullrt: divide into groups: invalid chunk size %d", chunkSize))
+	}
+
 	var keyChunks [][]peer.ID
 	var nextChunk []peer.ID
 	chunkProgress := 0
@@ -1146,41 +1154,10 @@ func divideIntoChunks(keys []peer.ID, chunkSize int) [][]peer.ID {
 			nextChunk = make([]peer.ID, 0, len(nextChunk))
 		}
 	}
-	keyChunks = append(keyChunks, nextChunk)
+	if chunkProgress != 0 {
+		keyChunks = append(keyChunks, nextChunk)
+	}
 	return keyChunks
-}
-
-// divideIntoGroups divides the set of keys into (at most) the number of groups
-func divideIntoGroups(keys []peer.ID, groups int) [][]peer.ID {
-	var keyGroups [][]peer.ID
-	if len(keys) < groups {
-		for i := 0; i < len(keys); i++ {
-			keyGroups = append(keyGroups, keys[i:i+1])
-		}
-		return keyGroups
-	}
-
-	chunkSize := len(keys) / groups
-	remainder := len(keys) % groups
-
-	start := 0
-	end := chunkSize
-	for i := 0; i < groups; i++ {
-		var chunk []peer.ID
-		// distribute the remainder as one extra entry per parallel thread
-		if remainder > 0 {
-			chunk = keys[start : end+1]
-			remainder--
-			start = end + 1
-			end = end + 1 + chunkSize
-		} else {
-			chunk = keys[start:end]
-			start = end
-			end = end + chunkSize
-		}
-		keyGroups = append(keyGroups, chunk)
-	}
-	return keyGroups
 }
 
 // FindProviders searches until the context expires.

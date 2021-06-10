@@ -1014,62 +1014,54 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 		go func() {
 			defer wg.Done()
 			defer logger.Debugf("bulk send goroutine done")
-			for {
-				select {
-				case wmsg, ok := <-workCh:
-					if !ok {
-						return
-					}
-					p, workKeys := wmsg.p, wmsg.keys
-					dht.peerAddrsLk.RLock()
-					peerAddrs := dht.peerAddrs[p]
-					dht.peerAddrsLk.RUnlock()
-					dialCtx, dialCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
-					if err := dht.h.Connect(dialCtx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
-						dialCancel()
-						atomic.AddInt64(&numSkipped, 1)
-						continue
-					}
+			for wmsg := range workCh {
+				p, workKeys := wmsg.p, wmsg.keys
+				dht.peerAddrsLk.RLock()
+				peerAddrs := dht.peerAddrs[p]
+				dht.peerAddrsLk.RUnlock()
+				dialCtx, dialCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
+				if err := dht.h.Connect(dialCtx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
 					dialCancel()
-					dht.h.ConnManager().Protect(p, connmgrTag)
-					for _, k := range workKeys {
-						keyReport := keySuccesses[k]
-
-						queryTimeout := dht.timeoutPerOp
-						keyReport.mx.RLock()
-						if keyReport.successes >= numSuccessfulToWaitFor {
-							if time.Since(keyReport.lastSuccess) > time.Millisecond*500 {
-								keyReport.mx.RUnlock()
-								continue
-							}
-							queryTimeout = time.Millisecond * 500
-						}
-						keyReport.mx.RUnlock()
-
-						fnCtx, fnCancel := context.WithTimeout(ctx, queryTimeout)
-						if err := fn(fnCtx, p, k); err == nil {
-							keyReport.mx.Lock()
-							keyReport.successes++
-							if keyReport.successes >= numSuccessfulToWaitFor {
-								keyReport.lastSuccess = time.Now()
-							}
-							keyReport.mx.Unlock()
-						} else {
-							keyReport.mx.Lock()
-							keyReport.failures++
-							keyReport.mx.Unlock()
-							if ctx.Err() != nil {
-								fnCancel()
-								break
-							}
-						}
-						fnCancel()
-					}
-
-					dht.h.ConnManager().Unprotect(p, connmgrTag)
-				case <-ctx.Done():
-					return
+					atomic.AddInt64(&numSkipped, 1)
+					continue
 				}
+				dialCancel()
+				dht.h.ConnManager().Protect(p, connmgrTag)
+				for _, k := range workKeys {
+					keyReport := keySuccesses[k]
+
+					queryTimeout := dht.timeoutPerOp
+					keyReport.mx.RLock()
+					if keyReport.successes >= numSuccessfulToWaitFor {
+						if time.Since(keyReport.lastSuccess) > time.Millisecond*500 {
+							keyReport.mx.RUnlock()
+							continue
+						}
+						queryTimeout = time.Millisecond * 500
+					}
+					keyReport.mx.RUnlock()
+
+					fnCtx, fnCancel := context.WithTimeout(ctx, queryTimeout)
+					if err := fn(fnCtx, p, k); err == nil {
+						keyReport.mx.Lock()
+						keyReport.successes++
+						if keyReport.successes >= numSuccessfulToWaitFor {
+							keyReport.lastSuccess = time.Now()
+						}
+						keyReport.mx.Unlock()
+					} else {
+						keyReport.mx.Lock()
+						keyReport.failures++
+						keyReport.mx.Unlock()
+						if ctx.Err() != nil {
+							fnCancel()
+							break
+						}
+					}
+					fnCancel()
+				}
+
+				dht.h.ConnManager().Unprotect(p, connmgrTag)
 			}
 		}()
 	}

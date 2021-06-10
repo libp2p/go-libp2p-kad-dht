@@ -65,12 +65,10 @@ func (dht *IpfsDHT) PutSmartValue(ctx context.Context, key string, value syntax.
 
 	rec := record.MakePutRecord(key, SRPointerValue)
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	// NOTE: Put record in local vm instead of directly to the datastore?
 	err = dht.putLocal(key, rec)
 	if err != nil {
 		return err
 	}
-
 	peers, err := dht.GetClosestPeers(ctx, key)
 	if err != nil {
 		return err
@@ -100,18 +98,25 @@ func (dht *IpfsDHT) PutSmartValue(ctx context.Context, key string, value syntax.
 			})
 
 			// Put smart value in every peer's vm.
-			err := dht.srClient.Update(ctx, key, p, value, dht.maxRecordAge)
-			if err != nil {
-				logger.Debugf("failed putting value to smart record: %s", err)
-			}
-			// Put pointer to SR in the DHT
-			// NOTE: Instead of putting this pointer to point to smart records,
-			// we could add a PUT_SMART_VALUE and GET_SMART_VALUE operation in
-			// in the DHT protocol to signal when to check DHT datastore and SR VM.
-			// This would lead to having different handlers for PUT_VALUE and PUT_SMART_VALUE
-			err = dht.protoMessenger.PutValue(ctx, p, rec)
-			if err != nil {
-				logger.Debugf("failed putting sr pointer to peer: %s", err)
+			if p == dht.self {
+				err := dht.srServer.UpdateLocal(key, p, value, dht.maxRecordAge)
+				if err != nil {
+					logger.Debugf("failed putting value to smart record locally: %s", err)
+				}
+			} else {
+				err := dht.srClient.Update(ctx, key, p, value, dht.maxRecordAge)
+				if err != nil {
+					logger.Debugf("failed putting value to smart record: %s", err)
+				}
+				// Put pointer to SR in the DHT
+				// NOTE: Instead of putting this pointer to point to smart records,
+				// we could add a PUT_SMART_VALUE and GET_SMART_VALUE operation in
+				// in the DHT protocol to signal when to check DHT datastore and SR VM.
+				// This would lead to having different handlers for PUT_VALUE and PUT_SMART_VALUE
+				err = dht.protoMessenger.PutValue(ctx, p, rec)
+				if err != nil {
+					logger.Debugf("failed putting sr pointer to peer: %s", err)
+				}
 			}
 
 		}(p)
@@ -145,7 +150,7 @@ func (dht *IpfsDHT) GetSmartValue(ctx context.Context, key string, opts ...routi
 	}
 
 	// Create temporary vm
-	vm, err := localVM()
+	tmpVM, err := localVM()
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't instantiate local VM: %v", err)
 	}
@@ -156,25 +161,32 @@ func (dht *IpfsDHT) GetSmartValue(ctx context.Context, key string, opts ...routi
 		// Check if the value is a pointer to smart record
 		if string(r.Val) == string(SRPointerValue) {
 			// Get smart record from peer
-			srOut, err := dht.srClient.Get(ctx, key, r.From)
-			fmt.Println(">>>> ", r.From == dht.self)
-			if err != nil {
-				// NOTE: Let's do nothing if Get fails for now.
-				// We have other alternatives
-				fmt.Println(err)
-				continue
+			// TODO: Check locally if r.From is self. It means that I have it.
+			var srOut vm.RecordValue
+			if r.From == dht.self {
+				srOut = dht.srServer.GetLocal(key)
+			} else {
+				t, err := dht.srClient.Get(ctx, key, r.From)
+				srOut = *t
+				if err != nil {
+					// NOTE: Let's do nothing if Get fails for now.
+					// We have other alternatives
+					fmt.Println(err)
+					continue
+				}
 			}
 			// Update with record
-			err = updateRecord(vm, key, srOut)
+			err = updateRecord(tmpVM, key, srOut)
 			if err != nil {
 				// NOTE: Let's do nothing if Get fails for now.
 				// We have other alternatives
+				continue
 			}
 		}
 	}
 
 	// Get final update from smart record and return it
-	best := vm.Get(key)
+	best := tmpVM.Get(key)
 
 	if ctx.Err() != nil {
 		return best, ctx.Err()
@@ -265,8 +277,8 @@ func localVM() (vm.Machine, error) {
 	return vm.NewVM(context.Background(), upCtx, asmCtx)
 }
 
-func updateRecord(v vm.Machine, key string, with *vm.RecordValue) error {
-	for p, r := range *with {
+func updateRecord(v vm.Machine, key string, with vm.RecordValue) error {
+	for p, r := range with {
 		// For each peer update the record
 		err := v.Update(p, key, *r)
 		if err != nil {

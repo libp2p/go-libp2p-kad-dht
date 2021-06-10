@@ -27,8 +27,8 @@ require (
 	github.com/libp2p/go-libp2p-xor v0.0.0-20200501025846-71e284145d58
 	github.com/libp2p/go-msgio v0.0.6
 	github.com/libp2p/go-netroute v0.1.6
-	github.com/libp2p/go-routing-language v0.0.0-20210526172636-c5ae98fb671d
-	github.com/libp2p/go-smart-record v0.0.0-20210604060018-ac3a8103b85a
+	github.com/libp2p/go-routing-language v0.0.0-20210531170722-12dc033e88ac
+	github.com/libp2p/go-smart-record v0.0.0-20210610072257-bd503d17d1eb
 	github.com/multiformats/go-base32 v0.0.3
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/multiformats/go-multibase v0.0.3

@@ -36,57 +36,69 @@ func TestValueSmartGetSet(t *testing.T) {
 	}
 
 	t.Log("requesting value on dhts: ", dhts[1].self)
-	ctxT, cancel = context.WithTimeout(ctx, time.Second*2*60)
+	ctxT, cancel = context.WithTimeout(ctx, time.Second*10000)
 	defer cancel()
 
 	val, err := dhts[1].GetSmartValue(ctxT, "/v/hello")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	out := val[dhts[0].self]
+	if len(val) == 0 {
+		t.Fatal("wrong size in returned value")
+	}
+	out := *val[dhts[0].self]
 	if !syntax.IsEqual(out, in) {
-		t.Fatalf("Expected in but got '%v'", out)
+		t.Fatalf("Expected %v but got %v", in, out)
 	}
 
+	// late connect
+
+	connect(t, ctx, dhts[2], dhts[0])
+	connect(t, ctx, dhts[2], dhts[1])
+
 	/*
-		// late connect
-
-		connect(t, ctx, dhts[2], dhts[0])
-		connect(t, ctx, dhts[2], dhts[1])
-
 		t.Log("requesting value (offline) on dhts: ", dhts[2].self)
 		vala, err := dhts[2].GetSmartValue(ctxT, "/v/hello", Quorum(0))
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		if string(vala) != "world" {
-			t.Fatalf("Expected 'world' got '%s'", string(vala))
+		if len(vala) == 0 {
+			t.Fatal("wrong size in returned value")
 		}
-		t.Log("requesting value (online) on dhts: ", dhts[2].self)
-		val, err = dhts[2].GetSmartValue(ctxT, "/v/hello")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if string(val) != "world" {
-			t.Fatalf("Expected 'world' got '%s'", string(val))
-		}
-
-		for _, d := range dhts[:3] {
-			connect(t, ctx, dhts[3], d)
-		}
-		connect(t, ctx, dhts[4], dhts[3])
-
-		t.Log("requesting value (requires peer routing) on dhts: ", dhts[4].self)
-		val, err = dhts[4].GetSmartValue(ctxT, "/v/hello")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if string(val) != "world" {
-			t.Fatalf("Expected 'world' got '%s'", string(val))
+		out = *vala[dhts[0].self]
+		if !syntax.IsEqual(out, in) {
+			t.Fatalf("Expected %v but got %v", in, out)
 		}
 	*/
+
+	t.Log("requesting value (online) on dhts: ", dhts[2].self)
+	val, err = dhts[2].GetSmartValue(ctxT, "/v/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(val) == 0 {
+		t.Fatal("wrong size in returned value")
+	}
+	out = *val[dhts[0].self]
+	if !syntax.IsEqual(out, in) {
+		t.Fatalf("Expected %v but got %v", in, out)
+	}
+
+	for _, d := range dhts[:3] {
+		connect(t, ctx, dhts[3], d)
+	}
+	connect(t, ctx, dhts[4], dhts[3])
+
+	t.Log("requesting value (requires peer routing) on dhts: ", dhts[4].self)
+	val, err = dhts[4].GetSmartValue(ctxT, "/v/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(val) == 0 {
+		t.Fatal("wrong size in returned value")
+	}
+	out = *val[dhts[0].self]
+	if !syntax.IsEqual(out, in) {
+		t.Fatalf("Expected %v but got %v", in, out)
+	}
 }

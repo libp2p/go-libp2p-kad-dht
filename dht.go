@@ -61,7 +61,8 @@ const (
 )
 
 const (
-	kad1 protocol.ID = "/kad/1.0.0"
+	kad1    protocol.ID = "/kad/1.0.0"
+	srDhtId protocol.ID = "/sr/dht/0.0.1"
 )
 
 const (
@@ -187,18 +188,6 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
 	}
 
-	// Start smart record service if enabled
-	if cfg.SmartRecords {
-		dht.srServer, err = sr.NewSmartRecordServer(ctx, h)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't start smart record server: %v", err)
-		}
-		dht.srClient, err = sr.NewSmartRecordClient(ctx, h)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't start smart record client: %v", err)
-		}
-	}
-
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
 	dht.maxRecordAge = cfg.MaxRecordAge
@@ -223,6 +212,18 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		dht.mode = modeServer
 	default:
 		return nil, fmt.Errorf("invalid dht mode %d", cfg.Mode)
+	}
+
+	// Start smart record service if enabled
+	if cfg.SmartRecords {
+		dht.srServer, err = sr.NewSmartRecordServer(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't start smart record server: %v", err)
+		}
+		dht.srClient, err = sr.NewSmartRecordClient(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't start smart record client: %v", err)
+		}
 	}
 
 	if dht.mode == modeServer {
@@ -284,6 +285,10 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	var protocols, serverProtocols []protocol.ID
 
 	v1proto := cfg.ProtocolPrefix + kad1
+	if cfg.SmartRecords {
+		// Use smart record protocols if enabled.
+		v1proto = srDhtId
+	}
 
 	if cfg.V1ProtocolOverride != "" {
 		v1proto = cfg.V1ProtocolOverride

@@ -720,10 +720,10 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 					ID:   p,
 				})
 				return nil
-			default:
-				return err
 			case nil, internal.ErrInvalidRecord:
 				// in either of these cases, we want to keep going
+			default:
+				return err
 			}
 
 			// TODO: What should happen if the record is invalid?

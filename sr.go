@@ -1,89 +1,39 @@
 package dht
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
-	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
-	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
-	record "github.com/libp2p/go-libp2p-record"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-routing-language/syntax"
 	"github.com/libp2p/go-smart-record/ir"
 	"github.com/libp2p/go-smart-record/ir/base"
 	"github.com/libp2p/go-smart-record/vm"
 )
 
-// Value stored in a key of the DHT to let others know that this value
-// is stored as a Smart Record
-var SRPointerValue = []byte("sr")
-
 // This file includes the code for smart record operations
 
 // PutSmartValue adds smart record value corresponding to given Key.
 // This is the top level smart record "Store" operation of the DHT
-// NOTE: We are inputting a Dict, if we want to keep the signature of
+// NOTE: We use a syntx.Dict as input, if we want to keep the signature of
 // PutValue change value to []byte
 func (dht *IpfsDHT) PutSmartValue(ctx context.Context, key string, value syntax.Dict, opts ...routing.Option) (err error) {
-	if !dht.enableValues {
-		return routing.ErrNotSupported
-	}
-
+	// Check if smart-records enabled
 	if dht.srClient == nil {
 		return fmt.Errorf("smart records not supported")
 	}
 
 	logger.Debugw("putting smart value", "key", internal.LoggableRecordKeyString(key))
 
-	// don't even allow local users to put bad values.
-	if err := dht.Validator.Validate(key, SRPointerValue); err != nil {
-		return err
-	}
-
-	old, err := dht.getLocal(key)
-	if err != nil {
-		// Means something is wrong with the datastore.
-		return err
-	}
-
-	// Check if we have an old value that's not the same as the new one.
-	if old != nil && !bytes.Equal(old.GetValue(), SRPointerValue) {
-		// Check to see if the new one is better.
-		i, err := dht.Validator.Select(key, [][]byte{SRPointerValue, old.GetValue()})
-		if err != nil {
-			return err
-		}
-		if i != 0 {
-			return fmt.Errorf("can't replace a newer value with an older value")
-		}
-	}
-
-	rec := record.MakePutRecord(key, SRPointerValue)
-	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dht.putLocal(key, rec)
-	if err != nil {
-		return err
-	}
+	// Get closest peers
 	peers, err := dht.GetClosestPeers(ctx, key)
 	if err != nil {
 		return err
 	}
-
-	// Marshal value into syntax.Dict
-	// TODO: This will be marshalled again in srClient.Update.
-	// Consider either making a syntax.Dict as the input for PutSmartValue,
-	// or changing srClient to accept bytes directly.
-	// (I am more fond of the first first one)
-	// n, err := syntax.UnmarshalJSON(value)
-	// d, ok := n.(syntax.Dict)
-	// if !ok {
-	// 	return fmt.Errorf("smart record value is not syntax.Dict")
-	// }
 
 	wg := sync.WaitGroup{}
 	for _, p := range peers {
@@ -92,12 +42,14 @@ func (dht *IpfsDHT) PutSmartValue(ctx context.Context, key string, value syntax.
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			defer wg.Done()
+			// NOTE: We could add specific events for smart values
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.Value,
 				ID:   p,
 			})
 
 			// Put smart value in every peer's vm.
+			// NOTE: This is a sanity-check. We probably can remove it in the future.
 			if p == dht.self {
 				err := dht.srServer.UpdateLocal(key, p, value, dht.maxRecordAge)
 				if err != nil {
@@ -107,15 +59,6 @@ func (dht *IpfsDHT) PutSmartValue(ctx context.Context, key string, value syntax.
 				err := dht.srClient.Update(ctx, key, p, value, dht.maxRecordAge)
 				if err != nil {
 					logger.Debugf("failed putting value to smart record: %s", err)
-				}
-				// Put pointer to SR in the DHT
-				// NOTE: Instead of putting this pointer to point to smart records,
-				// we could add a PUT_SMART_VALUE and GET_SMART_VALUE operation in
-				// in the DHT protocol to signal when to check DHT datastore and SR VM.
-				// This would lead to having different handlers for PUT_VALUE and PUT_SMART_VALUE
-				err = dht.protoMessenger.PutValue(ctx, p, rec)
-				if err != nil {
-					logger.Debugf("failed putting sr pointer to peer: %s", err)
 				}
 			}
 
@@ -127,84 +70,109 @@ func (dht *IpfsDHT) PutSmartValue(ctx context.Context, key string, value syntax.
 }
 
 // GetSmartValue searches for the smart record corresponding to given Key
-// NOTE: We are returning a recordValue.
+// NOTE: We are returning a vm.recordValue right away.
 func (dht *IpfsDHT) GetSmartValue(ctx context.Context, key string, opts ...routing.Option) (_ vm.RecordValue, err error) {
-	if !dht.enableValues {
-		return nil, routing.ErrNotSupported
-	}
 
 	if dht.srClient == nil {
 		return nil, fmt.Errorf("smart records not supported")
 	}
 
+	/* NOTE: For now we don't use quorum. We let the lookup run till the end so
+	/* we collect every smart records from peers in the path. We probably should
+	/* change this in the future and allow users specify when to terminate the lookup
 	// apply defaultQuorum if relevant
 	var cfg routing.Options
 	if err := cfg.Apply(opts...); err != nil {
 		return nil, err
 	}
 	opts = append(opts, Quorum(internalConfig.GetQuorum(&cfg)))
+	*/
 
-	responses, err := dht.SearchSmartValue(ctx, key, opts...)
+	// Finds closest peers and request smart records for peers in path.
+	r, err := dht.SearchSmartValue(ctx, key, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create temporary vm
-	tmpVM, err := localVM()
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't instantiate local VM: %v", err)
+	if ctx.Err() != nil {
+		return r, ctx.Err()
 	}
+	if r == nil {
+		return nil, routing.ErrNotFound
+	}
+	logger.Debugf("GetSmartValue %v %x", internal.LoggableRecordKeyString(key), r)
+	return r, nil
+}
 
-	// For each smart value received update with the current one
-	// to get final state
-	for r := range responses {
-		// Check if the value is a pointer to smart record
-		if string(r.Val) == string(SRPointerValue) {
-			// Get smart record from peer
-			// TODO: Check locally if r.From is self. It means that I have it.
-			var srOut vm.RecordValue
-			if r.From == dht.self {
-				srOut = dht.srServer.GetLocal(key)
-			} else {
-				t, err := dht.srClient.Get(ctx, key, r.From)
-				srOut = *t
-				if err != nil {
-					// NOTE: Let's do nothing if Get fails for now.
-					// We have other alternatives
-					fmt.Println(err)
-					continue
-				}
-			}
-			// Update with record
-			err = updateRecord(tmpVM, key, srOut)
-			if err != nil {
-				// NOTE: Let's do nothing if Get fails for now.
-				// We have other alternatives
-				continue
-			}
+func (dht *IpfsDHT) getSmartValues(ctx context.Context, key string, tmpVM vm.Machine, stopQuery chan struct{}) (<-chan *vm.RecordValue, <-chan *lookupWithFollowupResult) {
+	lookupResCh := make(chan *lookupWithFollowupResult, 1)
+	valCh := make(chan *vm.RecordValue, 1)
+	logger.Debugw("finding smart value", "key", internal.LoggableRecordKeyString(key))
+
+	// Look locally if we have any record for the key.
+	// NOTE: We may not need this. Even we have local records we
+	// want to gather the ones from closest peers.
+	if rec := dht.srServer.GetLocal(key); rec != nil {
+		select {
+		case valCh <- &rec:
+		case <-ctx.Done():
 		}
 	}
 
-	// Get final update from smart record and return it
-	best := tmpVM.Get(key)
+	go func() {
+		defer close(valCh)
+		defer close(lookupResCh)
+		lookupRes, err := dht.runLookupWithFollowup(ctx, key,
+			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+				// For DHT query command
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.SendingQuery,
+					ID:   p,
+				})
 
-	if ctx.Err() != nil {
-		return best, ctx.Err()
-	}
+				// Get smart record from remote peer
+				t, err := dht.srClient.Get(ctx, key, p)
+				if err != nil {
+					// NOTE: Let's do nothing if Get fails for now.
+					// We have other alternatives and we want to keep going.
+					logger.Debugf("Error in get smartRecord", err)
+					return nil, nil
+				}
+				select {
+				case valCh <- t: // Send value for aggregation in VM
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 
-	if best == nil {
-		return nil, routing.ErrNotFound
-	}
-	logger.Debugf("GetValue %v %x", internal.LoggableRecordKeyString(key), best)
-	return best, nil
+				return nil, nil
+			},
+			func() bool {
+				select {
+				case <-stopQuery: // TODO: stop query sends nothing. We run the lookup till th end
+					return true
+				default:
+					return false
+				}
+			},
+		)
+
+		if err != nil {
+			return
+		}
+		lookupResCh <- lookupRes
+
+		if ctx.Err() == nil {
+			dht.refreshRTIfNoShortcut(kb.ConvertKey(key), lookupRes)
+		}
+	}()
+
+	return valCh, lookupResCh
 }
 
 // SearchValue searches for the value corresponding to given Key and streams the results.
-func (dht *IpfsDHT) SearchSmartValue(ctx context.Context, key string, opts ...routing.Option) (<-chan RecvdVal, error) {
-	if !dht.enableValues {
-		return nil, routing.ErrNotSupported
-	}
+func (dht *IpfsDHT) SearchSmartValue(ctx context.Context, key string, opts ...routing.Option) (vm.RecordValue, error) {
 
+	/* NOTE: No routing options for now
 	var cfg routing.Options
 	if err := cfg.Apply(opts...); err != nil {
 		return nil, err
@@ -212,16 +180,35 @@ func (dht *IpfsDHT) SearchSmartValue(ctx context.Context, key string, opts ...ro
 
 	responsesNeeded := 0
 	if !cfg.Offline {
-		responsesNeeded = internalConfig.GetQuorum(&cfg)
+	        responsesNeeded = internalConfig.GetQuorum(&cfg)
+	}
+	*/
+
+	// Create temporary vm to aggregate records
+	tmpVM, err := dht.tempVM()
+	defer tmpVM.Close()
+	if err != nil {
+		return nil, fmt.Errorf("couldn't instantiate temp VM: %v", err)
 	}
 
 	stopCh := make(chan struct{})
-	valCh, lookupRes := dht.getValues(ctx, key, stopCh)
+	valCh, _ := dht.getSmartValues(ctx, key, tmpVM, stopCh)
+	for v := range valCh {
+		srOut := *v
+		// Update with record. This function accounts for empty reecords
+		err = updateRecord(tmpVM, key, srOut)
+		if err != nil {
+			// NOTE: Do nothing with this error for now.
+		}
 
-	out := make(chan RecvdVal)
+	}
+	// Get from local vm.
+	return tmpVM.Get(key), nil
+
+	/* NOTE: No update of routing tables or quorum for now
 	go func() {
 		defer close(out)
-		best, peersWithBest, aborted := dht.searchSmartValueQuorum(ctx, key, valCh, stopCh, out, responsesNeeded)
+		best, peersWithBest, aborted := dht.searchValueQuorum(ctx, key, valCh, stopCh, out, responsesNeeded)
 		if best == nil || aborted {
 			return
 		}
@@ -244,37 +231,15 @@ func (dht *IpfsDHT) SearchSmartValue(ctx context.Context, key string, opts ...ro
 
 		dht.updatePeerValues(dht.Context(), key, best, updatePeers)
 	}()
-
 	return out, nil
+	*/
 }
 
-func (dht *IpfsDHT) searchSmartValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
-	out chan<- RecvdVal, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
-	numResponses := 0
-	return dht.processValues(ctx, key, valCh,
-		func(ctx context.Context, v RecvdVal, better bool) bool {
-			numResponses++
-			if better {
-				select {
-				case out <- v:
-				case <-ctx.Done():
-					return false
-				}
-			}
-
-			if nvals > 0 && numResponses > nvals {
-				close(stopCh)
-				return true
-			}
-			return false
-		})
-}
-
-func localVM() (vm.Machine, error) {
+func (dht *IpfsDHT) tempVM() (vm.Machine, error) {
 	upCtx := ir.DefaultUpdateContext{}
 	asmCtx := ir.AssemblerContext{Grammar: base.BaseGrammar}
 	// Starting new temp VM to perform updates.
-	return vm.NewVM(context.Background(), upCtx, asmCtx)
+	return vm.NewVM(context.Background(), dht.host, upCtx, asmCtx)
 }
 
 func updateRecord(v vm.Machine, key string, with vm.RecordValue) error {

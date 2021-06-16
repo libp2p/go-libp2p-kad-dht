@@ -216,11 +216,11 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	// Start smart record service if enabled
 	if cfg.SmartRecords {
-		dht.srServer, err = sr.NewSmartRecordServer(ctx, h)
+		dht.srServer, err = sr.NewSmartRecordServer(ctx, h, []sr.ServerOption{sr.ServerProtocolPrefix(cfg.ProtocolPrefix)}...)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't start smart record server: %v", err)
 		}
-		dht.srClient, err = sr.NewSmartRecordClient(ctx, h)
+		dht.srClient, err = sr.NewSmartRecordClient(ctx, h, []sr.ClientOption{sr.ClientProtocolPrefix(cfg.ProtocolPrefix)}...)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't start smart record client: %v", err)
 		}
@@ -287,7 +287,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	v1proto := cfg.ProtocolPrefix + kad1
 	if cfg.SmartRecords {
 		// Use smart record protocols if enabled.
-		v1proto = srDhtId
+		v1proto = cfg.ProtocolPrefix + srDhtId
 	}
 
 	if cfg.V1ProtocolOverride != "" {

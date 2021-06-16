@@ -28,7 +28,7 @@ require (
 	github.com/libp2p/go-msgio v0.0.6
 	github.com/libp2p/go-netroute v0.1.6
 	github.com/libp2p/go-routing-language v0.0.0-20210531170722-12dc033e88ac
-	github.com/libp2p/go-smart-record v0.0.0-20210610072257-bd503d17d1eb
+	github.com/libp2p/go-smart-record v0.0.0-20210616131255-cd406cac5270
 	github.com/multiformats/go-base32 v0.0.3
 	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/multiformats/go-multibase v0.0.3

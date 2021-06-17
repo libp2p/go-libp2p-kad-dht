@@ -7,7 +7,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-func TestDivideIntoGroups(t *testing.T) {
+func TestDivideByChunkSize(t *testing.T) {
 	var keys []peer.ID
 	for i := 0; i < 10; i++ {
 		keys = append(keys, peer.ID(strconv.Itoa(i)))
@@ -34,7 +34,7 @@ func TestDivideIntoGroups(t *testing.T) {
 	}
 
 	t.Run("Divides", func(t *testing.T) {
-		gr := divideIntoGroups(keys, 2)
+		gr := divideByChunkSize(keys, 5)
 		if len(gr) != 2 {
 			t.Fatal("incorrect number of groups")
 		}
@@ -46,22 +46,25 @@ func TestDivideIntoGroups(t *testing.T) {
 		}
 	})
 	t.Run("Remainder", func(t *testing.T) {
-		gr := divideIntoGroups(keys, 3)
-		if len(gr) != 3 {
+		gr := divideByChunkSize(keys, 3)
+		if len(gr) != 4 {
 			t.Fatal("incorrect number of groups")
 		}
-		if g, expected := convertToStrings(gr[0]), []string{"0", "1", "2", "3"}; !pidsEquals(g, expected) {
+		if g, expected := convertToStrings(gr[0]), []string{"0", "1", "2"}; !pidsEquals(g, expected) {
 			t.Fatalf("expected %v, got %v", expected, g)
 		}
-		if g, expected := convertToStrings(gr[1]), []string{"4", "5", "6"}; !pidsEquals(g, expected) {
+		if g, expected := convertToStrings(gr[1]), []string{"3", "4", "5"}; !pidsEquals(g, expected) {
 			t.Fatalf("expected %v, got %v", expected, g)
 		}
-		if g, expected := convertToStrings(gr[2]), []string{"7", "8", "9"}; !pidsEquals(g, expected) {
+		if g, expected := convertToStrings(gr[2]), []string{"6", "7", "8"}; !pidsEquals(g, expected) {
+			t.Fatalf("expected %v, got %v", expected, g)
+		}
+		if g, expected := convertToStrings(gr[3]), []string{"9"}; !pidsEquals(g, expected) {
 			t.Fatalf("expected %v, got %v", expected, g)
 		}
 	})
 	t.Run("OneEach", func(t *testing.T) {
-		gr := divideIntoGroups(keys, 10)
+		gr := divideByChunkSize(keys, 1)
 		if len(gr) != 10 {
 			t.Fatal("incorrect number of groups")
 		}
@@ -71,15 +74,13 @@ func TestDivideIntoGroups(t *testing.T) {
 			}
 		}
 	})
-	t.Run("TooManyGroups", func(t *testing.T) {
-		gr := divideIntoGroups(keys, 11)
-		if len(gr) != 10 {
+	t.Run("ChunkSizeLargerThanKeys", func(t *testing.T) {
+		gr := divideByChunkSize(keys, 11)
+		if len(gr) != 1 {
 			t.Fatal("incorrect number of groups")
 		}
-		for i := 0; i < 10; i++ {
-			if g, expected := convertToStrings(gr[i]), []string{strconv.Itoa(i)}; !pidsEquals(g, expected) {
-				t.Fatalf("expected %v, got %v", expected, g)
-			}
+		if g, expected := convertToStrings(gr[0]), convertToStrings(keys); !pidsEquals(g, expected) {
+			t.Fatalf("expected %v, got %v", expected, g)
 		}
 	})
 }

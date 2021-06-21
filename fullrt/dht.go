@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -174,7 +175,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 		crawlerInterval: time.Minute * 60,
 
-		bulkSendParallelism: 10,
+		bulkSendParallelism: 20,
 	}
 
 	rt.wg.Add(1)
@@ -464,7 +465,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 		})
 		err := dht.protoMessenger.PutValue(ctx, p, rec)
 		return err
-	}, peers)
+	}, peers, true)
 
 	if successes == 0 {
 		return fmt.Errorf("failed to complete put")
@@ -720,10 +721,10 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 					ID:   p,
 				})
 				return nil
-			default:
-				return err
 			case nil, internal.ErrInvalidRecord:
 				// in either of these cases, we want to keep going
+			default:
+				return err
 			}
 
 			// TODO: What should happen if the record is invalid?
@@ -751,7 +752,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 			return nil
 		}
 
-		dht.execOnMany(ctx, queryFn, peers)
+		dht.execOnMany(ctx, queryFn, peers, false)
 		lookupResCh <- &lookupWithFollowupResult{peers: peers}
 	}()
 	return valCh, lookupResCh
@@ -817,7 +818,7 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
 		err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.h)
 		return err
-	}, peers)
+	}, peers, true)
 
 	if exceededDeadline {
 		return context.DeadlineExceeded
@@ -830,41 +831,71 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	return ctx.Err()
 }
 
-func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID) int {
-	putctx, cancel := context.WithCancel(ctx)
+// execOnMany executes the given function on each of the peers, although it may only wait for a certain chunk of peers
+// to respond before considering the results "good enough" and returning.
+//
+// If sloppyExit is true then this function will return without waiting for all of its internal goroutines to close.
+// If sloppyExit is true then the passed in function MUST be able to safely complete an arbitrary amount of time after
+// execOnMany has returned (e.g. do not write to resources that might get closed or set to nil and therefore result in
+// a panic instead of just returning an error).
+func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID, sloppyExit bool) int {
+	if len(peers) == 0 {
+		return 0
+	}
+
+	// having a buffer that can take all of the elements is basically a hack to allow for sloppy exits that clean up
+	// the goroutines after the function is done rather than before
+	errCh := make(chan error, len(peers))
+	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
+
+	putctx, cancel := context.WithTimeout(ctx, dht.timeoutPerOp)
 	defer cancel()
 
-	waitAllCh := make(chan struct{}, len(peers))
-	numSuccessfulToWaitFor := int(float64(len(peers)) * dht.waitFrac)
-	waitSuccessCh := make(chan struct{}, numSuccessfulToWaitFor)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			fnCtx, fnCancel := context.WithTimeout(putctx, dht.timeoutPerOp)
-			defer fnCancel()
-			err := fn(fnCtx, p)
-			if err != nil {
-				logger.Debug(err)
-			} else {
-				waitSuccessCh <- struct{}{}
-			}
-			waitAllCh <- struct{}{}
+			errCh <- fn(putctx, p)
 		}(p)
 	}
 
-	numSuccess, numDone := 0, 0
-	t := time.NewTimer(time.Hour)
-	for numDone != len(peers) {
+	var numDone, numSuccess, successSinceLastTick int
+	var ticker *time.Ticker
+	var tickChan <-chan time.Time
+
+	for numDone < len(peers) {
 		select {
-		case <-waitAllCh:
+		case err := <-errCh:
 			numDone++
-		case <-waitSuccessCh:
-			if numSuccess >= numSuccessfulToWaitFor {
-				t.Reset(time.Millisecond * 500)
+			if err == nil {
+				numSuccess++
+				if numSuccess >= numSuccessfulToWaitFor && ticker == nil {
+					// Once there are enough successes, wait a little longer
+					ticker = time.NewTicker(time.Millisecond * 500)
+					defer ticker.Stop()
+					tickChan = ticker.C
+					successSinceLastTick = numSuccess
+				}
+				// This is equivalent to numSuccess * 2 + numFailures >= len(peers) and is a heuristic that seems to be
+				// performing reasonably.
+				// TODO: Make this metric more configurable
+				// TODO: Have better heuristics in this function whether determined from observing static network
+				// properties or dynamically calculating them
+				if numSuccess+numDone >= len(peers) {
+					cancel()
+					if sloppyExit {
+						return numSuccess
+					}
+				}
 			}
-			numSuccess++
-			numDone++
-		case <-t.C:
-			cancel()
+		case <-tickChan:
+			if numSuccess > successSinceLastTick {
+				// If there were additional successes, then wait another tick
+				successSinceLastTick = numSuccess
+			} else {
+				cancel()
+				if sloppyExit {
+					return numSuccess
+				}
+			}
 		}
 	}
 	return numSuccess
@@ -888,21 +919,11 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 		return fmt.Errorf("no known addresses for self, cannot put provider")
 	}
 
-	fn := func(ctx context.Context, k peer.ID) error {
-		peers, err := dht.GetClosestPeers(ctx, string(k))
-		if err != nil {
-			return err
-		}
-		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
-			pmes := dht_pb.NewMessage(dht_pb.Message_ADD_PROVIDER, multihash.Multihash(k), 0)
-			pmes.ProviderPeers = pbPeers
+	fn := func(ctx context.Context, p, k peer.ID) error {
+		pmes := dht_pb.NewMessage(dht_pb.Message_ADD_PROVIDER, multihash.Multihash(k), 0)
+		pmes.ProviderPeers = pbPeers
 
-			return dht.messageSender.SendMessage(ctx, p, pmes)
-		}, peers)
-		if successes == 0 {
-			return fmt.Errorf("no successful provides")
-		}
-		return nil
+		return dht.messageSender.SendMessage(ctx, p, pmes)
 	}
 
 	keysAsPeerIDs := make([]peer.ID, 0, len(keys))
@@ -933,77 +954,210 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 		return fmt.Errorf("does not support duplicate keys")
 	}
 
-	fn := func(ctx context.Context, k peer.ID) error {
-		peers, err := dht.GetClosestPeers(ctx, string(k))
-		if err != nil {
-			return err
-		}
-		successes := dht.execOnMany(ctx, func(ctx context.Context, p peer.ID) error {
-			keyStr := string(k)
-			return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
-		}, peers)
-		if successes == 0 {
-			return fmt.Errorf("no successful puts")
-		}
-		return nil
+	fn := func(ctx context.Context, p, k peer.ID) error {
+		keyStr := string(k)
+		return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
 	}
 
 	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, false)
 }
 
-func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, k peer.ID) error, isProvRec bool) error {
+func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, target, k peer.ID) error, isProvRec bool) error {
 	if len(keys) == 0 {
 		return nil
 	}
 
-	sortedKeys := kb.SortClosestPeers(keys, kb.ID(make([]byte, 32)))
+	type report struct {
+		successes   int
+		failures    int
+		lastSuccess time.Time
+		mx          sync.RWMutex
+	}
 
-	var numSends uint64 = 0
-	var numSendsSuccessful uint64 = 0
+	keySuccesses := make(map[peer.ID]*report, len(keys))
+	var numSkipped int64
 
+	for _, k := range keys {
+		keySuccesses[k] = &report{}
+	}
+
+	logger.Infof("bulk send: number of keys %d, unique %d", len(keys), len(keySuccesses))
+	numSuccessfulToWaitFor := int(float64(dht.bucketSize) * dht.waitFrac * 1.2)
+
+	sortedKeys := make([]peer.ID, 0, len(keySuccesses))
+	for k := range keySuccesses {
+		sortedKeys = append(sortedKeys, k)
+	}
+
+	sortedKeys = kb.SortClosestPeers(sortedKeys, kb.ID(make([]byte, 32)))
+
+	dht.kMapLk.RLock()
+	numPeers := len(dht.keyToPeerMap)
+	dht.kMapLk.RUnlock()
+
+	chunkSize := (len(sortedKeys) * dht.bucketSize * 2) / numPeers
+	if chunkSize == 0 {
+		chunkSize = 1
+	}
+
+	connmgrTag := fmt.Sprintf("dht-bulk-provide-tag-%d", rand.Int())
+
+	type workMessage struct {
+		p    peer.ID
+		keys []peer.ID
+	}
+
+	workCh := make(chan workMessage, 1)
 	wg := sync.WaitGroup{}
 	wg.Add(dht.bulkSendParallelism)
-	chunkSize := len(sortedKeys) / dht.bulkSendParallelism
-	onePctKeys := uint64(len(sortedKeys)) / 100
 	for i := 0; i < dht.bulkSendParallelism; i++ {
-		var chunk []peer.ID
-		end := (i + 1) * chunkSize
-		if end > len(sortedKeys) {
-			chunk = sortedKeys[i*chunkSize:]
-		} else {
-			chunk = sortedKeys[i*chunkSize : end]
-		}
-
 		go func() {
 			defer wg.Done()
-			for _, key := range chunk {
-				sendsSoFar := atomic.AddUint64(&numSends, 1)
-				if sendsSoFar%onePctKeys == 0 {
-					logger.Infof("bulk sending goroutine: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(sortedKeys)), sendsSoFar, len(sortedKeys))
+			defer logger.Debugf("bulk send goroutine done")
+			for wmsg := range workCh {
+				p, workKeys := wmsg.p, wmsg.keys
+				dht.peerAddrsLk.RLock()
+				peerAddrs := dht.peerAddrs[p]
+				dht.peerAddrsLk.RUnlock()
+				dialCtx, dialCancel := context.WithTimeout(ctx, dht.timeoutPerOp)
+				if err := dht.h.Connect(dialCtx, peer.AddrInfo{ID: p, Addrs: peerAddrs}); err != nil {
+					dialCancel()
+					atomic.AddInt64(&numSkipped, 1)
+					continue
 				}
-				if err := fn(ctx, key); err != nil {
-					var l interface{}
-					if isProvRec {
-						l = internal.LoggableProviderRecordBytes(key)
-					} else {
-						l = internal.LoggableRecordKeyString(key)
+				dialCancel()
+				dht.h.ConnManager().Protect(p, connmgrTag)
+				for _, k := range workKeys {
+					keyReport := keySuccesses[k]
+
+					queryTimeout := dht.timeoutPerOp
+					keyReport.mx.RLock()
+					if keyReport.successes >= numSuccessfulToWaitFor {
+						if time.Since(keyReport.lastSuccess) > time.Millisecond*500 {
+							keyReport.mx.RUnlock()
+							continue
+						}
+						queryTimeout = time.Millisecond * 500
 					}
-					logger.Infof("failed to complete bulk sending of key :%v. %v", l, err)
-				} else {
-					atomic.AddUint64(&numSendsSuccessful, 1)
+					keyReport.mx.RUnlock()
+
+					fnCtx, fnCancel := context.WithTimeout(ctx, queryTimeout)
+					if err := fn(fnCtx, p, k); err == nil {
+						keyReport.mx.Lock()
+						keyReport.successes++
+						if keyReport.successes >= numSuccessfulToWaitFor {
+							keyReport.lastSuccess = time.Now()
+						}
+						keyReport.mx.Unlock()
+					} else {
+						keyReport.mx.Lock()
+						keyReport.failures++
+						keyReport.mx.Unlock()
+						if ctx.Err() != nil {
+							fnCancel()
+							break
+						}
+					}
+					fnCancel()
 				}
+
+				dht.h.ConnManager().Unprotect(p, connmgrTag)
 			}
 		}()
 	}
+
+	keyGroups := divideByChunkSize(sortedKeys, chunkSize)
+	sendsSoFar := 0
+	for _, g := range keyGroups {
+		if ctx.Err() != nil {
+			break
+		}
+
+		keysPerPeer := make(map[peer.ID][]peer.ID)
+		for _, k := range g {
+			peers, err := dht.GetClosestPeers(ctx, string(k))
+			if err == nil {
+				for _, p := range peers {
+					keysPerPeer[p] = append(keysPerPeer[p], k)
+				}
+			}
+		}
+
+		logger.Debugf("bulk send: %d peers for group size %d", len(keysPerPeer), len(g))
+
+	keyloop:
+		for p, workKeys := range keysPerPeer {
+			select {
+			case workCh <- workMessage{p: p, keys: workKeys}:
+			case <-ctx.Done():
+				break keyloop
+			}
+		}
+		sendsSoFar += len(g)
+		logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(keySuccesses)), sendsSoFar, len(keySuccesses))
+	}
+
+	close(workCh)
+
+	logger.Debugf("bulk send complete, waiting on goroutines to close")
+
 	wg.Wait()
 
+	numSendsSuccessful := 0
+	numFails := 0
+	// generate a histogram of how many successful sends occurred per key
+	successHist := make(map[int]int)
+	// generate a histogram of how many failed sends occurred per key
+	// this does not include sends to peers that were skipped and had no messages sent to them at all
+	failHist := make(map[int]int)
+	for _, v := range keySuccesses {
+		if v.successes > 0 {
+			numSendsSuccessful++
+		}
+		successHist[v.successes]++
+		failHist[v.failures]++
+		numFails += v.failures
+	}
+
 	if numSendsSuccessful == 0 {
+		logger.Infof("bulk send failed")
 		return fmt.Errorf("failed to complete bulk sending")
 	}
 
-	logger.Infof("bulk send complete: %d of %d successful", numSendsSuccessful, len(keys))
+	logger.Infof("bulk send complete: %d keys, %d unique, %d successful, %d skipped peers, %d fails",
+		len(keys), len(keySuccesses), numSendsSuccessful, numSkipped, numFails)
+
+	logger.Infof("bulk send summary: successHist %v, failHist %v", successHist, failHist)
 
 	return nil
+}
+
+// divideByChunkSize divides the set of keys into groups of (at most) chunkSize. Chunk size must be greater than 0.
+func divideByChunkSize(keys []peer.ID, chunkSize int) [][]peer.ID {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	if chunkSize < 1 {
+		panic(fmt.Sprintf("fullrt: divide into groups: invalid chunk size %d", chunkSize))
+	}
+
+	var keyChunks [][]peer.ID
+	var nextChunk []peer.ID
+	chunkProgress := 0
+	for _, k := range keys {
+		nextChunk = append(nextChunk, k)
+		chunkProgress++
+		if chunkProgress == chunkSize {
+			keyChunks = append(keyChunks, nextChunk)
+			chunkProgress = 0
+			nextChunk = make([]peer.ID, 0, len(nextChunk))
+		}
+	}
+	if chunkProgress != 0 {
+		keyChunks = append(keyChunks, nextChunk)
+	}
+	return keyChunks
 }
 
 // FindProviders searches until the context expires.
@@ -1129,7 +1283,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		return nil
 	}
 
-	dht.execOnMany(queryctx, fn, peers)
+	dht.execOnMany(queryctx, fn, peers, false)
 }
 
 // FindPeer searches for a peer with given ID.
@@ -1214,7 +1368,7 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, e
 		return nil
 	}
 
-	dht.execOnMany(queryctx, fn, peers)
+	dht.execOnMany(queryctx, fn, peers, false)
 
 	close(addrsCh)
 	wg.Wait()

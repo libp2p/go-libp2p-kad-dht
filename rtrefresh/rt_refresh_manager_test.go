@@ -15,6 +15,8 @@ import (
 )
 
 func TestSkipRefreshOnGapCpls(t *testing.T) {
+	t.Skip("This test is flaky, see https://github.com/libp2p/go-libp2p-kad-dht/issues/722.")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	local := test.RandPeerIDFatal(t)
@@ -39,8 +41,8 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 			p, err := rt.GenRandPeerID(uint(u))
 			require.NoError(t, err)
 			b, err := rt.TryAddPeer(p, true, false)
-			require.True(t, b)
 			require.NoError(t, err)
+			require.True(t, b)
 			return nil
 		}
 	}

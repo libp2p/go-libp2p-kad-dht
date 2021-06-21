@@ -388,6 +388,7 @@ func TestValueSetInvalid(t *testing.T) {
 }
 
 func TestContextShutDown(t *testing.T) {
+	t.Skip("This test is flaky, see https://github.com/libp2p/go-libp2p-kad-dht/issues/724.")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -412,6 +413,8 @@ func TestContextShutDown(t *testing.T) {
 }
 
 func TestSearchValue(t *testing.T) {
+	t.Skip("This test is flaky, see https://github.com/libp2p/go-libp2p-kad-dht/issues/723.")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -2051,6 +2051,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 func TestBootstrapPeersFunc(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var lock sync.Mutex
 
 	bootstrapFuncA := func() []peer.AddrInfo {
 		return []peer.AddrInfo{}
@@ -2059,8 +2060,11 @@ func TestBootstrapPeersFunc(t *testing.T) {
 
 	bootstrapPeersB := []peer.AddrInfo{}
 	bootstrapFuncB := func() []peer.AddrInfo {
+		lock.Lock()
+		defer lock.Unlock()
 		return bootstrapPeersB
 	}
+
 	dhtB := setupDHT(ctx, t, false, BootstrapPeersFunc(bootstrapFuncB))
 	require.Equal(t, 0, len(dhtB.host.Network().Peers()))
 
@@ -2069,7 +2073,10 @@ func TestBootstrapPeersFunc(t *testing.T) {
 		Addrs: dhtA.host.Addrs(),
 	}
 
+	lock.Lock()
 	bootstrapPeersB = []peer.AddrInfo{addrA}
+	lock.Unlock()
+
 	dhtB.fixLowPeers(ctx)
 	require.NotEqual(t, 0, len(dhtB.host.Network().Peers()))
 }

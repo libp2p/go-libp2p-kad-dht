@@ -142,7 +142,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 	var bsPeers []*peer.AddrInfo
 
-	for _, ai := range dhtcfg.BootstrapPeers {
+	for _, ai := range dhtcfg.BootstrapPeers() {
 		tmpai := ai
 		bsPeers = append(bsPeers, &tmpai)
 	}

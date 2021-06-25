@@ -2051,6 +2051,39 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	}, 5*time.Second, 500*time.Millisecond)
 }
 
+func TestBootstrapPeersFunc(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var lock sync.Mutex
+
+	bootstrapFuncA := func() []peer.AddrInfo {
+		return []peer.AddrInfo{}
+	}
+	dhtA := setupDHT(ctx, t, false, BootstrapPeersFunc(bootstrapFuncA))
+
+	bootstrapPeersB := []peer.AddrInfo{}
+	bootstrapFuncB := func() []peer.AddrInfo {
+		lock.Lock()
+		defer lock.Unlock()
+		return bootstrapPeersB
+	}
+
+	dhtB := setupDHT(ctx, t, false, BootstrapPeersFunc(bootstrapFuncB))
+	require.Equal(t, 0, len(dhtB.host.Network().Peers()))
+
+	addrA := peer.AddrInfo{
+		ID:    dhtA.self,
+		Addrs: dhtA.host.Addrs(),
+	}
+
+	lock.Lock()
+	bootstrapPeersB = []peer.AddrInfo{addrA}
+	lock.Unlock()
+
+	dhtB.fixLowPeers(ctx)
+	require.NotEqual(t, 0, len(dhtB.host.Network().Peers()))
+}
+
 func TestPreconnectedNodes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

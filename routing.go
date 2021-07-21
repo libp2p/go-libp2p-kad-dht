@@ -93,8 +93,8 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	return nil
 }
 
-// RecvdVal stores a value and the peer from which we got the value.
-type RecvdVal struct {
+// recvdVal stores a value and the peer from which we got the value.
+type recvdVal struct {
 	Val  []byte
 	From peer.ID
 }
@@ -182,11 +182,11 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	return out, nil
 }
 
-func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
+func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan recvdVal, stopCh chan struct{},
 	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
 	numResponses := 0
 	return dht.processValues(ctx, key, valCh,
-		func(ctx context.Context, v RecvdVal, better bool) bool {
+		func(ctx context.Context, v recvdVal, better bool) bool {
 			numResponses++
 			if better {
 				select {
@@ -204,29 +204,8 @@ func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-c
 		})
 }
 
-// GetValues gets nvals values corresponding to the given key.
-func (dht *IpfsDHT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
-	if !dht.enableValues {
-		return nil, routing.ErrNotSupported
-	}
-
-	queryCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	valCh, _ := dht.getValues(queryCtx, key, nil)
-
-	out := make([]RecvdVal, 0, nvals)
-	for val := range valCh {
-		out = append(out, val)
-		if len(out) == nvals {
-			cancel()
-		}
-	}
-
-	return out, ctx.Err()
-}
-
-func (dht *IpfsDHT) processValues(ctx context.Context, key string, vals <-chan RecvdVal,
-	newVal func(ctx context.Context, v RecvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
+func (dht *IpfsDHT) processValues(ctx context.Context, key string, vals <-chan recvdVal,
+	newVal func(ctx context.Context, v recvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:
 	for {
 		if aborted {
@@ -290,15 +269,15 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
-	valCh := make(chan RecvdVal, 1)
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan recvdVal, <-chan *lookupWithFollowupResult) {
+	valCh := make(chan recvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
 	logger.Debugw("finding value", "key", internal.LoggableRecordKeyString(key))
 
 	if rec, err := dht.getLocal(key); rec != nil && err == nil {
 		select {
-		case valCh <- RecvdVal{
+		case valCh <- recvdVal{
 			Val:  rec.GetValue(),
 			From: dht.self,
 		}:
@@ -337,7 +316,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 				// TODO: What should happen if the record is invalid?
 				// Pre-existing code counted it towards the quorum, but should it?
 				if rec != nil && rec.GetValue() != nil {
-					rv := RecvdVal{
+					rv := recvdVal{
 						Val:  rec.GetValue(),
 						From: p,
 					}

@@ -393,7 +393,6 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	defer q.waitGroup.Done()
 	dialCtx, queryCtx := ctx, ctx
 
-	startQuery := time.Now()
 	// dial the peer
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
 		// remove the peer if there was a dial failure..but not because of a context cancellation
@@ -404,6 +403,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 		return
 	}
 
+	startQuery := time.Now()
 	// send query RPC to the remote peer
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {

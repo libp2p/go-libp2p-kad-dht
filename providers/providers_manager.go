@@ -36,6 +36,8 @@ var lruCacheSize = 256
 var batchBufferSize = 256
 var log = logging.Logger("providers")
 var defaultProvideBufferSize = 256
+var defaultGetProvidersBufferSize = 16
+var defaultGetProvidersNonBlockingBufferSize = defaultGetProvidersBufferSize / 4
 
 // ProviderManager adds and pulls providers out of the datastore,
 // caching them in between
@@ -107,9 +109,7 @@ type getProv struct {
 func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
 	pm := new(ProviderManager)
 	pm.nonBlocking = true
-	// buffer size of one to reduce context switching.
-	pm.getprovs = make(chan *getProv, 1)
-	// buffer so we can handle bursts.
+	pm.getprovs = make(chan *getProv, defaultGetProvidersBufferSize)
 	pm.newprovs = make(chan *addProv, defaultProvideBufferSize)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
 	cache, err := lru.NewLRU(lruCacheSize, nil)
@@ -333,6 +333,38 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) []peer.ID
 		return nil
 	case peers := <-gp.resp:
 		return peers
+	}
+}
+
+// GetProvidersNonBlocking returns the set of providers for the given key. If the "get providers"
+// queue is full, it returns immediately.
+//
+// This method _does not_ copy the set. Do not modify it.
+func (pm *ProviderManager) GetProvidersNonBlocking(ctx context.Context, k []byte) ([]peer.ID, error) {
+	// If we're "busy", don't even try. This is clearly racy, but it's mostly an "optimistic"
+	// check anyways and it should stabalize pretty quickly when we're under load.
+	//
+	// This helps leave some space for peers that actually need responses.
+	if len(pm.getprovs) > defaultGetProvidersNonBlockingBufferSize {
+		return nil, ErrWouldBlock
+	}
+
+	gp := &getProv{
+		key:  k,
+		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking
+	}
+	select {
+	case pm.getprovs <- gp:
+	default:
+		return nil, ErrWouldBlock
+	}
+	select {
+	case <-pm.proc.Closing():
+		return nil, ErrClosing
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case peers := <-gp.resp:
+		return peers, nil
 	}
 }
 

@@ -1950,6 +1950,9 @@ func TestRoutingFilter(t *testing.T) {
 }
 
 func TestBootStrapWhenRTIsEmpty(t *testing.T) {
+	if detectrace.WithRace() {
+		t.Skip("skipping timing dependent test when race detector is running")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

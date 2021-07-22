@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/stretchr/testify/require"
 
 	mh "github.com/multiformats/go-multihash"
 
@@ -31,7 +32,7 @@ func TestProviderManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := u.Hash([]byte("test"))
-	p.AddProvider(ctx, a, peer.ID("testingprovider"))
+	require.NoError(t, p.AddProvider(ctx, a, peer.ID("testingprovider")))
 
 	// Not cached
 	// TODO verify that cache is empty
@@ -47,8 +48,8 @@ func TestProviderManager(t *testing.T) {
 		t.Fatal("Could not retrieve provider.")
 	}
 
-	p.AddProvider(ctx, a, peer.ID("testingprovider2"))
-	p.AddProvider(ctx, a, peer.ID("testingprovider3"))
+	require.NoError(t, p.AddProvider(ctx, a, peer.ID("testingprovider2")))
+	require.NoError(t, p.AddProvider(ctx, a, peer.ID("testingprovider3")))
 	// TODO verify that cache is already up to date
 	resp = p.GetProviders(ctx, a)
 	if len(resp) != 3 {
@@ -78,7 +79,7 @@ func TestProvidersDatastore(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		h := u.Hash([]byte(fmt.Sprint(i)))
 		mhs = append(mhs, h)
-		p.AddProvider(ctx, h, friend)
+		require.NoError(t, p.AddProvider(ctx, h, friend))
 	}
 
 	for _, c := range mhs {
@@ -165,15 +166,15 @@ func TestProvidesExpire(t *testing.T) {
 	}
 
 	for _, h := range mhs[:5] {
-		p.AddProvider(ctx, h, peers[0])
-		p.AddProvider(ctx, h, peers[1])
+		require.NoError(t, p.AddProvider(ctx, h, peers[0]))
+		require.NoError(t, p.AddProvider(ctx, h, peers[1]))
 	}
 
 	time.Sleep(time.Second / 4)
 
 	for _, h := range mhs[5:] {
-		p.AddProvider(ctx, h, peers[0])
-		p.AddProvider(ctx, h, peers[1])
+		require.NoError(t, p.AddProvider(ctx, h, peers[0]))
+		require.NoError(t, p.AddProvider(ctx, h, peers[1]))
 	}
 
 	for _, h := range mhs {
@@ -271,7 +272,7 @@ func TestLargeProvidersSet(t *testing.T) {
 		h := u.Hash([]byte(fmt.Sprint(i)))
 		mhs = append(mhs, h)
 		for _, pid := range peers {
-			p.AddProvider(ctx, h, pid)
+			require.NoError(t, p.AddProvider(ctx, h, pid))
 		}
 	}
 
@@ -296,16 +297,14 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	h1 := u.Hash([]byte("1"))
 	h2 := u.Hash([]byte("2"))
 	pm, err := NewProviderManager(ctx, p1, dssync.MutexWrap(ds.NewMapDatastore()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// add provider
-	pm.AddProvider(ctx, h1, p1)
+	require.NoError(t, pm.AddProvider(ctx, h1, p1))
 	// make the cached provider for h1 go to datastore
-	pm.AddProvider(ctx, h2, p1)
+	require.NoError(t, pm.AddProvider(ctx, h2, p1))
 	// now just offloaded record should be brought back and joined with p2
-	pm.AddProvider(ctx, h1, p2)
+	require.NoError(t, pm.AddProvider(ctx, h1, p2))
 
 	h1Provs := pm.GetProviders(ctx, h1)
 	if len(h1Provs) != 2 {
@@ -325,11 +324,11 @@ func TestWriteUpdatesCache(t *testing.T) {
 	}
 
 	// add provider
-	pm.AddProvider(ctx, h1, p1)
+	require.NoError(t, pm.AddProvider(ctx, h1, p1))
 	// force into the cache
-	pm.GetProviders(ctx, h1)
+	_ = pm.GetProviders(ctx, h1)
 	// add a second provider
-	pm.AddProvider(ctx, h1, p2)
+	require.NoError(t, pm.AddProvider(ctx, h1, p2))
 
 	c1Provs := pm.GetProviders(ctx, h1)
 	if len(c1Provs) != 2 {

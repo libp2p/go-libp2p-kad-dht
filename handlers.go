@@ -366,7 +366,10 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)
 		}
-		dht.ProviderManager.AddProvider(ctx, key, p)
+		err := dht.ProviderManager.AddProviderNonBlocking(ctx, key, p)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return nil, nil

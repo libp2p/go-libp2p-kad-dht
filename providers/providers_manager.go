@@ -106,7 +106,10 @@ type getProv struct {
 // NewProviderManager constructor
 func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
 	pm := new(ProviderManager)
-	pm.getprovs = make(chan *getProv)
+	pm.nonBlocking = true
+	// buffer size of one to reduce context switching.
+	pm.getprovs = make(chan *getProv, 1)
+	// buffer so we can handle bursts.
 	pm.newprovs = make(chan *addProv, defaultProvideBufferSize)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
 	cache, err := lru.NewLRU(lruCacheSize, nil)
@@ -320,8 +323,12 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) []peer.ID
 	case <-ctx.Done():
 		return nil
 	case pm.getprovs <- gp:
+	case <-pm.proc.Closing():
+		return nil
 	}
 	select {
+	case <-pm.proc.Closing():
+		return nil
 	case <-ctx.Done():
 		return nil
 	case peers := <-gp.resp:

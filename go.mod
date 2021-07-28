@@ -12,7 +12,7 @@ require (
 	github.com/ipfs/go-datastore v0.4.5
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ipfs-util v0.0.2
-	github.com/ipfs/go-ipns v0.1.0
+	github.com/ipfs/go-ipns v0.1.2
 	github.com/ipfs/go-log v1.0.5
 	github.com/jbenet/goprocess v0.1.4
 	github.com/libp2p/go-eventbus v0.2.1
@@ -22,8 +22,8 @@ require (
 	github.com/libp2p/go-libp2p-peerstore v0.2.8
 	github.com/libp2p/go-libp2p-record v0.1.3
 	github.com/libp2p/go-libp2p-routing-helpers v0.2.3
-	github.com/libp2p/go-libp2p-swarm v0.5.0
-	github.com/libp2p/go-libp2p-testing v0.4.0
+	github.com/libp2p/go-libp2p-swarm v0.5.3
+	github.com/libp2p/go-libp2p-testing v0.4.2
 	github.com/libp2p/go-libp2p-xor v0.0.0-20210714161855-5c005aca55db
 	github.com/libp2p/go-msgio v0.0.6
 	github.com/libp2p/go-netroute v0.1.6

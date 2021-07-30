@@ -395,7 +395,8 @@ func workers(numWorkers int, fn func(interface{}), inputs <-chan interface{}) {
 }
 
 func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
-	_, span := Tracer.Start(ctx, "GetClosestPeers")
+	ctx, span := Tracer.Start(ctx, "GetClosestPeers")
+	_ = ctx // not used, but we want to assign it _just_ in case we use it.
 	defer span.End()
 
 	kbID := kb.ConvertKey(key)

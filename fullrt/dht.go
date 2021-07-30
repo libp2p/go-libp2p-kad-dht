@@ -42,7 +42,12 @@ import (
 	"github.com/libp2p/go-libp2p-xor/kademlia"
 	kadkey "github.com/libp2p/go-libp2p-xor/key"
 	"github.com/libp2p/go-libp2p-xor/trie"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
+
+var Tracer = otel.Tracer("")
 
 var logger = logging.Logger("fullrtdht")
 
@@ -390,6 +395,10 @@ func workers(numWorkers int, fn func(interface{}), inputs <-chan interface{}) {
 }
 
 func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
+	ctx, span := Tracer.Start(ctx, "GetClosestPeers")
+	_ = ctx // not used, but we want to assign it _just_ in case we use it.
+	defer span.End()
+
 	kbID := kb.ConvertKey(key)
 	kadKey := kadkey.KbucketIDToKey(kbID)
 	dht.rtLk.RLock()
@@ -764,6 +773,9 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	ctx, span := Tracer.Start(ctx, "Provide")
+	defer span.End()
+
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
@@ -839,6 +851,9 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 // execOnMany has returned (e.g. do not write to resources that might get closed or set to nil and therefore result in
 // a panic instead of just returning an error).
 func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID, sloppyExit bool) int {
+	ctx, span := Tracer.Start(ctx, "execOnMany")
+	defer span.End()
+
 	if len(peers) == 0 {
 		return 0
 	}
@@ -902,6 +917,9 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 }
 
 func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) error {
+	ctx, span := Tracer.Start(ctx, "ProvideMany")
+	defer span.End()
+
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	}
@@ -963,6 +981,9 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 }
 
 func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, target, k peer.ID) error, isProvRec bool) error {
+	ctx, span := Tracer.Start(ctx, "bulkMessageSend", trace.WithAttributes(attribute.Int("numKeys", len(keys))))
+	defer span.End()
+
 	if len(keys) == 0 {
 		return nil
 	}

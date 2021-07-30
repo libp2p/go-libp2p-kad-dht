@@ -35,5 +35,7 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.23.0
+	go.opentelemetry.io/otel v0.20.0
+	go.opentelemetry.io/otel/trace v0.20.0
 	go.uber.org/zap v1.18.1
 )

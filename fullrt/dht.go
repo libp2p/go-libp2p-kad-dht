@@ -19,7 +19,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
@@ -1279,7 +1278,7 @@ func (dhtx *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		for _, prov := range provs {
 			dhtx.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
 			logger.Debugf("got provider: %s", prov)
-			dht.DebugAddrInfo("BUG", *prov)
+			kaddht.DebugAddrInfo("BUG", *prov)
 			if ps.TryAdd(prov.ID) {
 				logger.Debugf("using provider: %s", prov)
 				select {

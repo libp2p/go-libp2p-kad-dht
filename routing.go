@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -22,6 +22,15 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/multiformats/go-multihash"
 )
+
+func DebugAddrInfo(msg string, ai peer.AddrInfo) {
+	for _, a := range ai.Addrs {
+		if a == nil {
+			logger.Errorf("(%s) AddrInfo with nil multiaddress: %s", msg, string(debug.Stack()))
+			return
+		}
+	}
+}
 
 // This file implements the Routing interface for the IpfsDHT struct.
 
@@ -500,8 +509,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p) {
 			pi := dht.peerstore.PeerInfo(p)
-			_, file, line, _ := runtime.Caller(0)
-			peer.DebugAddrInfo(fmt.Sprintf("BUG %s:%d", file, line), pi)
+			DebugAddrInfo("BUG", pi)
 			select {
 			case peerOut <- pi:
 			case <-ctx.Done():
@@ -535,8 +543,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 			for _, prov := range provs {
 				dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
 				logger.Debugf("got provider: %s", prov)
-				_, file, line, _ := runtime.Caller(0)
-				peer.DebugAddrInfo(fmt.Sprintf("BUG %s:%d", file, line), *prov)
+				DebugAddrInfo("BUG", *prov)
 				if ps.TryAdd(prov.ID) {
 					logger.Debugf("using provider: %s", prov)
 					select {

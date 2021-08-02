@@ -1238,7 +1238,7 @@ func (dhtx *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p) {
 			pi := dhtx.h.Peerstore().PeerInfo(p)
-			dht.DebugAddrInfo("BUG", pi)
+			kaddht.DebugAddrInfo("BUG", pi)
 			select {
 			case peerOut <- pi:
 			case <-ctx.Done():

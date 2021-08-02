@@ -5,6 +5,7 @@ package dual
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -199,11 +200,15 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 				}
 				continue
 			case pi, ok = <-wanCh:
+				_, file, line, _ := runtime.Caller(0)
+				peer.DebugAddrInfo(fmt.Sprintf("BUG %s:%d", file, line), pi)
 				if !ok {
 					wanCh = nil
 					continue
 				}
 			case pi, ok = <-lanCh:
+				_, file, line, _ := runtime.Caller(0)
+				peer.DebugAddrInfo(fmt.Sprintf("BUG %s:%d", file, line), pi)
 				if !ok {
 					lanCh = nil
 					continue

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1237,6 +1238,8 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p) {
 			pi := dht.h.Peerstore().PeerInfo(p)
+			_, file, line, _ := runtime.Caller(0)
+			peer.DebugAddrInfo(fmt.Sprintf("BUG %s:%d", file, line), pi)
 			select {
 			case peerOut <- pi:
 			case <-ctx.Done():
@@ -1277,6 +1280,8 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		for _, prov := range provs {
 			dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
 			logger.Debugf("got provider: %s", prov)
+			_, file, line, _ := runtime.Caller(0)
+			peer.DebugAddrInfo(fmt.Sprintf("BUG %s:%d", file, line), *prov)
 			if ps.TryAdd(prov.ID) {
 				logger.Debugf("using provider: %s", prov)
 				select {

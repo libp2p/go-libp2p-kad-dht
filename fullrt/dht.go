@@ -127,7 +127,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 	}
 
 	ms := net.NewMessageSenderImpl(h, []protocol.ID{dhtcfg.ProtocolPrefix + "/kad/1.0.0"})
-	protoMessenger, err := dht_pb.NewProtocolMessenger(ms, dht_pb.WithValidator(dhtcfg.Validator))
+	protoMessenger, err := dht_pb.NewProtocolMessenger(ms)
 	if err != nil {
 		return nil, err
 	}
@@ -720,35 +720,8 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 			})
 
 			rec, peers, err := dht.protoMessenger.GetValue(ctx, p, key)
-			switch err {
-			case routing.ErrNotFound:
-				// in this case, they responded with nothing,
-				// still send a notification so listeners can know the
-				// request has completed 'successfully'
-				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-					Type: routing.PeerResponse,
-					ID:   p,
-				})
-				return nil
-			case nil, internal.ErrInvalidRecord:
-				// in either of these cases, we want to keep going
-			default:
+			if err != nil {
 				return err
-			}
-
-			// TODO: What should happen if the record is invalid?
-			// Pre-existing code counted it towards the quorum, but should it?
-			if rec != nil && rec.GetValue() != nil {
-				rv := RecvdVal{
-					Val:  rec.GetValue(),
-					From: p,
-				}
-
-				select {
-				case valCh <- rv:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
 			}
 
 			// For DHT query command
@@ -757,6 +730,31 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 				ID:        p,
 				Responses: peers,
 			})
+
+			if rec == nil {
+				return nil
+			}
+
+			val := rec.GetValue()
+			if val == nil {
+				logger.Debug("received a nil record value")
+				return nil
+			}
+			if err := dht.Validator.Validate(key, val); err != nil {
+				// make sure record is valid
+				logger.Debugw("received invalid record (discarded)", "error", err)
+				return nil
+			}
+
+			// the record is present and valid, send it out for processing
+			select {
+			case valCh <- RecvdVal{
+				Val:  val,
+				From: p,
+			}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 
 			return nil
 		}

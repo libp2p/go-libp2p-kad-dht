@@ -297,35 +297,8 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 				})
 
 				rec, peers, err := dht.protoMessenger.GetValue(ctx, p, key)
-				switch err {
-				case routing.ErrNotFound:
-					// in this case, they responded with nothing,
-					// still send a notification so listeners can know the
-					// request has completed 'successfully'
-					routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-						Type: routing.PeerResponse,
-						ID:   p,
-					})
+				if err != nil {
 					return nil, err
-				case nil, internal.ErrInvalidRecord:
-					// in either of these cases, we want to keep going
-				default:
-					return nil, err
-				}
-
-				// TODO: What should happen if the record is invalid?
-				// Pre-existing code counted it towards the quorum, but should it?
-				if rec != nil && rec.GetValue() != nil {
-					rv := recvdVal{
-						Val:  rec.GetValue(),
-						From: p,
-					}
-
-					select {
-					case valCh <- rv:
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
 				}
 
 				// For DHT query command
@@ -335,7 +308,32 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					Responses: peers,
 				})
 
-				return peers, err
+				if rec == nil {
+					return peers, nil
+				}
+
+				val := rec.GetValue()
+				if val == nil {
+					logger.Debug("received a nil record value")
+					return peers, nil
+				}
+				if err := dht.Validator.Validate(key, val); err != nil {
+					// make sure record is valid
+					logger.Debugw("received invalid record (discarded)", "error", err)
+					return peers, nil
+				}
+
+				// the record is present and valid, send it out for processing
+				select {
+				case valCh <- recvdVal{
+					Val:  val,
+					From: p,
+				}:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+
+				return peers, nil
 			},
 			func() bool {
 				select {

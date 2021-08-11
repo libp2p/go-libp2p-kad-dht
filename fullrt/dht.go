@@ -596,27 +596,6 @@ func (dht *FullRT) searchValueQuorum(ctx context.Context, key string, valCh <-ch
 		})
 }
 
-// GetValues gets nvals values corresponding to the given key.
-func (dht *FullRT) GetValues(ctx context.Context, key string, nvals int) (_ []RecvdVal, err error) {
-	if !dht.enableValues {
-		return nil, routing.ErrNotSupported
-	}
-
-	queryCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	valCh, _ := dht.getValues(queryCtx, key, nil)
-
-	out := make([]RecvdVal, 0, nvals)
-	for val := range valCh {
-		out = append(out, val)
-		if len(out) == nvals {
-			cancel()
-		}
-	}
-
-	return out, ctx.Err()
-}
-
 func (dht *FullRT) processValues(ctx context.Context, key string, vals <-chan RecvdVal,
 	newVal func(ctx context.Context, v RecvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:

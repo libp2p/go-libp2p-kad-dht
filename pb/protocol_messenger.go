@@ -6,12 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	logging "github.com/ipfs/go-log"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/routing"
-
-	logging "github.com/ipfs/go-log"
-	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-multihash"
 
@@ -27,18 +24,10 @@ var logger = logging.Logger("dht")
 // Note: the ProtocolMessenger's MessageSender still needs to deal with some wire protocol details such as using
 // varint-delineated protobufs
 type ProtocolMessenger struct {
-	m         MessageSender
-	validator record.Validator
+	m MessageSender
 }
 
 type ProtocolMessengerOption func(*ProtocolMessenger) error
-
-func WithValidator(validator record.Validator) ProtocolMessengerOption {
-	return func(messenger *ProtocolMessenger) error {
-		messenger.validator = validator
-		return nil
-	}
-}
 
 // NewProtocolMessenger creates a new ProtocolMessenger that is used for sending DHT messages to peers and processing
 // their responses.
@@ -99,21 +88,16 @@ func (pm *ProtocolMessenger) GetValue(ctx context.Context, p peer.ID, key string
 		// Success! We were given the value
 		logger.Debug("got value")
 
-		// make sure record is valid.
-		err = pm.validator.Validate(string(rec.GetKey()), rec.GetValue())
-		if err != nil {
-			logger.Debug("received invalid record (discarded)")
-			// return a sentinel to signify an invalid record was received
-			return nil, peers, internal.ErrInvalidRecord
+		// Check that record matches the one we are looking for (validation of the record does not happen here)
+		if !bytes.Equal([]byte(key), rec.GetKey()) {
+			logger.Debug("received incorrect record")
+			return nil, nil, internal.ErrIncorrectRecord
 		}
+
 		return rec, peers, err
 	}
 
-	if len(peers) > 0 {
-		return nil, peers, nil
-	}
-
-	return nil, nil, routing.ErrNotFound
+	return nil, peers, nil
 }
 
 // GetClosestPeers asks a peer to return the K (a DHT-wide parameter) DHT server peers closest in XOR space to the id

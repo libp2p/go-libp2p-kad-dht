@@ -191,7 +191,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.Validator = cfg.Validator
 	dht.msgSender = net.NewMessageSenderImpl(h, dht.protocols)
-	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender, pb.WithValidator(dht.Validator))
+	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender)
 	if err != nil {
 		return nil, err
 	}

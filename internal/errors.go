@@ -2,4 +2,4 @@ package internal
 
 import "errors"
 
-var ErrInvalidRecord = errors.New("received invalid record")
+var ErrIncorrectRecord = errors.New("received incorrect record")

@@ -18,6 +18,10 @@ type pubkrs struct {
 // GetPublicKey gets the public key when given a Peer ID. It will extract from
 // the Peer ID if inlined or ask the node it belongs to or ask the DHT.
 func (dht *IpfsDHT) GetPublicKey(ctx context.Context, p peer.ID) (ci.PubKey, error) {
+	if !dht.enableValues {
+		return nil, routing.ErrNotSupported
+	}
+
 	logger.Debugf("getPublicKey for: %s", p)
 
 	// Check locally. Will also try to extract the public key from the peer

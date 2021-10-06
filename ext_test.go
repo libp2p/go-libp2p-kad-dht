@@ -11,6 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/stretchr/testify/require"
 
 	record "github.com/libp2p/go-libp2p-record"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
@@ -100,13 +101,13 @@ func TestGetFailures(t *testing.T) {
 
 	ctx := context.Background()
 
-	host1 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
-	host2 := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
+	host1, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	require.NoError(t, err)
+	host2, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	require.NoError(t, err)
 
 	d, err := New(ctx, host1, testPrefix, DisableAutoRefresh(), Mode(ModeServer))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Reply with failures to every message
 	for _, proto := range d.serverProtocols {
@@ -118,9 +119,7 @@ func TestGetFailures(t *testing.T) {
 
 	host1.Peerstore().AddAddrs(host2.ID(), host2.Addrs(), peerstore.ConnectedAddrTTL)
 	_, err = host1.Network().DialPeer(ctx, host2.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	time.Sleep(1 * time.Second)
 
 	// This one should time out

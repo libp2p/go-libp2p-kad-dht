@@ -9,6 +9,8 @@ import (
 
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInvalidMessageSenderTracking(t *testing.T) {
@@ -17,14 +19,13 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 
 	foo := peer.ID("asdasd")
 
-	h := bhost.New(swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport))
+	h, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	require.NoError(t, err)
 
 	msgSender := NewMessageSenderImpl(h, []protocol.ID{"/test/kad/1.0.0"}).(*messageSenderImpl)
 
-	_, err := msgSender.messageSenderForPeer(ctx, foo)
-	if err == nil {
-		t.Fatal("that shouldnt have succeeded")
-	}
+	_, err = msgSender.messageSenderForPeer(ctx, foo)
+	require.Error(t, err, "should have failed to find message sender")
 
 	msgSender.smlk.Lock()
 	mscnt := len(msgSender.strmap)

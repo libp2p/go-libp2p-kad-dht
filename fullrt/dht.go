@@ -1198,7 +1198,7 @@ func (dht *FullRT) FindProvidersAsync(ctx context.Context, key cid.Cid, count in
 	return peerOut
 }
 
-func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
+func (dhtx *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
 	defer close(peerOut)
 
 	findAll := count == 0
@@ -1209,11 +1209,12 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		ps = peer.NewLimitedSet(count)
 	}
 
-	provs := dht.ProviderManager.GetProviders(ctx, key)
+	provs := dhtx.ProviderManager.GetProviders(ctx, key)
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p) {
-			pi := dht.h.Peerstore().PeerInfo(p)
+			pi := dhtx.h.Peerstore().PeerInfo(p)
+			kaddht.DebugAddrInfo("BUG", pi)
 			select {
 			case peerOut <- pi:
 			case <-ctx.Done():
@@ -1228,7 +1229,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		}
 	}
 
-	peers, err := dht.GetClosestPeers(ctx, string(key))
+	peers, err := dhtx.GetClosestPeers(ctx, string(key))
 	if err != nil {
 		return
 	}
@@ -1243,7 +1244,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 			ID:   p,
 		})
 
-		provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
+		provs, closest, err := dhtx.protoMessenger.GetProviders(ctx, p, key)
 		if err != nil {
 			return err
 		}
@@ -1252,8 +1253,9 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 
 		// Add unique providers from request, up to 'count'
 		for _, prov := range provs {
-			dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+			dhtx.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
 			logger.Debugf("got provider: %s", prov)
+			kaddht.DebugAddrInfo("BUG", *prov)
 			if ps.TryAdd(prov.ID) {
 				logger.Debugf("using provider: %s", prov)
 				select {
@@ -1281,7 +1283,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		return nil
 	}
 
-	dht.execOnMany(queryctx, fn, peers, false)
+	dhtx.execOnMany(queryctx, fn, peers, false)
 }
 
 // FindPeer searches for a peer with given ID.

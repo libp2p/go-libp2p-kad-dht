@@ -167,7 +167,7 @@ func (dht *DHT) GetRoutingTableDiversityStats() []peerdiversity.CplDiversityStat
 }
 
 // FindProvidersAsync searches for peers who are able to provide a given key
-func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+func (dhtx *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
 	reqCtx, cancel := context.WithCancel(ctx)
 	outCh := make(chan peer.AddrInfo)
 
@@ -178,8 +178,8 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 		subCtx, evtCh = routing.RegisterForQueryEvents(reqCtx)
 	}
 
-	wanCh := dht.WAN.FindProvidersAsync(subCtx, key, count)
-	lanCh := dht.LAN.FindProvidersAsync(subCtx, key, count)
+	wanCh := dhtx.WAN.FindProvidersAsync(subCtx, key, count)
+	lanCh := dhtx.LAN.FindProvidersAsync(subCtx, key, count)
 	zeroCount := (count == 0)
 	go func() {
 		defer cancel()
@@ -199,11 +199,13 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 				}
 				continue
 			case pi, ok = <-wanCh:
+				dht.DebugAddrInfo("BUG", pi)
 				if !ok {
 					wanCh = nil
 					continue
 				}
 			case pi, ok = <-lanCh:
+				dht.DebugAddrInfo("BUG", pi)
 				if !ok {
 					lanCh = nil
 					continue

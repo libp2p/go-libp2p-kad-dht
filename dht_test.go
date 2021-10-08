@@ -1285,7 +1285,8 @@ func TestClientModeConnect(t *testing.T) {
 
 	c := testCaseCids[0]
 	p := peer.ID("TestPeer")
-	a.ProviderManager.AddProvider(ctx, c.Hash(), p)
+	err := a.ProviderManager.AddProviderNonBlocking(ctx, c.Hash(), p)
+	require.NoError(t, err)
 	time.Sleep(time.Millisecond * 5) // just in case...
 
 	provs, err := b.FindProviders(ctx, c)

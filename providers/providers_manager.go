@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,11 @@ import (
 	base32 "github.com/multiformats/go-base32"
 )
 
+var (
+	ErrWouldBlock = errors.New("provide would block")
+	ErrClosing    = errors.New("provider manager is closing")
+)
+
 // ProvidersKeyPrefix is the prefix/namespace for ALL provider record
 // keys stored in the data store.
 const ProvidersKeyPrefix = "/providers/"
@@ -29,6 +35,9 @@ var defaultCleanupInterval = time.Hour
 var lruCacheSize = 256
 var batchBufferSize = 256
 var log = logging.Logger("providers")
+var defaultProvideBufferSize = 256
+var defaultGetProvidersBufferSize = 16
+var defaultGetProvidersNonBlockingBufferSize = defaultGetProvidersBufferSize / 4
 
 // ProviderManager adds and pulls providers out of the datastore,
 // caching them in between
@@ -38,9 +47,10 @@ type ProviderManager struct {
 	cache  lru.LRUCache
 	dstore *autobatch.Datastore
 
-	newprovs chan *addProv
-	getprovs chan *getProv
-	proc     goprocess.Process
+	nonBlocking bool
+	newprovs    chan *addProv
+	getprovs    chan *getProv
+	proc        goprocess.Process
 
 	cleanupInterval time.Duration
 }
@@ -75,9 +85,19 @@ func Cache(c lru.LRUCache) Option {
 	}
 }
 
+// NonBlockingProvide causes the provide manager to drop inbound provides when the queue is full
+// instead of blocking.
+func NonBlockingProvide(nonBlocking bool) Option {
+	return func(pm *ProviderManager) error {
+		pm.nonBlocking = nonBlocking
+		return nil
+	}
+}
+
 type addProv struct {
-	key []byte
-	val peer.ID
+	key  []byte
+	val  peer.ID
+	resp chan error
 }
 
 type getProv struct {
@@ -88,8 +108,9 @@ type getProv struct {
 // NewProviderManager constructor
 func NewProviderManager(ctx context.Context, local peer.ID, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
 	pm := new(ProviderManager)
-	pm.getprovs = make(chan *getProv)
-	pm.newprovs = make(chan *addProv)
+	pm.nonBlocking = true
+	pm.getprovs = make(chan *getProv, defaultGetProvidersBufferSize)
+	pm.newprovs = make(chan *addProv, defaultProvideBufferSize)
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
 	cache, err := lru.NewLRU(lruCacheSize, nil)
 	if err != nil {
@@ -134,6 +155,9 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 		select {
 		case np := <-pm.newprovs:
 			err := pm.addProv(np.key, np.val)
+			if np.resp != nil {
+				np.resp <- err
+			}
 			if err != nil {
 				log.Error("error adding new providers: ", err)
 				continue
@@ -213,15 +237,50 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 	}
 }
 
-// AddProvider adds a provider
-func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, val peer.ID) {
+// AddProviderNonBlocking adds a provider
+func (pm *ProviderManager) AddProviderNonBlocking(ctx context.Context, k []byte, val peer.ID) error {
 	prov := &addProv{
 		key: k,
 		val: val,
 	}
+	if pm.nonBlocking {
+		select {
+		case pm.newprovs <- prov:
+		default:
+			return ErrWouldBlock
+		}
+	} else {
+		select {
+		case pm.newprovs <- prov:
+		case <-pm.proc.Closing():
+			return ErrClosing
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, val peer.ID) error {
+	prov := &addProv{
+		key:  k,
+		val:  val,
+		resp: make(chan error, 1),
+	}
 	select {
 	case pm.newprovs <- prov:
+	case <-pm.proc.Closing():
+		return ErrClosing
 	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-prov.resp:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-pm.proc.Closing():
+		return ErrClosing
 	}
 }
 
@@ -264,12 +323,48 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) []peer.ID
 	case <-ctx.Done():
 		return nil
 	case pm.getprovs <- gp:
+	case <-pm.proc.Closing():
+		return nil
 	}
 	select {
+	case <-pm.proc.Closing():
+		return nil
 	case <-ctx.Done():
 		return nil
 	case peers := <-gp.resp:
 		return peers
+	}
+}
+
+// GetProvidersNonBlocking returns the set of providers for the given key. If the "get providers"
+// queue is full, it returns immediately.
+//
+// This method _does not_ copy the set. Do not modify it.
+func (pm *ProviderManager) GetProvidersNonBlocking(ctx context.Context, k []byte) ([]peer.ID, error) {
+	// If we're "busy", don't even try. This is clearly racy, but it's mostly an "optimistic"
+	// check anyways and it should stabalize pretty quickly when we're under load.
+	//
+	// This helps leave some space for peers that actually need responses.
+	if len(pm.getprovs) > defaultGetProvidersNonBlockingBufferSize {
+		return nil, ErrWouldBlock
+	}
+
+	gp := &getProv{
+		key:  k,
+		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking
+	}
+	select {
+	case pm.getprovs <- gp:
+	default:
+		return nil, ErrWouldBlock
+	}
+	select {
+	case <-pm.proc.Closing():
+		return nil, ErrClosing
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case peers := <-gp.resp:
+		return peers, nil
 	}
 }
 

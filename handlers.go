@@ -9,6 +9,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 
 	"github.com/gogo/protobuf/proto"
@@ -317,21 +318,44 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
+	// Find closer peers.
+	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)
+	myBucket := true
+	if len(closer) > 0 {
+		// Fill out peer infos.
+		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
+		infos := pstore.PeerInfos(dht.peerstore, closer)
+		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
+
+		// If we have a full bucket of closer peers, check to see if _we're_ in the closest
+		// set.
+		if len(closer) >= dht.bucketSize {
+			// Check to see if _we're_ in the "close" bucket.
+			// If not, we _may_
+			peers := append(closer, dht.self)
+			peers = kb.SortClosestPeers(peers, kb.ConvertKey(string(pmes.GetKey())))
+			myBucket = peers[len(peers)-1] != dht.self
+		}
+	}
+
 	// setup providers
-	providers := dht.ProviderManager.GetProviders(ctx, key)
+	var providers []peer.ID
+	if myBucket {
+		// If we're in the closest set, block getting providers.
+		providers = dht.ProviderManager.GetProviders(ctx, key)
+	} else {
+		// Otherwise, don't block. The peer will find a closer peer.
+		var err error
+		providers, err = dht.ProviderManager.GetProvidersNonBlocking(ctx, key)
+		if err != nil {
+			logger.Debugw("dropping get providers requests", err)
+		}
+	}
 
 	if len(providers) > 0 {
 		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
 		infos := pstore.PeerInfos(dht.peerstore, providers)
 		resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
-	}
-
-	// Also send closer peers.
-	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)
-	if closer != nil {
-		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
-		infos := pstore.PeerInfos(dht.peerstore, closer)
-		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
 	}
 
 	return resp, nil
@@ -366,7 +390,10 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			// add the received addresses to our peerstore.
 			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)
 		}
-		dht.ProviderManager.AddProvider(ctx, key, p)
+		err := dht.ProviderManager.AddProviderNonBlocking(ctx, key, p)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return nil, nil

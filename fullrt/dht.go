@@ -762,9 +762,15 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.ProviderManager.AddProvider(ctx, keyMH, dht.h.ID())
+	err = dht.ProviderManager.AddProvider(ctx, keyMH, dht.h.ID())
 	if !brdcst {
-		return nil
+		// If we're not broadcasting, return immediately. But also return the error because,
+		// if something went wrong, we basically failed to do anything.
+		return err
+	}
+	if err != nil {
+		// Otherwise, "local" provides are "best effort".
+		logger.Debugw("local provide failed", "error", err)
 	}
 
 	closerCtx := ctx

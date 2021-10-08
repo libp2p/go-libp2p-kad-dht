@@ -380,9 +380,15 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
+	err = dht.ProviderManager.AddProvider(ctx, keyMH, dht.self)
 	if !brdcst {
-		return nil
+		// If we're not broadcasting, return immediately. But also return the error because,
+		// if something went wrong, we basically failed to do anything.
+		return err
+	}
+	if err != nil {
+		// Otherwise, "local" provides are "best effort".
+		logger.Debugw("local provide failed", "error", err)
 	}
 
 	closerCtx := ctx

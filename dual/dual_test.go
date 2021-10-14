@@ -57,8 +57,9 @@ func MkFilterForPeer() (func(_ interface{}, p peer.ID) bool, *customRtHelper) {
 }
 
 func setupDHTWithFilters(ctx context.Context, t *testing.T, options ...dht.Option) (*DHT, []*customRtHelper) {
-	h, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	t.Cleanup(func() { h.Close() })
 
 	wanFilter, wanRef := MkFilterForPeer()
 	wanOpts := []dht.Option{
@@ -89,8 +90,9 @@ func setupDHTWithFilters(ctx context.Context, t *testing.T, options ...dht.Optio
 func setupDHT(ctx context.Context, t *testing.T, options ...dht.Option) *DHT {
 	t.Helper()
 
-	host, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
 	baseOpts := []dht.Option{
 		dht.NamespacedValidator("v", blankValidator{}),
@@ -144,8 +146,9 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 
 	d, hlprs := setupDHTWithFilters(ctx, t)
 
-	whost, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	whost, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	t.Cleanup(func() { whost.Close() })
 
 	wan, err := dht.New(
 		ctx,
@@ -158,8 +161,9 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 	hlprs[0].allow = wan.PeerID()
 	connect(ctx, t, d.WAN, wan)
 
-	lhost, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	lhost, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	t.Cleanup(func() { lhost.Close() })
 
 	lan, err := dht.New(
 		ctx,

@@ -91,10 +91,11 @@ func TestBadMessage(t *testing.T) {
 func BenchmarkHandleFindPeer(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h, err := libp2p.New(ctx)
+	h, err := libp2p.New()
 	if err != nil {
 		b.Fatal(err)
 	}
+	defer h.Close()
 
 	d, err := New(ctx, h)
 	if err != nil {

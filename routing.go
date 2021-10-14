@@ -40,7 +40,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 		return err
 	}
 
-	old, err := dht.getLocal(key)
+	old, err := dht.getLocal(ctx, key)
 	if err != nil {
 		// Means something is wrong with the datastore.
 		return err
@@ -60,7 +60,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 
 	rec := record.MakePutRecord(key, value)
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dht.putLocal(key, rec)
+	err = dht.putLocal(ctx, key, rec)
 	if err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 		go func(p peer.ID) {
 			//TODO: Is this possible?
 			if p == dht.self {
-				err := dht.putLocal(key, fixupRec)
+				err := dht.putLocal(ctx, key, fixupRec)
 				if err != nil {
 					logger.Error("Error correcting local dht entry:", err)
 				}
@@ -275,7 +275,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 	logger.Debugw("finding value", "key", internal.LoggableRecordKeyString(key))
 
-	if rec, err := dht.getLocal(key); rec != nil && err == nil {
+	if rec, err := dht.getLocal(ctx, key); rec != nil && err == nil {
 		select {
 		case valCh <- recvdVal{
 			Val:  rec.GetValue(),

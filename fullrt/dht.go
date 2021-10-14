@@ -437,7 +437,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 		return err
 	}
 
-	old, err := dht.getLocal(key)
+	old, err := dht.getLocal(ctx, key)
 	if err != nil {
 		// Means something is wrong with the datastore.
 		return err
@@ -457,7 +457,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 
 	rec := record.MakePutRecord(key, value)
 	rec.TimeReceived = u.FormatRFC3339(time.Now())
-	err = dht.putLocal(key, rec)
+	err = dht.putLocal(ctx, key, rec)
 	if err != nil {
 		return err
 	}
@@ -645,7 +645,7 @@ func (dht *FullRT) updatePeerValues(ctx context.Context, key string, val []byte,
 		go func(p peer.ID) {
 			//TODO: Is this possible?
 			if p == dht.h.ID() {
-				err := dht.putLocal(key, fixupRec)
+				err := dht.putLocal(ctx, key, fixupRec)
 				if err != nil {
 					logger.Error("Error correcting local dht entry:", err)
 				}
@@ -671,7 +671,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 
 	logger.Debugw("finding value", "key", internal.LoggableRecordKeyString(key))
 
-	if rec, err := dht.getLocal(key); rec != nil && err == nil {
+	if rec, err := dht.getLocal(ctx, key); rec != nil && err == nil {
 		select {
 		case valCh <- RecvdVal{
 			Val:  rec.GetValue(),
@@ -1398,10 +1398,10 @@ var _ routing.Routing = (*FullRT)(nil)
 //
 // returns nil, nil when either nothing is found or the value found doesn't properly validate.
 // returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *FullRT) getLocal(key string) (*recpb.Record, error) {
+func (dht *FullRT) getLocal(ctx context.Context, key string) (*recpb.Record, error) {
 	logger.Debugw("finding value in datastore", "key", internal.LoggableRecordKeyString(key))
 
-	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
+	rec, err := dht.getRecordFromDatastore(ctx, mkDsKey(key))
 	if err != nil {
 		logger.Warnw("get local failed", "key", internal.LoggableRecordKeyString(key), "error", err)
 		return nil, err
@@ -1417,14 +1417,14 @@ func (dht *FullRT) getLocal(key string) (*recpb.Record, error) {
 }
 
 // putLocal stores the key value pair in the datastore
-func (dht *FullRT) putLocal(key string, rec *recpb.Record) error {
+func (dht *FullRT) putLocal(ctx context.Context, key string, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
 		logger.Warnw("failed to put marshal record for local put", "error", err, "key", internal.LoggableRecordKeyString(key))
 		return err
 	}
 
-	return dht.datastore.Put(mkDsKey(key), data)
+	return dht.datastore.Put(ctx, mkDsKey(key), data)
 }
 
 func mkDsKey(s string) ds.Key {
@@ -1433,8 +1433,8 @@ func mkDsKey(s string) ds.Key {
 
 // returns nil, nil when either nothing is found or the value found doesn't properly validate.
 // returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *FullRT) getRecordFromDatastore(dskey ds.Key) (*recpb.Record, error) {
-	buf, err := dht.datastore.Get(dskey)
+func (dht *FullRT) getRecordFromDatastore(ctx context.Context, dskey ds.Key) (*recpb.Record, error) {
+	buf, err := dht.datastore.Get(ctx, dskey)
 	if err == ds.ErrNotFound {
 		return nil, nil
 	}

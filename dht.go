@@ -549,10 +549,10 @@ func (dht *IpfsDHT) persistRTPeersInPeerStore() {
 //
 // returns nil, nil when either nothing is found or the value found doesn't properly validate.
 // returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
+func (dht *IpfsDHT) getLocal(ctx context.Context, key string) (*recpb.Record, error) {
 	logger.Debugw("finding value in datastore", "key", internal.LoggableRecordKeyString(key))
 
-	rec, err := dht.getRecordFromDatastore(mkDsKey(key))
+	rec, err := dht.getRecordFromDatastore(ctx, mkDsKey(key))
 	if err != nil {
 		logger.Warnw("get local failed", "key", internal.LoggableRecordKeyString(key), "error", err)
 		return nil, err
@@ -568,14 +568,14 @@ func (dht *IpfsDHT) getLocal(key string) (*recpb.Record, error) {
 }
 
 // putLocal stores the key value pair in the datastore
-func (dht *IpfsDHT) putLocal(key string, rec *recpb.Record) error {
+func (dht *IpfsDHT) putLocal(ctx context.Context, key string, rec *recpb.Record) error {
 	data, err := proto.Marshal(rec)
 	if err != nil {
 		logger.Warnw("failed to put marshal record for local put", "error", err, "key", internal.LoggableRecordKeyString(key))
 		return err
 	}
 
-	return dht.datastore.Put(mkDsKey(key), data)
+	return dht.datastore.Put(ctx, mkDsKey(key), data)
 }
 
 func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {

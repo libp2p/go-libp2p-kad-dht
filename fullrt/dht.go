@@ -139,7 +139,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pm, err := providers.NewProviderManager(ctx, h.ID(), dhtcfg.Datastore)
+	pm, err := providers.NewProviderManager(ctx, h.ID(), h.Peerstore(), dhtcfg.Datastore)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -762,7 +762,7 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.ProviderManager.AddProvider(ctx, keyMH, dht.h.ID())
+	dht.ProviderManager.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.h.ID()})
 	if !brdcst {
 		return nil
 	}
@@ -1212,10 +1212,9 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 	provs := dht.ProviderManager.GetProviders(ctx, key)
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
-		if ps.TryAdd(p) {
-			pi := dht.h.Peerstore().PeerInfo(p)
+		if ps.TryAdd(p.ID) {
 			select {
-			case peerOut <- pi:
+			case peerOut <- p:
 			case <-ctx.Done():
 				return
 			}

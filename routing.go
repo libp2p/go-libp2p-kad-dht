@@ -496,9 +496,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p.ID) {
-			pi := dht.peerstore.PeerInfo(p.ID)
 			select {
-			case peerOut <- peer.AddrInfo{ID: p.ID, Addrs: append(pi.Addrs, p.Addrs...)}: // XXX: dedup addresses?
+			case peerOut <- p:
 			case <-ctx.Done():
 				return
 			}

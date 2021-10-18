@@ -592,7 +592,7 @@ func TestLocalProvides(t *testing.T) {
 
 	for _, c := range testCaseCids {
 		for i := 0; i < 3; i++ {
-			provs := dhts[i].ProviderManager.GetProviders(ctx, c.Hash())
+			provs := dhts[i].ProviderStore().GetProviders(ctx, c.Hash())
 			if len(provs) > 0 {
 				t.Fatal("shouldnt know this")
 			}
@@ -1285,7 +1285,7 @@ func TestClientModeConnect(t *testing.T) {
 
 	c := testCaseCids[0]
 	p := peer.ID("TestPeer")
-	a.ProviderManager.AddProvider(ctx, c.Hash(), p)
+	a.ProviderStore().AddProvider(ctx, c.Hash(), peer.AddrInfo{ID: p})
 	time.Sleep(time.Millisecond * 5) // just in case...
 
 	provs, err := b.FindProviders(ctx, c)
@@ -1548,7 +1548,7 @@ func TestProvideDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				provs := dhtB.ProviderManager.GetProviders(ctx, kHash)
+				provs := dhtB.ProviderStore().GetProviders(ctx, kHash)
 				if len(provs) != 0 {
 					t.Fatal("node B should not have found local providers")
 				}
@@ -1564,7 +1564,7 @@ func TestProvideDisabled(t *testing.T) {
 					t.Fatal("node A should not have found providers")
 				}
 			}
-			provAddrs := dhtA.ProviderManager.GetProviders(ctx, kHash)
+			provAddrs := dhtA.ProviderStore().GetProviders(ctx, kHash)
 			if len(provAddrs) != 0 {
 				t.Fatal("node A should not have found local providers")
 			}

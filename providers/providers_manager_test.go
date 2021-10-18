@@ -21,6 +21,10 @@ import (
 	// lds "github.com/ipfs/go-ds-leveldb"
 )
 
+func TestProviderManagerImplementsProviderStore(t *testing.T) {
+	var _ ProviderStore = (*ProviderManager)(nil)
+}
+
 func TestProviderManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

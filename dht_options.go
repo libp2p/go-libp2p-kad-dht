@@ -36,6 +36,14 @@ const DefaultPrefix protocol.ID = "/ipfs"
 
 type Option = dhtcfg.Option
 
+// ProviderStore sets the provider storage manager.
+func ProviderStore(ps providers.ProviderStore) Option {
+	return func(c *dhtcfg.Config) error {
+		c.ProviderStore = ps
+		return nil
+	}
+}
+
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
 func RoutingTableLatencyTolerance(latency time.Duration) Option {

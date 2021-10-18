@@ -356,7 +356,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			continue
 		}
 
-		dht.providerStore.AddProvider(ctx, key, pstore.PeerInfo{ID: p})
+		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: p})
 	}
 
 	return nil, nil

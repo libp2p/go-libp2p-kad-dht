@@ -592,7 +592,7 @@ func TestLocalProvides(t *testing.T) {
 
 	for _, c := range testCaseCids {
 		for i := 0; i < 3; i++ {
-			provs := dhts[i].ProviderStore().GetProviders(ctx, c.Hash())
+			provs, _ := dhts[i].ProviderStore().GetProviders(ctx, c.Hash())
 			if len(provs) > 0 {
 				t.Fatal("shouldnt know this")
 			}
@@ -1548,7 +1548,7 @@ func TestProvideDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				provs := dhtB.ProviderStore().GetProviders(ctx, kHash)
+				provs, _ := dhtB.ProviderStore().GetProviders(ctx, kHash)
 				if len(provs) != 0 {
 					t.Fatal("node B should not have found local providers")
 				}
@@ -1564,7 +1564,7 @@ func TestProvideDisabled(t *testing.T) {
 					t.Fatal("node A should not have found providers")
 				}
 			}
-			provAddrs := dhtA.ProviderStore().GetProviders(ctx, kHash)
+			provAddrs, _ := dhtA.ProviderStore().GetProviders(ctx, kHash)
 			if len(provAddrs) != 0 {
 				t.Fatal("node A should not have found local providers")
 			}

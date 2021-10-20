@@ -1209,7 +1209,10 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		ps = peer.NewLimitedSet(count)
 	}
 
-	provs := dht.ProviderManager.GetProviders(ctx, key)
+	provs, err := dht.ProviderManager.GetProviders(ctx, key)
+	if err != nil {
+		return
+	}
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
 		if ps.TryAdd(p.ID) {

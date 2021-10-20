@@ -317,7 +317,10 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
 	// setup providers
-	providers := dht.providerStore.GetProviders(ctx, key)
+	providers, err := dht.providerStore.GetProviders(ctx, key)
+	if err != nil {
+		return nil, err
+	}
 	resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), providers)
 
 	// Also send closer peers.

@@ -34,8 +34,8 @@ var log = logging.Logger("providers")
 
 // ProviderStore represents a store that associates peers and their addresses to keys.
 type ProviderStore interface {
-	AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo)
-	GetProviders(ctx context.Context, key []byte) []peer.AddrInfo
+	AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error
+	GetProviders(ctx context.Context, key []byte) ([]peer.AddrInfo, error)
 }
 
 // ProviderManager adds and pulls providers out of the datastore,
@@ -54,6 +54,8 @@ type ProviderManager struct {
 
 	cleanupInterval time.Duration
 }
+
+var _ ProviderStore = (*ProviderManager)(nil)
 
 // Option is a function that sets a provider manager option.
 type Option func(*ProviderManager) error
@@ -226,7 +228,7 @@ func (pm *ProviderManager) run(proc goprocess.Process) {
 }
 
 // AddProvider adds a provider
-func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) {
+func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
 	if provInfo.ID != pm.self { // don't add own addrs.
 		pm.pstore.AddAddrs(provInfo.ID, provInfo.Addrs, peerstore.ProviderAddrTTL)
 	}
@@ -236,7 +238,9 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo p
 	}
 	select {
 	case pm.newprovs <- prov:
+		return nil
 	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -270,21 +274,21 @@ func mkProvKey(k []byte) string {
 
 // GetProviders returns the set of providers for the given key.
 // This method _does not_ copy the set. Do not modify it.
-func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) []peer.AddrInfo {
+func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.AddrInfo, error) {
 	gp := &getProv{
 		key:  k,
 		resp: make(chan []peer.ID, 1), // buffered to prevent sender from blocking
 	}
 	select {
 	case <-ctx.Done():
-		return nil
+		return nil, ctx.Err()
 	case pm.getprovs <- gp:
 	}
 	select {
 	case <-ctx.Done():
-		return nil
+		return nil, ctx.Err()
 	case peers := <-gp.resp:
-		return peerstore_legacy.PeerInfos(pm.pstore, peers)
+		return peerstore_legacy.PeerInfos(pm.pstore, peers), nil
 	}
 }
 

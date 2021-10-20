@@ -44,7 +44,6 @@ type Config struct {
 	MaxRecordAge       time.Duration
 	EnableProviders    bool
 	EnableValues       bool
-	ProvidersOptions   []providers.Option //XXX: get rid?
 	ProviderStore      providers.ProviderStore
 	QueryPeerFilter    QueryFilterFunc
 

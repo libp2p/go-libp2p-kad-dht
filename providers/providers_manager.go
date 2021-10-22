@@ -9,7 +9,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	peerstore "github.com/libp2p/go-libp2p-core/peerstore"
-	peerstore_legacy "github.com/libp2p/go-libp2p-peerstore"
+	peerstoreImpl "github.com/libp2p/go-libp2p-peerstore"
 
 	lru "github.com/hashicorp/golang-lru/simplelru"
 	ds "github.com/ipfs/go-datastore"
@@ -288,7 +288,7 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.A
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case peers := <-gp.resp:
-		return peerstore_legacy.PeerInfos(pm.pstore, peers), nil
+		return peerstoreImpl.PeerInfos(pm.pstore, peers), nil
 	}
 }
 

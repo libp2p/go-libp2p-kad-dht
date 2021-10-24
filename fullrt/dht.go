@@ -183,8 +183,17 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		bulkSendParallelism: 20,
 	}
 
+	var seedPeers []peer.AddrInfo
+	if fullrtcfg.skipInitialRTVerification {
+		for _, ai := range fullrtcfg.initialRTPeers {
+			rt.peerAddrs[ai.ID] = ai.Addrs
+		}
+	} else {
+		seedPeers = fullrtcfg.initialRTPeers[:]
+	}
+
 	rt.wg.Add(1)
-	go rt.runCrawler(ctx)
+	go rt.runCrawler(ctx, seedPeers)
 
 	return rt, nil
 }
@@ -238,7 +247,7 @@ func (dht *FullRT) Host() host.Host {
 	return dht.h
 }
 
-func (dht *FullRT) runCrawler(ctx context.Context) {
+func (dht *FullRT) runCrawler(ctx context.Context, initialSeedPeers []peer.AddrInfo) {
 	defer dht.wg.Done()
 	t := time.NewTicker(dht.crawlerInterval)
 
@@ -247,6 +256,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 
 	initialTrigger := make(chan struct{}, 1)
 	initialTrigger <- struct{}{}
+
+	firstCrawl := true
 
 	for {
 		select {
@@ -258,6 +269,13 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		}
 
 		var addrs []*peer.AddrInfo
+		if firstCrawl {
+			firstCrawl = false
+			for _, ai := range initialSeedPeers {
+				addrs = append(addrs, &ai)
+			}
+		}
+
 		dht.peerAddrsLk.Lock()
 		for k := range m {
 			addrs = append(addrs, &peer.AddrInfo{ID: k}) // Addrs: v.addrs

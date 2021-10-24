@@ -225,6 +225,16 @@ func (dht *FullRT) Stat() map[string]peer.ID {
 	return newMap
 }
 
+func (dht *FullRT) GetRoutingTablePeers() []peer.AddrInfo {
+	dht.peerAddrsLk.RLock()
+	defer dht.peerAddrsLk.RUnlock()
+	ais := make([]peer.AddrInfo, 0, len(dht.peerAddrs))
+	for id, addrs := range dht.peerAddrs {
+		ais = append(ais, peer.AddrInfo{ID: id, Addrs: addrs})
+	}
+	return ais
+}
+
 func (dht *FullRT) Ready() bool {
 	dht.rtLk.RLock()
 	lastCrawlTime := dht.lastCrawlTime

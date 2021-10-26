@@ -84,8 +84,8 @@ type IpfsDHT struct {
 	datastore ds.Datastore // Local data
 
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
-	// ProviderManager stores & manages the provider records for this Dht peer.
-	ProviderManager *providers.ProviderManager
+	// providerStore stores & manages the provider records for this Dht peer.
+	providerStore providers.ProviderStore
 
 	// manages Routing Table refresh
 	rtRefreshManager *rtrefresh.RtRefreshManager
@@ -221,7 +221,9 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	}
 	dht.proc.Go(sn.subscribe)
 	// handle providers
-	dht.proc.AddChild(dht.ProviderManager.Process())
+	if mgr, ok := dht.providerStore.(interface{ Process() goprocess.Process }); ok {
+		dht.proc.AddChild(mgr.Process())
+	}
 
 	// go-routine to make sure we ALWAYS have RT peer addresses in the peerstore
 	// since RT membership is decoupled from connectivity
@@ -338,11 +340,14 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	// the DHT context should be done when the process is closed
 	dht.ctx = goprocessctx.WithProcessClosing(ctxTags, dht.proc)
 
-	pm, err := providers.NewProviderManager(dht.ctx, h.ID(), cfg.Datastore, cfg.ProvidersOptions...)
-	if err != nil {
-		return nil, err
+	if cfg.ProviderStore != nil {
+		dht.providerStore = cfg.ProviderStore
+	} else {
+		dht.providerStore, err = providers.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.Datastore)
+		if err != nil {
+			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
+		}
 	}
-	dht.ProviderManager = pm
 
 	dht.rtFreezeTimeout = rtFreezeTimeout
 
@@ -411,6 +416,11 @@ func makeRoutingTable(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutbound
 	}
 
 	return rt, err
+}
+
+// ProviderStore returns the provider storage object for storing and retrieving provider records.
+func (dht *IpfsDHT) ProviderStore() providers.ProviderStore {
+	return dht.providerStore
 }
 
 // GetRoutingTableDiversityStats returns the diversity stats for the Routing Table.

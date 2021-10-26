@@ -36,6 +36,14 @@ const DefaultPrefix protocol.ID = "/ipfs"
 
 type Option = dhtcfg.Option
 
+// ProviderStore sets the provider storage manager.
+func ProviderStore(ps providers.ProviderStore) Option {
+	return func(c *dhtcfg.Config) error {
+		c.ProviderStore = ps
+		return nil
+	}
+}
+
 // RoutingTableLatencyTolerance sets the maximum acceptable latency for peers
 // in the routing table's cluster.
 func RoutingTableLatencyTolerance(latency time.Duration) Option {
@@ -232,18 +240,6 @@ func DisableProviders() Option {
 func DisableValues() Option {
 	return func(c *dhtcfg.Config) error {
 		c.EnableValues = false
-		return nil
-	}
-}
-
-// ProvidersOptions are options passed directly to the provider manager.
-//
-// The provider manager adds and gets provider records from the datastore, cahing
-// them in between. These options are passed to the provider manager allowing
-// customisation of things like the GC interval and cache implementation.
-func ProvidersOptions(opts []providers.Option) Option {
-	return func(c *dhtcfg.Config) error {
-		c.ProvidersOptions = opts
 		return nil
 	}
 }

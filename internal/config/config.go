@@ -44,7 +44,7 @@ type Config struct {
 	MaxRecordAge       time.Duration
 	EnableProviders    bool
 	EnableValues       bool
-	ProvidersOptions   []providers.Option
+	ProviderStore      providers.ProviderStore
 	QueryPeerFilter    QueryFilterFunc
 
 	RoutingTable struct {

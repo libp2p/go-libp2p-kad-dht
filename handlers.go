@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/peerstore"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 
 	"github.com/gogo/protobuf/proto"
@@ -318,13 +317,11 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
 	// setup providers
-	providers := dht.ProviderManager.GetProviders(ctx, key)
-
-	if len(providers) > 0 {
-		// TODO: pstore.PeerInfos should move to core (=> peerstore.AddrInfos).
-		infos := pstore.PeerInfos(dht.peerstore, providers)
-		resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
+	providers, err := dht.providerStore.GetProviders(ctx, key)
+	if err != nil {
+		return nil, err
 	}
+	resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), providers)
 
 	// Also send closer peers.
 	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)
@@ -362,11 +359,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			continue
 		}
 
-		if pi.ID != dht.self { // don't add own addrs.
-			// add the received addresses to our peerstore.
-			dht.peerstore.AddAddrs(pi.ID, pi.Addrs, peerstore.ProviderAddrTTL)
-		}
-		dht.ProviderManager.AddProvider(ctx, key, p)
+		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: p})
 	}
 
 	return nil, nil

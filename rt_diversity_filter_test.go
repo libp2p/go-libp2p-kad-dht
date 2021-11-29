@@ -14,11 +14,9 @@ import (
 )
 
 func TestRTPeerDiversityFilter(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	h, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	defer h.Close()
 	r := NewRTPeerDiversityFilter(h, 2, 3)
 
 	// table should only have 2 for each prefix per cpl
@@ -57,8 +55,9 @@ func TestRTPeerDiversityFilter(t *testing.T) {
 
 func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 	ctx := context.Background()
-	h, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	defer h.Close()
 	r := NewRTPeerDiversityFilter(h, 1, 2)
 
 	d, err := New(
@@ -71,6 +70,7 @@ func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 		RoutingTablePeerDiversityFilter(r),
 	)
 	require.NoError(t, err)
+	defer d.Close()
 
 	var d2 *IpfsDHT
 	var d3 *IpfsDHT
@@ -114,8 +114,9 @@ func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	h, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	defer h.Close()
 	r := NewRTPeerDiversityFilter(h, 100, 3)
 
 	d, err := New(
@@ -128,6 +129,7 @@ func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
 		RoutingTablePeerDiversityFilter(r),
 	)
 	require.NoError(t, err)
+	defer d.Close()
 
 	// only 3 peers per prefix for the table.
 	d2 := setupDHT(ctx, t, false, DisableAutoRefresh())

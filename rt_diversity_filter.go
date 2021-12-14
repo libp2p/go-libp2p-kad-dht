@@ -58,7 +58,7 @@ func (r *rtPeerIPGroupFilter) Allow(g peerdiversity.PeerGroupInfo) bool {
 	c, ok := r.cplIpGroupCount[cpl]
 	allow := !ok || c[key] < r.maxPerCpl
 	if !allow {
-		dfLog.Debugw("rejecting (max for cpl) diversity of peer", g.Id, "cpl", g.Cpl, "ip group", g.IPGroupKey)
+		dfLog.Debugw("rejecting (max for cpl) diversity", "peer", g.Id, "cpl", g.Cpl, "ip group", g.IPGroupKey)
 	}
 	return allow
 }

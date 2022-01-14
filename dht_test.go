@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -797,6 +798,9 @@ func TestPeriodicRefresh(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping due to #760")
+	}
 	if detectrace.WithRace() {
 		t.Skip("skipping due to race detector max goroutines")
 	}
@@ -858,6 +862,9 @@ func TestPeriodicRefresh(t *testing.T) {
 }
 
 func TestProvidesMany(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping due to #760")
+	}
 	if detectrace.WithRace() {
 		t.Skip("skipping due to race detector max goroutines")
 	}
@@ -1116,6 +1123,9 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping due to #760")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1365,6 +1375,10 @@ func testFindPeerQuery(t *testing.T,
 	leafs, // Number of nodes that might be connected to from the bootstrappers
 	bootstrapConns int, // Number of bootstrappers each leaf should connect to.
 ) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping due to #760")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

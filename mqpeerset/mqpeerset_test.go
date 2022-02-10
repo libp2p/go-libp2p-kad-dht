@@ -84,10 +84,10 @@ func TestMultiQueryPeerset_TryAdd_updatesIntersections(t *testing.T) {
 
 	assert.Len(t, mqps.intersections, 1)
 	assert.NotNil(t, mqps.intersections[peer1])
-	assert.Equal(t, peer1, mqps.intersections[peer1].id)
-	assert.Equal(t, PeerWaiting, mqps.intersections[peer1].state)
-	assert.NotNil(t, mqps.intersections[peer1].distance)
+	assert.Equal(t, peer1, mqps.intersections[peer1].ID)
+	assert.Equal(t, PeerWaiting, mqps.intersections[peer1].State)
+	assert.NotNil(t, mqps.intersections[peer1].Distance)
 
 	mqps.SetState(queryID1, peer1, PeerQueried)
-	assert.Equal(t, PeerQueried, mqps.intersections[peer1].state)
+	assert.Equal(t, PeerQueried, mqps.intersections[peer1].State)
 }

@@ -59,13 +59,13 @@ type multiQueryPeerState struct {
 }
 
 type IntersectionPeerState struct {
-	id       peer.ID
-	distance *big.Int
-	state    PeerState
+	ID       peer.ID
+	Distance *big.Int
+	State    PeerState
 }
 
 func (ips *IntersectionPeerState) String() string {
-	return fmt.Sprintf("%s (%s)", ips.id.String()[:16], ips.state)
+	return fmt.Sprintf("%s (%s)", ips.ID.String()[:16], ips.State)
 }
 
 // NewMultiQueryPeerset creates a new empty set of peers.
@@ -116,9 +116,9 @@ func (mqp *MultiQueryPeerset) TryAdd(qid uuid.UUID, referrer peer.ID, p peer.ID)
 	}
 	if count == len(mqp.states) {
 		mqp.intersections[p] = &IntersectionPeerState{
-			id:       p,
-			distance: ks.XORKeySpace.Key([]byte(p)).Distance(mqp.key),
-			state:    state,
+			ID:       p,
+			Distance: ks.XORKeySpace.Key([]byte(p)).Distance(mqp.key),
+			State:    state,
 		}
 	}
 
@@ -141,8 +141,8 @@ func (mqp *MultiQueryPeerset) GetState(qid uuid.UUID, p peer.ID) PeerState {
 // If p or qid is not in the peerset, SetState panics.
 func (mqp *MultiQueryPeerset) SetState(qid uuid.UUID, p peer.ID, s PeerState) {
 	mqp.states[qid][p].state = s
-	if _, found := mqp.intersections[p]; found && s > mqp.intersections[p].state {
-		mqp.intersections[p].state = s
+	if _, found := mqp.intersections[p]; found && s > mqp.intersections[p].State {
+		mqp.intersections[p].State = s
 	}
 }
 
@@ -153,7 +153,7 @@ func (mqp *MultiQueryPeerset) GetIntersections() []*IntersectionPeerState {
 		states = append(states, state)
 	}
 	sort.Slice(states, func(i, j int) bool {
-		return states[i].distance.Cmp(states[j].distance) <= 0
+		return states[i].Distance.Cmp(states[j].Distance) <= 0
 	})
 	return states
 }

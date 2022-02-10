@@ -251,7 +251,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	fixupRec := record.MakePutRecord(key, val)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			//TODO: Is this possible?
+			// TODO: Is this possible?
 			if p == dht.self {
 				err := dht.putLocal(ctx, key, fixupRec)
 				if err != nil {
@@ -344,7 +344,6 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 				}
 			},
 		)
-
 		if err != nil {
 			return
 		}
@@ -368,6 +367,69 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 // Provider abstraction for indirect stores.
 // Some DHTs store values directly, while an indirect store stores pointers to
 // locations of the value, similarly to Coral and Mainline DHT.
+
+// ProvideMultiQuery makes this node announce that it can provide a value for the given key by starting multiple
+// queries for the closest peers in XOR space and wait until the result set intersects.
+func (dht *IpfsDHT) ProvideMultiQuery(ctx context.Context, key cid.Cid) error {
+	if !dht.enableProviders {
+		return routing.ErrNotSupported
+	} else if !key.Defined() {
+		return fmt.Errorf("invalid cid: undefined")
+	}
+	keyMH := key.Hash()
+	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
+
+	// add self locally
+	if err := dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self}); err != nil {
+		return err
+	}
+
+	closerCtx := ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		now := time.Now()
+		timeout := deadline.Sub(now)
+
+		if timeout < 0 {
+			// timed out
+			return context.DeadlineExceeded
+		} else if timeout < 10*time.Second {
+			// Reserve 10% for the final put.
+			deadline = deadline.Add(-timeout / 10)
+		} else {
+			// Otherwise, reserve a second (we'll already be
+			// connected so this should be fast).
+			deadline = deadline.Add(-time.Second)
+		}
+		var cancel context.CancelFunc
+		closerCtx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+
+	var exceededDeadline bool
+	peers, err := dht.GetClosestPeersMultiLookup(closerCtx, string(keyMH))
+	switch err {
+	case context.DeadlineExceeded:
+		// If the _inner_ deadline has been exceeded but the _outer_
+		// context is still fine, provide the value to the closest peers
+		// we managed to find, even if they're not the _actual_ closest peers.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		exceededDeadline = true
+	case nil:
+	default:
+		return err
+	}
+
+	// TODO: Store provider records
+	_ = peers
+	// TODO: Store provider records
+
+	if exceededDeadline {
+		return context.DeadlineExceeded
+	}
+	return ctx.Err()
+}
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
@@ -608,7 +670,6 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)
-
 	if err != nil {
 		return peer.AddrInfo{}, err
 	}

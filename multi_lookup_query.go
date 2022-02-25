@@ -98,15 +98,18 @@ func (mlq *multiLookupQuery) run() []*mqpeerset.IntersectionPeerState {
 	defer mlq.cancelQueries()
 	doneChan := make(chan []*mqpeerset.IntersectionPeerState)
 
-	go mlq.consumeEvents(doneChan)
+	go mlq.consumeLookupEvents(doneChan)
 	for _, query := range mlq.queries {
 		go query.run()
 	}
 	return <-doneChan
 }
 
-func (mlq *multiLookupQuery) consumeEvents(doneChan chan []*mqpeerset.IntersectionPeerState) {
+func (mlq *multiLookupQuery) consumeLookupEvents(doneChan chan []*mqpeerset.IntersectionPeerState) {
 	for event := range mlq.eventsChan {
+
+		PublishLookupEvent(mlq.ctx, event)
+
 		if event.Request != nil {
 			mlq.handleRequestEvent(event.ID, event.Request)
 		} else if event.Response != nil {

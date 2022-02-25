@@ -31,6 +31,11 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 
 			peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
 			if err != nil {
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.QueryError,
+					ID:   p,
+					Extra: err.Error(),
+				})
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}

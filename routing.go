@@ -421,9 +421,19 @@ func (dht *IpfsDHT) ProvideMultiQuery(ctx context.Context, key cid.Cid) error {
 		return err
 	}
 
-	// TODO: Store provider records
-	_ = peers
-	// TODO: Store provider records
+	wg := sync.WaitGroup{}
+	for _, p := range peers {
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+			if err != nil {
+				logger.Debug(err)
+			}
+		}(p)
+	}
+	wg.Wait()
 
 	if exceededDeadline {
 		return context.DeadlineExceeded

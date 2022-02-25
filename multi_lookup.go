@@ -56,10 +56,9 @@ func (dht *IpfsDHT) GetClosestPeersMultiLookup(ctx context.Context, key string) 
 
 	results := mq.run()
 
-	peers := []peer.ID{}
-	for _, result := range results {
-		logger.Infow("Found peer", "peerID", result.ID, "state", result.State.String(), "distance", NormDistance(result.Distance)*100)
-		peers = append(peers, result.ID)
+	peers := make([]peer.ID, len(results))
+	for i, result := range results {
+		peers[i] = result.ID
 	}
 
 	return peers, nil

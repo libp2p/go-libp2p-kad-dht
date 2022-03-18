@@ -19,8 +19,9 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 
 	foo := peer.ID("asdasd")
 
-	h, err := bhost.NewHost(ctx, swarmt.GenSwarm(t, ctx, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	defer h.Close()
 
 	msgSender := NewMessageSenderImpl(h, []protocol.ID{"/test/kad/1.0.0"}).(*messageSenderImpl)
 

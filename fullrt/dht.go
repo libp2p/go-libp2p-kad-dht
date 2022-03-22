@@ -102,7 +102,7 @@ type FullRT struct {
 // Not all of the standard DHT options are supported in this DHT.
 func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
 	var fullrtcfg config
-	if err := fullrtcfg.apply(options...); err != nil {
+	if err := fullrtcfg.apply(append([]Option{DHTOption(internalConfig.Defaults)}, options...)...); err != nil {
 		return nil, err
 	}
 

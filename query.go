@@ -21,8 +21,10 @@ import (
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
-type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
-type stopFn func() bool
+type (
+	queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
+	stopFn  func() bool
+)
 
 // query represents a single DHT query.
 type query struct {
@@ -44,7 +46,7 @@ type query struct {
 	peerTimes map[peer.ID]time.Duration
 
 	// queryPeers is the set of peers known by this query and their respective states.
-	queryPeers *qpeerset.QueryPeerset
+	queryPeers *qpeerset.SingleQueryPeerset
 
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.

@@ -1,4 +1,4 @@
-package mqpeerset
+package qpeerset
 
 import (
 	"bytes"
@@ -55,13 +55,13 @@ func TestMultiQueryPeerset_TryAdd_addsCorrectMultiQueryPeerState(t *testing.T) {
 
 	mqps := NewMultiQueryPeerset(key, queryID1, queryID2)
 
-	assert.True(t, mqps.TryAdd(queryID2, peer1, peer2))
+	assert.True(t, mqps.TryAdd(queryID2, peer2, peer1))
 	assert.Equal(t, mqps.states[queryID2][peer1].id, peer1)
 	assert.NotNil(t, mqps.states[queryID2][peer1].distance)
 	assert.Equal(t, mqps.states[queryID2][peer1].state, PeerHeard)
 	assert.Equal(t, mqps.states[queryID2][peer1].referredBy, peer2)
 
-	assert.False(t, mqps.TryAdd(queryID2, peer1, peer3))
+	assert.False(t, mqps.TryAdd(queryID2, peer3, peer1))
 	assert.Equal(t, mqps.states[queryID2][peer1].referredBy, peer2)
 }
 
@@ -78,9 +78,9 @@ func TestMultiQueryPeerset_TryAdd_updatesIntersections(t *testing.T) {
 
 	assert.Len(t, mqps.intersections, 0)
 
-	assert.True(t, mqps.TryAdd(queryID1, peer1, peer2))
+	assert.True(t, mqps.TryAdd(queryID1, peer2, peer1))
 	mqps.SetState(queryID1, peer1, PeerWaiting)
-	assert.True(t, mqps.TryAdd(queryID2, peer1, peer3))
+	assert.True(t, mqps.TryAdd(queryID2, peer3, peer1))
 
 	assert.Len(t, mqps.intersections, 1)
 	assert.NotNil(t, mqps.intersections[peer1])

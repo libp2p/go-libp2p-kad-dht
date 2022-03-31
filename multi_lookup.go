@@ -52,9 +52,11 @@ func (dht *IpfsDHT) GetClosestPeersMultiLookup(ctx context.Context, key string) 
 		return nil, kb.ErrLookupFailure
 	}
 
-	mq := dht.newMultiLookupQuery(ctx, key, closestPeers, otherPeers)
+	mlq := dht.newMultiLookupQuery(ctx, key, closestPeers, otherPeers)
 
-	results := mq.run()
+	mlq.run()
+
+	x := mlq.mqpeerset.GetIntersections()[:mlq.dht.bucketSize]
 
 	peers := make([]peer.ID, len(results))
 	for i, result := range results {

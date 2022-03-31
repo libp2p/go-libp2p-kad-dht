@@ -1,83 +1,38 @@
-package mqpeerset
+package qpeerset
 
 import (
 	"fmt"
-	"math/big"
 	"sort"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	ks "github.com/whyrusleeping/go-keyspace"
 )
 
-// PeerState describes the state of a peer ID during the lifecycle of an individual lookup.
-type PeerState int
-
-const (
-	// PeerHeard is applied to peers which have not been queried yet.
-	PeerHeard PeerState = iota
-	// PeerWaiting is applied to peers that are currently being queried.
-	PeerWaiting
-	// PeerQueried is applied to peers who have been queried and a response was retrieved successfully.
-	PeerQueried
-	// PeerUnreachable is applied to peers who have been queried and a response was not retrieved successfully.
-	PeerUnreachable
-)
-
-func (ps PeerState) String() string {
-	switch ps {
-	case PeerHeard:
-		return "HEARD"
-	case PeerWaiting:
-		return "WAITING"
-	case PeerQueried:
-		return "QUERIED"
-	case PeerUnreachable:
-		return "UNREACHABLE"
-	}
-	panic("unknown PeerState " + strconv.Itoa(int(ps)))
-}
-
-// MultiQueryPeerset .
+// MultiQueryPeerset maintains the state of multiple Kademlia asynchronous lookups.
+// The lookup state is a set queries with each a set of peers where each is labeled
+// with a peer state.
 type MultiQueryPeerset struct {
 	// the key being searched for
 	key ks.Key
 
 	// all known peers of all running queries
-	states map[uuid.UUID]map[peer.ID]*multiQueryPeerState
+	states map[uuid.UUID]map[peer.ID]*queryPeerState
 
 	// all peers that appeared in all queries
-	intersections map[peer.ID]*IntersectionPeerState
+	intersections map[peer.ID]*intersPeerState
 }
 
-type multiQueryPeerState struct {
-	id         peer.ID
-	distance   *big.Int
-	state      PeerState
-	referredBy peer.ID
-}
-
-type IntersectionPeerState struct {
-	ID       peer.ID
-	Distance *big.Int
-	State    PeerState
-}
-
-func (ips *IntersectionPeerState) String() string {
-	return fmt.Sprintf("%s (%s)", ips.ID.String()[:16], ips.State)
-}
-
-// NewMultiQueryPeerset creates a new empty set of peers.
-// key is the target key of the lookup that this peer set is for.
+// NewMultiQueryPeerset creates a new empty set of lookup queries.
+// key is the target key of the lookup that this query set is for.
 func NewMultiQueryPeerset(key string, queryIDs ...uuid.UUID) *MultiQueryPeerset {
 	mqps := &MultiQueryPeerset{
 		key:           ks.XORKeySpace.Key([]byte(key)),
-		states:        map[uuid.UUID]map[peer.ID]*multiQueryPeerState{},
-		intersections: map[peer.ID]*IntersectionPeerState{},
+		states:        map[uuid.UUID]map[peer.ID]*queryPeerState{},
+		intersections: map[peer.ID]*intersPeerState{},
 	}
 	for _, queryID := range queryIDs {
-		mqps.states[queryID] = map[peer.ID]*multiQueryPeerState{}
+		mqps.states[queryID] = map[peer.ID]*queryPeerState{}
 	}
 	return mqps
 }
@@ -88,16 +43,17 @@ func NewMultiQueryPeerset(key string, queryIDs ...uuid.UUID) *MultiQueryPeerset 
 // TryAdd returns true if the peer was not already present.
 func (mqp *MultiQueryPeerset) TryAdd(qid uuid.UUID, referrer peer.ID, p peer.ID) bool {
 	// panic if the query ID is unknown
-	if _, found := mqp.states[qid]; !found {
-		panic("tried to add peer for unknown query")
+	query, found := mqp.states[qid]
+	if !found {
+		panic(fmt.Sprintf("tried to add peer for unknown query %s", qid))
 	}
 
 	// don't do anything if we already know the peer in that query
-	if _, found := mqp.states[qid][p]; found {
+	if _, found = query[p]; found {
 		return false
 	}
 
-	mqp.states[qid][p] = &multiQueryPeerState{
+	mqp.states[qid][p] = &queryPeerState{
 		id:         p,
 		distance:   ks.XORKeySpace.Key([]byte(p)).Distance(mqp.key),
 		state:      PeerHeard,
@@ -114,8 +70,9 @@ func (mqp *MultiQueryPeerset) TryAdd(qid uuid.UUID, referrer peer.ID, p peer.ID)
 			}
 		}
 	}
+
 	if count == len(mqp.states) {
-		mqp.intersections[p] = &IntersectionPeerState{
+		mqp.intersections[p] = &intersPeerState{
 			ID:       p,
 			Distance: ks.XORKeySpace.Key([]byte(p)).Distance(mqp.key),
 			State:    state,
@@ -141,14 +98,14 @@ func (mqp *MultiQueryPeerset) GetState(qid uuid.UUID, p peer.ID) PeerState {
 // If p or qid is not in the peerset, SetState panics.
 func (mqp *MultiQueryPeerset) SetState(qid uuid.UUID, p peer.ID, s PeerState) {
 	mqp.states[qid][p].state = s
-	if _, found := mqp.intersections[p]; found && s > mqp.intersections[p].State {
+	if inters, found := mqp.intersections[p]; found && s > inters.State {
 		mqp.intersections[p].State = s
 	}
 }
 
 // GetIntersections returns an ascending list of peers that appeared in all queries.
-func (mqp *MultiQueryPeerset) GetIntersections() []*IntersectionPeerState {
-	var states []*IntersectionPeerState
+func (mqp *MultiQueryPeerset) GetIntersections() []*intersPeerState {
+	var states []*intersPeerState
 	for _, state := range mqp.intersections {
 		states = append(states, state)
 	}

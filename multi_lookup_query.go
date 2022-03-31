@@ -8,36 +8,59 @@ import (
 	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
-	"github.com/libp2p/go-libp2p-kad-dht/mqpeerset"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	"go.uber.org/atomic"
 )
 
+// multiLookupQuery represents multiple DHT queries.
 type multiLookupQuery struct {
-	ctx           context.Context
-	dht           *IpfsDHT
-	queries       map[uuid.UUID]*query
-	peerset       *mqpeerset.MultiQueryPeerset
-	eventsChan    <-chan *LookupEvent
-	termCount     int
+	// the overarching query context.
+	ctx context.Context
+
+	// cancelQueries is the cancel function for the context above
 	cancelQueries context.CancelFunc
-	stop          *atomic.Bool
+
+	// a reference to the DHT instance
+	dht *IpfsDHT
+
+	// queries keeps track of all running queries
+	queries map[uuid.UUID]*query
+
+	// mqpeerset tracks the states of all peers across all queries
+	mqpeerset *qpeerset.MultiQueryPeerset
+
+	// eventsChan emits all lookup events from the underlying queries
+	// so that we can update the multi query peerset: mqpeerset
+	eventsChan <-chan *LookupEvent
+
+	// termCount keeps track of the amount of terminated queries. If this
+	// reaches len(queries) no underlying query is running anymore and
+	// we can stop.
+	termCount int
+
+	// stop indicates to the underlying queries that they should stop
+	// looking for peers.
+	stop *atomic.Bool
 }
 
+// newMultiLookupQuery initializes a new multi lookup query struct. The number
+// of underlying queries is determined by the number of seed peer lists.
 func (dht *IpfsDHT) newMultiLookupQuery(ctx context.Context, key string, seedPeerLists ...[]peer.ID) *multiLookupQuery {
 	queryCtx, cancelQueries := context.WithCancel(ctx)
 	queryCtx, eventsChan := RegisterForLookupEvents(ctx)
 
+	// for each list of seed peers generate a unique query ID
 	queryIDs := make([]uuid.UUID, len(seedPeerLists))
 	for i := range seedPeerLists {
 		queryIDs[i] = uuid.New()
 	}
+
 	mlq := &multiLookupQuery{
 		ctx:           ctx,
 		dht:           dht,
 		cancelQueries: cancelQueries,
 		queries:       map[uuid.UUID]*query{},
-		peerset:       mqpeerset.NewMultiQueryPeerset(key, queryIDs...),
+		mqpeerset:     qpeerset.NewMultiQueryPeerset(key, queryIDs...),
 		eventsChan:    eventsChan,
 		termCount:     0,
 		stop:          atomic.NewBool(false),
@@ -59,7 +82,6 @@ func (dht *IpfsDHT) newMultiLookupQuery(ctx context.Context, key string, seedPee
 			return nil, err
 		}
 
-		// For DHT query command
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:      routing.PeerResponse,
 			ID:        p,
@@ -69,6 +91,7 @@ func (dht *IpfsDHT) newMultiLookupQuery(ctx context.Context, key string, seedPee
 		return peers, err
 	}
 
+	// for each list of seed peers initialize a query.
 	for i, seedPeers := range seedPeerLists {
 		query := &query{
 			id:         queryIDs[i],
@@ -83,31 +106,29 @@ func (dht *IpfsDHT) newMultiLookupQuery(ctx context.Context, key string, seedPee
 			stopFn:     func() bool { return mlq.stop.Load() },
 		}
 		mlq.queries[query.id] = query
-		mlq.peerset.TryAddMany(query.id, dht.self, seedPeers...)
+		mlq.mqpeerset.TryAddMany(query.id, dht.self, seedPeers...)
 	}
 
 	ps := []peer.ID{}
-	for _, p := range mlq.peerset.GetIntersections() {
+	for _, p := range mlq.mqpeerset.GetIntersections() {
 		ps = append(ps, p.ID)
 	}
-	logger.Infow("Initial Intersection", "peers", ps)
+	logger.Debugw("Initial Intersection", "peers", ps)
 	return mlq
 }
 
-func (mlq *multiLookupQuery) run() []*mqpeerset.IntersectionPeerState {
+func (mlq *multiLookupQuery) run() {
 	defer mlq.cancelQueries()
-	doneChan := make(chan []*mqpeerset.IntersectionPeerState)
 
-	go mlq.consumeLookupEvents(doneChan)
+	// start all queries
 	for _, query := range mlq.queries {
 		go query.run()
 	}
-	return <-doneChan
-}
 
-func (mlq *multiLookupQuery) consumeLookupEvents(doneChan chan []*mqpeerset.IntersectionPeerState) {
+	// listen for all lookup events
 	for event := range mlq.eventsChan {
 
+		// forward lookup event to application
 		PublishLookupEvent(mlq.ctx, event)
 
 		if event.Request != nil {
@@ -121,11 +142,11 @@ func (mlq *multiLookupQuery) consumeLookupEvents(doneChan chan []*mqpeerset.Inte
 		}
 
 		if mlq.termCount == len(mlq.queries) {
-			doneChan <- mlq.peerset.GetIntersections()[:mlq.dht.bucketSize]
-			break
+			// doneChan <- mlq.mqpeerset.GetIntersections()[:mlq.dht.bucketSize]
+			return
 		}
 
-		if len(mlq.peerset.GetIntersections()) >= mlq.dht.bucketSize {
+		if len(mlq.mqpeerset.GetIntersections()) >= mlq.dht.bucketSize {
 			mlq.stop.Store(true)
 		}
 	}
@@ -136,7 +157,7 @@ func (mlq *multiLookupQuery) handleRequestEvent(qid uuid.UUID, request *LookupUp
 		if p.Peer == mlq.dht.self {
 			continue
 		}
-		mlq.peerset.SetState(qid, p.Peer, mqpeerset.PeerWaiting)
+		mlq.mqpeerset.SetState(qid, p.Peer, qpeerset.PeerWaiting)
 	}
 }
 
@@ -145,15 +166,15 @@ func (mlq *multiLookupQuery) handleResponseEvent(qid uuid.UUID, response *Lookup
 		if p.Peer == mlq.dht.self { // don't add self.
 			continue
 		}
-		mlq.peerset.TryAdd(qid, response.Cause.Peer, p.Peer)
+		mlq.mqpeerset.TryAdd(qid, response.Cause.Peer, p.Peer)
 	}
 
 	for _, p := range response.Queried {
 		if p.Peer == mlq.dht.self { // don't add self.
 			continue
 		}
-		if st := mlq.peerset.GetState(qid, p.Peer); st == mqpeerset.PeerWaiting {
-			mlq.peerset.SetState(qid, p.Peer, mqpeerset.PeerUnreachable)
+		if st := mlq.mqpeerset.GetState(qid, p.Peer); st == qpeerset.PeerWaiting {
+			mlq.mqpeerset.SetState(qid, p.Peer, qpeerset.PeerUnreachable)
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the queried state from state %v", st))
 		}
@@ -164,8 +185,8 @@ func (mlq *multiLookupQuery) handleResponseEvent(qid uuid.UUID, response *Lookup
 			continue
 		}
 
-		if st := mlq.peerset.GetState(qid, p.Peer); st == mqpeerset.PeerWaiting {
-			mlq.peerset.SetState(qid, p.Peer, mqpeerset.PeerUnreachable)
+		if st := mlq.mqpeerset.GetState(qid, p.Peer); st == qpeerset.PeerWaiting {
+			mlq.mqpeerset.SetState(qid, p.Peer, qpeerset.PeerUnreachable)
 		} else {
 			panic(fmt.Errorf("kademlia protocol error: tried to transition to the unreachable state from state %v", st))
 		}

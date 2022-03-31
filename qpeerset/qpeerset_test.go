@@ -46,7 +46,8 @@ func TestQPeerSet(t *testing.T) {
 	oracle := test.RandPeerIDFatal(t)
 
 	// find fails
-	require.Equal(t, -1, qp.find(peer2))
+	_, found := qp.states[peer2]
+	require.False(t, found)
 
 	// add peer2,assert state & then another add fails
 	require.True(t, qp.TryAdd(peer2, oracle))
@@ -83,4 +84,17 @@ func TestQPeerSet(t *testing.T) {
 	require.True(t, qp.TryAdd(peer3, oracle))
 	require.Equal(t, []peer.ID{peer3, peer1}, qp.GetClosestInStates(PeerHeard))
 	require.Equal(t, 2, qp.NumHeard())
+
+	// Initialize another query peer set and assert intersection
+	otherqp := NewQueryPeerset(key)
+	require.Len(t, qp.GetIntersection(otherqp), 0)
+	require.True(t, otherqp.TryAdd(peer2, oracle))
+	require.Len(t, qp.GetIntersection(otherqp), 1)
+	require.Len(t, otherqp.GetIntersection(qp), 1)
+	require.Equal(t, []peer.ID{peer2}, qp.GetIntersection(otherqp))
+
+	// sets for different keys cannot intersect
+	otherqp = NewQueryPeerset("other key")
+	require.True(t, otherqp.TryAdd(peer2, oracle))
+	require.Len(t, qp.GetIntersection(otherqp), 0)
 }

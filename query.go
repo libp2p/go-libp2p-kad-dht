@@ -46,7 +46,7 @@ type query struct {
 	peerTimes map[peer.ID]time.Duration
 
 	// queryPeers is the set of peers known by this query and their respective states.
-	queryPeers *qpeerset.SingleQueryPeerset
+	queryPeers *qpeerset.QueryPeerset
 
 	// terminated is set when the first worker thread encounters the termination condition.
 	// Its role is to make sure that once termination is determined, it is sticky.

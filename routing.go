@@ -369,7 +369,7 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // ProvideMultiQuery makes this node announce that it can provide a value for the given key by starting multiple
-// queries for the closest peers in XOR space and wait until the result set intersects.
+// queries for the closest peers in the XOR space and wait until the result sets intersect.
 func (dht *IpfsDHT) ProvideMultiQuery(ctx context.Context, key cid.Cid) error {
 	if !dht.enableProviders {
 		return routing.ErrNotSupported

@@ -2,66 +2,52 @@ package dht
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
-	kb "github.com/libp2p/go-libp2p-kbucket"
 )
 
-// GetClosestPeersMultiLookup .
+// GetClosestPeersMultiLookup is a Kademlia 'node lookup' operation that starts multiple queries
+// to terminate faster.
+//
+// If the context is canceled, this function will return the context error along
+// with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeersMultiLookup(ctx context.Context, key string) ([]peer.ID, error) {
-	// Convert key to a Kademlia compatible ID (hash it again with SHA256)
-	kadKey := kb.ConvertKey(key)
-
-	// Calculate seed peers
-	closestPeers := dht.routingTable.NearestPeers(kadKey, dht.bucketSize)
-	if len(closestPeers) == 0 {
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type:  routing.QueryError,
-			Extra: kb.ErrLookupFailure.Error(),
-		})
-		return nil, kb.ErrLookupFailure
+	if key == "" {
+		return nil, fmt.Errorf("can't lookup empty key")
 	}
 
-	// Create set of other peers
-	var otherPeers []peer.ID
-	for _, p := range dht.routingTable.ListPeers() {
-		// Check if the peer is already in the other list
-		inClosestPeers := false
-		for _, closestPeer := range closestPeers {
-			if p == closestPeer {
-				inClosestPeers = true
-				break
+	peers, err := dht.runMultiLookup(ctx, key,
+		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type: routing.SendingQuery,
+				ID:   p,
+			})
+
+			peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
+			if err != nil {
+				logger.Debugf("error getting closer peers: %s", err)
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.QueryError,
+					ID:   p,
+				})
+				return nil, err
 			}
-		}
-		// If it's in the other list don't do anything with this peer
-		if inClosestPeers {
-			continue
-		}
 
-		otherPeers = append(otherPeers, p)
-		if len(otherPeers) == dht.bucketSize {
-			break
-		}
-	}
-	if len(otherPeers) == 0 {
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type:  routing.QueryError,
-			Extra: kb.ErrLookupFailure.Error(),
-		})
-		return nil, kb.ErrLookupFailure
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type:      routing.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
+
+			return peers, err
+		},
+		func() bool { return false },
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	mlq := dht.newMultiLookupQuery(ctx, key, closestPeers, otherPeers)
-
-	mlq.run()
-
-	x := mlq.mqpeerset.GetIntersections()[:mlq.dht.bucketSize]
-
-	peers := make([]peer.ID, len(results))
-	for i, result := range results {
-		peers[i] = result.ID
-	}
-
-	return peers, nil
+	return peers, ctx.Err()
 }

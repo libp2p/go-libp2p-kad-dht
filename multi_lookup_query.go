@@ -2,193 +2,131 @@ package dht
 
 import (
 	"context"
-	"fmt"
 	"time"
+
+	kb "github.com/libp2p/go-libp2p-kbucket"
 
 	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
-	"go.uber.org/atomic"
 )
 
 // multiLookupQuery represents multiple DHT queries.
 type multiLookupQuery struct {
-	// the overarching query context.
+	// the overarching query context. This context is used to forward
+	// lookup events to
 	ctx context.Context
-
-	// cancelQueries is the cancel function for the context above
-	cancelQueries context.CancelFunc
 
 	// a reference to the DHT instance
 	dht *IpfsDHT
 
 	// queries keeps track of all running queries
-	queries map[uuid.UUID]*query
-
-	// mqpeerset tracks the states of all peers across all queries
-	mqpeerset *qpeerset.MultiQueryPeerset
+	queries []*query
 
 	// eventsChan emits all lookup events from the underlying queries
 	// so that we can update the multi query peerset: mqpeerset
 	eventsChan <-chan *LookupEvent
 
-	// termCount keeps track of the amount of terminated queries. If this
-	// reaches len(queries) no underlying query is running anymore and
-	// we can stop.
-	termCount int
-
-	// stop indicates to the underlying queries that they should stop
-	// looking for peers.
-	stop *atomic.Bool
+	// intersThresh is the intersection threshold that must be reached for
+	// the concurrent queries to be stopped
+	intersThresh int
 }
 
-// newMultiLookupQuery initializes a new multi lookup query struct. The number
-// of underlying queries is determined by the number of seed peer lists.
-func (dht *IpfsDHT) newMultiLookupQuery(ctx context.Context, key string, seedPeerLists ...[]peer.ID) *multiLookupQuery {
-	queryCtx, cancelQueries := context.WithCancel(ctx)
-	queryCtx, eventsChan := RegisterForLookupEvents(ctx)
+func (dht *IpfsDHT) runMultiLookup(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) ([]peer.ID, error) {
+	// Convert key to a Kademlia compatible ID (hash it again with SHA256)
+	kadKey := kb.ConvertKey(target)
 
-	// for each list of seed peers generate a unique query ID
-	queryIDs := make([]uuid.UUID, len(seedPeerLists))
-	for i := range seedPeerLists {
-		queryIDs[i] = uuid.New()
+	// Calculate seed peers
+	sortedPeers := kb.SortClosestPeers(dht.routingTable.ListPeers(), kadKey)
+	closestPeers := sortedPeers[:dht.bucketSize]
+	furthestPeers := sortedPeers[len(sortedPeers)-dht.bucketSize-1:]
+
+	lookupRes, err := dht.runMultiLookupQuery(ctx, target, queryFn, stopFn, closestPeers, furthestPeers)
+	if err != nil {
+		return nil, err
+	}
+
+	return lookupRes, nil
+}
+
+// runMultiLookupQuery initializes a new multi lookup query struct. The number
+// of underlying queries is determined by the number of seed peer lists.
+func (dht *IpfsDHT) runMultiLookupQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, seedPeerLists ...[]peer.ID) ([]peer.ID, error) {
+	for _, seedPeers := range seedPeerLists {
+		if len(seedPeers) != 0 {
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type:  routing.QueryError,
+				Extra: kb.ErrLookupFailure.Error(),
+			})
+			return nil, kb.ErrLookupFailure
+		}
 	}
 
 	mlq := &multiLookupQuery{
-		ctx:           ctx,
-		dht:           dht,
-		cancelQueries: cancelQueries,
-		queries:       map[uuid.UUID]*query{},
-		mqpeerset:     qpeerset.NewMultiQueryPeerset(key, queryIDs...),
-		eventsChan:    eventsChan,
-		termCount:     0,
-		stop:          atomic.NewBool(false),
-	}
-
-	queryFn := func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type: routing.SendingQuery,
-			ID:   p,
-		})
-
-		peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
-		if err != nil {
-			logger.Debugf("error getting closer peers: %s", err)
-			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-				Type: routing.QueryError,
-				ID:   p,
-			})
-			return nil, err
-		}
-
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type:      routing.PeerResponse,
-			ID:        p,
-			Responses: peers,
-		})
-
-		return peers, err
+		ctx:          ctx,
+		dht:          dht,
+		queries:      make([]*query, len(seedPeerLists)),
+		intersThresh: dht.bucketSize,
 	}
 
 	// for each list of seed peers initialize a query.
 	for i, seedPeers := range seedPeerLists {
-		query := &query{
-			id:         queryIDs[i],
-			key:        key,
-			ctx:        queryCtx,
+		mlq.queries[i] = &query{
+			id:         uuid.New(),
+			key:        target,
+			ctx:        ctx,
 			dht:        dht,
-			queryPeers: qpeerset.NewQueryPeerset(key),
+			queryPeers: qpeerset.NewQueryPeerset(target),
 			seedPeers:  seedPeers,
 			peerTimes:  make(map[peer.ID]time.Duration),
 			terminated: false,
 			queryFn:    queryFn,
-			stopFn:     func() bool { return mlq.stop.Load() },
+			stopFn: func() bool {
+				return stopFn() || len(mlq.getQueriesIntersection()) >= mlq.intersThresh
+			},
 		}
-		mlq.queries[query.id] = query
-		mlq.mqpeerset.TryAddMany(query.id, dht.self, seedPeers...)
 	}
 
-	ps := []peer.ID{}
-	for _, p := range mlq.mqpeerset.GetIntersections() {
-		ps = append(ps, p.ID)
+	mlq.run()
+
+	if ctx.Err() == nil {
+		mlq.recordValuablePeers()
 	}
-	logger.Debugw("Initial Intersection", "peers", ps)
-	return mlq
+
+	intersection := mlq.getQueriesIntersection()
+	if len(intersection) <= mlq.intersThresh {
+		// can happen if stopFn fires
+		return intersection, nil
+	}
+
+	return intersection[:mlq.intersThresh], nil
+}
+
+func (mlq *multiLookupQuery) getQueriesIntersection() []peer.ID {
+	// slice access is guarded by enforcing >= queries in newMultiLookupQuery
+	peerSets := make([]*qpeerset.QueryPeerset, len(mlq.queries)-1)
+	for i, q := range mlq.queries[1:] {
+		peerSets[i] = q.queryPeers
+	}
+
+	return mlq.queries[0].queryPeers.GetIntersectionNotInState(qpeerset.PeerUnreachable, peerSets...)
 }
 
 func (mlq *multiLookupQuery) run() {
-	defer mlq.cancelQueries()
-
 	// start all queries
 	for _, query := range mlq.queries {
 		go query.run()
 	}
 
-	// listen for all lookup events
-	for event := range mlq.eventsChan {
-
-		// forward lookup event to application
-		PublishLookupEvent(mlq.ctx, event)
-
-		if event.Request != nil {
-			mlq.handleRequestEvent(event.ID, event.Request)
-		} else if event.Response != nil {
-			mlq.handleResponseEvent(event.ID, event.Response)
-		} else if event.Terminate != nil {
-			mlq.termCount += 1
-		} else {
-			panic(fmt.Errorf("unexpected lookup event"))
-		}
-
-		if mlq.termCount == len(mlq.queries) {
-			// doneChan <- mlq.mqpeerset.GetIntersections()[:mlq.dht.bucketSize]
-			return
-		}
-
-		if len(mlq.mqpeerset.GetIntersections()) >= mlq.dht.bucketSize {
-			mlq.stop.Store(true)
-		}
+	// Wait fo all to finish
+	for _, query := range mlq.queries {
+		query.waitGroup.Wait()
 	}
 }
 
-func (mlq *multiLookupQuery) handleRequestEvent(qid uuid.UUID, request *LookupUpdateEvent) {
-	for _, p := range request.Waiting {
-		if p.Peer == mlq.dht.self {
-			continue
-		}
-		mlq.mqpeerset.SetState(qid, p.Peer, qpeerset.PeerWaiting)
-	}
-}
-
-func (mlq *multiLookupQuery) handleResponseEvent(qid uuid.UUID, response *LookupUpdateEvent) {
-	for _, p := range response.Heard {
-		if p.Peer == mlq.dht.self { // don't add self.
-			continue
-		}
-		mlq.mqpeerset.TryAdd(qid, response.Cause.Peer, p.Peer)
-	}
-
-	for _, p := range response.Queried {
-		if p.Peer == mlq.dht.self { // don't add self.
-			continue
-		}
-		if st := mlq.mqpeerset.GetState(qid, p.Peer); st == qpeerset.PeerWaiting {
-			mlq.mqpeerset.SetState(qid, p.Peer, qpeerset.PeerUnreachable)
-		} else {
-			panic(fmt.Errorf("kademlia protocol error: tried to transition to the queried state from state %v", st))
-		}
-	}
-
-	for _, p := range response.Unreachable {
-		if p.Peer == mlq.dht.self { // don't add self.
-			continue
-		}
-
-		if st := mlq.mqpeerset.GetState(qid, p.Peer); st == qpeerset.PeerWaiting {
-			mlq.mqpeerset.SetState(qid, p.Peer, qpeerset.PeerUnreachable)
-		} else {
-			panic(fmt.Errorf("kademlia protocol error: tried to transition to the unreachable state from state %v", st))
-		}
+func (mlq *multiLookupQuery) recordValuablePeers() {
+	for _, query := range mlq.queries {
+		query.recordValuablePeers()
 	}
 }

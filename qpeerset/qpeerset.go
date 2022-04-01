@@ -3,6 +3,7 @@ package qpeerset
 import (
 	"math/big"
 	"sort"
+	"sync"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	ks "github.com/whyrusleeping/go-keyspace"
@@ -29,7 +30,8 @@ type QueryPeerset struct {
 	key ks.Key
 
 	// all known peers and their query states
-	states map[peer.ID]*queryPeerState
+	statesLk sync.RWMutex
+	states   map[peer.ID]*queryPeerState
 }
 
 type queryPeerState struct {
@@ -56,6 +58,9 @@ func (qp *QueryPeerset) distanceToKey(p peer.ID) *big.Int {
 // Otherwise, the peer is added with state set to PeerHeard.
 // TryAdd returns true iff the peer was not already present.
 func (qp *QueryPeerset) TryAdd(p, referredBy peer.ID) bool {
+	qp.statesLk.Lock()
+	defer qp.statesLk.Unlock()
+
 	if _, found := qp.states[p]; found {
 		return false
 	}
@@ -72,18 +77,24 @@ func (qp *QueryPeerset) TryAdd(p, referredBy peer.ID) bool {
 // SetState sets the state of peer p to s.
 // If p is not in the peerset, SetState panics.
 func (qp *QueryPeerset) SetState(p peer.ID, s PeerState) {
+	qp.statesLk.Lock()
 	qp.states[p].state = s
+	qp.statesLk.Unlock()
 }
 
 // GetState returns the state of peer p.
 // If p is not in the peerset, GetState panics.
 func (qp *QueryPeerset) GetState(p peer.ID) PeerState {
+	qp.statesLk.RLock()
+	defer qp.statesLk.RUnlock()
 	return qp.states[p].state
 }
 
 // GetReferrer returns the peer that referred us to the peer p.
 // If p is not in the peerset, GetReferrer panics.
 func (qp *QueryPeerset) GetReferrer(p peer.ID) peer.ID {
+	qp.statesLk.RLock()
+	defer qp.statesLk.RUnlock()
 	return qp.states[p].referredBy
 }
 
@@ -91,6 +102,9 @@ func (qp *QueryPeerset) GetReferrer(p peer.ID) peer.ID {
 // It returns n peers or less, if fewer peers meet the condition.
 // The returned peers are sorted in ascending order by their distance to the key.
 func (qp *QueryPeerset) GetClosestNInStates(n int, states ...PeerState) []peer.ID {
+	qp.statesLk.RLock()
+	defer qp.statesLk.RUnlock()
+
 	m := make(map[PeerState]struct{}, len(states))
 	for i := range states {
 		m[states[i]] = struct{}{}
@@ -131,25 +145,83 @@ func (qp *QueryPeerset) NumWaiting() int {
 	return len(qp.GetClosestInStates(PeerWaiting))
 }
 
-func (qp *QueryPeerset) GetIntersection(other *QueryPeerset) []peer.ID {
-	if !qp.key.Equal(other.key) {
-		return []peer.ID{}
+// GetIntersection returns all peers that are in qp and all other given query peer sets
+// regardless of their state.
+func (qp *QueryPeerset) GetIntersection(others ...*QueryPeerset) []peer.ID {
+	var smallest map[peer.ID]*queryPeerState
+	var smallestIdx int
+
+	all := append(others, qp)
+	for i, qps := range all {
+		qps.statesLk.RLock()
+		defer qps.statesLk.RUnlock()
+
+		if !qp.key.Equal(qps.key) {
+			return []peer.ID{}
+		}
+
+		if len(qps.states) < len(smallest) || smallest == nil {
+			smallest = qps.states
+			smallestIdx = i
+		}
 	}
 
-	// loop over smaller set
-	smaller := qp.states
-	larger := other.states
-	if len(smaller) > len(larger) {
-		smaller = other.states
-		larger = qp.states
-	}
+	// Remove smallest peer set from the list
+	all[smallestIdx] = all[len(all)-1]
+	all = all[:len(all)-1]
 
 	results := []peer.ID{}
-
-	for p := range smaller {
-		if _, found := larger[p]; found {
-			results = append(results, p)
+OUTER:
+	for p := range smallest {
+		for _, other := range all {
+			if _, found := other.states[p]; !found {
+				continue OUTER
+			}
 		}
+		results = append(results, p)
+	}
+
+	return results
+}
+
+// GetIntersectionNotInState returns all peers that are in qp and all other given query peer sets
+// and none of the peer sets tracks a peer as PeerUnreachable. This means all peers in the resulting list
+// can either be in the states PeerHeard, PeerWaiting, or PeerQueried.
+func (qp *QueryPeerset) GetIntersectionNotInState(state PeerState, others ...*QueryPeerset) []peer.ID {
+	var smallest map[peer.ID]*queryPeerState
+	var smallestIdx int
+
+	all := append(others, qp)
+	for i, qps := range all {
+		qps.statesLk.RLock()
+		defer qps.statesLk.RUnlock()
+
+		if !qp.key.Equal(qps.key) {
+			return []peer.ID{}
+		}
+
+		if len(qps.states) < len(smallest) || smallest == nil {
+			smallest = qps.states
+			smallestIdx = i
+		}
+	}
+
+	// Remove smallest peer set from the list
+	all[smallestIdx] = all[len(all)-1]
+	all = all[:len(all)-1]
+
+	results := []peer.ID{}
+OUTER:
+	for p, ps := range smallest {
+		if ps.state == state {
+			continue
+		}
+		for _, other := range all {
+			if qpstate, found := other.states[p]; !found || qpstate.state == state {
+				continue OUTER
+			}
+		}
+		results = append(results, p)
 	}
 
 	return results

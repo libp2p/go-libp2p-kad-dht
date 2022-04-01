@@ -188,6 +188,7 @@ OUTER:
 // GetIntersectionNotInState returns all peers that are in qp and all other given query peer sets
 // and none of the peer sets tracks a peer as PeerUnreachable. This means all peers in the resulting list
 // can either be in the states PeerHeard, PeerWaiting, or PeerQueried.
+// The resulting list is not ordered in any way.
 func (qp *QueryPeerset) GetIntersectionNotInState(state PeerState, others ...*QueryPeerset) []peer.ID {
 	var smallest map[peer.ID]*queryPeerState
 	var smallestIdx int

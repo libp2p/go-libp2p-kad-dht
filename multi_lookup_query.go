@@ -113,6 +113,7 @@ func (dht *IpfsDHT) runMultiLookupQuery(ctx context.Context, target string, quer
 		return intersection, nil
 	}
 
+	intersection = kb.SortClosestPeers(intersection, kb.ConvertKey(target))
 	return intersection[:mlq.intersThresh], nil
 }
 

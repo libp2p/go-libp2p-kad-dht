@@ -25,10 +25,6 @@ type multiLookupQuery struct {
 	// queries keeps track of all running queries
 	queries []*query
 
-	// eventsChan emits all lookup events from the underlying queries
-	// so that we can update the multi query peerset: mqpeerset
-	eventsChan <-chan *LookupEvent
-
 	// intersThresh is the intersection threshold that must be reached for
 	// the concurrent queries to be stopped
 	intersThresh int

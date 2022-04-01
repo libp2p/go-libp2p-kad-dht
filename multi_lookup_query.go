@@ -58,6 +58,14 @@ func (dht *IpfsDHT) runMultiLookup(ctx context.Context, target string, queryFn q
 // runMultiLookupQuery initializes a new multi lookup query struct. The number
 // of underlying queries is determined by the number of seed peer lists.
 func (dht *IpfsDHT) runMultiLookupQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, seedPeerLists ...[]peer.ID) ([]peer.ID, error) {
+	if len(seedPeerLists) < 2 {
+		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+			Type:  routing.QueryError,
+			Extra: kb.ErrLookupFailure.Error(),
+		})
+		return nil, kb.ErrLookupFailure
+	}
+
 	for _, seedPeers := range seedPeerLists {
 		if len(seedPeers) == 0 {
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -109,7 +117,7 @@ func (dht *IpfsDHT) runMultiLookupQuery(ctx context.Context, target string, quer
 }
 
 func (mlq *multiLookupQuery) getQueriesIntersection() []peer.ID {
-	// slice access is guarded by enforcing >= queries in newMultiLookupQuery
+	// slice access is guarded by enforcing len(queries) >= 2 in newMultiLookupQuery
 	peerSets := make([]*qpeerset.QueryPeerset, len(mlq.queries)-1)
 	for i, q := range mlq.queries[1:] {
 		peerSets[i] = q.queryPeers

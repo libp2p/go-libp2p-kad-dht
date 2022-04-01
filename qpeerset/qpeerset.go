@@ -147,6 +147,7 @@ func (qp *QueryPeerset) NumWaiting() int {
 
 // GetIntersection returns all peers that are in qp and all other given query peer sets
 // regardless of their state.
+// TODO: Remove duplication with GetIntersectionNotInState. However, this function isn't used anyways...
 func (qp *QueryPeerset) GetIntersection(others ...*QueryPeerset) []peer.ID {
 	var smallest map[peer.ID]*queryPeerState
 	var smallestIdx int

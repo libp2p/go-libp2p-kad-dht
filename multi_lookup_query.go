@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -39,8 +40,16 @@ func (dht *IpfsDHT) runMultiLookup(ctx context.Context, target string, queryFn q
 
 	// Calculate seed peers
 	sortedPeers := kb.SortClosestPeers(dht.routingTable.ListPeers(), kadKey)
+	if len(sortedPeers) < 2*dht.bucketSize {
+		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+			Type:  routing.QueryError,
+			Extra: kb.ErrLookupFailure.Error(),
+		})
+		return nil, kb.ErrLookupFailure
+	}
+
 	closestPeers := sortedPeers[:dht.bucketSize]
-	furthestPeers := sortedPeers[len(sortedPeers)-dht.bucketSize-1:]
+	furthestPeers := sortedPeers[len(sortedPeers)-dht.bucketSize:]
 
 	lookupRes, err := dht.runMultiLookupQuery(ctx, target, queryFn, stopFn, closestPeers, furthestPeers)
 	if err != nil {
@@ -54,7 +63,7 @@ func (dht *IpfsDHT) runMultiLookup(ctx context.Context, target string, queryFn q
 // of underlying queries is determined by the number of seed peer lists.
 func (dht *IpfsDHT) runMultiLookupQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, seedPeerLists ...[]peer.ID) ([]peer.ID, error) {
 	for _, seedPeers := range seedPeerLists {
-		if len(seedPeers) != 0 {
+		if len(seedPeers) == 0 {
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:  routing.QueryError,
 				Extra: kb.ErrLookupFailure.Error(),
@@ -115,14 +124,18 @@ func (mlq *multiLookupQuery) getQueriesIntersection() []peer.ID {
 
 func (mlq *multiLookupQuery) run() {
 	// start all queries
+	var wg sync.WaitGroup
 	for _, query := range mlq.queries {
-		go query.run()
+		wg.Add(1)
+		queryCpy := query
+		go func() {
+			queryCpy.run()
+			wg.Done()
+		}()
 	}
 
 	// Wait fo all to finish
-	for _, query := range mlq.queries {
-		query.waitGroup.Wait()
-	}
+	wg.Wait()
 }
 
 func (mlq *multiLookupQuery) recordValuablePeers() {

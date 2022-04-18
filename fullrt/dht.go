@@ -53,6 +53,16 @@ var logger = logging.Logger("fullrtdht")
 
 // FullRT is an experimental DHT client that is under development. Expect breaking changes to occur in this client
 // until it stabilizes.
+//
+// Running FullRT by itself (i.e. without a companion IpfsDHT) will run into some issues. The most critical is that
+// running a FullRT node will not currently keep you connected to the k closest peers which means that your peer's
+// addresses may not be discoverable in the DHT. Additionally, FullRT is only a DHT client and not a server which means it does not contribute capacity to the network.
+// If you want to run a server you should also run an IpfsDHT instance in server mode.
+//
+// FullRT has a Ready function that indicates the routing table has been refreshed recently. It is currently within the
+// discretion of the application as to how much they care about whether the routing table is ready.
+// One approach taken to "readiness" is to not insist on it for ad-hoc operations but to insist on it for larger bulk
+// operations.
 type FullRT struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,6 +110,9 @@ type FullRT struct {
 // until it stabilizes.
 //
 // Not all of the standard DHT options are supported in this DHT.
+//
+// DHT options passed in should be suitable for your network (e.g. protocol prefix, validators, bucket size, and
+// bootstrap peers).
 func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
 	var fullrtcfg config
 	if err := fullrtcfg.apply(options...); err != nil {
@@ -216,6 +229,9 @@ func (dht *FullRT) Stat() map[string]peer.ID {
 	return newMap
 }
 
+// Ready indicates that the routing table has been refreshed recently. It is recommended to be used for operations where
+// it is important for the operation to be particularly accurate (e.g. bulk publishing where you do not want to
+// republish for as long as you can).
 func (dht *FullRT) Ready() bool {
 	dht.rtLk.RLock()
 	lastCrawlTime := dht.lastCrawlTime

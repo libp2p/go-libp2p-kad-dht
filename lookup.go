@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
-
-	kb "github.com/libp2p/go-libp2p-kbucket"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // GetClosestPeers is a Kademlia 'node lookup' operation. Returns a channel of
@@ -17,6 +19,9 @@ import (
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.GetClosestPeers", trace.WithAttributes(attribute.String("Key", key)))
+	defer span.End()
+
 	if key == "" {
 		return nil, fmt.Errorf("can't lookup empty key")
 	}

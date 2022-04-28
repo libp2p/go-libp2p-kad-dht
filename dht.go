@@ -14,6 +14,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
@@ -647,6 +649,9 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 //
 //	Do Nothing.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.PeerFound", trace.WithAttributes(attribute.Stringer("PeerID", p)))
+	defer span.End()
+
 	if c := baseLogger.Check(zap.DebugLevel, "peer found"); c != nil {
 		c.Write(zap.String("peer", p.String()))
 	}
@@ -656,7 +661,7 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	} else if b {
 		select {
 		case dht.addPeerToRTChan <- addPeerRTReq{p, queryPeer}:
-		case <-dht.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -664,6 +669,9 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 
 // peerStoppedDHT signals the routing table that a peer is unable to responsd to DHT queries anymore.
 func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
+	_, span := internal.StartSpan(ctx, "IpfsDHT.PeerStoppedDHT", trace.WithAttributes(attribute.Stringer("PeerID", p)))
+	defer span.End()
+
 	logger.Debugw("peer stopped dht", "peer", p)
 	// A peer that does not support the DHT protocol is dead for us.
 	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
@@ -678,7 +686,10 @@ func (dht *IpfsDHT) fixRTIfNeeded() {
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
-func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
+func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
+	_, span := internal.StartSpan(ctx, "IpfsDHT.FindLocal", trace.WithAttributes(attribute.Stringer("PeerID", id)))
+	defer span.End()
+
 	switch dht.host.Network().Connectedness(id) {
 	case network.Connected, network.CanConnect:
 		return dht.peerstore.PeerInfo(id)
@@ -827,6 +838,8 @@ func (dht *IpfsDHT) Host() host.Host {
 
 // Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Ping")
+	defer span.End()
 	return dht.protoMessenger.Ping(ctx, p)
 }
 

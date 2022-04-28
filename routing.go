@@ -11,6 +11,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
@@ -29,6 +31,9 @@ import (
 // PutValue adds value corresponding to given Key.
 // This is the top level "Store" operation of the DHT
 func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts ...routing.Option) (err error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.PutValue", trace.WithAttributes(attribute.String("Key", key)))
+	defer span.End()
+
 	if !dht.enableValues {
 		return routing.ErrNotSupported
 	}
@@ -101,6 +106,9 @@ type recvdVal struct {
 
 // GetValue searches for the value corresponding to given Key.
 func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Option) (_ []byte, err error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.GetValue", trace.WithAttributes(attribute.String("Key", key)))
+	defer span.End()
+
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
@@ -135,6 +143,9 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 
 // SearchValue searches for the value corresponding to given Key and streams the results.
 func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.SearchValue")
+	defer span.End()
+
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
@@ -154,6 +165,9 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 
 	out := make(chan []byte)
 	go func() {
+		ctx, span := internal.StartSpan(ctx, "IpfsDHT.SearchValue.Worker")
+		defer span.End()
+
 		defer close(out)
 		best, peersWithBest, aborted := dht.searchValueQuorum(ctx, key, valCh, stopCh, out, responsesNeeded)
 		if best == nil || aborted {
@@ -371,6 +385,9 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Provide", trace.WithAttributes(attribute.String("Key", key.String()), attribute.Bool("Broadcast", brdcst)))
+	defer span.End()
+
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
@@ -443,6 +460,9 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.FindProviders")
+	defer span.End()
+
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
@@ -462,6 +482,9 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.FindProvidersAsync")
+	defer span.End()
+
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
@@ -483,6 +506,9 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 
 func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
 	defer close(peerOut)
+
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.FindProvidersAsyncRoutine")
+	defer span.End()
 
 	findAll := count == 0
 
@@ -582,6 +608,9 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.FindPeer")
+	defer span.End()
+
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err
 	}
@@ -589,7 +618,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 	logger.Debugw("finding peer", "peer", id)
 
 	// Check if were already connected to them
-	if pi := dht.FindLocal(id); pi.ID != "" {
+	if pi := dht.FindLocal(ctx, id); pi.ID != "" {
 		return pi, nil
 	}
 

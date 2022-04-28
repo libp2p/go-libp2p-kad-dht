@@ -44,12 +44,9 @@ import (
 	"github.com/libp2p/go-libp2p-xor/kademlia"
 	kadkey "github.com/libp2p/go-libp2p-xor/key"
 	"github.com/libp2p/go-libp2p-xor/trie"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
-
-var Tracer = otel.Tracer("")
 
 var logger = logging.Logger("fullrtdht")
 
@@ -363,6 +360,9 @@ func (dht *FullRT) Bootstrap(ctx context.Context) error {
 
 // CheckPeers return (success, total)
 func (dht *FullRT) CheckPeers(ctx context.Context, peers ...peer.ID) (int, int) {
+	ctx, span := internal.StartSpan(ctx, "FullRT.CheckPeers", trace.WithAttributes(attribute.Int("NumPeers", len(peers))))
+	defer span.End()
+
 	var peerAddrs chan interface{}
 	var total int
 	if len(peers) == 0 {
@@ -420,8 +420,7 @@ func workers(numWorkers int, fn func(interface{}), inputs <-chan interface{}) {
 }
 
 func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
-	ctx, span := Tracer.Start(ctx, "GetClosestPeers")
-	_ = ctx // not used, but we want to assign it _just_ in case we use it.
+	_, span := internal.StartSpan(ctx, "FullRT.GetClosestPeers", trace.WithAttributes(attribute.String("Key", key)))
 	defer span.End()
 
 	kbID := kb.ConvertKey(key)
@@ -550,6 +549,9 @@ func (dht *FullRT) GetValue(ctx context.Context, key string, opts ...routing.Opt
 
 // SearchValue searches for the value corresponding to given Key and streams the results.
 func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (<-chan []byte, error) {
+	ctx, span := internal.StartSpan(ctx, "FullRT.SearchValue", trace.WithAttributes(attribute.String("Key", key)))
+	defer span.End()
+
 	if !dht.enableValues {
 		return nil, routing.ErrNotSupported
 	}
@@ -570,6 +572,9 @@ func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.
 	out := make(chan []byte)
 	go func() {
 		defer close(out)
+		ctx, span := internal.StartSpan(ctx, "FullRT.SearchValue.Worker")
+		defer span.End()
+
 		best, peersWithBest, aborted := dht.searchValueQuorum(ctx, key, valCh, stopCh, out, responsesNeeded)
 		if best == nil || aborted {
 			return
@@ -591,7 +596,7 @@ func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 		dht.updatePeerValues(ctx, key, best, updatePeers)
 		cancel()
 	}()
@@ -775,7 +780,7 @@ func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan str
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
-	ctx, span := Tracer.Start(ctx, "Provide")
+	ctx, span := internal.StartSpan(ctx, "FullRT.Provide", trace.WithAttributes(attribute.Stringer("Key", key), attribute.Bool("Broadcast", brdcst)))
 	defer span.End()
 
 	if !dht.enableProviders {
@@ -853,9 +858,6 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 // execOnMany has returned (e.g. do not write to resources that might get closed or set to nil and therefore result in
 // a panic instead of just returning an error).
 func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer.ID) error, peers []peer.ID, sloppyExit bool) int {
-	ctx, span := Tracer.Start(ctx, "execOnMany")
-	defer span.End()
-
 	if len(peers) == 0 {
 		return 0
 	}
@@ -919,7 +921,7 @@ func (dht *FullRT) execOnMany(ctx context.Context, fn func(context.Context, peer
 }
 
 func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) error {
-	ctx, span := Tracer.Start(ctx, "ProvideMany")
+	ctx, span := internal.StartSpan(ctx, "FullRT.ProvideMany", trace.WithAttributes(attribute.Int("NumKeys", len(keys))))
 	defer span.End()
 
 	if !dht.enableProviders {
@@ -955,6 +957,9 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 }
 
 func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) error {
+	ctx, span := internal.StartSpan(ctx, "FullRT.PutMany", trace.WithAttributes(attribute.Int("NumKeys", len(keys))))
+	defer span.End()
+
 	if !dht.enableValues {
 		return routing.ErrNotSupported
 	}
@@ -983,7 +988,7 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 }
 
 func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, target, k peer.ID) error, isProvRec bool) error {
-	ctx, span := Tracer.Start(ctx, "bulkMessageSend", trace.WithAttributes(attribute.Int("numKeys", len(keys))))
+	ctx, span := internal.StartSpan(ctx, "FullRT.BulkMessageSend")
 	defer span.End()
 
 	if len(keys) == 0 {
@@ -1185,6 +1190,9 @@ func divideByChunkSize(keys []peer.ID, chunkSize int) [][]peer.ID {
 
 // FindProviders searches until the context expires.
 func (dht *FullRT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+	ctx, span := internal.StartSpan(ctx, "FullRT.FindProviders", trace.WithAttributes(attribute.Stringer("Key", c)))
+	defer span.End()
+
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
@@ -1204,6 +1212,9 @@ func (dht *FullRT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInf
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *FullRT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+	ctx, span := internal.StartSpan(ctx, "FullRT.FindProvidersAsync", trace.WithAttributes(attribute.Stringer("Key", key), attribute.Int("Count", count)))
+	defer span.End()
+
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
@@ -1225,6 +1236,8 @@ func (dht *FullRT) FindProvidersAsync(ctx context.Context, key cid.Cid, count in
 
 func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo) {
 	defer close(peerOut)
+	ctx, span := internal.StartSpan(ctx, "FullRT.FindProvidersAsyncRouting")
+	defer span.End()
 
 	findAll := count == 0
 	ps := make(map[peer.ID]struct{})
@@ -1324,6 +1337,9 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 
 // FindPeer searches for a peer with given ID.
 func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+	ctx, span := internal.StartSpan(ctx, "FullRT.FindPeer", trace.WithAttributes(attribute.Stringer("PeerID", id)))
+	defer span.End()
+
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err
 	}

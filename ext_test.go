@@ -30,10 +30,11 @@ func TestHungRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mn, err := mocknet.FullMeshLinked(ctx, 2)
+	mn, err := mocknet.FullMeshLinked(2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer mn.Close()
 	hosts := mn.Hosts()
 
 	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
@@ -231,10 +232,11 @@ func TestNotFound(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	mn, err := mocknet.FullMeshConnected(ctx, 16)
+	mn, err := mocknet.FullMeshConnected(16)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer mn.Close()
 	hosts := mn.Hosts()
 
 	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
@@ -324,10 +326,11 @@ func TestLessThanKResponses(t *testing.T) {
 	// t.Skip("skipping test because it makes a lot of output")
 
 	ctx := context.Background()
-	mn, err := mocknet.FullMeshConnected(ctx, 6)
+	mn, err := mocknet.FullMeshConnected(6)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer mn.Close()
 	hosts := mn.Hosts()
 
 	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
@@ -397,10 +400,11 @@ func TestMultipleQueries(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	mn, err := mocknet.FullMeshConnected(ctx, 2)
+	mn, err := mocknet.FullMeshConnected(2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer mn.Close()
 	hosts := mn.Hosts()
 	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
 	d, err := New(ctx, hosts[0], os...)

@@ -3,6 +3,7 @@ package fullrt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
+	swarm "github.com/libp2p/go-libp2p-swarm"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
@@ -50,6 +52,8 @@ import (
 var Tracer = otel.Tracer("")
 
 var logger = logging.Logger("fullrtdht")
+
+const rtRefreshLimitsMsg = `Accelerated DHT client was unable to fully refresh its routing table due to Resource Manager limits, which may degrade content routing. Consider increasing resource limits. See debug logs for the "dht-crawler" subsystem for details.`
 
 // FullRT is an experimental DHT client that is under development. Expect breaking changes to occur in this client
 // until it stabilizes.
@@ -271,6 +275,7 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		}
 
 		start := time.Now()
+		limitErrOnce := sync.Once{}
 		dht.crawler.Run(ctx, addrs,
 			func(p peer.ID, rtPeers []*peer.AddrInfo) {
 				conns := dht.h.Network().ConnsToPeer(p)
@@ -296,7 +301,20 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 					addrs: addrs,
 				}
 			},
-			func(p peer.ID, err error) {})
+			func(p peer.ID, err error) {
+				dialErr, ok := err.(*swarm.DialError)
+				if ok {
+					for _, transportErr := range dialErr.DialErrors {
+						if errors.Is(transportErr.Cause, network.ErrResourceLimitExceeded) {
+							limitErrOnce.Do(func() { logger.Errorf(rtRefreshLimitsMsg) })
+						}
+					}
+				}
+				// note that DialError implements Unwrap() which returns the Cause, so this covers that case
+				if errors.Is(err, network.ErrResourceLimitExceeded) {
+					limitErrOnce.Do(func() { logger.Errorf(rtRefreshLimitsMsg) })
+				}
+			})
 		dur := time.Since(start)
 		logger.Infof("crawl took %v", dur)
 

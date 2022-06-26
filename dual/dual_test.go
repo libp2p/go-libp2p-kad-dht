@@ -9,12 +9,12 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
-	peerstore "github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/peerstore"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	record "github.com/libp2p/go-libp2p-record"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 )
@@ -127,7 +127,7 @@ func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	t.Helper()
 	for a.RoutingTable().Find(b.PeerID()) == "" {
-		//fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
+		// fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())

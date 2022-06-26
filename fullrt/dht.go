@@ -20,7 +20,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
-	swarm "github.com/libp2p/go-libp2p-swarm"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
@@ -40,6 +39,7 @@ import (
 
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/libp2p/go-libp2p-xor/kademlia"
 	kadkey "github.com/libp2p/go-libp2p-xor/key"
@@ -661,7 +661,7 @@ func (dht *FullRT) updatePeerValues(ctx context.Context, key string, val []byte,
 	fixupRec := record.MakePutRecord(key, val)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			//TODO: Is this possible?
+			// TODO: Is this possible?
 			if p == dht.h.ID() {
 				err := dht.putLocal(ctx, key, fixupRec)
 				if err != nil {

@@ -34,8 +34,8 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 )
 
 var testCaseCids []cid.Cid
@@ -614,7 +614,7 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 			rtlen := dht.routingTable.Size()
 			totalPeers += rtlen
 			if minPeers > 0 && rtlen < minPeers {
-				//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+				// t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
 				return false
 			}
 		}
@@ -1957,7 +1957,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 
 	{
 
-		//----------------
+		// ----------------
 		// We will initialize a DHT with 1 bootstrapper, connect it to another DHT,
 		// then remove the latter from the Routing Table
 		// This should add the bootstrap peer and the peer that the bootstrap peer is conencted to
@@ -1997,7 +1997,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 
 	{
 
-		//----------------
+		// ----------------
 		// We will initialize a DHT with 2 bootstrappers, connect it to another DHT,
 		// then remove the DHT handler from the other DHT which should make the first DHT's
 		// routing table empty.

@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	record "github.com/libp2p/go-libp2p-record"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	"github.com/libp2p/go-msgio/protoio"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"

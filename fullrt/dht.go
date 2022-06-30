@@ -20,7 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
-	swarm "github.com/libp2p/go-libp2p-swarm"
+	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
@@ -1220,11 +1220,22 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 	defer close(peerOut)
 
 	findAll := count == 0
-	var ps *peer.Set
-	if findAll {
-		ps = peer.NewSet()
-	} else {
-		ps = peer.NewLimitedSet(count)
+	ps := make(map[peer.ID]struct{})
+	psLock := &sync.Mutex{}
+	psTryAdd := func(p peer.ID) bool {
+		psLock.Lock()
+		defer psLock.Unlock()
+		_, ok := ps[p]
+		if !ok && (len(ps) < count || findAll) {
+			ps[p] = struct{}{}
+			return true
+		}
+		return false
+	}
+	psSize := func() int {
+		psLock.Lock()
+		defer psLock.Unlock()
+		return len(ps)
 	}
 
 	provs, err := dht.ProviderManager.GetProviders(ctx, key)
@@ -1233,7 +1244,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 	}
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
-		if ps.TryAdd(p.ID) {
+		if psTryAdd(p.ID) {
 			select {
 			case peerOut <- p:
 			case <-ctx.Done():
@@ -1243,7 +1254,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 
 		// If we have enough peers locally, don't bother with remote RPC
 		// TODO: is this a DOS vector?
-		if !findAll && ps.Size() >= count {
+		if !findAll && psSize() >= count {
 			return
 		}
 	}
@@ -1274,7 +1285,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		for _, prov := range provs {
 			dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
 			logger.Debugf("got provider: %s", prov)
-			if ps.TryAdd(prov.ID) {
+			if psTryAdd(prov.ID) {
 				logger.Debugf("using provider: %s", prov)
 				select {
 				case peerOut <- *prov:
@@ -1283,8 +1294,8 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 					return ctx.Err()
 				}
 			}
-			if !findAll && ps.Size() >= count {
-				logger.Debugf("got enough providers (%d/%d)", ps.Size(), count)
+			if !findAll && psSize() >= count {
+				logger.Debugf("got enough providers (%d/%d)", psSize(), count)
 				cancelquery()
 				return nil
 			}

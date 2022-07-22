@@ -64,8 +64,9 @@ type query struct {
 }
 
 type lookupWithFollowupResult struct {
-	peers []peer.ID            // the top K not unreachable peers at the end of the query
-	state []qpeerset.PeerState // the peer states at the end of the query
+	peers   []peer.ID            // the top K not unreachable peers at the end of the query
+	state   []qpeerset.PeerState // the peer states at the end of the query of the peers slice (not closest)
+	closest []peer.ID            // the top K peers at the end of the query
 
 	// indicates that neither the lookup nor the followup has been prematurely terminated by an external condition such
 	// as context cancellation or the stop function being called.
@@ -244,11 +245,14 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 		sortedPeers = sortedPeers[:q.dht.bucketSize]
 	}
 
+	closest := q.queryPeers.GetClosestNInStates(q.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried, qpeerset.PeerUnreachable)
+
 	// return the top K not unreachable peers as well as their states at the end of the query
 	res := &lookupWithFollowupResult{
 		peers:     sortedPeers,
 		state:     make([]qpeerset.PeerState, len(sortedPeers)),
 		completed: completed,
+		closest:   closest,
 	}
 
 	for i, p := range sortedPeers {

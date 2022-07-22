@@ -1,6 +1,7 @@
 package netsize
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/big"
@@ -22,12 +23,12 @@ var (
 )
 
 var (
-	logger                 = logging.Logger("dht/netsize")
-	MaxDataPointAge        = 2 * time.Hour
-	MinDataPointsThreshold = 100
-	MaxDataPointsThreshold = 3_000
-	keyspaceMaxInt, _      = new(big.Int).SetString(strings.Repeat("F", 64), 16)
-	keyspaceMaxFloat       = new(big.Float).SetInt(keyspaceMaxInt)
+	logger                   = logging.Logger("dht/netsize")
+	MaxMeasurementAge        = 2 * time.Hour
+	MinMeasurementsThreshold = 5
+	MaxMeasurementsThreshold = 150
+	keyspaceMaxInt, _        = new(big.Int).SetString(strings.Repeat("F", 64), 16)
+	keyspaceMaxFloat         = new(big.Float).SetInt(keyspaceMaxInt)
 )
 
 type Estimator struct {
@@ -42,7 +43,6 @@ type Estimator struct {
 }
 
 func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Estimator {
-
 	// initialize map to hold measurement observations
 	measurements := map[int][]measurement{}
 	for i := 0; i < bucketSize; i++ {
@@ -91,10 +91,9 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 	ksKey := ks.XORKeySpace.Key([]byte(key))
 
 	// the maximum age timestamp of the measurement data points
-	maxAgeTs := now.Add(-MaxDataPointAge)
+	maxAgeTs := now.Add(-MaxMeasurementAge)
 
 	for i, p := range peers {
-
 		// Map peer to the kademlia key space
 		pKey := ks.XORKeySpace.Key([]byte(p))
 
@@ -115,14 +114,19 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 			return e.measurements[i][j].timestamp.After(maxAgeTs)
 		})
 
-		// if measurements are outside the allowed time window remove them. idx == n would mean "not found"
-		if idx != n {
+		// if measurements are outside the allowed time window remove them.
+		// idx == n - there is no measurement in the allowed time window -> reset slice
+		// idx == 0 - the normal case where we only have valid entries
+		// idx != 0 - there is a mix of valid and obsolete entries
+		if idx == n {
+			e.measurements[i] = []measurement{}
+		} else if idx != 0 {
 			e.measurements[i] = e.measurements[i][idx:]
 		}
 
 		// if the number of data points exceed the max threshold, strip oldest measurement data points.
-		if len(e.measurements[i]) > MaxDataPointsThreshold {
-			e.measurements[i] = e.measurements[i][len(e.measurements[i])-MaxDataPointsThreshold:]
+		if len(e.measurements[i]) > MaxMeasurementsThreshold {
+			e.measurements[i] = e.measurements[i][len(e.measurements[i])-MaxMeasurementsThreshold:]
 		}
 	}
 
@@ -130,9 +134,9 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 }
 
 // NetworkSize instructs the Estimator to calculate the current network size estimate.
-func (e *Estimator) NetworkSize() (float64, error) {
-	e.measurementsLk.RLock()
-	defer e.measurementsLk.RUnlock()
+func (e *Estimator) NetworkSize(ctx context.Context) (float64, error) {
+	e.measurementsLk.Lock()
+	defer e.measurementsLk.Unlock()
 
 	// return cached calculation
 	if e.netSizeCache != nil {
@@ -148,12 +152,11 @@ func (e *Estimator) NetworkSize() (float64, error) {
 	ys := make([]float64, e.bucketSize)
 	yerrs := make([]float64, e.bucketSize)
 
-	logger.Debug("Calculating network size estimation")
 	for i := 0; i < e.bucketSize; i++ {
 		observationCount := len(e.measurements[i])
 
 		// If we don't have enough data to reasonably calculate the network size, return early
-		if observationCount < MinDataPointsThreshold {
+		if observationCount < MinMeasurementsThreshold {
 			return 0, ErrNotEnoughData
 		}
 
@@ -172,7 +175,7 @@ func (e *Estimator) NetworkSize() (float64, error) {
 			diff := m.distance - distanceAvg
 			sumWeightedDiffs += m.weight * diff * diff
 		}
-		variance := sumWeightedDiffs / (float64((observationCount-1)/observationCount) * sumWeights)
+		variance := sumWeightedDiffs / (float64((observationCount - 1)) / float64(observationCount) * sumWeights)
 		distanceStd := math.Sqrt(variance)
 
 		// Track calculations
@@ -222,7 +225,7 @@ func (e *Estimator) garbageCollect() {
 	now := time.Now()
 
 	// the maximum age timestamp of the measurement data points
-	maxAgeTs := now.Add(-MaxDataPointAge)
+	maxAgeTs := now.Add(-MaxMeasurementAge)
 
 	for i := 0; i < e.bucketSize; i++ {
 
@@ -233,8 +236,13 @@ func (e *Estimator) garbageCollect() {
 			return e.measurements[i][j].timestamp.After(maxAgeTs)
 		})
 
-		// if measurements are outside the allowed time window remove them. idx == n would mean "not found"
-		if idx != n {
+		// if measurements are outside the allowed time window remove them.
+		// idx == n - there is no measurement in the allowed time window -> reset slice
+		// idx == 0 - the normal case where we only have valid entries
+		// idx != 0 - there is a mix of valid and obsolete entries
+		if idx == n {
+			e.measurements[i] = []measurement{}
+		} else if idx != 0 {
 			e.measurements[i] = e.measurements[i][idx:]
 		}
 	}

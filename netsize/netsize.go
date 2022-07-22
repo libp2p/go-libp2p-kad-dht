@@ -23,27 +23,17 @@ var (
 
 var (
 	logger                 = logging.Logger("dht/netsize")
-	DefaultTimeWindow      = 2 * time.Hour
+	MaxDataPointAge        = 2 * time.Hour
 	MinDataPointsThreshold = 100
 	MaxDataPointsThreshold = 3_000
 	keyspaceMaxInt, _      = new(big.Int).SetString(strings.Repeat("F", 64), 16)
 	keyspaceMaxFloat       = new(big.Float).SetInt(keyspaceMaxInt)
 )
 
-type EstimatorOption func(*Estimator)
-
-func WithTimeWindow(timeWindow time.Duration) EstimatorOption {
-	return func(e *Estimator) {
-		e.timeWindow = timeWindow
-	}
-}
-
 type Estimator struct {
 	localID    kbucket.ID
 	rt         *kbucket.RoutingTable
 	bucketSize int
-
-	timeWindow time.Duration
 
 	measurementsLk sync.RWMutex
 	measurements   map[int][]measurement
@@ -51,7 +41,7 @@ type Estimator struct {
 	netSizeCache *float64
 }
 
-func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int, options ...EstimatorOption) *Estimator {
+func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Estimator {
 
 	// initialize map to hold measurement observations
 	measurements := map[int][]measurement{}
@@ -59,19 +49,12 @@ func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int, opt
 		measurements[i] = []measurement{}
 	}
 
-	e := &Estimator{
+	return &Estimator{
 		localID:      kbucket.ConvertPeerID(localID),
 		rt:           rt,
 		bucketSize:   bucketSize,
-		timeWindow:   DefaultTimeWindow,
 		measurements: measurements,
 	}
-
-	for _, option := range options {
-		option(e)
-	}
-
-	return e
 }
 
 type measurement struct {
@@ -108,7 +91,7 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 	ksKey := ks.XORKeySpace.Key([]byte(key))
 
 	// the maximum age timestamp of the measurement data points
-	maxAgeTs := now.Add(-e.timeWindow)
+	maxAgeTs := now.Add(-MaxDataPointAge)
 
 	for i, p := range peers {
 
@@ -239,7 +222,7 @@ func (e *Estimator) garbageCollect() {
 	now := time.Now()
 
 	// the maximum age timestamp of the measurement data points
-	maxAgeTs := now.Add(-e.timeWindow)
+	maxAgeTs := now.Add(-MaxDataPointAge)
 
 	for i := 0; i < e.bucketSize; i++ {
 

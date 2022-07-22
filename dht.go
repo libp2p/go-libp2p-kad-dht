@@ -21,6 +21,7 @@ import (
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
@@ -146,6 +147,9 @@ type IpfsDHT struct {
 	refreshFinishedCh chan struct{}
 
 	rtFreezeTimeout time.Duration
+
+	// network size estimator
+	nsEstimator *netsize.Estimator
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
@@ -322,6 +326,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	}
 	dht.routingTable = rt
 	dht.bootstrapPeers = cfg.BootstrapPeers
+
+	// init network size estimator
+	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)

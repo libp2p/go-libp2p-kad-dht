@@ -149,7 +149,8 @@ type IpfsDHT struct {
 	rtFreezeTimeout time.Duration
 
 	// network size estimator
-	nsEstimator *netsize.Estimator
+	nsEstimator             *netsize.Estimator
+	enableOptimisticProvide bool
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
@@ -302,6 +303,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 
 		addPeerToRTChan:   make(chan addPeerRTReq),
 		refreshFinishedCh: make(chan struct{}),
+
+		enableOptimisticProvide: cfg.EnableOptimisticProvide,
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration

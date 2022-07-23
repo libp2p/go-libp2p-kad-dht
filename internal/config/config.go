@@ -62,6 +62,8 @@ type Config struct {
 	// test specific Config options
 	DisableFixLowPeers          bool
 	TestAddressUpdateProcessing bool
+
+	EnableOptimisticProvide bool
 }
 
 func EmptyQueryFilter(_ interface{}, ai peer.AddrInfo) bool { return true }

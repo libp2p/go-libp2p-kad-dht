@@ -309,3 +309,11 @@ func forceAddressUpdateProcessing(t *testing.T) Option {
 		return nil
 	}
 }
+
+// EnableOptimisticProvide enables an optimisation when it comes to writing provider records in the DHT network.
+func EnableOptimisticProvide() Option {
+	return func(c *dhtcfg.Config) error {
+		c.EnableOptimisticProvide = true
+		return nil
+	}
+}

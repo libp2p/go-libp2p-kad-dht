@@ -1,7 +1,6 @@
 package netsize
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"math/big"
@@ -99,7 +98,7 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 
 		// Construct measurement struct
 		m := measurement{
-			distance:  normedDistance(pKey, ksKey),
+			distance:  NormedDistance(pKey, ksKey),
 			weight:    weight,
 			timestamp: now,
 		}
@@ -134,7 +133,7 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 }
 
 // NetworkSize instructs the Estimator to calculate the current network size estimate.
-func (e *Estimator) NetworkSize(ctx context.Context) (float64, error) {
+func (e *Estimator) NetworkSize() (float64, error) {
 	e.measurementsLk.Lock()
 	defer e.measurementsLk.Unlock()
 
@@ -212,8 +211,8 @@ func (e *Estimator) calcWeight(key string) float64 {
 	return math.Pow(2, float64(bucketLevel-e.bucketSize))
 }
 
-// normedDistance calculates the normed XOR distance of the given keys (from 0 to 1).
-func normedDistance(key1 ks.Key, key2 ks.Key) float64 {
+// NormedDistance calculates the normed XOR distance of the given keys (from 0 to 1).
+func NormedDistance(key1 ks.Key, key2 ks.Key) float64 {
 	ksDistance := new(big.Float).SetInt(key1.Distance(key2))
 	normedDist, _ := new(big.Float).Quo(ksDistance, keyspaceMaxFloat).Float64()
 	return normedDist

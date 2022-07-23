@@ -28,7 +28,8 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 		return nil, fmt.Errorf("can't lookup empty key")
 	}
 
-	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), func(*qpeerset.QueryPeerset) bool { return false })
+	//TODO: I can break the interface! return []peer.ID
+	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), func(context.Context, *qpeerset.QueryPeerset) bool { return false })
 
 	if err != nil {
 		return nil, err

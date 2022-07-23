@@ -22,11 +22,13 @@ const (
 )
 
 type estimatorState struct {
-	ctx context.Context
 	dht *IpfsDHT
 
 	// the most recent network size estimation
 	networkSize float64
+
+	// a channel indicating when an ADD_PROVIDER RPC completed (successful or not)
+	doneChan chan struct{}
 
 	// tracks which peers we have stored the provider records with
 	peerStatesLk sync.RWMutex
@@ -48,7 +50,7 @@ type estimatorState struct {
 	setThreshold float64
 }
 
-func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
+func (dht *IpfsDHT) newEstimatorState(key string) (*estimatorState, error) {
 	// get network size and err out if there is no reasonable estimate
 	networkSize, err := dht.nsEstimator.NetworkSize()
 	if err != nil {
@@ -56,9 +58,9 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 	}
 
 	return &estimatorState{
-		ctx:                 ctx,
 		dht:                 dht,
 		key:                 key,
+		doneChan:            make(chan struct{}, int(float64(dht.bucketSize)*0.75)), // 15
 		ksKey:               ks.XORKeySpace.Key([]byte(key)),
 		networkSize:         networkSize,
 		peerStates:          map[peer.ID]addProviderRPCState{},
@@ -67,34 +69,50 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 	}, nil
 }
 
-func (dht *IpfsDHT) GetClosestPeersEstimator(ctx context.Context, key string) ([]peer.ID, error) {
+func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string) error {
 	if key == "" {
-		return nil, fmt.Errorf("can't lookup empty key")
+		return fmt.Errorf("can't lookup empty key")
 	}
 
-	es, err := dht.newEstimatorState(ctx, key)
+	es, err := dht.newEstimatorState(key)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), es.stopFn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if ctx.Err() == nil && lookupRes.completed {
+	// Store the provider records with all of the closest peers
+	// we haven't already contacted.
+	es.peerStatesLk.Lock()
+	for _, p := range lookupRes.peers {
+		if _, found := es.peerStates[p]; found {
+			continue
+		}
+		go es.putProviderRecord(ctx, p)
+		es.peerStates[p] = Sent
+	}
+	es.peerStatesLk.Unlock()
+
+	// wait until at least bucketSize * 0.75 ADD_PROVIDER RPCs have completed
+	es.waitForRPCs(int(float64(es.dht.bucketSize) * 0.75))
+
+	if ctx.Err() == nil && lookupRes.completed { // likely completed is false but that's not a given
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}
 
-	return lookupRes.peers, ctx.Err()
+	return ctx.Err()
 }
 
-func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
+func (es *estimatorState) stopFn(ctx context.Context, qps *qpeerset.QueryPeerset) bool {
 	es.peerStatesLk.Lock()
 	defer es.peerStatesLk.Unlock()
 
-	// get currently known closest peers
+	// get currently known closest peers and check if any of them is already very close.
+	// If so -> store provider records straight away.
 	closest := qps.GetClosestNInStates(es.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
 	distances := make([]float64, es.dht.bucketSize)
 	for i, p := range closest {
@@ -112,7 +130,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 		}
 
 		// peer is indeed very close already -> store the provider record directly with it!
-		go es.putProviderRecord(es.ctx, p)
+		go es.putProviderRecord(ctx, p)
 
 		// keep state that we've contacted that peer
 		es.peerStates[p] = Sent
@@ -151,10 +169,50 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 func (es *estimatorState) putProviderRecord(ctx context.Context, pid peer.ID) {
 	err := es.dht.protoMessenger.PutProvider(ctx, pid, []byte(es.key), es.dht.host)
 	es.peerStatesLk.Lock()
-	defer es.peerStatesLk.Unlock()
 	if err != nil {
 		es.peerStates[pid] = Failure
 	} else {
 		es.peerStates[pid] = Success
 	}
+	es.peerStatesLk.Unlock()
+
+	// indicate that this ADD_PROVIDER RPC has completed
+	es.doneChan <- struct{}{}
+}
+
+func (es *estimatorState) waitForRPCs(returnThreshold int) {
+	es.peerStatesLk.RLock()
+	rpcCount := len(es.peerStates)
+	es.peerStatesLk.RUnlock()
+
+	// returnThreshold can't be larger than the total number issued RPCs
+	if returnThreshold > rpcCount {
+		returnThreshold = rpcCount
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		dones := 0
+		for range es.doneChan {
+			dones += 1
+
+			// Indicate to the wait group that returnThreshold RPCs have finished but
+			// don't break here. Keep go-routine around so that the putProviderRecord
+			// go-routines can write to the done channel and everything gets cleaned
+			// up properly.
+			if dones == returnThreshold {
+				wg.Done()
+			}
+
+			// If the total number RPCs was reached break for loop and close the done channel.
+			if dones == rpcCount {
+				break
+			}
+		}
+		close(es.doneChan)
+	}()
+
+	// wait until returnThreshold ADD_PROVIDER RPCs have finished
+	wg.Wait()
 }

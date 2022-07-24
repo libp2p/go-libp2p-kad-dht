@@ -22,6 +22,10 @@ const (
 )
 
 type estimatorState struct {
+	// outer context
+	ctx context.Context
+
+	// reference to the DHT
 	dht *IpfsDHT
 
 	// the most recent network size estimation
@@ -50,7 +54,7 @@ type estimatorState struct {
 	setThreshold float64
 }
 
-func (dht *IpfsDHT) newEstimatorState(key string) (*estimatorState, error) {
+func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
 	// get network size and err out if there is no reasonable estimate
 	networkSize, err := dht.nsEstimator.NetworkSize()
 	if err != nil {
@@ -58,6 +62,7 @@ func (dht *IpfsDHT) newEstimatorState(key string) (*estimatorState, error) {
 	}
 
 	return &estimatorState{
+		ctx:                 ctx,
 		dht:                 dht,
 		key:                 key,
 		doneChan:            make(chan struct{}, int(float64(dht.bucketSize)*0.75)), // 15
@@ -74,7 +79,7 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 		return fmt.Errorf("can't lookup empty key")
 	}
 
-	es, err := dht.newEstimatorState(key)
+	es, err := dht.newEstimatorState(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -107,7 +112,7 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 	return ctx.Err()
 }
 
-func (es *estimatorState) stopFn(ctx context.Context, qps *qpeerset.QueryPeerset) bool {
+func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 	es.peerStatesLk.Lock()
 	defer es.peerStatesLk.Unlock()
 
@@ -130,7 +135,7 @@ func (es *estimatorState) stopFn(ctx context.Context, qps *qpeerset.QueryPeerset
 		}
 
 		// peer is indeed very close already -> store the provider record directly with it!
-		go es.putProviderRecord(ctx, p)
+		go es.putProviderRecord(es.ctx, p)
 
 		// keep state that we've contacted that peer
 		es.peerStates[p] = Sent

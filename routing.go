@@ -361,7 +361,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 				return peers, nil
 			},
-			func(context.Context, *qpeerset.QueryPeerset) bool {
+			func(*qpeerset.QueryPeerset) bool {
 				select {
 				case <-stopQuery:
 					return true
@@ -470,7 +470,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	return ctx.Err()
 }
 
-func (dht *IpfsDHT) OptimisticProvide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+func (dht *IpfsDHT) OptimisticProvide(ctx context.Context, key cid.Cid) (err error) {
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
@@ -634,7 +634,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 			return closest, nil
 		},
-		func(context.Context, *qpeerset.QueryPeerset) bool {
+		func(*qpeerset.QueryPeerset) bool {
 			return !findAll && psSize() >= count
 		},
 	)
@@ -689,7 +689,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 
 			return peers, err
 		},
-		func(context.Context, *qpeerset.QueryPeerset) bool {
+		func(*qpeerset.QueryPeerset) bool {
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)

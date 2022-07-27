@@ -23,8 +23,8 @@ const (
 )
 
 type estimatorState struct {
-	// outer context
-	ctx context.Context
+	// context for all ADD_PROVIDER RPCs
+	putCtx context.Context
 
 	// reference to the DHT
 	dht *IpfsDHT
@@ -71,7 +71,7 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 		return nil, err
 	}
 	return &estimatorState{
-		ctx:                 ctx,
+		putCtx:              ctx,
 		dht:                 dht,
 		key:                 key,
 		doneChan:            make(chan struct{}, int(float64(dht.bucketSize)*0.75)), // 15
@@ -89,15 +89,39 @@ func (es *estimatorState) log(a ...interface{}) {
 	fmt.Println(append([]interface{}{es.cid.String()[:16], time.Since(es.start).Seconds()}, a...)...)
 }
 
-func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string) error {
+func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key string) error {
 	if key == "" {
 		return fmt.Errorf("can't lookup empty key")
 	}
 
-	es, err := dht.newEstimatorState(ctx, key)
+	// initialize new context for all putProvider operations.
+	// We don't want to give the outer context to the put operations as we return early before all
+	// put operations have finished to avoid the long tail of the latency distribution. If we
+	// provided the outer context the put operations may be cancelled depending on what happens
+	// with the context on the user side.
+	putCtx, putCtxCancel := context.WithTimeout(context.Background(), time.Minute)
+
+	es, err := dht.newEstimatorState(putCtx, key)
 	if err != nil {
+		putCtxCancel()
 		return err
 	}
+
+	// initialize context that finishes when this function returns
+	innerCtx, innerCtxCancel := context.WithCancel(outerCtx)
+	defer innerCtxCancel()
+
+	go func() {
+		select {
+		case <-outerCtx.Done():
+			// If the outer context gets cancelled while we're still in this function. We stop all
+			// pending put operations.
+			putCtxCancel()
+		case <-innerCtx.Done():
+			// We have returned from this function. Ignore cancellations of the outer context and continue
+			// with the remaining put operations.
+		}
+	}()
 
 	es.log("start")
 	es.log("networkSize", es.networkSize)
@@ -107,7 +131,7 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 
 	defer func() { es.log("return") }()
 
-	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), es.stopFn)
+	lookupRes, err := dht.runLookupWithFollowup(outerCtx, key, dht.pmGetClosestPeers(key), es.stopFn)
 	if err != nil {
 		return err
 	}
@@ -119,9 +143,9 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 		if _, found := es.peerStates[p]; found {
 			continue
 		}
-		go es.putProviderRecord(ctx, p)
 
 		es.log("[1] write provider", p.Pretty()[:16], netsize.NormedDistance(ks.XORKeySpace.Key([]byte(p)), es.ksKey))
+		go es.putProviderRecord(p)
 		es.peerStates[p] = Sent
 	}
 	es.peerStatesLk.Unlock()
@@ -129,12 +153,12 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 	// wait until at least bucketSize * 0.75 ADD_PROVIDER RPCs have completed
 	es.waitForRPCs(int(float64(es.dht.bucketSize) * 0.75))
 
-	if ctx.Err() == nil && lookupRes.completed { // likely completed is false but that's not a given
+	if outerCtx.Err() == nil && lookupRes.completed { // likely completed is false but that's not a given
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}
 
-	return ctx.Err()
+	return outerCtx.Err()
 }
 
 func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
@@ -161,7 +185,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 
 		es.log("[0] write provider", p.Pretty()[:16], distances[i])
 		// peer is indeed very close already -> store the provider record directly with it!
-		go es.putProviderRecord(es.ctx, p)
+		go es.putProviderRecord(p)
 
 		// keep state that we've contacted that peer
 		es.peerStates[p] = Sent
@@ -197,8 +221,8 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 	return false
 }
 
-func (es *estimatorState) putProviderRecord(ctx context.Context, pid peer.ID) {
-	err := es.dht.protoMessenger.PutProvider(ctx, pid, []byte(es.key), es.dht.host)
+func (es *estimatorState) putProviderRecord(pid peer.ID) {
+	err := es.dht.protoMessenger.PutProvider(es.putCtx, pid, []byte(es.key), es.dht.host)
 	es.peerStatesLk.Lock()
 	if err != nil {
 		es.peerStates[pid] = Failure

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
@@ -52,6 +53,10 @@ type estimatorState struct {
 
 	// distance threshold for the set of bucketSize closest peers
 	setThreshold float64
+
+	// debug fields
+	start time.Time
+	cid   cid.Cid
 }
 
 func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
@@ -61,6 +66,10 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 		return nil, err
 	}
 
+	_, c, err := cid.CidFromBytes([]byte(key))
+	if err != nil {
+		return nil, err
+	}
 	return &estimatorState{
 		ctx:                 ctx,
 		dht:                 dht,
@@ -71,7 +80,13 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 		peerStates:          map[peer.ID]addProviderRPCState{},
 		individualThreshold: float64(dht.bucketSize) * 0.75 / (networkSize + 1), // 15 / (n+1)
 		setThreshold:        float64(dht.bucketSize) / (networkSize + 1),        // 20 / (n+1)
+		start:               time.Now(),
+		cid:                 c,
 	}, nil
+}
+
+func (es *estimatorState) log(a ...interface{}) {
+	fmt.Println(append([]interface{}{es.cid.String()[:16], time.Since(es.start).Seconds()}, a...)...)
 }
 
 func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string) error {
@@ -83,6 +98,14 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 	if err != nil {
 		return err
 	}
+
+	es.log("start")
+	es.log("networkSize", es.networkSize)
+	es.log("individualThreshold", es.individualThreshold)
+	es.log("setThreshold", es.setThreshold)
+	es.log("doneThreshold", 15)
+
+	defer func() { es.log("return") }()
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), es.stopFn)
 	if err != nil {
@@ -97,6 +120,8 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(ctx context.Context, key string)
 			continue
 		}
 		go es.putProviderRecord(ctx, p)
+
+		es.log("[1] write provider", p.Pretty()[:16], netsize.NormedDistance(ks.XORKeySpace.Key([]byte(p)), es.ksKey))
 		es.peerStates[p] = Sent
 	}
 	es.peerStatesLk.Unlock()
@@ -134,6 +159,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 			continue
 		}
 
+		es.log("[0] write provider", p.Pretty()[:16], distances[i])
 		// peer is indeed very close already -> store the provider record directly with it!
 		go es.putProviderRecord(es.ctx, p)
 
@@ -151,7 +177,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 
 	// if we have already contacted more than bucketSize peers stop the procedure
 	if sentAndSuccessCount >= es.dht.bucketSize {
-		fmt.Printf("Stopping due to sentAndSuccessCount %d < %d\n", sentAndSuccessCount, es.dht.bucketSize)
+		es.log(fmt.Sprintf("Stopping due to sentAndSuccessCount %d < %d", sentAndSuccessCount, es.dht.bucketSize))
 		return true
 	}
 
@@ -164,7 +190,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 
 	// if the average is below the set threshold stop the procedure
 	if avg < es.setThreshold {
-		fmt.Printf("Stopping due to average %f < %f\n", avg, es.setThreshold)
+		es.log(fmt.Sprintf("Stopping due to average %f < %f", avg, es.setThreshold))
 		return true
 	}
 
@@ -182,6 +208,7 @@ func (es *estimatorState) putProviderRecord(ctx context.Context, pid peer.ID) {
 	es.peerStatesLk.Unlock()
 
 	// indicate that this ADD_PROVIDER RPC has completed
+	es.log("[x] Write provider record done!", pid.Pretty()[:16], err != nil)
 	es.doneChan <- struct{}{}
 }
 
@@ -201,6 +228,7 @@ func (es *estimatorState) waitForRPCs(returnThreshold int) {
 		dones := 0
 		for range es.doneChan {
 			dones += 1
+			es.log("received done", dones, returnThreshold)
 
 			// Indicate to the wait group that returnThreshold RPCs have finished but
 			// don't break here. Keep go-routine around so that the putProviderRecord
@@ -216,6 +244,7 @@ func (es *estimatorState) waitForRPCs(returnThreshold int) {
 			}
 		}
 		close(es.doneChan)
+		es.log("done")
 	}()
 
 	// wait until returnThreshold ADD_PROVIDER RPCs have finished

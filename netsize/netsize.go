@@ -10,8 +10,8 @@ import (
 	"time"
 
 	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-core/peer"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/peer"
 	ks "github.com/whyrusleeping/go-keyspace"
 )
 
@@ -26,7 +26,7 @@ var (
 	MaxMeasurementAge        = 2 * time.Hour
 	MinMeasurementsThreshold = 5
 	MaxMeasurementsThreshold = 150
-	keyspaceMaxInt, _        = new(big.Int).SetString(strings.Repeat("F", 64), 16)
+	keyspaceMaxInt, _        = new(big.Int).SetString(strings.Repeat("1", 256), 2)
 	keyspaceMaxFloat         = new(big.Float).SetInt(keyspaceMaxInt)
 )
 
@@ -34,6 +34,7 @@ type Estimator struct {
 	localID    kbucket.ID
 	rt         *kbucket.RoutingTable
 	bucketSize int
+	lsqConst   float64
 
 	measurementsLk sync.RWMutex
 	measurements   map[int][]measurement
@@ -48,11 +49,14 @@ func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Es
 		measurements[i] = []measurement{}
 	}
 
+	k := float64(bucketSize)
+
 	return &Estimator{
 		localID:      kbucket.ConvertPeerID(localID),
 		rt:           rt,
 		bucketSize:   bucketSize,
 		measurements: measurements,
+		lsqConst:     k * (k + 1) * (2*k + 1) / 6.0,
 	}
 }
 
@@ -93,12 +97,9 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 	maxAgeTs := now.Add(-MaxMeasurementAge)
 
 	for i, p := range peers {
-		// Map peer to the kademlia key space
-		pKey := ks.XORKeySpace.Key([]byte(p))
-
 		// Construct measurement struct
 		m := measurement{
-			distance:  NormedDistance(pKey, ksKey),
+			distance:  NormedDistance(p, ksKey),
 			weight:    weight,
 			timestamp: now,
 		}
@@ -160,8 +161,8 @@ func (e *Estimator) NetworkSize() (float64, error) {
 		}
 
 		// Calculate Average Distance
-		sumDistances := float64(0)
-		sumWeights := float64(0)
+		sumDistances := 0.0
+		sumWeights := 0.0
 		for _, m := range e.measurements[i] {
 			sumDistances += m.weight * m.distance
 			sumWeights += m.weight
@@ -169,12 +170,12 @@ func (e *Estimator) NetworkSize() (float64, error) {
 		distanceAvg := sumDistances / sumWeights
 
 		// Calculate standard deviation
-		sumWeightedDiffs := float64(0)
+		sumWeightedDiffs := 0.0
 		for _, m := range e.measurements[i] {
 			diff := m.distance - distanceAvg
 			sumWeightedDiffs += m.weight * diff * diff
 		}
-		variance := sumWeightedDiffs / (float64((observationCount - 1)) / float64(observationCount) * sumWeights)
+		variance := sumWeightedDiffs / (float64(observationCount-1) / float64(observationCount) * sumWeights)
 		distanceStd := math.Sqrt(variance)
 
 		// Track calculations
@@ -212,8 +213,9 @@ func (e *Estimator) calcWeight(key string) float64 {
 }
 
 // NormedDistance calculates the normed XOR distance of the given keys (from 0 to 1).
-func NormedDistance(key1 ks.Key, key2 ks.Key) float64 {
-	ksDistance := new(big.Float).SetInt(key1.Distance(key2))
+func NormedDistance(p peer.ID, k ks.Key) float64 {
+	pKey := ks.XORKeySpace.Key([]byte(p))
+	ksDistance := new(big.Float).SetInt(pKey.Distance(k))
 	normedDist, _ := new(big.Float).Quo(ksDistance, keyspaceMaxFloat).Float64()
 	return normedDist
 }

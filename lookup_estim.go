@@ -3,15 +3,32 @@ package dht
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
-	"github.com/ipfs/go-cid"
-	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/peer"
 	ks "github.com/whyrusleeping/go-keyspace"
+	"gonum.org/v1/gonum/mathext"
+)
+
+const (
+	// OptProvIndividualThresholdCertainty describes how sure we want to be that an individual peer that
+	// we find during walking the DHT actually belongs to the k-closest peers based on the current network size
+	// estimate.
+	OptProvIndividualThresholdCertainty = 0.9
+
+	// OptProvSetThresholdStrictness describes the probability that the set of closest peers is actually further
+	// away then the calculated set threshold. Put differently, what is the probability that we are too strict and
+	// don't terminate the process early because we can't find any closer peers.
+	OptProvSetThresholdStrictness = 0.1
+
+	// OptProvReturnRatio corresponds to how many ADD_PROVIDER RPCs must have completed (regardless of success)
+	// before we return to the user. The ratio of 0.75 equals 15 RPC as it is based on the Kademlia bucket size.
+	OptProvReturnRatio = 0.75
 )
 
 type addProviderRPCState int
@@ -45,18 +62,14 @@ type estimatorState struct {
 	// the key to provide transformed into the Kademlia key space
 	ksKey ks.Key
 
-	// routing table error in percent (stale routing table entries)
-	rtErrPct float64
-
-	// distance threshold for individual peers
+	// distance threshold for individual peers. If peers are closer than this number we store
+	// the provider records right away.
 	individualThreshold float64
 
-	// distance threshold for the set of bucketSize closest peers
+	// distance threshold for the set of bucketSize closest peers. If the average distance of the bucketSize
+	// closest peers is below this number we stop the DHT walk and store the remaining provider records.
+	// "remaining" because we have likely already stored some on peers that were below the individualThreshold.
 	setThreshold float64
-
-	// debug fields
-	start time.Time
-	cid   cid.Cid
 }
 
 func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
@@ -66,27 +79,21 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 		return nil, err
 	}
 
-	_, c, err := cid.CidFromBytes([]byte(key))
-	if err != nil {
-		return nil, err
-	}
+	individualThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize), 1-OptProvIndividualThresholdCertainty) / networkSize
+	setThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize)/2.0+1, 1-OptProvSetThresholdStrictness) / networkSize
+	returnThreshold := int(math.Ceil(float64(dht.bucketSize) * OptProvReturnRatio))
+
 	return &estimatorState{
 		putCtx:              ctx,
 		dht:                 dht,
 		key:                 key,
-		doneChan:            make(chan struct{}, int(float64(dht.bucketSize)*0.75)), // 15
+		doneChan:            make(chan struct{}, returnThreshold), // buffered channel to not miss events
 		ksKey:               ks.XORKeySpace.Key([]byte(key)),
 		networkSize:         networkSize,
 		peerStates:          map[peer.ID]addProviderRPCState{},
-		individualThreshold: float64(dht.bucketSize) * 0.75 / (networkSize + 1), // 15 / (n+1)
-		setThreshold:        float64(dht.bucketSize) / (networkSize + 1),        // 20 / (n+1)
-		start:               time.Now(),
-		cid:                 c,
+		individualThreshold: individualThreshold,
+		setThreshold:        setThreshold,
 	}, nil
-}
-
-func (es *estimatorState) log(a ...interface{}) {
-	fmt.Println(append([]interface{}{es.cid.String()[:16], time.Since(es.start).Seconds()}, a...)...)
 }
 
 func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key string) error {
@@ -123,14 +130,6 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 		}
 	}()
 
-	es.log("start")
-	es.log("networkSize", es.networkSize)
-	es.log("individualThreshold", es.individualThreshold)
-	es.log("setThreshold", es.setThreshold)
-	es.log("doneThreshold", 15)
-
-	defer func() { es.log("return") }()
-
 	lookupRes, err := dht.runLookupWithFollowup(outerCtx, key, dht.pmGetClosestPeers(key), es.stopFn)
 	if err != nil {
 		return err
@@ -144,7 +143,6 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 			continue
 		}
 
-		es.log("[1] write provider", p.Pretty()[:16], netsize.NormedDistance(ks.XORKeySpace.Key([]byte(p)), es.ksKey))
 		go es.putProviderRecord(p)
 		es.peerStates[p] = Sent
 	}
@@ -153,7 +151,13 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 	// wait until at least bucketSize * 0.75 ADD_PROVIDER RPCs have completed
 	es.waitForRPCs(int(float64(es.dht.bucketSize) * 0.75))
 
-	if outerCtx.Err() == nil && lookupRes.completed { // likely completed is false but that's not a given
+	if outerCtx.Err() == nil && lookupRes.completed { // likely the "completed" field is false but that's not a given
+
+		// tracking lookup results for network size estimator as "completed" is true
+		if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
+			logger.Warnf("network size estimator track peers: %s", err)
+		}
+
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}
@@ -171,7 +175,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 	distances := make([]float64, es.dht.bucketSize)
 	for i, p := range closest {
 		// calculate distance of peer p to the target key
-		distances[i] = netsize.NormedDistance(ks.XORKeySpace.Key([]byte(p)), es.ksKey)
+		distances[i] = netsize.NormedDistance(p, es.ksKey)
 
 		// Check if we have already interacted with that peer
 		if _, found := es.peerStates[p]; found {
@@ -183,7 +187,6 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 			continue
 		}
 
-		es.log("[0] write provider", p.Pretty()[:16], distances[i])
 		// peer is indeed very close already -> store the provider record directly with it!
 		go es.putProviderRecord(p)
 
@@ -201,7 +204,6 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 
 	// if we have already contacted more than bucketSize peers stop the procedure
 	if sentAndSuccessCount >= es.dht.bucketSize {
-		es.log(fmt.Sprintf("Stopping due to sentAndSuccessCount %d < %d", sentAndSuccessCount, es.dht.bucketSize))
 		return true
 	}
 
@@ -214,7 +216,6 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 
 	// if the average is below the set threshold stop the procedure
 	if avg < es.setThreshold {
-		es.log(fmt.Sprintf("Stopping due to average %f < %f", avg, es.setThreshold))
 		return true
 	}
 
@@ -232,7 +233,6 @@ func (es *estimatorState) putProviderRecord(pid peer.ID) {
 	es.peerStatesLk.Unlock()
 
 	// indicate that this ADD_PROVIDER RPC has completed
-	es.log("[x] Write provider record done!", pid.Pretty()[:16], err != nil)
 	es.doneChan <- struct{}{}
 }
 
@@ -252,8 +252,6 @@ func (es *estimatorState) waitForRPCs(returnThreshold int) {
 		dones := 0
 		for range es.doneChan {
 			dones += 1
-			es.log("received done", dones, returnThreshold)
-
 			// Indicate to the wait group that returnThreshold RPCs have finished but
 			// don't break here. Keep go-routine around so that the putProviderRecord
 			// go-routines can write to the done channel and everything gets cleaned
@@ -268,7 +266,6 @@ func (es *estimatorState) waitForRPCs(returnThreshold int) {
 			}
 		}
 		close(es.doneChan)
-		es.log("done")
 	}()
 
 	// wait until returnThreshold ADD_PROVIDER RPCs have finished

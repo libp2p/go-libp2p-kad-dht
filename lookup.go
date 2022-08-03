@@ -35,12 +35,13 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 		return nil, err
 	}
 
-	// tracking lookup results for network size estimator
-	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
-		logger.Warnf("network size estimator track peers: %s", err)
-	}
-
 	if ctx.Err() == nil && lookupRes.completed {
+
+		// tracking lookup results for network size estimator
+		if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
+			logger.Warnf("network size estimator track peers: %s", err)
+		}
+
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
 	}

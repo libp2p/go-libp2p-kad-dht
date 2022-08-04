@@ -34,7 +34,6 @@ type Estimator struct {
 	localID    kbucket.ID
 	rt         *kbucket.RoutingTable
 	bucketSize int
-	lsqConst   float64
 
 	measurementsLk sync.RWMutex
 	measurements   map[int][]measurement
@@ -49,15 +48,20 @@ func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Es
 		measurements[i] = []measurement{}
 	}
 
-	k := float64(bucketSize)
-
 	return &Estimator{
 		localID:      kbucket.ConvertPeerID(localID),
 		rt:           rt,
 		bucketSize:   bucketSize,
 		measurements: measurements,
-		lsqConst:     k * (k + 1) * (2*k + 1) / 6.0,
 	}
+}
+
+// NormedDistance calculates the normed XOR distance of the given keys (from 0 to 1).
+func NormedDistance(p peer.ID, k ks.Key) float64 {
+	pKey := ks.XORKeySpace.Key([]byte(p))
+	ksDistance := new(big.Float).SetInt(pKey.Distance(k))
+	normedDist, _ := new(big.Float).Quo(ksDistance, keyspaceMaxFloat).Float64()
+	return normedDist
 }
 
 type measurement struct {
@@ -210,14 +214,6 @@ func (e *Estimator) calcWeight(key string) float64 {
 	cpl := kbucket.CommonPrefixLen(kbucket.ConvertKey(key), e.localID)
 	bucketLevel := e.rt.NPeersForCpl(uint(cpl))
 	return math.Pow(2, float64(bucketLevel-e.bucketSize))
-}
-
-// NormedDistance calculates the normed XOR distance of the given keys (from 0 to 1).
-func NormedDistance(p peer.ID, k ks.Key) float64 {
-	pKey := ks.XORKeySpace.Key([]byte(p))
-	ksDistance := new(big.Float).SetInt(pKey.Distance(k))
-	normedDist, _ := new(big.Float).Quo(ksDistance, keyspaceMaxFloat).Float64()
-	return normedDist
 }
 
 // garbageCollect removes all measurements from the list that fell out of the measurement time window.

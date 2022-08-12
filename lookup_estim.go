@@ -70,6 +70,9 @@ type estimatorState struct {
 	// closest peers is below this number we stop the DHT walk and store the remaining provider records.
 	// "remaining" because we have likely already stored some on peers that were below the individualThreshold.
 	setThreshold float64
+
+	// number of completed (regardless of success) ADD_PROVIDER RPCs before we return control back to the user.
+	returnThreshold int
 }
 
 func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
@@ -93,6 +96,7 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 		peerStates:          map[peer.ID]addProviderRPCState{},
 		individualThreshold: individualThreshold,
 		setThreshold:        setThreshold,
+		returnThreshold:     returnThreshold,
 	}, nil
 }
 
@@ -148,8 +152,8 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 	}
 	es.peerStatesLk.Unlock()
 
-	// wait until at least bucketSize * 0.75 ADD_PROVIDER RPCs have completed
-	es.waitForRPCs(int(float64(es.dht.bucketSize) * 0.75))
+	// wait until a threshold number of RPCs have completed
+	es.waitForRPCs(es.returnThreshold)
 
 	if outerCtx.Err() == nil && lookupRes.completed { // likely the "completed" field is false but that's not a given
 

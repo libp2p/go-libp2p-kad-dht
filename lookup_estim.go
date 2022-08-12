@@ -215,11 +215,7 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 	avg := sum / float64(len(distances))
 
 	// if the average is below the set threshold stop the procedure
-	if avg < es.setThreshold {
-		return true
-	}
-
-	return false
+	return avg < es.setThreshold
 }
 
 func (es *estimatorState) putProviderRecord(pid peer.ID) {

@@ -187,8 +187,17 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		bulkSendParallelism: 20,
 	}
 
+	var seedPeers []peer.AddrInfo
+	if fullrtcfg.skipInitialRTVerification {
+		for _, ai := range fullrtcfg.initialRTPeers {
+			rt.peerAddrs[ai.ID] = ai.Addrs
+		}
+	} else {
+		seedPeers = fullrtcfg.initialRTPeers[:]
+	}
+
 	rt.wg.Add(1)
-	go rt.runCrawler(ctx)
+	go rt.runCrawler(ctx, seedPeers)
 
 	return rt, nil
 }
@@ -220,6 +229,16 @@ func (dht *FullRT) Stat() map[string]peer.ID {
 	return newMap
 }
 
+func (dht *FullRT) GetRoutingTablePeers() []peer.AddrInfo {
+	dht.peerAddrsLk.RLock()
+	defer dht.peerAddrsLk.RUnlock()
+	ais := make([]peer.AddrInfo, 0, len(dht.peerAddrs))
+	for id, addrs := range dht.peerAddrs {
+		ais = append(ais, peer.AddrInfo{ID: id, Addrs: addrs})
+	}
+	return ais
+}
+
 func (dht *FullRT) Ready() bool {
 	dht.rtLk.RLock()
 	lastCrawlTime := dht.lastCrawlTime
@@ -242,7 +261,7 @@ func (dht *FullRT) Host() host.Host {
 	return dht.h
 }
 
-func (dht *FullRT) runCrawler(ctx context.Context) {
+func (dht *FullRT) runCrawler(ctx context.Context, initialSeedPeers []peer.AddrInfo) {
 	defer dht.wg.Done()
 	t := time.NewTicker(dht.crawlerInterval)
 
@@ -251,6 +270,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 
 	initialTrigger := make(chan struct{}, 1)
 	initialTrigger <- struct{}{}
+
+	firstCrawl := true
 
 	for {
 		select {
@@ -262,6 +283,13 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		}
 
 		var addrs []*peer.AddrInfo
+		if firstCrawl {
+			firstCrawl = false
+			for _, ai := range initialSeedPeers {
+				addrs = append(addrs, &ai)
+			}
+		}
+
 		dht.peerAddrsLk.Lock()
 		for k := range m {
 			addrs = append(addrs, &peer.AddrInfo{ID: k}) // Addrs: v.addrs

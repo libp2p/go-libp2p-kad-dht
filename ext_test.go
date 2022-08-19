@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/protocol"
-	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/stretchr/testify/require"
 
 	record "github.com/libp2p/go-libp2p-record"
@@ -45,7 +45,7 @@ func TestHungRequest(t *testing.T) {
 	for _, proto := range d.serverProtocols {
 		// Hang on every request.
 		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
-			defer s.Reset() //nolint
+			defer s.Reset() // nolint
 			<-ctx.Done()
 		})
 	}
@@ -308,7 +308,7 @@ func TestNotFound(t *testing.T) {
 				// make sure we didn't just disconnect
 				t.Fatal("expected peers in the routing table")
 			}
-			//Success!
+			// Success!
 			return
 		case u.ErrTimeout:
 			t.Fatal("Should not have gotten timeout!")
@@ -382,7 +382,7 @@ func TestLessThanKResponses(t *testing.T) {
 	if _, err := d.GetValue(ctx, "hello"); err != nil {
 		switch err {
 		case routing.ErrNotFound:
-			//Success!
+			// Success!
 			return
 		case u.ErrTimeout:
 			t.Fatal("Should not have gotten timeout!")
@@ -452,7 +452,7 @@ func TestMultipleQueries(t *testing.T) {
 		if _, err := d.GetValue(ctx, "hello"); err != nil {
 			switch err {
 			case routing.ErrNotFound:
-				//Success!
+				// Success!
 				continue
 			case u.ErrTimeout:
 				t.Fatal("Should not have gotten timeout!")

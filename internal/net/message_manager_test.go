@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"

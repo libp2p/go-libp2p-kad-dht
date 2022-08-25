@@ -3,7 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -235,7 +235,7 @@ func TestProvidesExpire(t *testing.T) {
 	}
 }
 
-var _ = ioutil.NopCloser
+var _ = io.NopCloser
 var _ = os.DevNull
 
 // TestLargeProvidersSet can be used for profiling.
@@ -248,7 +248,7 @@ func TestLargeProvidersSet(t *testing.T) {
 
 	dstore := ds.NewMapDatastore()
 
-	//dirn, err := ioutil.TempDir("", "provtest")
+	//dirn, err := os.MkdirTemp("", "provtest")
 	//if err != nil {
 	//	t.Fatal(err)
 	//}

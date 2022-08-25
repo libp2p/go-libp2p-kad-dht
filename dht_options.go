@@ -65,9 +65,9 @@ func RoutingTableRefreshQueryTimeout(timeout time.Duration) Option {
 // RoutingTableRefreshPeriod sets the period for refreshing buckets in the
 // routing table. The DHT will refresh buckets every period by:
 //
-// 1. First searching for nearby peers to figure out how many buckets we should try to fill.
-// 1. Then searching for a random key in each bucket that hasn't been queried in
-//    the last refresh period.
+//  1. First searching for nearby peers to figure out how many buckets we should try to fill.
+//  1. Then searching for a random key in each bucket that hasn't been queried in
+//     the last refresh period.
 func RoutingTableRefreshPeriod(period time.Duration) Option {
 	return func(c *dhtcfg.Config) error {
 		c.RoutingTable.RefreshInterval = period

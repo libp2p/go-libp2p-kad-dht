@@ -625,16 +625,23 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // peerFound signals the routingTable that we've found a peer that
 // might support the DHT protocol.
 // If we have a connection a peer but no exchange of a query RPC ->
-//    LastQueriedAt=time.Now (so we don't ping it for some time for a liveliness check)
-//    LastUsefulAt=0
+//
+//	LastQueriedAt=time.Now (so we don't ping it for some time for a liveliness check)
+//	LastUsefulAt=0
+//
 // If we connect to a peer and then exchange a query RPC ->
-//    LastQueriedAt=time.Now (same reason as above)
-//    LastUsefulAt=time.Now (so we give it some life in the RT without immediately evicting it)
+//
+//	LastQueriedAt=time.Now (same reason as above)
+//	LastUsefulAt=time.Now (so we give it some life in the RT without immediately evicting it)
+//
 // If we query a peer we already have in our Routing Table ->
-//    LastQueriedAt=time.Now()
-//    LastUsefulAt remains unchanged
+//
+//	LastQueriedAt=time.Now()
+//	LastUsefulAt remains unchanged
+//
 // If we connect to a peer we already have in the RT but do not exchange a query (rare)
-//    Do Nothing.
+//
+//	Do Nothing.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	if c := baseLogger.Check(zap.DebugLevel, "peer found"); c != nil {
 		c.Write(zap.String("peer", p.String()))

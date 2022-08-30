@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/test"
+	"github.com/libp2p/go-libp2p/core/test"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
+	pstore "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 
 	"github.com/stretchr/testify/require"
 )

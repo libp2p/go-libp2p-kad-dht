@@ -14,12 +14,12 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/protocol"
-	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
 	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/gogo/protobuf/proto"
@@ -661,7 +661,7 @@ func (dht *FullRT) updatePeerValues(ctx context.Context, key string, val []byte,
 	fixupRec := record.MakePutRecord(key, val)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			//TODO: Is this possible?
+			// TODO: Is this possible?
 			if p == dht.h.ID() {
 				err := dht.putLocal(ctx, key, fixupRec)
 				if err != nil {

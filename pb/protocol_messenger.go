@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	logging "github.com/ipfs/go-log"
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/peer"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multihash"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"

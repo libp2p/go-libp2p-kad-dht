@@ -7,18 +7,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/peer"
-	peerstore "github.com/libp2p/go-libp2p-core/peerstore"
-	peerstoreImpl "github.com/libp2p/go-libp2p-peerstore"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	peerstoreImpl "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 
 	lru "github.com/hashicorp/golang-lru/simplelru"
 	ds "github.com/ipfs/go-datastore"
-	autobatch "github.com/ipfs/go-datastore/autobatch"
+	"github.com/ipfs/go-datastore/autobatch"
 	dsq "github.com/ipfs/go-datastore/query"
 	logging "github.com/ipfs/go-log"
-	goprocess "github.com/jbenet/goprocess"
+	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	base32 "github.com/multiformats/go-base32"
+	"github.com/multiformats/go-base32"
 )
 
 // ProvidersKeyPrefix is the prefix/namespace for ALL provider record

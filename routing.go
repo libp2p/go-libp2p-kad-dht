@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/routing"
 
 	"github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
@@ -251,7 +251,7 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	fixupRec := record.MakePutRecord(key, val)
 	for _, p := range peers {
 		go func(p peer.ID) {
-			//TODO: Is this possible?
+			// TODO: Is this possible?
 			if p == dht.self {
 				err := dht.putLocal(ctx, key, fixupRec)
 				if err != nil {

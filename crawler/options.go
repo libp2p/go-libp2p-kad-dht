@@ -3,7 +3,7 @@ package crawler
 import (
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
 // Option DHT Crawler option type.

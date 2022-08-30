@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/libp2p/go-libp2p-core/event"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-
-	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p/core/event"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 
 	"github.com/jbenet/goprocess"
 	ma "github.com/multiformats/go-multiaddr"

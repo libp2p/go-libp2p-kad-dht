@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/test"
+	"github.com/libp2p/go-libp2p/core/test"
 
 	u "github.com/ipfs/go-ipfs-util"
-	ci "github.com/libp2p/go-libp2p-core/crypto"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/routing"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
+	ci "github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/routing"
 )
 
 // Check that GetPublicKey() correctly extracts a public key

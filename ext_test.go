@@ -45,7 +45,7 @@ func TestHungRequest(t *testing.T) {
 	for _, proto := range d.serverProtocols {
 		// Hang on every request.
 		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
-			defer s.Reset() // nolint
+			defer s.Reset() //nolint
 			<-ctx.Done()
 		})
 	}

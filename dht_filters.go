@@ -217,7 +217,7 @@ func isEUI(ip net.IP) bool {
 
 func sameV6Net(a, b net.IP) bool {
 	//lint:ignore SA1021 We're comparing only parts of the IP address here.
-	return len(a) == net.IPv6len && len(b) == net.IPv6len && bytes.Equal(a[0:8], b[0:8]) // nolint
+	return len(a) == net.IPv6len && len(b) == net.IPv6len && bytes.Equal(a[0:8], b[0:8]) //nolint
 }
 
 func isRelayAddr(a ma.Multiaddr) bool {

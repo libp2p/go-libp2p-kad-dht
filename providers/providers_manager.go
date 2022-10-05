@@ -26,7 +26,7 @@ import (
 const ProvidersKeyPrefix = "/providers/"
 
 // ProvideValidity is the default time that a provider record should last
-var ProvideValidity = time.Hour * 24
+var ProvideValidity = time.Hour * 48
 var defaultCleanupInterval = time.Hour
 var lruCacheSize = 256
 var batchBufferSize = 256

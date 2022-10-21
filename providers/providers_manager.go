@@ -21,9 +21,16 @@ import (
 	"github.com/multiformats/go-base32"
 )
 
-// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
-// keys stored in the data store.
-const ProvidersKeyPrefix = "/providers/"
+const (
+	// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
+	// keys stored in the data store.
+	ProvidersKeyPrefix = "/providers/"
+
+	// ProviderAddrTTL is the TTL to keep the multi addresses of provider
+	// peers around. This means we return those addresses alongside provider
+	// records and likely make the second DHT lookup for addresses obsolete.
+	ProviderAddrTTL = 24 * time.Hour
+)
 
 // ProvideValidity is the default time that a provider record should last
 var ProvideValidity = time.Hour * 24
@@ -232,7 +239,7 @@ func (pm *ProviderManager) run(ctx context.Context, proc goprocess.Process) {
 // AddProvider adds a provider
 func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
 	if provInfo.ID != pm.self { // don't add own addrs.
-		pm.pstore.AddAddrs(provInfo.ID, provInfo.Addrs, peerstore.ProviderAddrTTL)
+		pm.pstore.AddAddrs(provInfo.ID, provInfo.Addrs, ProviderAddrTTL)
 	}
 	prov := &addProv{
 		ctx: ctx,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
@@ -73,6 +74,9 @@ type estimatorState struct {
 
 	// number of completed (regardless of success) ADD_PROVIDER RPCs before we return control back to the user.
 	returnThreshold int
+
+	// putProvDone counts the ADD_PROVIDER RPCs that have completed (successful and unsuccessful)
+	putProvDone atomic.Int32
 }
 
 func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
@@ -97,6 +101,7 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 		individualThreshold: individualThreshold,
 		setThreshold:        setThreshold,
 		returnThreshold:     returnThreshold,
+		putProvDone:         atomic.Int32{},
 	}, nil
 }
 
@@ -153,7 +158,7 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 	es.peerStatesLk.Unlock()
 
 	// wait until a threshold number of RPCs have completed
-	es.waitForRPCs(es.returnThreshold)
+	es.waitForRPCs()
 
 	if outerCtx.Err() == nil && lookupRes.completed { // likely the "completed" field is false but that's not a given
 
@@ -236,38 +241,62 @@ func (es *estimatorState) putProviderRecord(pid peer.ID) {
 	es.doneChan <- struct{}{}
 }
 
-func (es *estimatorState) waitForRPCs(returnThreshold int) {
+// waitForRPCs waits for a subset of ADD_PROVIDER RPCs to complete and then acquire a lease on
+// a bound channel to return early back to the user and prevent unbound asynchronicity. If
+// there are already too many requests in-flight we are just waiting for our current set to
+// finish.
+func (es *estimatorState) waitForRPCs() {
 	es.peerStatesLk.RLock()
 	rpcCount := len(es.peerStates)
 	es.peerStatesLk.RUnlock()
 
 	// returnThreshold can't be larger than the total number issued RPCs
-	if returnThreshold > rpcCount {
-		returnThreshold = rpcCount
+	if es.returnThreshold > rpcCount {
+		es.returnThreshold = rpcCount
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		dones := 0
-		for range es.doneChan {
-			dones += 1
-			// Indicate to the wait group that returnThreshold RPCs have finished but
-			// don't break here. Keep go-routine around so that the putProviderRecord
-			// go-routines can write to the done channel and everything gets cleaned
-			// up properly.
-			if dones == returnThreshold {
-				wg.Done()
-			}
+	// Wait until returnThreshold ADD_PROVIDER RPCs have returned
+	for range es.doneChan {
+		if int(es.putProvDone.Add(1)) == es.returnThreshold {
+			break
+		}
+	}
+	// At this point only a subset of all ADD_PROVIDER RPCs have completed.
+	// We want to give control back to the user as soon as possible because
+	// it is highly likely that at least one of the remaining RPCs will time
+	// out and thus slow down the whole processes. The provider records will
+	// already be available with less than the total number of RPCs having
+	// finished. This has been investigated here:
+	// https://github.com/protocol/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 
-			// If the total number RPCs was reached break for loop and close the done channel.
-			if dones == rpcCount {
-				break
+	// For the remaining ADD_PROVIDER RPCs try to acquire a lease on the optProvJobsPool channel.
+	// If that worked we need to consume the doneChan and release the acquired lease on the
+	// optProvJobsPool channel.
+	remaining := rpcCount - int(es.putProvDone.Load())
+	for i := 0; i < remaining; i++ {
+		select {
+		case es.dht.optProvJobsPool <- struct{}{}:
+			// We were able to acquire a lease on the optProvJobsPool channel.
+			// Consume doneChan to release the acquired lease again.
+			go es.consumeDoneChan(rpcCount)
+		case <-es.doneChan:
+			// We were not able to acquire a lease but an ADD_PROVIDER RPC resolved.
+			if int(es.putProvDone.Add(1)) == rpcCount {
+				close(es.doneChan)
 			}
 		}
-		close(es.doneChan)
-	}()
+	}
+}
 
-	// wait until returnThreshold ADD_PROVIDER RPCs have finished
-	wg.Wait()
+func (es *estimatorState) consumeDoneChan(until int) {
+	// Wait for an RPC to finish
+	<-es.doneChan
+
+	// Release acquired lease for other's to get a spot
+	<-es.dht.optProvJobsPool
+
+	// If all RPCs have finished, close the channel.
+	if int(es.putProvDone.Add(1)) == until {
+		close(es.doneChan)
+	}
 }

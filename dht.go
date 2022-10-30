@@ -149,8 +149,11 @@ type IpfsDHT struct {
 	rtFreezeTimeout time.Duration
 
 	// network size estimator
-	nsEstimator             *netsize.Estimator
-	enableOptimisticProvide bool
+	nsEstimator   *netsize.Estimator
+	enableOptProv bool
+
+	// a bound channel to limit asynchronicity of in-flight ADD_PROVIDER RPCs
+	optProvJobsPool chan struct{}
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
@@ -304,7 +307,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		addPeerToRTChan:   make(chan addPeerRTReq),
 		refreshFinishedCh: make(chan struct{}),
 
-		enableOptimisticProvide: cfg.EnableOptimisticProvide,
+		enableOptProv:   cfg.EnableOptimisticProvide,
+		optProvJobsPool: nil,
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration
@@ -332,6 +336,10 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 
 	// init network size estimator
 	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
+
+	if dht.enableOptProv {
+		dht.optProvJobsPool = make(chan struct{}, cfg.OptimisticProvideJobsPoolSize)
+	}
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)

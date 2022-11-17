@@ -37,22 +37,28 @@ type Estimator struct {
 	measurementsLk sync.RWMutex
 	measurements   map[int][]measurement
 
-	netSizeCache *float64
+	netSizeCache   *float64
+	weightFuncType WeightFuncType
 }
 
-func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Estimator {
-	// initialize map to hold measurement observations
-	measurements := map[int][]measurement{}
-	for i := 0; i < bucketSize; i++ {
-		measurements[i] = []measurement{}
+func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, opts ...Option) *Estimator {
+	es := &Estimator{
+		localID:        kbucket.ConvertPeerID(localID),
+		rt:             rt,
+		measurements:   map[int][]measurement{},
+		bucketSize:     DefaultBucketSize,
+		weightFuncType: DefaultWeightFuncType,
 	}
 
-	return &Estimator{
-		localID:      kbucket.ConvertPeerID(localID),
-		rt:           rt,
-		bucketSize:   bucketSize,
-		measurements: measurements,
+	for _, opt := range opts {
+		opt(es)
 	}
+
+	for i := 0; i < es.bucketSize; i++ {
+		es.measurements[i] = []measurement{}
+	}
+
+	return es
 }
 
 // NormedDistance calculates the normed XOR distance of the given keys (from 0 to 1).
@@ -202,17 +208,6 @@ func (e *Estimator) NetworkSize() (float64, error) {
 
 	logger.Debugw("New network size estimation", "estimate", *e.netSizeCache)
 	return netSize, nil
-}
-
-// calcWeight weighs data points exponentially less if they fall into a non-full bucket.
-// It weighs distance estimates based on their CPLs and bucket levels.
-// Bucket Level: 20 -> 1/2^0 -> weight: 1
-// Bucket Level: 17 -> 1/2^3 -> weight: 1/8
-// Bucket Level: 10 -> 1/2^10 -> weight: 1/1024
-func (e *Estimator) calcWeight(key string) float64 {
-	cpl := kbucket.CommonPrefixLen(kbucket.ConvertKey(key), e.localID)
-	bucketLevel := e.rt.NPeersForCpl(uint(cpl))
-	return math.Pow(2, float64(bucketLevel-e.bucketSize))
 }
 
 // garbageCollect removes all measurements from the list that fell out of the measurement time window.

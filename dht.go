@@ -138,6 +138,9 @@ type IpfsDHT struct {
 	// networks).
 	enableProviders, enableValues bool
 
+	// Disable sending of closer peers for GetProviders queries
+	disableGetProvidersCloserPeers bool
+
 	disableFixLowPeers bool
 	fixLowPeersChan    chan struct{}
 
@@ -278,21 +281,22 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	serverProtocols = []protocol.ID{v1proto}
 
 	dht := &IpfsDHT{
-		datastore:              cfg.Datastore,
-		self:                   h.ID(),
-		selfKey:                kb.ConvertPeerID(h.ID()),
-		peerstore:              h.Peerstore(),
-		host:                   h,
-		birth:                  time.Now(),
-		protocols:              protocols,
-		protocolsStrs:          protocol.ConvertToStrings(protocols),
-		serverProtocols:        serverProtocols,
-		bucketSize:             cfg.BucketSize,
-		alpha:                  cfg.Concurrency,
-		beta:                   cfg.Resiliency,
-		queryPeerFilter:        cfg.QueryPeerFilter,
-		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
-		rtPeerDiversityFilter:  cfg.RoutingTable.DiversityFilter,
+		datastore:                      cfg.Datastore,
+		self:                           h.ID(),
+		selfKey:                        kb.ConvertPeerID(h.ID()),
+		peerstore:                      h.Peerstore(),
+		host:                           h,
+		birth:                          time.Now(),
+		protocols:                      protocols,
+		protocolsStrs:                  protocol.ConvertToStrings(protocols),
+		serverProtocols:                serverProtocols,
+		bucketSize:                     cfg.BucketSize,
+		alpha:                          cfg.Concurrency,
+		beta:                           cfg.Resiliency,
+		queryPeerFilter:                cfg.QueryPeerFilter,
+		routingTablePeerFilter:         cfg.RoutingTable.PeerFilter,
+		rtPeerDiversityFilter:          cfg.RoutingTable.DiversityFilter,
+		disableGetProvidersCloserPeers: cfg.DisableGetProvidersCloserPeers,
 
 		fixLowPeersChan: make(chan struct{}, 1),
 

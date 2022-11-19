@@ -291,6 +291,16 @@ func RoutingTablePeerDiversityFilter(pg peerdiversity.PeerIPGroupFilter) Option 
 	}
 }
 
+// DisableGetProvidersCloserPeers always returns an empty closer peers list for a GetProviders response.
+// WARNING: do not change this unless you're using a forked DHT (i.e., a private
+// network and/or distinct DHT protocols with the `Protocols` option).
+func DisableGetProvidersCloserPeers() Option {
+	return func(c *dhtcfg.Config) error {
+		c.DisableGetProvidersCloserPeers = true
+		return nil
+	}
+}
+
 // disableFixLowPeersRoutine disables the "fixLowPeers" routine in the DHT.
 // This is ONLY for tests.
 func disableFixLowPeersRoutine(t *testing.T) Option {

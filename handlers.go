@@ -20,7 +20,7 @@ import (
 )
 
 // dhthandler specifies the signature of functions that handle DHT messages.
-type dhtHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, error)
+type dhtHandler func(context.Context, peer.ID, *pb.Message) (msg *pb.Message, err error)
 
 func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 	switch t {
@@ -314,14 +314,21 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 		return nil, fmt.Errorf("handleGetProviders key is empty")
 	}
 
-	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
-
 	// setup providers
 	providers, err := dht.providerStore.GetProviders(ctx, key)
 	if err != nil {
 		return nil, err
 	}
-	resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), providers)
+
+	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
+
+	if providers != nil {
+		resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), providers)
+	}
+
+	if dht.disableGetProvidersCloserPeers {
+		return resp, nil
+	}
 
 	// Also send closer peers.
 	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)

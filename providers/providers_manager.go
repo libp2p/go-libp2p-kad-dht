@@ -25,6 +25,11 @@ import (
 // keys stored in the data store.
 const ProvidersKeyPrefix = "/providers/"
 
+// ProviderAddrTTL is the TTL of an address we've received from a provider.
+// This is also a temporary address, but lasts longer. After this expires,
+// the records we return will require an extra lookup.
+const ProviderAddrTTL = time.Minute * 30
+
 // ProvideValidity is the default time that a provider record should last
 var ProvideValidity = time.Hour * 24
 var defaultCleanupInterval = time.Hour
@@ -232,7 +237,7 @@ func (pm *ProviderManager) run(ctx context.Context, proc goprocess.Process) {
 // AddProvider adds a provider
 func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
 	if provInfo.ID != pm.self { // don't add own addrs.
-		pm.pstore.AddAddrs(provInfo.ID, provInfo.Addrs, peerstore.ProviderAddrTTL)
+		pm.pstore.AddAddrs(provInfo.ID, provInfo.Addrs, ProviderAddrTTL)
 	}
 	prov := &addProv{
 		ctx: ctx,

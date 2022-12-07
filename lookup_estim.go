@@ -10,7 +10,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
-	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ks "github.com/whyrusleeping/go-keyspace"
 	"gonum.org/v1/gonum/mathext"
@@ -159,17 +158,6 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 
 	// wait until a threshold number of RPCs have completed
 	es.waitForRPCs()
-
-	if outerCtx.Err() == nil && lookupRes.completed { // likely the "completed" field is false but that's not a given
-
-		// tracking lookup results for network size estimator as "completed" is true
-		if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
-			logger.Warnf("network size estimator track peers: %s", err)
-		}
-
-		// refresh the cpl for this key as the query was successful
-		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
-	}
 
 	return outerCtx.Err()
 }

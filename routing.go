@@ -486,14 +486,14 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 	findAll := count == 0
 
-	ps := make(map[peer.ID]struct{})
+	ps := make(map[peer.ID]peer.AddrInfo)
 	psLock := &sync.Mutex{}
-	psTryAdd := func(p peer.ID) bool {
+	psTryAdd := func(p peer.AddrInfo) bool {
 		psLock.Lock()
 		defer psLock.Unlock()
-		_, ok := ps[p]
-		if !ok && (len(ps) < count || findAll) {
-			ps[p] = struct{}{}
+		pi, ok := ps[p.ID]
+		if (!ok && (len(ps) < count || findAll)) || ((len(pi.Addrs) == 0) && len(p.Addrs) > 0){
+			ps[p.ID] = p
 			return true
 		}
 		return false
@@ -510,7 +510,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	}
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
-		if psTryAdd(p.ID) {
+		if psTryAdd(p) {
 			select {
 			case peerOut <- p:
 			case <-ctx.Done():
@@ -544,7 +544,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 			for _, prov := range provs {
 				dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
 				logger.Debugf("got provider: %s", prov)
-				if psTryAdd(prov.ID) {
+				if psTryAdd(*prov) {
 					logger.Debugf("using provider: %s", prov)
 					select {
 					case peerOut <- *prov:

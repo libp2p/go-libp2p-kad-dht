@@ -492,7 +492,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		psLock.Lock()
 		defer psLock.Unlock()
 		pi, ok := ps[p.ID]
-		if (!ok && (len(ps) < count || findAll)) || ((len(pi.Addrs) == 0) && len(p.Addrs) > 0){
+		if (!ok && (len(ps) < count || findAll)) || ((len(pi.Addrs) == 0) && len(p.Addrs) > 0) {
 			ps[p.ID] = p
 			return true
 		}

@@ -218,10 +218,9 @@ func (e *Estimator) calcWeight(key string) float64 {
 // garbageCollect removes all measurements from the list that fell out of the measurement time window.
 func (e *Estimator) garbageCollect() {
 	logger.Debug("Running garbage collection")
-	now := time.Now()
 
 	// the maximum age timestamp of the measurement data points
-	maxAgeTs := now.Add(-MaxMeasurementAge)
+	maxAgeTs := time.Now().Add(-MaxMeasurementAge)
 
 	for i := 0; i < e.bucketSize; i++ {
 

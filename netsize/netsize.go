@@ -91,7 +91,7 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 	e.netSizeCache = nil
 
 	// Calculate weight for the peer distances.
-	weight := e.calcWeight(key)
+	weight := e.calcWeight(key, peers)
 
 	// Map given key to the Kademlia key space (hash it)
 	ksKey := ks.XORKeySpace.Key([]byte(key))
@@ -209,9 +209,33 @@ func (e *Estimator) NetworkSize() (float64, error) {
 // Bucket Level: 20 -> 1/2^0 -> weight: 1
 // Bucket Level: 17 -> 1/2^3 -> weight: 1/8
 // Bucket Level: 10 -> 1/2^10 -> weight: 1/1024
-func (e *Estimator) calcWeight(key string) float64 {
+//
+// It can happen that the routing table doesn't have a full bucket, but we are tracking here
+// a list of peers that would theoretically have been suitable for that bucket. Let's imagine
+// there are only 13 peers in bucket 3 although there is space for 20. Now, the Track function
+// gets a peers list (len 20) where all peers fall into bucket 3. The weight of this set of peers
+// should be 1 instead of 1/2^7.
+// I actually thought this cannot happen as peers would have been added to the routing table before
+// the Track function gets called. But they seem sometimes not to be added.
+func (e *Estimator) calcWeight(key string, peers []peer.ID) float64 {
+
 	cpl := kbucket.CommonPrefixLen(kbucket.ConvertKey(key), e.localID)
 	bucketLevel := e.rt.NPeersForCpl(uint(cpl))
+
+	if bucketLevel < e.bucketSize {
+		// routing table doesn't have a full bucket. Check how many peers would fit into that bucket
+		peerLevel := 0
+		for _, p := range peers {
+			if cpl == kbucket.CommonPrefixLen(kbucket.ConvertPeerID(p), e.localID) {
+				peerLevel += 1
+			}
+		}
+
+		if peerLevel > bucketLevel {
+			return math.Pow(2, float64(peerLevel-e.bucketSize))
+		}
+	}
+
 	return math.Pow(2, float64(bucketLevel-e.bucketSize))
 }
 

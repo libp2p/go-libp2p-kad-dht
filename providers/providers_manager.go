@@ -30,7 +30,8 @@ const ProvidersKeyPrefix = "/providers/"
 // the records we return will require an extra lookup.
 const ProviderAddrTTL = time.Minute * 30
 
-// ProvideValidity is the default time that a provider record should last
+// ProvideValidity is the default time that a Provider Record should last on DHT
+// This value is also known as Provider Record Expiration Interval.
 var ProvideValidity = time.Hour * 48
 var defaultCleanupInterval = time.Hour
 var lruCacheSize = 256

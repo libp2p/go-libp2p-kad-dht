@@ -31,7 +31,7 @@ const ProvidersKeyPrefix = "/providers/"
 const ProviderAddrTTL = time.Minute * 30
 
 // ProvideValidity is the default time that a provider record should last
-var ProvideValidity = time.Hour * 24
+var ProvideValidity = time.Hour * 48
 var defaultCleanupInterval = time.Hour
 var lruCacheSize = 256
 var batchBufferSize = 256

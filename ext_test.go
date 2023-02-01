@@ -9,7 +9,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +44,7 @@ func TestHungRequest(t *testing.T) {
 	for _, proto := range d.serverProtocols {
 		// Hang on every request.
 		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
-			defer s.Reset() //nolint
+			defer s.Reset() // nolint
 			<-ctx.Done()
 		})
 	}
@@ -285,7 +284,7 @@ func TestNotFound(t *testing.T) {
 			if host == peer {
 				continue
 			}
-			_ = peer.Peerstore().AddProtocols(host.ID(), protocol.ConvertToStrings(d.serverProtocols)...)
+			_ = peer.Peerstore().AddProtocols(host.ID(), d.serverProtocols...)
 		}
 	}
 

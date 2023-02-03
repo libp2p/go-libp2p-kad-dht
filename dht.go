@@ -365,10 +365,15 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 		return err
 	}
 
+	pingFnc := func(ctx context.Context, p peer.ID) error {
+		return dht.protoMessenger.Ping(ctx, p)
+	}
+
 	r, err := rtrefresh.NewRtRefreshManager(
 		dht.host, dht.routingTable, cfg.RoutingTable.AutoRefresh,
 		keyGenFnc,
 		queryFnc,
+		pingFnc,
 		cfg.RoutingTable.RefreshQueryTimeout,
 		cfg.RoutingTable.RefreshInterval,
 		maxLastSuccessfulOutboundThreshold,

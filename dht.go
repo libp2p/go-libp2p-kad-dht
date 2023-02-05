@@ -26,6 +26,7 @@ import (
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 
 	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
@@ -366,7 +367,19 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 	}
 
 	pingFnc := func(ctx context.Context, p peer.ID) error {
-		return dht.protoMessenger.Ping(ctx, p)
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		// Just wait for a single ping
+		select {
+		case res, more := <-ping.Ping(timeoutCtx, dht.host, p):
+			if !more {
+				return timeoutCtx.Err()
+			}
+			return res.Error
+		case <-timeoutCtx.Done():
+			return timeoutCtx.Err()
+		}
 	}
 
 	r, err := rtrefresh.NewRtRefreshManager(

@@ -69,6 +69,11 @@ const (
 	protectedBuckets = 2
 )
 
+const (
+	// MAGIC: timeout for receiving a pong from a peer in our routing table
+	pingTimeout = 5 * time.Second
+)
+
 type addPeerRTReq struct {
 	p         peer.ID
 	queryPeer bool
@@ -367,7 +372,7 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 	}
 
 	pingFnc := func(ctx context.Context, p peer.ID) error {
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		timeoutCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 		defer cancel()
 
 		// Just wait for a single ping

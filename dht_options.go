@@ -310,7 +310,11 @@ func forceAddressUpdateProcessing(t *testing.T) Option {
 	}
 }
 
-// EnableOptimisticProvide enables an optimisation when it comes to writing provider records in the DHT network.
+// EnableOptimisticProvide enables and optimization that skips the last hops of the provide process.
+// This works by using the network size estimator (which use the keyspace density of queries)
+// to optimistically send ADD_PROVIDER requests when we most likely find the last hops.
+// It will also run some ADD_PROVIDER requests asynchronously in the background after returning,
+// this allows to optimistically return earlier if some threshold succeeded.
 func EnableOptimisticProvide() Option {
 	return func(c *dhtcfg.Config) error {
 		c.EnableOptimisticProvide = true

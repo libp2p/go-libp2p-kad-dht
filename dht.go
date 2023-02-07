@@ -26,7 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 
 	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
@@ -67,11 +66,6 @@ const (
 const (
 	kbucketTag       = "kbucket"
 	protectedBuckets = 2
-)
-
-const (
-	// MAGIC: timeout for receiving a pong from a peer in our routing table
-	pingTimeout = 5 * time.Second
 )
 
 type addPeerRTReq struct {
@@ -372,19 +366,7 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 	}
 
 	pingFnc := func(ctx context.Context, p peer.ID) error {
-		timeoutCtx, cancel := context.WithTimeout(ctx, pingTimeout)
-		defer cancel()
-
-		// Just wait for a single ping
-		select {
-		case res, more := <-ping.Ping(timeoutCtx, dht.host, p):
-			if !more {
-				return timeoutCtx.Err()
-			}
-			return res.Error
-		case <-timeoutCtx.Done():
-			return timeoutCtx.Err()
-		}
+		return dht.protoMessenger.Ping(ctx, p)
 	}
 
 	r, err := rtrefresh.NewRtRefreshManager(

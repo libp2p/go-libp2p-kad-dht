@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
@@ -1735,7 +1736,7 @@ func TestClientModeAtInit(t *testing.T) {
 	client := setupDHT(ctx, t, true)
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
-	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 }
 
 func TestModeChange(t *testing.T) {
@@ -1746,7 +1747,7 @@ func TestModeChange(t *testing.T) {
 	clientToServer := setupDHT(ctx, t, true)
 	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
 	err := clientOnly.Ping(ctx, clientToServer.PeerID())
-	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 	err = clientToServer.setMode(modeServer)
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
@@ -1775,7 +1776,7 @@ func TestDynamicModeSwitching(t *testing.T) {
 
 	assertDHTClient := func() {
 		err = prober.Ping(ctx, node.PeerID())
-		assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+		assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
 			t.Errorf("expected routing table length to be 0; instead is %d", l)
 		}
@@ -2099,7 +2100,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	// Wait until we know identify has completed by checking for supported protocols
 	// TODO: Is this needed? Could we do h2.Connect(h1) and that would wait for identify to complete.
 	require.Eventually(t, func() bool {
-		h1Protos, err := h2.Peerstore().SupportsProtocols(h1.ID(), d1.protocolsStrs...)
+		h1Protos, err := h2.Peerstore().SupportsProtocols(h1.ID(), d1.protocols...)
 		require.NoError(t, err)
 
 		return len(h1Protos) > 0

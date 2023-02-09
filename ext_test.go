@@ -9,7 +9,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/stretchr/testify/require"
 
@@ -285,7 +284,7 @@ func TestNotFound(t *testing.T) {
 			if host == peer {
 				continue
 			}
-			_ = peer.Peerstore().AddProtocols(host.ID(), protocol.ConvertToStrings(d.serverProtocols)...)
+			_ = peer.Peerstore().AddProtocols(host.ID(), d.serverProtocols...)
 		}
 	}
 

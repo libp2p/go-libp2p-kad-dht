@@ -103,8 +103,10 @@ func TestGetFailures(t *testing.T) {
 
 	host1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host1.Start()
 	host2, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host2.Start()
 
 	d, err := New(ctx, host1, testPrefix, DisableAutoRefresh(), Mode(ModeServer))
 	require.NoError(t, err)

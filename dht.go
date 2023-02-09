@@ -366,7 +366,8 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 	}
 
 	pingFnc := func(ctx context.Context, p peer.ID) error {
-		return dht.protoMessenger.Ping(ctx, p)
+		_, err := dht.protoMessenger.GetClosestPeers(ctx, p, p) // don't use the PING message type as it's deprecated
+		return err
 	}
 
 	r, err := rtrefresh.NewRtRefreshManager(

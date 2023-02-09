@@ -122,3 +122,7 @@ require (
 	lukechampine.com/blake3 v1.1.7 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect
 )
+
+replace github.com/multiformats/go-multistream => github.com/multiformats/go-multistream v0.4.1-0.20230209203903-40e7992d5835
+
+replace github.com/libp2p/go-libp2p => github.com/libp2p/go-libp2p v0.25.1-0.20230209214455-624c745852c5

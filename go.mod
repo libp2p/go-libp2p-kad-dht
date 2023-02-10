@@ -15,7 +15,7 @@ require (
 	github.com/ipfs/go-ipns v0.2.0
 	github.com/ipfs/go-log v1.0.5
 	github.com/jbenet/goprocess v0.1.4
-	github.com/libp2p/go-libp2p v0.25.0
+	github.com/libp2p/go-libp2p v0.25.1
 	github.com/libp2p/go-libp2p-kbucket v0.5.0
 	github.com/libp2p/go-libp2p-record v0.2.0
 	github.com/libp2p/go-libp2p-routing-helpers v0.4.0
@@ -27,7 +27,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.8.0
 	github.com/multiformats/go-multibase v0.1.1
 	github.com/multiformats/go-multihash v0.2.1
-	github.com/multiformats/go-multistream v0.4.0
+	github.com/multiformats/go-multistream v0.4.1
 	github.com/stretchr/testify v1.8.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.24.0
@@ -122,7 +122,3 @@ require (
 	lukechampine.com/blake3 v1.1.7 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect
 )
-
-replace github.com/multiformats/go-multistream => github.com/multiformats/go-multistream v0.4.1-0.20230209203903-40e7992d5835
-
-replace github.com/libp2p/go-libp2p => github.com/libp2p/go-libp2p v0.25.1-0.20230209214455-624c745852c5

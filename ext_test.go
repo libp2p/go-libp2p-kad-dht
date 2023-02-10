@@ -9,7 +9,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/stretchr/testify/require"
 
@@ -17,6 +16,8 @@ import (
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
+
+	//lint:ignore SA1019 TODO migrate away from gogo pb
 	"github.com/libp2p/go-msgio/protoio"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -45,7 +46,7 @@ func TestHungRequest(t *testing.T) {
 	for _, proto := range d.serverProtocols {
 		// Hang on every request.
 		hosts[1].SetStreamHandler(proto, func(s network.Stream) {
-			defer s.Reset() //nolint
+			defer s.Reset() // nolint
 			<-ctx.Done()
 		})
 	}
@@ -104,8 +105,10 @@ func TestGetFailures(t *testing.T) {
 
 	host1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host1.Start()
 	host2, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host2.Start()
 
 	d, err := New(ctx, host1, testPrefix, DisableAutoRefresh(), Mode(ModeServer))
 	require.NoError(t, err)
@@ -285,7 +288,7 @@ func TestNotFound(t *testing.T) {
 			if host == peer {
 				continue
 			}
-			_ = peer.Peerstore().AddProtocols(host.ID(), protocol.ConvertToStrings(d.serverProtocols)...)
+			_ = peer.Peerstore().AddProtocols(host.ID(), d.serverProtocols...)
 		}
 	}
 

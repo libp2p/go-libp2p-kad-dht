@@ -146,7 +146,7 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 // supporting the primary protocols, we do not want to add peers that are speaking obsolete secondary protocols to our
 // routing table
 func (dht *IpfsDHT) validRTPeer(p peer.ID) (bool, error) {
-	b, err := dht.peerstore.FirstSupportedProtocol(p, dht.protocolsStrs...)
+	b, err := dht.peerstore.FirstSupportedProtocol(p, dht.protocols...)
 	if len(b) == 0 || err != nil {
 		return false, err
 	}

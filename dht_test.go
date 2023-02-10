@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
@@ -119,6 +120,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option)
 
 	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host.Start()
 	t.Cleanup(func() { host.Close() })
 
 	d, err := New(ctx, host, append(baseOpts, options...)...)
@@ -708,6 +710,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 
 	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host.Start()
 
 	// enable auto bootstrap on A
 	dhtA, err := New(
@@ -1134,6 +1137,7 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 
 	filteredPeer, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	filteredPeer.Start()
 	defer filteredPeer.Close()
 	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ interface{}, ai peer.AddrInfo) bool {
 		return ai.ID != filteredPeer.ID()
@@ -1603,6 +1607,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	// start host 1 that speaks dht v1
 	hA, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	hA.Start()
 	defer hA.Close()
 	dhtA, err := New(ctx, hA, os...)
 	require.NoError(t, err)
@@ -1611,6 +1616,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	// start host 2 that also speaks dht v1
 	hB, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	hB.Start()
 	defer hB.Close()
 	dhtB, err := New(ctx, hB, os...)
 	require.NoError(t, err)
@@ -1648,6 +1654,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hA, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hA.Start()
 		defer hA.Close()
 		dhtA, err := New(ctx, hA, os...)
 		require.NoError(t, err)
@@ -1655,6 +1662,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hB, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hB.Start()
 		defer hB.Close()
 		dhtB, err := New(ctx, hB, os...)
 		require.NoError(t, err)
@@ -1679,6 +1687,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hA, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hA.Start()
 		defer hA.Close()
 		dhtA, err := New(ctx, hA, []Option{
 			ProtocolPrefix("/esh"),
@@ -1691,6 +1700,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hB, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hB.Start()
 		defer hB.Close()
 		dhtB, err := New(ctx, hB, []Option{
 			ProtocolPrefix("/lsr"),
@@ -1735,7 +1745,7 @@ func TestClientModeAtInit(t *testing.T) {
 	client := setupDHT(ctx, t, true)
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
-	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 }
 
 func TestModeChange(t *testing.T) {
@@ -1746,7 +1756,7 @@ func TestModeChange(t *testing.T) {
 	clientToServer := setupDHT(ctx, t, true)
 	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
 	err := clientOnly.Ping(ctx, clientToServer.PeerID())
-	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 	err = clientToServer.setMode(modeServer)
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
@@ -1775,7 +1785,7 @@ func TestDynamicModeSwitching(t *testing.T) {
 
 	assertDHTClient := func() {
 		err = prober.Ping(ctx, node.PeerID())
-		assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+		assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
 			t.Errorf("expected routing table length to be 0; instead is %d", l)
 		}
@@ -1966,6 +1976,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 
 		h1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		h1.Start()
 		dht1, err := New(
 			ctx,
 			h1,
@@ -2006,6 +2017,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		// AutoRefresh needs to be enabled for this.
 		h1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		h1.Start()
 		dht1, err := New(
 			ctx,
 			h1,
@@ -2082,9 +2094,11 @@ func TestPreconnectedNodes(t *testing.T) {
 	// Create hosts
 	h1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h1.Start()
 	defer h1.Close()
 	h2, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h2.Start()
 	defer h2.Close()
 
 	// Setup first DHT
@@ -2099,7 +2113,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	// Wait until we know identify has completed by checking for supported protocols
 	// TODO: Is this needed? Could we do h2.Connect(h1) and that would wait for identify to complete.
 	require.Eventually(t, func() bool {
-		h1Protos, err := h2.Peerstore().SupportsProtocols(h1.ID(), d1.protocolsStrs...)
+		h1Protos, err := h2.Peerstore().SupportsProtocols(h1.ID(), d1.protocols...)
 		require.NoError(t, err)
 
 		return len(h1Protos) > 0

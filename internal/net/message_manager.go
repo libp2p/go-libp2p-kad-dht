@@ -15,6 +15,8 @@ import (
 
 	logging "github.com/ipfs/go-log"
 	"github.com/libp2p/go-msgio"
+
+	//lint:ignore SA1019 TODO migrate away from gogo pb
 	"github.com/libp2p/go-msgio/protoio"
 
 	"go.opencensus.io/stats"

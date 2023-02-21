@@ -35,18 +35,19 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 		return nil, err
 	}
 
-	if ctx.Err() == nil && lookupRes.completed {
-
-		// tracking lookup results for network size estimator
-		if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
-			logger.Warnf("network size estimator track peers: %s", err)
-		}
-
-		// refresh the cpl for this key as the query was successful
-		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
+	if err := ctx.Err(); err != nil || !lookupRes.completed {
+		return lookupRes.peers, err
 	}
 
-	return lookupRes.peers, ctx.Err()
+	// tracking lookup results for network size estimator
+	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
+		logger.Warnf("network size estimator track peers: %s", err)
+	}
+
+	// refresh the cpl for this key as the query was successful
+	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
+
+	return lookupRes.peers, nil
 }
 
 // pmGetClosestPeers is the protocol messenger version of the GetClosestPeer queryFn.

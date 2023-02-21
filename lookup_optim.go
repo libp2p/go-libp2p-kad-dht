@@ -12,6 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multihash"
 	ks "github.com/whyrusleeping/go-keyspace"
 	"gonum.org/v1/gonum/mathext"
 )
@@ -19,7 +20,7 @@ import (
 const (
 	// OptProvIndividualThresholdCertainty describes how sure we want to be that an individual peer that
 	// we find during walking the DHT actually belongs to the k-closest peers based on the current network size
-	// estimate.
+	// estimation.
 	OptProvIndividualThresholdCertainty = 0.9
 
 	// OptProvSetThresholdStrictness describes the probability that the set of closest peers is actually further
@@ -40,7 +41,7 @@ const (
 	Failure
 )
 
-type estimatorState struct {
+type optimisticState struct {
 	// context for all ADD_PROVIDER RPCs
 	putCtx context.Context
 
@@ -79,7 +80,7 @@ type estimatorState struct {
 	putProvDone atomic.Int32
 }
 
-func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimatorState, error) {
+func (dht *IpfsDHT) newOptimisticState(ctx context.Context, key string) (*optimisticState, error) {
 	// get network size and err out if there is no reasonable estimate
 	networkSize, err := dht.nsEstimator.NetworkSize()
 	if err != nil {
@@ -90,7 +91,7 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 	setThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize)/2.0+1, 1-OptProvSetThresholdStrictness) / networkSize
 	returnThreshold := int(math.Ceil(float64(dht.bucketSize) * OptProvReturnRatio))
 
-	return &estimatorState{
+	return &optimisticState{
 		putCtx:              ctx,
 		dht:                 dht,
 		key:                 key,
@@ -105,7 +106,9 @@ func (dht *IpfsDHT) newEstimatorState(ctx context.Context, key string) (*estimat
 	}, nil
 }
 
-func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key string) error {
+func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.Multihash) error {
+	key := string(keyMH)
+
 	if key == "" {
 		return fmt.Errorf("can't lookup empty key")
 	}
@@ -117,7 +120,7 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 	// with the context on the user side.
 	putCtx, putCtxCancel := context.WithTimeout(context.Background(), time.Minute)
 
-	es, err := dht.newEstimatorState(putCtx, key)
+	es, err := dht.newOptimisticState(putCtx, key)
 	if err != nil {
 		putCtxCancel()
 		return err
@@ -144,7 +147,7 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 		return err
 	}
 
-	// Store the provider records with all of the closest peers
+	// Store the provider records with all the closest peers
 	// we haven't already contacted.
 	es.peerStatesLk.Lock()
 	for _, p := range lookupRes.peers {
@@ -160,59 +163,60 @@ func (dht *IpfsDHT) GetAndProvideToClosestPeers(outerCtx context.Context, key st
 	// wait until a threshold number of RPCs have completed
 	es.waitForRPCs()
 
-	if outerCtx.Err() == nil && lookupRes.completed { // likely the "completed" field is false but that's not a given
-
-		// tracking lookup results for network size estimator as "completed" is true
-		if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
-			logger.Warnf("network size estimator track peers: %s", err)
-		}
-
-		// refresh the cpl for this key as the query was successful
-		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
+	if err := outerCtx.Err(); err != nil || !lookupRes.completed { // likely the "completed" field is false but that's not a given
+		return err
 	}
 
-	return outerCtx.Err()
+	// tracking lookup results for network size estimator as "completed" is true
+	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
+		logger.Warnf("network size estimator track peers: %s", err)
+	}
+
+	// refresh the cpl for this key as the query was successful
+	dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
+
+	return nil
 }
 
-func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
-	es.peerStatesLk.Lock()
-	defer es.peerStatesLk.Unlock()
+func (os *optimisticState) stopFn(qps *qpeerset.QueryPeerset) bool {
+	os.peerStatesLk.Lock()
+	defer os.peerStatesLk.Unlock()
 
 	// get currently known closest peers and check if any of them is already very close.
 	// If so -> store provider records straight away.
-	closest := qps.GetClosestNInStates(es.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
-	distances := make([]float64, es.dht.bucketSize)
+	closest := qps.GetClosestNInStates(os.dht.bucketSize, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
+	distances := make([]float64, os.dht.bucketSize)
 	for i, p := range closest {
 		// calculate distance of peer p to the target key
-		distances[i] = netsize.NormedDistance(p, es.ksKey)
+		distances[i] = netsize.NormedDistance(p, os.ksKey)
 
 		// Check if we have already interacted with that peer
-		if _, found := es.peerStates[p]; found {
+		if _, found := os.peerStates[p]; found {
 			continue
 		}
 
 		// Check if peer is close enough to store the provider record with
-		if distances[i] > es.individualThreshold {
+		if distances[i] > os.individualThreshold {
 			continue
 		}
 
 		// peer is indeed very close already -> store the provider record directly with it!
-		go es.putProviderRecord(p)
+		go os.putProviderRecord(p)
 
 		// keep state that we've contacted that peer
-		es.peerStates[p] = Sent
+		os.peerStates[p] = Sent
 	}
 
 	// count number of peers we have already (successfully) contacted via the above method
 	sentAndSuccessCount := 0
-	for _, s := range es.peerStates {
+	for _, s := range os.peerStates {
 		if s == Sent || s == Success {
 			sentAndSuccessCount += 1
 		}
 	}
 
 	// if we have already contacted more than bucketSize peers stop the procedure
-	if sentAndSuccessCount >= es.dht.bucketSize {
+	if sentAndSuccessCount >= os.dht.bucketSize {
 		return true
 	}
 
@@ -224,40 +228,40 @@ func (es *estimatorState) stopFn(qps *qpeerset.QueryPeerset) bool {
 	avg := sum / float64(len(distances))
 
 	// if the average is below the set threshold stop the procedure
-	return avg < es.setThreshold
+	return avg < os.setThreshold
 }
 
-func (es *estimatorState) putProviderRecord(pid peer.ID) {
-	err := es.dht.protoMessenger.PutProvider(es.putCtx, pid, []byte(es.key), es.dht.host)
-	es.peerStatesLk.Lock()
+func (os *optimisticState) putProviderRecord(pid peer.ID) {
+	err := os.dht.protoMessenger.PutProvider(os.putCtx, pid, []byte(os.key), os.dht.host)
+	os.peerStatesLk.Lock()
 	if err != nil {
-		es.peerStates[pid] = Failure
+		os.peerStates[pid] = Failure
 	} else {
-		es.peerStates[pid] = Success
+		os.peerStates[pid] = Success
 	}
-	es.peerStatesLk.Unlock()
+	os.peerStatesLk.Unlock()
 
 	// indicate that this ADD_PROVIDER RPC has completed
-	es.doneChan <- struct{}{}
+	os.doneChan <- struct{}{}
 }
 
 // waitForRPCs waits for a subset of ADD_PROVIDER RPCs to complete and then acquire a lease on
 // a bound channel to return early back to the user and prevent unbound asynchronicity. If
 // there are already too many requests in-flight we are just waiting for our current set to
 // finish.
-func (es *estimatorState) waitForRPCs() {
-	es.peerStatesLk.RLock()
-	rpcCount := len(es.peerStates)
-	es.peerStatesLk.RUnlock()
+func (os *optimisticState) waitForRPCs() {
+	os.peerStatesLk.RLock()
+	rpcCount := len(os.peerStates)
+	os.peerStatesLk.RUnlock()
 
 	// returnThreshold can't be larger than the total number issued RPCs
-	if es.returnThreshold > rpcCount {
-		es.returnThreshold = rpcCount
+	if os.returnThreshold > rpcCount {
+		os.returnThreshold = rpcCount
 	}
 
 	// Wait until returnThreshold ADD_PROVIDER RPCs have returned
-	for range es.doneChan {
-		if int(es.putProvDone.Add(1)) == es.returnThreshold {
+	for range os.doneChan {
+		if int(os.putProvDone.Add(1)) == os.returnThreshold {
 			break
 		}
 	}
@@ -272,31 +276,31 @@ func (es *estimatorState) waitForRPCs() {
 	// For the remaining ADD_PROVIDER RPCs try to acquire a lease on the optProvJobsPool channel.
 	// If that worked we need to consume the doneChan and release the acquired lease on the
 	// optProvJobsPool channel.
-	remaining := rpcCount - int(es.putProvDone.Load())
+	remaining := rpcCount - int(os.putProvDone.Load())
 	for i := 0; i < remaining; i++ {
 		select {
-		case es.dht.optProvJobsPool <- struct{}{}:
+		case os.dht.optProvJobsPool <- struct{}{}:
 			// We were able to acquire a lease on the optProvJobsPool channel.
 			// Consume doneChan to release the acquired lease again.
-			go es.consumeDoneChan(rpcCount)
-		case <-es.doneChan:
+			go os.consumeDoneChan(rpcCount)
+		case <-os.doneChan:
 			// We were not able to acquire a lease but an ADD_PROVIDER RPC resolved.
-			if int(es.putProvDone.Add(1)) == rpcCount {
-				close(es.doneChan)
+			if int(os.putProvDone.Add(1)) == rpcCount {
+				close(os.doneChan)
 			}
 		}
 	}
 }
 
-func (es *estimatorState) consumeDoneChan(until int) {
+func (os *optimisticState) consumeDoneChan(until int) {
 	// Wait for an RPC to finish
-	<-es.doneChan
+	<-os.doneChan
 
 	// Release acquired lease for other's to get a spot
-	<-es.dht.optProvJobsPool
+	<-os.dht.optProvJobsPool
 
 	// If all RPCs have finished, close the channel.
-	if int(es.putProvDone.Add(1)) == until {
-		close(es.doneChan)
+	if int(os.putProvDone.Add(1)) == until {
+		close(os.doneChan)
 	}
 }

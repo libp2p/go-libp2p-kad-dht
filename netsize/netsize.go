@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	logging "github.com/ipfs/go-log"
@@ -14,6 +15,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ks "github.com/whyrusleeping/go-keyspace"
 )
+
+// invalidEstimate indicates that we currently have no valid estimate cached.
+const invalidEstimate int32 = -1
 
 var (
 	ErrNotEnoughData   = fmt.Errorf("not enough data")
@@ -37,7 +41,7 @@ type Estimator struct {
 	measurementsLk sync.RWMutex
 	measurements   map[int][]measurement
 
-	netSizeCache *float64
+	netSizeCache int32
 }
 
 func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Estimator {
@@ -52,6 +56,7 @@ func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Es
 		rt:           rt,
 		bucketSize:   bucketSize,
 		measurements: measurements,
+		netSizeCache: invalidEstimate,
 	}
 }
 
@@ -88,7 +93,7 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 	now := time.Now()
 
 	// invalidate cache
-	e.netSizeCache = nil
+	atomic.StoreInt32(&e.netSizeCache, invalidEstimate)
 
 	// Calculate weight for the peer distances.
 	weight := e.calcWeight(key, peers)
@@ -107,44 +112,53 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 			timestamp: now,
 		}
 
-		// keep track of this measurement
-		e.measurements[i] = append(e.measurements[i], m)
+		measurements := append(e.measurements[i], m)
 
 		// find the smallest index of a measurement that is still in the allowed time window
 		// all measurements with a lower index should be discarded as they are too old
-		n := len(e.measurements[i])
+		n := len(measurements)
 		idx := sort.Search(n, func(j int) bool {
-			return e.measurements[i][j].timestamp.After(maxAgeTs)
+			return measurements[j].timestamp.After(maxAgeTs)
 		})
 
 		// if measurements are outside the allowed time window remove them.
 		// idx == n - there is no measurement in the allowed time window -> reset slice
 		// idx == 0 - the normal case where we only have valid entries
 		// idx != 0 - there is a mix of valid and obsolete entries
-		if idx == n {
-			e.measurements[i] = []measurement{}
-		} else if idx != 0 {
-			e.measurements[i] = e.measurements[i][idx:]
+		if idx != 0 {
+			x := make([]measurement, n-idx)
+			copy(x, measurements[idx:])
+			measurements = x
 		}
 
 		// if the number of data points exceed the max threshold, strip oldest measurement data points.
-		if len(e.measurements[i]) > MaxMeasurementsThreshold {
-			e.measurements[i] = e.measurements[i][len(e.measurements[i])-MaxMeasurementsThreshold:]
+		if len(measurements) > MaxMeasurementsThreshold {
+			measurements = measurements[len(measurements)-MaxMeasurementsThreshold:]
 		}
+
+		e.measurements[i] = measurements
 	}
 
 	return nil
 }
 
 // NetworkSize instructs the Estimator to calculate the current network size estimate.
-func (e *Estimator) NetworkSize() (float64, error) {
+func (e *Estimator) NetworkSize() (int32, error) {
+
+	// return cached calculation lock-free (fast path)
+	if estimate := atomic.LoadInt32(&e.netSizeCache); estimate != invalidEstimate {
+		logger.Debugw("Cached network size estimation", "estimate", estimate)
+		return estimate, nil
+	}
+
 	e.measurementsLk.Lock()
 	defer e.measurementsLk.Unlock()
 
-	// return cached calculation
-	if e.netSizeCache != nil {
-		logger.Debugw("Cached network size estimation", "estimate", *e.netSizeCache)
-		return *e.netSizeCache, nil
+	// Check a second time. This is needed because we maybe had to wait on another goroutine doing the computation.
+	// Then the computation was just finished by the other goroutine, and we don't need to redo it.
+	if estimate := e.netSizeCache; estimate != invalidEstimate {
+		logger.Debugw("Cached network size estimation", "estimate", estimate)
+		return estimate, nil
 	}
 
 	// remove obsolete data points
@@ -196,11 +210,13 @@ func (e *Estimator) NetworkSize() (float64, error) {
 	}
 	slope := xySum / x2Sum
 
-	// cache network size estimation
-	netSize := 1/slope - 1
-	e.netSizeCache = &netSize
+	// calculate final network size
+	netSize := int32(1/slope - 1)
 
-	logger.Debugw("New network size estimation", "estimate", *e.netSizeCache)
+	// cache network size estimation
+	atomic.StoreInt32(&e.netSizeCache, netSize)
+
+	logger.Debugw("New network size estimation", "estimate", netSize)
 	return netSize, nil
 }
 

@@ -3,6 +3,7 @@ package dht
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
+	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -414,6 +416,18 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return nil
 	}
 
+	if dht.enableOptProv {
+		err := dht.optimisticProvide(ctx, keyMH)
+		if errors.Is(err, netsize.ErrNotEnoughData) {
+			logger.Debugln("not enough data for optimistic provide taking classic approach")
+			return dht.classicProvide(ctx, keyMH)
+		}
+		return err
+	}
+	return dht.classicProvide(ctx, keyMH)
+}
+
+func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihash) error {
 	closerCtx := ctx
 	if deadline, ok := ctx.Deadline(); ok {
 		now := time.Now()
@@ -468,23 +482,6 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return context.DeadlineExceeded
 	}
 	return ctx.Err()
-}
-
-func (dht *IpfsDHT) OptimisticProvide(ctx context.Context, key cid.Cid) (err error) {
-	if !dht.enableProviders {
-		return routing.ErrNotSupported
-	} else if !key.Defined() {
-		return fmt.Errorf("invalid cid: undefined")
-	}
-	keyMH := key.Hash()
-	logger.Debugw("optimistic providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
-
-	// add self locally
-	if err := dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self}); err != nil {
-		return err
-	}
-
-	return dht.GetAndProvideToClosestPeers(ctx, string(keyMH))
 }
 
 // FindProviders searches until the context expires.

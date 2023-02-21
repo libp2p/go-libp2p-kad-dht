@@ -293,7 +293,7 @@ func TestNotFound(t *testing.T) {
 	}
 
 	for _, p := range hosts {
-		d.peerFound(ctx, p.ID(), true)
+		d.peerFound(ctx, p.ID())
 	}
 
 	// long timeout to ensure timing is not at play.
@@ -343,7 +343,7 @@ func TestLessThanKResponses(t *testing.T) {
 	}
 
 	for i := 1; i < 5; i++ {
-		d.peerFound(ctx, hosts[i].ID(), true)
+		d.peerFound(ctx, hosts[i].ID())
 	}
 
 	// Reply with random peers to every message
@@ -415,7 +415,7 @@ func TestMultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.peerFound(ctx, hosts[1].ID(), true)
+	d.peerFound(ctx, hosts[1].ID())
 
 	for _, proto := range d.serverProtocols {
 		// It would be nice to be able to just get a value and succeed but then

@@ -191,8 +191,8 @@ func TestBootstrappersReplacable(t *testing.T) {
 	require.NoError(t, d.host.Network().ClosePeer(d5.self))
 	connectNoSync(t, ctx, d, d1)
 	connectNoSync(t, ctx, d, d5)
-	d.peerFound(ctx, d5.self, true)
-	d.peerFound(ctx, d1.self, true)
+	d.peerFound(ctx, d5.self)
+	d.peerFound(ctx, d1.self)
 	time.Sleep(1 * time.Second)
 
 	require.Len(t, d.routingTable.ListPeers(), 2)

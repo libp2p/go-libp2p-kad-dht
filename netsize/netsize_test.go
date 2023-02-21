@@ -25,7 +25,7 @@ func TestNewEstimator(t *testing.T) {
 	assert.Equal(t, rt, e.rt)
 	assert.Equal(t, kbucket.ConvertPeerID(pid), e.localID)
 	assert.Len(t, e.measurements, bucketSize)
-	assert.Nil(t, e.netSizeCache)
+	assert.Equal(t, invalidEstimate, e.netSizeCache)
 }
 
 func TestNormedDistance(t *testing.T) {

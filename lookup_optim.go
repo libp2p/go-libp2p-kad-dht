@@ -49,7 +49,7 @@ type optimisticState struct {
 	dht *IpfsDHT
 
 	// the most recent network size estimation
-	networkSize float64
+	networkSize int32
 
 	// a channel indicating when an ADD_PROVIDER RPC completed (successful or not)
 	doneChan chan struct{}
@@ -87,8 +87,8 @@ func (dht *IpfsDHT) newOptimisticState(ctx context.Context, key string) (*optimi
 		return nil, err
 	}
 
-	individualThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize), 1-OptProvIndividualThresholdCertainty) / networkSize
-	setThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize)/2.0+1, 1-OptProvSetThresholdStrictness) / networkSize
+	individualThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize), 1-OptProvIndividualThresholdCertainty) / float64(networkSize)
+	setThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize)/2.0+1, 1-OptProvSetThresholdStrictness) / float64(networkSize)
 	returnThreshold := int(math.Ceil(float64(dht.bucketSize) * OptProvReturnRatio))
 
 	return &optimisticState{

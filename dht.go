@@ -327,10 +327,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.protocolCheck = func(ctx context.Context, p peer.ID) error {
 		// lookup request to p requesting for its own peer.ID
 		peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p)
-		// p should return at least 2 peer.ID, itself plus at least one neighbor
-		// otherwise the response is considered as invalid
-		if err == nil && len(peerids) < 2 {
-			return fmt.Errorf("peer %s failed to return its closest peers", p)
+		// p should return at least its own peerid
+		if err == nil && len(peerids) == 0 {
+			return fmt.Errorf("peer %s failed to return its closest peers, got %d", p, len(peerids))
 		}
 		return err
 	}

@@ -279,6 +279,7 @@ func TestNotFound(t *testing.T) {
 					if err := pbw.WriteMsg(resp); err != nil {
 						return
 					}
+				case pb.Message_FIND_NODE:
 				default:
 					panic("Shouldnt recieve this.")
 				}
@@ -372,6 +373,7 @@ func TestLessThanKResponses(t *testing.T) {
 					if err := pbw.WriteMsg(resp); err != nil {
 						panic(err)
 					}
+				case pb.Message_FIND_NODE:
 				default:
 					panic("Shouldnt recieve this.")
 				}
@@ -442,6 +444,7 @@ func TestMultipleQueries(t *testing.T) {
 				if err := pbw.WriteMsg(resp); err != nil {
 					panic(err)
 				}
+			case pb.Message_FIND_NODE:
 			default:
 				panic("Shouldnt recieve this.")
 			}

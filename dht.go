@@ -43,10 +43,6 @@ var (
 	baseLogger = logger.Desugar()
 
 	rtFreezeTimeout = 1 * time.Minute
-
-	// max time given to connecting to, and querying a peers before
-	// adding it to the Routing Table
-	protocolCheckTimeout = 10 * time.Second
 )
 
 const (
@@ -126,7 +122,8 @@ type IpfsDHT struct {
 
 	// A function performing a lookup request to a remote peer.ID, verifying that it is able to
 	// answer it correctly
-	protocolCheck func(context.Context, peer.ID) error
+	lookupCheck        func(context.Context, peer.ID) error
+	lookupCheckTimeout time.Duration
 
 	// A function returning a set of bootstrap peers to fallback on if all other attempts to fix
 	// the routing table fail (or, e.g., this is the first time this node is
@@ -324,7 +321,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.routingTable = rt
 	dht.bootstrapPeers = cfg.BootstrapPeers
 
-	dht.protocolCheck = func(ctx context.Context, p peer.ID) error {
+	dht.lookupCheck = func(ctx context.Context, p peer.ID) error {
 		// lookup request to p requesting for its own peer.ID
 		peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p)
 		// p should return at least its own peerid
@@ -333,6 +330,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		}
 		return err
 	}
+	dht.lookupCheckTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -380,7 +378,7 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 		dht.host, dht.routingTable, cfg.RoutingTable.AutoRefresh,
 		keyGenFnc,
 		queryFnc,
-		dht.protocolCheck,
+		dht.lookupCheck,
 		cfg.RoutingTable.RefreshQueryTimeout,
 		cfg.RoutingTable.RefreshInterval,
 		maxLastSuccessfulOutboundThreshold,
@@ -643,7 +641,7 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		livelinessCtx, cancel := context.WithTimeout(ctx, protocolCheckTimeout)
+		livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
 		defer cancel()
 
 		if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: p}); err != nil {
@@ -651,7 +649,7 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 			return
 		}
 
-		if err := dht.protocolCheck(livelinessCtx, p); err != nil {
+		if err := dht.lookupCheck(livelinessCtx, p); err != nil {
 			logger.Debugw("connected peer not answering DHT request as expected", "peer", p, "error", err)
 			return
 		}

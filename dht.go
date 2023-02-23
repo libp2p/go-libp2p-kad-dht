@@ -122,8 +122,13 @@ type IpfsDHT struct {
 
 	// A function performing a lookup request to a remote peer.ID, verifying that it is able to
 	// answer it correctly
-	lookupCheck        func(context.Context, peer.ID) error
-	lookupCheckTimeout time.Duration
+	lookupCheck         func(context.Context, peer.ID) error
+	lookupCheckTimeout  time.Duration
+	lookupCheckInterval time.Duration // time interval during which we don't try to query the same peer again
+	// recentlyCheckedPeers contains the peers recently queried with the time at which they were queried
+	recentlyCheckedPeers   map[peer.ID]time.Time
+	recentlyCheckedPeersLk sync.Mutex
+	peerRecentlyQueried    func(peer.ID) bool
 
 	// A function returning a set of bootstrap peers to fallback on if all other attempts to fix
 	// the routing table fail (or, e.g., this is the first time this node is
@@ -183,6 +188,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
+	dht.lookupCheckInterval = cfg.LookupCheckInterval
 	dht.maxRecordAge = cfg.MaxRecordAge
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
@@ -331,6 +337,26 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		return err
 	}
 	dht.lookupCheckTimeout = cfg.RoutingTable.RefreshQueryTimeout
+	dht.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	dht.peerRecentlyQueried = func(p peer.ID) bool {
+		dht.recentlyCheckedPeersLk.Lock()
+
+		now := time.Now()
+
+		// clean recentlyCheckedPeers
+		for peerid, t := range dht.recentlyCheckedPeers {
+			// remove peers that have been queried more than lookupCheckInterval ago
+			if t.Add(dht.lookupCheckInterval).Before(now) {
+				delete(dht.recentlyCheckedPeers, peerid)
+			}
+		}
+
+		// if p still in recentlyCheckedPeers, it has been queried less than
+		// lookupCheckInterval ago
+		_, ok := dht.recentlyCheckedPeers[p]
+		dht.recentlyCheckedPeersLk.Unlock()
+		return ok
+	}
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -598,8 +624,7 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 		case <-timerCh:
 			dht.routingTable.MarkAllPeersIrreplaceable()
 		case p := <-dht.addPeerToRTChan:
-			prevSize := dht.routingTable.Size()
-			if prevSize == 0 {
+			if dht.routingTable.Size() == 0 {
 				isBootsrapping = true
 				bootstrapCount = 0
 				timerCh = nil
@@ -637,23 +662,46 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // and probe it to make sure it answers DHT queries as expected. If
 // it fails to answer, it isn't added to the routingTable.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
+
+	// TODO: verify whether the appropriate bucket still has space
+	/*
+		cpl := kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
+		if dht.routingTable.NPeersForCpl(uint(cpl)) >= dht.bucketSize {
+			logger.Debugw("bucket already full, not querying", p)
+			return
+		}
+	*/
+
+	// verify whether the remote peer advertises the right dht protocol
 	b, err := dht.validRTPeer(p)
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
+		if dht.peerRecentlyQueried(p) {
+			// peer was already queried recently and didn't make it to the bucket
+			return
+		}
+
 		livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
 		defer cancel()
 
+		// connecting to the remote peer
 		if err := dht.host.Connect(livelinessCtx, peer.AddrInfo{ID: p}); err != nil {
 			logger.Debugw("failed connection to DHT peer", "peer", p, "error", err)
 			return
 		}
 
+		// add peer.ID to recently queried peers
+		dht.recentlyCheckedPeersLk.Lock()
+		dht.recentlyCheckedPeers[p] = time.Now()
+		dht.recentlyCheckedPeersLk.Unlock()
+
+		// performing a FIND_NODE query
 		if err := dht.lookupCheck(livelinessCtx, p); err != nil {
 			logger.Debugw("connected peer not answering DHT request as expected", "peer", p, "error", err)
 			return
 		}
-
+		// if the FIND_NODE succeeded, the peer is considered as valid
 		dht.validPeerFound(ctx, p)
 	}
 }

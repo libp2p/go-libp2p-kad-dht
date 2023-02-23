@@ -767,6 +767,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 
 	// and because of the above bootstrap, A also discovers E !
 	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
+	time.Sleep(10 * time.Millisecond)
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }
 
@@ -1325,6 +1326,49 @@ func TestClientModeConnect(t *testing.T) {
 	}
 }
 
+func TestInvalidServer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := setupDHT(ctx, t, false)
+	b := setupDHT(ctx, t, true)
+
+	// make b advertise all dht server protocols
+	for _, proto := range a.serverProtocols {
+		// Hang on every request.
+		b.host.SetStreamHandler(proto, func(s network.Stream) {
+			defer s.Reset() // nolint
+			<-ctx.Done()
+		})
+	}
+
+	connectNoSync(t, ctx, a, b)
+
+	c := testCaseCids[0]
+	p := peer.ID("TestPeer")
+	a.ProviderStore().AddProvider(ctx, c.Hash(), peer.AddrInfo{ID: p})
+	time.Sleep(time.Millisecond * 5) // just in case...
+
+	provs, err := b.FindProviders(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(provs) == 0 {
+		t.Fatal("Expected to get a provider back")
+	}
+
+	if provs[0].ID != p {
+		t.Fatal("expected it to be our test peer")
+	}
+	if a.routingTable.Find(b.self) != "" {
+		t.Fatal("DHT clients should not be added to routing tables")
+	}
+	if b.routingTable.Find(a.self) == "" {
+		t.Fatal("DHT server should have been added to the dht client's routing table")
+	}
+}
+
 func TestClientModeFindPeer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1519,6 +1563,11 @@ func TestFixLowPeers(t *testing.T) {
 		mainD.routingTable.RemovePeer(d.self)
 	}
 
+	// remove blacklist of already contacted peers
+	mainD.recentlyCheckedPeersLk.Lock()
+	mainD.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	mainD.recentlyCheckedPeersLk.Unlock()
+
 	// but we will still get enough peers in the RT because of fix low Peers
 	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
 }
@@ -1623,6 +1672,15 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	defer dhtB.Close()
 
 	connect(t, ctx, dhtA, dhtB)
+
+	// clear connection history
+	dhtA.recentlyCheckedPeersLk.Lock()
+	dhtA.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	dhtA.recentlyCheckedPeersLk.Unlock()
+
+	dhtB.recentlyCheckedPeersLk.Lock()
+	dhtB.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	dhtB.recentlyCheckedPeersLk.Unlock()
 
 	// now assert both have each other in their RT
 	waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second)
@@ -2123,6 +2181,13 @@ func TestPreconnectedNodes(t *testing.T) {
 	d2, err := New(ctx, h2, opts...)
 	require.NoError(t, err)
 	defer h2.Close()
+
+	// clear d2 recent checked peers
+	d2.recentlyCheckedPeersLk.Lock()
+	d2.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	d2.recentlyCheckedPeersLk.Unlock()
+
+	connect(t, ctx, d1, d2)
 
 	// See if it works
 	peers, err := d2.GetClosestPeers(ctx, "testkey")

@@ -32,20 +32,21 @@ type RouteTableFilterFunc func(dht interface{}, p peer.ID) bool
 
 // Config is a structure containing all the options that can be used when constructing a DHT.
 type Config struct {
-	Datastore          ds.Batching
-	Validator          record.Validator
-	ValidatorChanged   bool // if true implies that the validator has been changed and that Defaults should not be used
-	Mode               ModeOpt
-	ProtocolPrefix     protocol.ID
-	V1ProtocolOverride protocol.ID
-	BucketSize         int
-	Concurrency        int
-	Resiliency         int
-	MaxRecordAge       time.Duration
-	EnableProviders    bool
-	EnableValues       bool
-	ProviderStore      providers.ProviderStore
-	QueryPeerFilter    QueryFilterFunc
+	Datastore           ds.Batching
+	Validator           record.Validator
+	ValidatorChanged    bool // if true implies that the validator has been changed and that Defaults should not be used
+	Mode                ModeOpt
+	ProtocolPrefix      protocol.ID
+	V1ProtocolOverride  protocol.ID
+	BucketSize          int
+	Concurrency         int
+	Resiliency          int
+	LookupCheckInterval time.Duration
+	MaxRecordAge        time.Duration
+	EnableProviders     bool
+	EnableValues        bool
+	ProviderStore       providers.ProviderStore
+	QueryPeerFilter     QueryFilterFunc
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
@@ -114,6 +115,8 @@ var Defaults = func(o *Config) error {
 	o.RoutingTable.RefreshInterval = 10 * time.Minute
 	o.RoutingTable.AutoRefresh = true
 	o.RoutingTable.PeerFilter = EmptyRTFilter
+
+	o.LookupCheckInterval = 5 * time.Second
 	o.MaxRecordAge = providers.ProvideValidity
 
 	o.BucketSize = defaultBucketSize

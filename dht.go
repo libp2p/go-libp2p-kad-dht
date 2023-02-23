@@ -663,14 +663,10 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // it fails to answer, it isn't added to the routingTable.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 
-	// TODO: verify whether the appropriate bucket still has space
-	/*
-		cpl := kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
-		if dht.routingTable.NPeersForCpl(uint(cpl)) >= dht.bucketSize {
-			logger.Debugw("bucket already full, not querying", p)
-			return
-		}
-	*/
+	// if the appropriate bucket is already full, don't try to add the new peer.ID
+	if !dht.routingTable.UsefulPeer(p) {
+		return
+	}
 
 	// verify whether the remote peer advertises the right dht protocol
 	b, err := dht.validRTPeer(p)

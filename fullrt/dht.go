@@ -105,7 +105,12 @@ type FullRT struct {
 //
 // Not all of the standard DHT options are supported in this DHT.
 func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
-	var fullrtcfg config
+	fullrtcfg := config{
+		crawlInterval:       time.Hour,
+		bulkSendParallelism: 20,
+		waitFrac:            0.3,
+		timeoutPerOp:        5 * time.Second,
+	}
 	if err := fullrtcfg.apply(options...); err != nil {
 		return nil, err
 	}
@@ -179,12 +184,12 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 		triggerRefresh: make(chan struct{}),
 
-		waitFrac:     0.3,
-		timeoutPerOp: 5 * time.Second,
+		waitFrac:     fullrtcfg.waitFrac,
+		timeoutPerOp: fullrtcfg.timeoutPerOp,
 
-		crawlerInterval: time.Minute * 60,
+		crawlerInterval: fullrtcfg.crawlInterval,
 
-		bulkSendParallelism: 20,
+		bulkSendParallelism: fullrtcfg.bulkSendParallelism,
 	}
 
 	rt.wg.Add(1)

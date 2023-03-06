@@ -71,7 +71,7 @@ type FullRT struct {
 	crawlerInterval time.Duration
 	lastCrawlTime   time.Time
 
-	crawler        *crawler.Crawler
+	crawler        crawler.Crawler
 	protoMessenger *dht_pb.ProtocolMessenger
 	messageSender  dht_pb.MessageSender
 
@@ -141,9 +141,11 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		return nil, err
 	}
 
-	c, err := crawler.New(h, crawler.WithParallelism(200))
-	if err != nil {
-		return nil, err
+	if fullrtcfg.crawler == nil {
+		fullrtcfg.crawler, err = crawler.NewDefaultCrawler(h, crawler.WithParallelism(200))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -171,7 +173,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		ProviderManager: pm,
 		datastore:       dhtcfg.Datastore,
 		h:               h,
-		crawler:         c,
+		crawler:         fullrtcfg.crawler,
 		messageSender:   ms,
 		protoMessenger:  protoMessenger,
 		filterFromTable: kaddht.PublicQueryFilter,

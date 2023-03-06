@@ -5,6 +5,7 @@ import (
 	"time"
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/crawler"
 )
 
 type config struct {
@@ -14,6 +15,7 @@ type config struct {
 	waitFrac            float64
 	bulkSendParallelism int
 	timeoutPerOp        time.Duration
+	crawler             crawler.Crawler
 }
 
 func (cfg *config) apply(opts ...Option) error {
@@ -30,6 +32,15 @@ type Option func(opt *config) error
 func DHTOption(opts ...kaddht.Option) Option {
 	return func(c *config) error {
 		c.dhtOpts = append(c.dhtOpts, opts...)
+		return nil
+	}
+}
+
+// WithCrawler sets the crawler.Crawler to use in order to crawl the DHT network.
+// Defaults to crawler.DefaultCrawler with parallelism of 200.
+func WithCrawler(c crawler.Crawler) Option {
+	return func(opt *config) error {
+		opt.crawler = c
 		return nil
 	}
 }

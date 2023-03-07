@@ -23,6 +23,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
+	"golang.org/x/exp/maps"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1565,7 +1566,7 @@ func TestFixLowPeers(t *testing.T) {
 
 	// remove blacklist of already contacted peers
 	mainD.recentlyCheckedPeersLk.Lock()
-	mainD.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	maps.Clear(mainD.recentlyCheckedPeers)
 	mainD.recentlyCheckedPeersLk.Unlock()
 
 	// but we will still get enough peers in the RT because of fix low Peers
@@ -1675,11 +1676,11 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 
 	// clear connection history
 	dhtA.recentlyCheckedPeersLk.Lock()
-	dhtA.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	maps.Clear(dhtA.recentlyCheckedPeers)
 	dhtA.recentlyCheckedPeersLk.Unlock()
 
 	dhtB.recentlyCheckedPeersLk.Lock()
-	dhtB.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	maps.Clear(dhtB.recentlyCheckedPeers)
 	dhtB.recentlyCheckedPeersLk.Unlock()
 
 	// now assert both have each other in their RT
@@ -2184,7 +2185,7 @@ func TestPreconnectedNodes(t *testing.T) {
 
 	// clear d2 recent checked peers
 	d2.recentlyCheckedPeersLk.Lock()
-	d2.recentlyCheckedPeers = make(map[peer.ID]time.Time)
+	maps.Clear(d2.recentlyCheckedPeers)
 	d2.recentlyCheckedPeersLk.Unlock()
 
 	connect(t, ctx, d1, d2)

@@ -150,7 +150,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pm, err := providers.NewProviderManager(ctx, h.ID(), h.Peerstore(), dhtcfg.Datastore)
+	pm, err := providers.NewProviderManager(ctx, h.ID(), h.Peerstore(), dhtcfg.Datastore, fullrtcfg.pmOpts...)
 	if err != nil {
 		cancel()
 		return nil, err

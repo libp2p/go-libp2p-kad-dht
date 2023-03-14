@@ -90,9 +90,9 @@ func WithTimeoutPerOperation(t time.Duration) Option {
 }
 
 // WithProviderManagerOptions sets the options to use when instantiating providers.ProviderManager.
-func WithProviderManagerOptions(pmo ...providers.Option) Option {
+func WithProviderManagerOptions(pmOpts ...providers.Option) Option {
 	return func(opt *config) error {
-		opt.pmOpts = pmo
+		opt.pmOpts = pmOpts
 		return nil
 	}
 }

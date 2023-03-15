@@ -21,9 +21,16 @@ import (
 	"github.com/multiformats/go-base32"
 )
 
-// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
-// keys stored in the data store.
-const ProvidersKeyPrefix = "/providers/"
+const (
+	// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
+	// keys stored in the data store.
+	ProvidersKeyPrefix = "/providers/"
+
+	// ProviderAddrTTL is the TTL to keep the multi addresses of provider
+	// peers around. This means we return those addresses alongside provider
+	// records and likely make the second DHT lookup for addresses obsolete.
+	ProviderAddrTTL = 24 * time.Hour
+)
 
 // ProviderAddrTTL is the TTL of an address we've received from a provider.
 // This is also a temporary address, but lasts longer. After this expires,

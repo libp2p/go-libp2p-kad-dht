@@ -27,15 +27,11 @@ const (
 	ProvidersKeyPrefix = "/providers/"
 
 	// ProviderAddrTTL is the TTL to keep the multi addresses of provider
-	// peers around. This means we return those addresses alongside provider
-	// records and likely make the second DHT lookup for addresses obsolete.
+	// peers around. Those addresses are returned alongside provider. After
+	// it expires, the returned records will require an extra lookup, to
+	// find the multiaddress associated with the returned peer id.
 	ProviderAddrTTL = 24 * time.Hour
 )
-
-// ProviderAddrTTL is the TTL of an address we've received from a provider.
-// This is also a temporary address, but lasts longer. After this expires,
-// the records we return will require an extra lookup.
-const ProviderAddrTTL = time.Minute * 30
 
 // ProvideValidity is the default time that a Provider Record should last on DHT
 // This value is also known as Provider Record Expiration Interval.

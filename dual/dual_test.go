@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
-	u "github.com/ipfs/go-ipfs-util"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	record "github.com/libp2p/go-libp2p-record"

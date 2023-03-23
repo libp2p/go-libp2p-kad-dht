@@ -23,10 +23,10 @@ import (
 	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/gogo/protobuf/proto"
+	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	u "github.com/ipfs/go-ipfs-util"
 	logging "github.com/ipfs/go-log"
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"

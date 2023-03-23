@@ -22,7 +22,7 @@ import (
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	u "github.com/ipfs/go-ipfs-util"
+	u "github.com/ipfs/boxo/util"
 )
 
 // Test that one hung request to a peer doesn't prevent another request

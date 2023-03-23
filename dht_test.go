@@ -30,9 +30,9 @@ import (
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
+	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
 	detectrace "github.com/ipfs/go-detect-race"
-	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"

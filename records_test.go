@@ -9,7 +9,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/test"
 
-	u "github.com/ipfs/go-ipfs-util"
+	u "github.com/ipfs/boxo/util"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	ci "github.com/libp2p/go-libp2p/core/crypto"

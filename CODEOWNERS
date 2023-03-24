@@ -5,11 +5,11 @@
 /pb/ @libp2p/go-libp2p-maintainers @guillaumemichel
 
 # dual is an application for IPFS
-/dual/ @ipfs/kubo-maintainers @guillaumemichel
+/dual/ @libp2p/kubo-maintainers @guillaumemichel
 # fullrt is IPFS specific
-/fullrt/ @ipfs/kubo-maintainers @guillaumemichel
+/fullrt/ @libp2p/kubo-maintainers @guillaumemichel
 # providers describe the IPFS specific providers
-/providers/ @ipfs/kubo-maintainers @guillaumemichel
+/providers/ @libp2p/kubo-maintainers @guillaumemichel
 # records are IPFS specific
-/records.go @ipfs/kubo-maintainers @guillaumemichel
-/records_test.go @ipfs/kubo-maintainers @guillaumemichel
+/records.go @libp2p/kubo-maintainers @guillaumemichel
+/records_test.go @libp2p/kubo-maintainers @guillaumemichel

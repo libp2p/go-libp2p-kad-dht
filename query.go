@@ -422,7 +422,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	if err := q.dht.dialPeer(dialCtx, p); err != nil {
 		// remove the peer if there was a dial failure..but not because of a context cancellation
 		if dialCtx.Err() == nil {
-			q.dht.peerStoppedDHT(q.dht.ctx, p)
+			q.dht.peerStoppedDHT(p)
 		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
@@ -433,7 +433,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	newPeers, err := q.queryFn(queryCtx, p)
 	if err != nil {
 		if queryCtx.Err() == nil {
-			q.dht.peerStoppedDHT(q.dht.ctx, p)
+			q.dht.peerStoppedDHT(p)
 		}
 		ch <- &queryUpdate{cause: p, unreachable: []peer.ID{p}}
 		return
@@ -442,7 +442,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	queryDuration := time.Since(startQuery)
 
 	// query successful, try to add to RT
-	q.dht.peerFound(q.dht.ctx, p, true)
+	q.dht.peerFound(p, true)
 
 	// process new peers
 	saw := []peer.ID{}

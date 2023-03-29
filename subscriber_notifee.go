@@ -108,10 +108,10 @@ func handlePeerChangeEvent(dht *IpfsDHT, p peer.ID) {
 		logger.Errorf("could not check peerstore for protocol support: err: %s", err)
 		return
 	} else if valid {
-		dht.peerFound(dht.ctx, p, false)
+		dht.peerFound(p, false)
 		dht.fixRTIfNeeded()
 	} else {
-		dht.peerStoppedDHT(dht.ctx, p)
+		dht.peerStoppedDHT(p)
 	}
 }
 

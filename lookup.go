@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,11 +35,17 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 				ID:   p,
 			})
 
-			peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
+			mctx, mspan := internal.StartSpan(ctx, "protoMessenger.GetClosestPeers", trace.WithAttributes(attribute.Stringer("peer", p)))
+			peers, err := dht.protoMessenger.GetClosestPeers(mctx, p, peer.ID(key))
 			if err != nil {
+				if mspan.IsRecording() {
+					mspan.SetStatus(codes.Error, err.Error())
+				}
+				mspan.End()
 				logger.Debugf("error getting closer peers: %s", err)
 				return nil, err
 			}
+			mspan.End()
 
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{

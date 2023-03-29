@@ -235,7 +235,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// Fill routing table with currently connected peers that are DHT servers
 	dht.plk.Lock()
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(dht.ctx, p, false)
+		dht.peerFound(p, false)
 	}
 	dht.plk.Unlock()
 
@@ -482,7 +482,7 @@ func (dht *IpfsDHT) fixLowPeers(ctx context.Context) {
 	// we try to add all peers we are connected to to the Routing Table
 	// in case they aren't already there.
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(ctx, p, false)
+		dht.peerFound(p, false)
 	}
 
 	// TODO Active Bootstrapping
@@ -648,9 +648,7 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // If we connect to a peer we already have in the RT but do not exchange a query (rare)
 //
 //	Do Nothing.
-func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
-	ctx, span := internal.StartSpan(ctx, "IpfsDHT.PeerFound", trace.WithAttributes(attribute.Stringer("PeerID", p)))
-	defer span.End()
+func (dht *IpfsDHT) peerFound(p peer.ID, queryPeer bool) {
 
 	if c := baseLogger.Check(zap.DebugLevel, "peer found"); c != nil {
 		c.Write(zap.String("peer", p.String()))
@@ -661,17 +659,14 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID, queryPeer bool) {
 	} else if b {
 		select {
 		case dht.addPeerToRTChan <- addPeerRTReq{p, queryPeer}:
-		case <-ctx.Done():
+		case <-dht.ctx.Done():
 			return
 		}
 	}
 }
 
 // peerStoppedDHT signals the routing table that a peer is unable to responsd to DHT queries anymore.
-func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
-	_, span := internal.StartSpan(ctx, "IpfsDHT.PeerStoppedDHT", trace.WithAttributes(attribute.Stringer("PeerID", p)))
-	defer span.End()
-
+func (dht *IpfsDHT) peerStoppedDHT(p peer.ID) {
 	logger.Debugw("peer stopped dht", "peer", p)
 	// A peer that does not support the DHT protocol is dead for us.
 	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
@@ -838,7 +833,7 @@ func (dht *IpfsDHT) Host() host.Host {
 
 // Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
-	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Ping")
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Ping", trace.WithAttributes(attribute.Stringer("PeerID", p)))
 	defer span.End()
 	return dht.protoMessenger.Ping(ctx, p)
 }

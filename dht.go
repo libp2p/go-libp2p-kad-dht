@@ -856,6 +856,13 @@ func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 	return dht.protoMessenger.Ping(ctx, p)
 }
 
+// NetworkSize returns the most recent estimation of the DHT network size.
+// EXPERIMENTAL: We do not provide any guarantees that this method will
+// continue to exist in the codebase. Use it at your own risk.
+func (dht *IpfsDHT) NetworkSize() (int32, error) {
+	return dht.nsEstimator.NetworkSize()
+}
+
 // newContextWithLocalTags returns a new context.Context with the InstanceID and
 // PeerID keys populated. It will also take any extra tags that need adding to
 // the context as tag.Mutators.

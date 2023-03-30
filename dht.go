@@ -869,7 +869,7 @@ func (dht *IpfsDHT) NetworkSize() (int32, error) {
 func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...tag.Mutator) context.Context {
 	extraTags = append(
 		extraTags,
-		tag.Upsert(metrics.KeyPeerID, dht.self.Pretty()),
+		tag.Upsert(metrics.KeyPeerID, dht.self.String()),
 		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", dht)),
 	)
 	ctx, _ = tag.New(

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -170,6 +171,10 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 	// tracking lookup results for network size estimator as "completed" is true
 	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
 		logger.Warnf("network size estimator track peers: %s", err)
+	}
+
+	if ns, err := dht.nsEstimator.NetworkSize(); err == nil {
+		metrics.NetworkSize.M(int64(ns))
 	}
 
 	// refresh the cpl for this key as the query was successful

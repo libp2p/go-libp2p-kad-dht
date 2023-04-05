@@ -148,8 +148,7 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 		return err
 	}
 
-	// Store the provider records with all the closest peers
-	// we haven't already contacted.
+	// Store the provider records with all the closest peers we haven't already contacted/scheduled interaction with.
 	es.peerStatesLk.Lock()
 	for _, p := range lookupRes.peers {
 		if _, found := es.peerStates[p]; found {
@@ -195,7 +194,7 @@ func (os *optimisticState) stopFn(qps *qpeerset.QueryPeerset) bool {
 		// calculate distance of peer p to the target key
 		distances[i] = netsize.NormedDistance(p, os.ksKey)
 
-		// Check if we have already interacted with that peer
+		// Check if we have already scheduled interaction or have actually interacted with that peer
 		if _, found := os.peerStates[p]; found {
 			continue
 		}
@@ -208,20 +207,20 @@ func (os *optimisticState) stopFn(qps *qpeerset.QueryPeerset) bool {
 		// peer is indeed very close already -> store the provider record directly with it!
 		go os.putProviderRecord(p)
 
-		// keep state that we've contacted that peer
+		// keep track that we've scheduled storing a provider record with that peer
 		os.peerStates[p] = scheduled
 	}
 
-	// count number of peers we have already (successfully) contacted via the above method
-	sentAndSuccessCount := 0
+	// count number of peers we have scheduled to contact or have already successfully contacted via the above method
+	scheduledAndSuccessCount := 0
 	for _, s := range os.peerStates {
 		if s == scheduled || s == success {
-			sentAndSuccessCount += 1
+			scheduledAndSuccessCount += 1
 		}
 	}
 
-	// if we have already contacted more than bucketSize peers stop the procedure
-	if sentAndSuccessCount >= os.dht.bucketSize {
+	// if we have already contacted/scheduled the RPC for more than bucketSize peers stop the procedure
+	if scheduledAndSuccessCount >= os.dht.bucketSize {
 		return true
 	}
 

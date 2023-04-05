@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru v0.5.4
-	github.com/ipfs/boxo v0.8.0-rc1
+	github.com/ipfs/boxo v0.8.0
 	github.com/ipfs/go-cid v0.4.0
 	github.com/ipfs/go-datastore v0.6.0
 	github.com/ipfs/go-detect-race v0.0.1

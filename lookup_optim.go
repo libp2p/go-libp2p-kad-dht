@@ -19,27 +19,27 @@ import (
 )
 
 const (
-	// OptProvIndividualThresholdCertainty describes how sure we want to be that an individual peer that
+	// optProvIndividualThresholdCertainty describes how sure we want to be that an individual peer that
 	// we find during walking the DHT actually belongs to the k-closest peers based on the current network size
 	// estimation.
-	OptProvIndividualThresholdCertainty = 0.9
+	optProvIndividualThresholdCertainty = 0.9
 
-	// OptProvSetThresholdStrictness describes the probability that the set of closest peers is actually further
+	// optProvSetThresholdStrictness describes the probability that the set of closest peers is actually further
 	// away then the calculated set threshold. Put differently, what is the probability that we are too strict and
 	// don't terminate the process early because we can't find any closer peers.
-	OptProvSetThresholdStrictness = 0.1
+	optProvSetThresholdStrictness = 0.1
 
-	// OptProvReturnRatio corresponds to how many ADD_PROVIDER RPCs must have completed (regardless of success)
+	// optProvReturnRatio corresponds to how many ADD_PROVIDER RPCs must have completed (regardless of success)
 	// before we return to the user. The ratio of 0.75 equals 15 RPC as it is based on the Kademlia bucket size.
-	OptProvReturnRatio = 0.75
+	optProvReturnRatio = 0.75
 )
 
 type addProviderRPCState int
 
 const (
-	Sent addProviderRPCState = iota + 1
-	Success
-	Failure
+	scheduled addProviderRPCState = iota + 1
+	success
+	failure
 )
 
 type optimisticState struct {
@@ -88,9 +88,9 @@ func (dht *IpfsDHT) newOptimisticState(ctx context.Context, key string) (*optimi
 		return nil, err
 	}
 
-	individualThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize), 1-OptProvIndividualThresholdCertainty) / float64(networkSize)
-	setThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize)/2.0+1, 1-OptProvSetThresholdStrictness) / float64(networkSize)
-	returnThreshold := int(math.Ceil(float64(dht.bucketSize) * OptProvReturnRatio))
+	individualThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize), 1-optProvIndividualThresholdCertainty) / float64(networkSize)
+	setThreshold := mathext.GammaIncRegInv(float64(dht.bucketSize)/2.0+1, 1-optProvSetThresholdStrictness) / float64(networkSize)
+	returnThreshold := int(math.Ceil(float64(dht.bucketSize) * optProvReturnRatio))
 
 	return &optimisticState{
 		putCtx:              ctx,
@@ -157,7 +157,7 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 		}
 
 		go es.putProviderRecord(p)
-		es.peerStates[p] = Sent
+		es.peerStates[p] = scheduled
 	}
 	es.peerStatesLk.Unlock()
 
@@ -209,13 +209,13 @@ func (os *optimisticState) stopFn(qps *qpeerset.QueryPeerset) bool {
 		go os.putProviderRecord(p)
 
 		// keep state that we've contacted that peer
-		os.peerStates[p] = Sent
+		os.peerStates[p] = scheduled
 	}
 
 	// count number of peers we have already (successfully) contacted via the above method
 	sentAndSuccessCount := 0
 	for _, s := range os.peerStates {
-		if s == Sent || s == Success {
+		if s == scheduled || s == success {
 			sentAndSuccessCount += 1
 		}
 	}
@@ -240,9 +240,9 @@ func (os *optimisticState) putProviderRecord(pid peer.ID) {
 	err := os.dht.protoMessenger.PutProvider(os.putCtx, pid, []byte(os.key), os.dht.host)
 	os.peerStatesLk.Lock()
 	if err != nil {
-		os.peerStates[pid] = Failure
+		os.peerStates[pid] = failure
 	} else {
-		os.peerStates[pid] = Success
+		os.peerStates[pid] = success
 	}
 	os.peerStatesLk.Unlock()
 

@@ -323,7 +323,7 @@ func EnableOptimisticProvide() Option {
 }
 
 // OptimisticProvideJobsPoolSize allows to configure the asynchronicity limit for in-flight ADD_PROVIDER RPCs.
-// It makes sense to set it to a multiple of OptProvReturnRatio * BucketSize
+// It makes sense to set it to a multiple of optProvReturnRatio * BucketSize
 func OptimisticProvideJobsPoolSize(size int) Option {
 	return func(c *dhtcfg.Config) error {
 		c.OptimisticProvideJobsPoolSize = size

@@ -309,3 +309,31 @@ func forceAddressUpdateProcessing(t *testing.T) Option {
 		return nil
 	}
 }
+
+// EnableOptimisticProvide enables an optimization that skips the last hops of the provide process.
+// This works by using the network size estimator (which uses the keyspace density of queries)
+// to optimistically send ADD_PROVIDER requests when we most likely have found the last hop.
+// It will also run some ADD_PROVIDER requests asynchronously in the background after returning,
+// this allows to optimistically return earlier if some threshold number of RPCs have succeeded.
+// The number of background/in-flight queries can be configured with the OptimisticProvideJobsPoolSize
+// option.
+//
+// EXPERIMENTAL: This is an experimental option and might be removed in the future. Use at your own risk.
+func EnableOptimisticProvide() Option {
+	return func(c *dhtcfg.Config) error {
+		c.EnableOptimisticProvide = true
+		return nil
+	}
+}
+
+// OptimisticProvideJobsPoolSize allows to configure the asynchronicity limit for in-flight ADD_PROVIDER RPCs.
+// It makes sense to set it to a multiple of optProvReturnRatio * BucketSize. Check the description of
+// EnableOptimisticProvide for more details.
+//
+// EXPERIMENTAL: This is an experimental option and might be removed in the future. Use at your own risk.
+func OptimisticProvideJobsPoolSize(size int) Option {
+	return func(c *dhtcfg.Config) error {
+		c.OptimisticProvideJobsPoolSize = size
+		return nil
+	}
+}

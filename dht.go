@@ -21,6 +21,7 @@ import (
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
@@ -146,6 +147,13 @@ type IpfsDHT struct {
 	refreshFinishedCh chan struct{}
 
 	rtFreezeTimeout time.Duration
+
+	// network size estimator
+	nsEstimator   *netsize.Estimator
+	enableOptProv bool
+
+	// a bound channel to limit asynchronicity of in-flight ADD_PROVIDER RPCs
+	optProvJobsPool chan struct{}
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
@@ -298,6 +306,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 
 		addPeerToRTChan:   make(chan addPeerRTReq),
 		refreshFinishedCh: make(chan struct{}),
+
+		enableOptProv:   cfg.EnableOptimisticProvide,
+		optProvJobsPool: nil,
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration
@@ -322,6 +333,13 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	}
 	dht.routingTable = rt
 	dht.bootstrapPeers = cfg.BootstrapPeers
+
+	// init network size estimator
+	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
+
+	if dht.enableOptProv {
+		dht.optProvJobsPool = make(chan struct{}, cfg.OptimisticProvideJobsPoolSize)
+	}
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -838,13 +856,20 @@ func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 	return dht.protoMessenger.Ping(ctx, p)
 }
 
+// NetworkSize returns the most recent estimation of the DHT network size.
+// EXPERIMENTAL: We do not provide any guarantees that this method will
+// continue to exist in the codebase. Use it at your own risk.
+func (dht *IpfsDHT) NetworkSize() (int32, error) {
+	return dht.nsEstimator.NetworkSize()
+}
+
 // newContextWithLocalTags returns a new context.Context with the InstanceID and
 // PeerID keys populated. It will also take any extra tags that need adding to
 // the context as tag.Mutators.
 func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...tag.Mutator) context.Context {
 	extraTags = append(
 		extraTags,
-		tag.Upsert(metrics.KeyPeerID, dht.self.Pretty()),
+		tag.Upsert(metrics.KeyPeerID, dht.self.String()),
 		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", dht)),
 	)
 	ctx, _ = tag.New(

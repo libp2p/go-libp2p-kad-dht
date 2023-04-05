@@ -62,6 +62,9 @@ type Config struct {
 	// test specific Config options
 	DisableFixLowPeers          bool
 	TestAddressUpdateProcessing bool
+
+	EnableOptimisticProvide       bool
+	OptimisticProvideJobsPoolSize int
 }
 
 func EmptyQueryFilter(_ interface{}, ai peer.AddrInfo) bool { return true }
@@ -119,6 +122,9 @@ var Defaults = func(o *Config) error {
 	o.BucketSize = defaultBucketSize
 	o.Concurrency = 10
 	o.Resiliency = 3
+
+	// MAGIC: It makes sense to set it to a multiple of OptProvReturnRatio * BucketSize. We chose a multiple of 4.
+	o.OptimisticProvideJobsPoolSize = 60
 
 	return nil
 }

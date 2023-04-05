@@ -3,6 +3,7 @@ package dht
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
+	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -361,7 +363,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 
 				return peers, nil
 			},
-			func() bool {
+			func(*qpeerset.QueryPeerset) bool {
 				select {
 				case <-stopQuery:
 					return true
@@ -414,6 +416,18 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return nil
 	}
 
+	if dht.enableOptProv {
+		err := dht.optimisticProvide(ctx, keyMH)
+		if errors.Is(err, netsize.ErrNotEnoughData) {
+			logger.Debugln("not enough data for optimistic provide taking classic approach")
+			return dht.classicProvide(ctx, keyMH)
+		}
+		return err
+	}
+	return dht.classicProvide(ctx, keyMH)
+}
+
+func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihash) error {
 	closerCtx := ctx
 	if deadline, ok := ctx.Deadline(); ok {
 		now := time.Now()
@@ -617,7 +631,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 			return closest, nil
 		},
-		func() bool {
+		func(*qpeerset.QueryPeerset) bool {
 			return !findAll && psSize() >= count
 		},
 	)
@@ -672,7 +686,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 
 			return peers, err
 		},
-		func() bool {
+		func(*qpeerset.QueryPeerset) bool {
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)

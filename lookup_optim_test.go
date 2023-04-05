@@ -5,14 +5,16 @@ import (
 	"math/rand"
 	"testing"
 	"time"
-	
+
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+var random = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 func randInt(n, except int) int {
 	for {
-		r := rand.Intn(n)
+		r := random.Intn(n)
 		if r != except {
 			return r
 		}
@@ -20,8 +22,6 @@ func randInt(n, except int) int {
 }
 
 func TestOptimisticProvide(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
-
 	// Order of events:
 	// 1. setup DHTs
 	// 2. connect each DHT with three others (but not to itself)

@@ -5,14 +5,14 @@ import (
 	"math/rand"
 	"testing"
 	"time"
-	
+
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func randInt(n, except int) int {
+func randInt(rng *rand.Rand, n, except int) int {
 	for {
-		r := rand.Intn(n)
+		r := rng.Intn(n)
 		if r != except {
 			return r
 		}
@@ -20,7 +20,7 @@ func randInt(n, except int) int {
 }
 
 func TestOptimisticProvide(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Order of events:
 	// 1. setup DHTs
@@ -46,13 +46,13 @@ func TestOptimisticProvide(t *testing.T) {
 	// connect each DHT with three random others
 	for i, dht := range dhts {
 		for j := 0; j < 3; j++ {
-			r := randInt(dhtCount, i)
+			r := randInt(rng, dhtCount, i)
 			connect(t, ctx, dhts[r], dht)
 		}
 	}
 
 	// select privileged DHT that will perform the provide operation
-	privIdx := rand.Intn(dhtCount)
+	privIdx := rng.Intn(dhtCount)
 	privDHT := dhts[privIdx]
 
 	peerIDs := make([]peer.ID, 20)
@@ -85,7 +85,7 @@ func TestOptimisticProvide(t *testing.T) {
 	}
 
 	for _, c := range testCaseCids {
-		n := randInt(dhtCount, privIdx)
+		n := randInt(rng, dhtCount, privIdx)
 
 		ctxT, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()

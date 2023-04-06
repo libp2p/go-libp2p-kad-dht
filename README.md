@@ -39,6 +39,7 @@ Check out our [contributing document](https://github.com/libp2p/community/blob/m
 - [@libp2p/go-libp2p-maintainers](https://github.com/orgs/libp2p/teams/go-libp2p-maintainers)
 - [@guillaumemichel](https://github.com/guillaumemichel)
 
+See [CODEOWNERS](./CODEOWNERS).
 
 ## License
 

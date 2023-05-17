@@ -13,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // DefaultPrefix is the application specific prefix attached to all DHT protocols by default.
@@ -58,6 +59,7 @@ type Config struct {
 	}
 
 	BootstrapPeers func() []peer.AddrInfo
+	AddressFilter  func([]ma.Multiaddr) []ma.Multiaddr
 
 	// test specific Config options
 	DisableFixLowPeers          bool

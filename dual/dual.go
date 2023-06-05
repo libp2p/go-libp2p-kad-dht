@@ -1,4 +1,4 @@
-// Package dual provides an implementaiton of a split or "dual" dht, where two parallel instances
+// Package dual provides an implementation of a split or "dual" dht, where two parallel instances
 // are maintained for the global internet and the local LAN respectively.
 package dual
 
@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 
 	"github.com/hashicorp/go-multierror"
 )
@@ -101,6 +102,8 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 			dht.QueryFilter(dht.PublicQueryFilter),
 			dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
 			dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
+			// filter out all private addresses
+			dht.AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr { return ma.FilterAddrs(addrs, manet.IsPublicAddr) }),
 		),
 	)
 	if err != nil {
@@ -111,6 +114,10 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 			dht.ProtocolExtension(LanExtension),
 			dht.QueryFilter(dht.PrivateQueryFilter),
 			dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),
+			// filter out localhost IP addresses
+			dht.AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+				return ma.FilterAddrs(addrs, func(a ma.Multiaddr) bool { return !manet.IsIPLoopback(a) })
+			}),
 		),
 	)
 	if err != nil {

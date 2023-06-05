@@ -7,13 +7,13 @@ import (
 
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
+	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
-	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
-	record "github.com/libp2p/go-libp2p-record"
-
 	ds "github.com/ipfs/go-datastore"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // ModeOpt describes what mode the dht should operate in
@@ -334,6 +334,16 @@ func EnableOptimisticProvide() Option {
 func OptimisticProvideJobsPoolSize(size int) Option {
 	return func(c *dhtcfg.Config) error {
 		c.OptimisticProvideJobsPoolSize = size
+		return nil
+	}
+}
+
+// AddressFilter allows to configure the address filtering function.
+// This function is run before addresses are added to the peerstore.
+// It is most useful to avoid adding localhost / local addresses.
+func AddressFilter(f func([]ma.Multiaddr) []ma.Multiaddr) Option {
+	return func(c *dhtcfg.Config) error {
+		c.AddressFilter = f
 		return nil
 	}
 }

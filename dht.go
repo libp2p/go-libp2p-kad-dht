@@ -157,6 +157,10 @@ type IpfsDHT struct {
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
+
+	// addrFilter is used to filter the addresses we put into the peer store.
+	// Mostly used to filter out localhost and local addresses.
+	addrFilter func([]ma.Multiaddr) []ma.Multiaddr
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -301,6 +305,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		queryPeerFilter:        cfg.QueryPeerFilter,
 		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
 		rtPeerDiversityFilter:  cfg.RoutingTable.DiversityFilter,
+		addrFilter:             cfg.AddressFilter,
 
 		fixLowPeersChan: make(chan struct{}, 1),
 
@@ -883,6 +888,9 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 	// Don't add addresses for self or our connected peers. We have better ones.
 	if p == dht.self || dht.host.Network().Connectedness(p) == network.Connected {
 		return
+	}
+	if dht.addrFilter != nil {
+		addrs = dht.addrFilter(addrs)
 	}
 	dht.peerstore.AddAddrs(p, addrs, ttl)
 }

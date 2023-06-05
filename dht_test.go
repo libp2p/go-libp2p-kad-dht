@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -21,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
 
@@ -2130,4 +2132,93 @@ func TestPreconnectedNodes(t *testing.T) {
 
 	require.Equal(t, len(peers), 1, "why is there more than one peer?")
 	require.Equal(t, h1.ID(), peers[0], "could not find peer")
+}
+
+func TestAddrFilter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// generate a bunch of addresses
+	publicAddrs := []ma.Multiaddr{
+		ma.StringCast("/ip4/1.2.3.1/tcp/123"),
+		ma.StringCast("/ip4/160.160.160.160/tcp/1600"),
+		ma.StringCast("/ip6/2001::10/tcp/123"),
+	}
+	privAddrs := []ma.Multiaddr{
+		ma.StringCast("/ip4/192.168.1.100/tcp/123"),
+		ma.StringCast("/ip4/172.16.10.10/tcp/123"),
+		ma.StringCast("/ip4/10.10.10.10/tcp/123"),
+		ma.StringCast("/ip6/fc00::10/tcp/123"),
+	}
+	loopbackAddrs := []ma.Multiaddr{
+		ma.StringCast("/ip4/127.0.0.100/tcp/123"),
+		ma.StringCast("/ip6/::1/tcp/123"),
+	}
+
+	allAddrs := append(publicAddrs, privAddrs...)
+	allAddrs = append(allAddrs, loopbackAddrs...)
+
+	// generate different address filters
+	acceptAllFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return addrs
+	})
+	rejectAllFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{}
+	})
+	publicIpFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return ma.FilterAddrs(addrs, manet.IsPublicAddr)
+	})
+	localIpFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return ma.FilterAddrs(addrs, func(a ma.Multiaddr) bool { return !manet.IsIPLoopback(a) })
+	})
+
+	// generate peerid for "remote" peer
+	_, pub, err := crypto.GenerateKeyPair(
+		crypto.Ed25519, // Select your key type. Ed25519 are nice short
+		-1,             // Select key length when possible (i.e. RSA).
+	)
+	require.NoError(t, err)
+	peerid, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+
+	// DHT accepting all addresses
+	d0 := setupDHT(ctx, t, false, acceptAllFilter)
+
+	// peerstore should only contain self
+	require.Equal(t, 1, d0.host.Peerstore().Peers().Len())
+
+	d0.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	require.Equal(t, 2, d0.host.Peerstore().Peers().Len())
+	for _, a := range allAddrs {
+		// check that the peerstore contains all addresses of the remote peer
+		require.Contains(t, d0.host.Peerstore().Addrs(peerid), a)
+	}
+
+	// DHT rejecting all addresses
+	d1 := setupDHT(ctx, t, false, rejectAllFilter)
+	d1.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	// remote peer should not be added to peerstore (all addresses rejected)
+	require.Equal(t, 1, d1.host.Peerstore().Peers().Len())
+
+	// DHT accepting only public addresses
+	d2 := setupDHT(ctx, t, false, publicIpFilter)
+	d2.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	for _, a := range publicAddrs {
+		// check that the peerstore contains only public addresses of the remote peer
+		require.Contains(t, d2.host.Peerstore().Addrs(peerid), a)
+	}
+	require.Equal(t, len(publicAddrs), len(d2.host.Peerstore().Addrs(peerid)))
+
+	// DHT accepting only non-loopback addresses
+	d3 := setupDHT(ctx, t, false, localIpFilter)
+	d3.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	for _, a := range publicAddrs {
+		// check that the peerstore contains only non-loopback addresses of the remote peer
+		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
+	}
+	for _, a := range privAddrs {
+		// check that the peerstore contains only non-loopback addresses of the remote peer
+		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
+	}
+	require.Equal(t, len(publicAddrs)+len(privAddrs), len(d3.host.Peerstore().Addrs(peerid)))
 }

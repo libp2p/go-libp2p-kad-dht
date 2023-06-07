@@ -767,7 +767,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	connect(t, ctx, dhtA, dhtD)
 
 	// and because of the above bootstrap, A also discovers E !
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
+	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 10*time.Second)
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }

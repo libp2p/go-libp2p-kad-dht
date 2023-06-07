@@ -371,8 +371,9 @@ func (dht *IpfsDHT) lookupCheck(ctx context.Context, p peer.ID) error {
 	return err
 }
 
-// peerRecentlyQueried returns true if p has been queried less than dht.lookupCheckInterval ago
-func (dht *IpfsDHT) peerRecentlyQueried(p peer.ID) bool {
+// verifyAndLogPeerQuery returns true if p has been queried less than dht.lookupCheckInterval ago.
+// If the peer has not been queried recently, log that it is being queried.
+func (dht *IpfsDHT) verifyAndLogPeerQuery(p peer.ID) bool {
 	dht.recentlyCheckedPeersLk.Lock()
 	defer dht.recentlyCheckedPeersLk.Unlock()
 
@@ -389,6 +390,10 @@ func (dht *IpfsDHT) peerRecentlyQueried(p peer.ID) bool {
 	// if p still in recentlyCheckedPeers, it has been queried less than
 	// lookupCheckInterval ago
 	_, ok := dht.recentlyCheckedPeers[p]
+	if !ok {
+		// log that the peer is being queried
+		dht.recentlyCheckedPeers[p] = now
+	}
 	return ok
 }
 
@@ -665,7 +670,6 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // and probe it to make sure it answers DHT queries as expected. If
 // it fails to answer, it isn't added to the routingTable.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
-
 	// if the appropriate bucket is already full, don't try to add the new peer.ID
 	if !dht.routingTable.UsefulPeer(p) {
 		return
@@ -676,8 +680,8 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		if dht.peerRecentlyQueried(p) {
-			// peer was already queried recently and didn't make it to the bucket
+		if dht.verifyAndLogPeerQuery(p) {
+			// peer was already queried recently, don't query it again
 			return
 		}
 
@@ -689,10 +693,6 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 			logger.Debugw("connected peer not answering DHT request as expected", "peer", p, "error", err)
 			return
 		}
-		// add peer.ID to recently queried peers
-		dht.recentlyCheckedPeersLk.Lock()
-		dht.recentlyCheckedPeers[p] = time.Now()
-		dht.recentlyCheckedPeersLk.Unlock()
 
 		// if the FIND_NODE succeeded, the peer is considered as valid
 		dht.validPeerFound(ctx, p)

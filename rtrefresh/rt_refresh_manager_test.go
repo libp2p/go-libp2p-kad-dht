@@ -65,7 +65,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	b, _ := rt.TryAddPeer(p, true, false)
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
-	require.NoError(t, r.doRefresh(true))
+	require.NoError(t, r.doRefresh(ctx, true))
 
 	for i := uint(0); i < lastCpl+1; i++ {
 		if i == icpl {
@@ -88,7 +88,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	b, _ = rt.TryAddPeer(p, true, false)
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
-	require.NoError(t, r.doRefresh(true))
+	require.NoError(t, r.doRefresh(ctx, true))
 
 	for i := uint(0); i < 10; i++ {
 		if i == icpl {

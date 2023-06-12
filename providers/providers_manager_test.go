@@ -13,10 +13,10 @@ import (
 
 	mh "github.com/multiformats/go-multihash"
 
+	u "github.com/ipfs/boxo/util"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
-	u "github.com/ipfs/go-ipfs-util"
 	//
 	// used by TestLargeProvidersSet: do not remove
 	// lds "github.com/ipfs/go-ds-leveldb"

@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/peer"
-
-	kbucket "github.com/libp2p/go-libp2p-kbucket"
 
 	"github.com/hashicorp/go-multierror"
 	logging "github.com/ipfs/go-log"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	kbucket "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-base32"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var logger = logging.Logger("dht/RtRefreshManager")
@@ -129,12 +132,60 @@ func (r *RtRefreshManager) RefreshNoWait() {
 	}
 }
 
+// pingAndEvictPeers pings Routing Table peers that haven't been heard of/from
+// in the interval they should have been and evict them if they don't reply.
+func (r *RtRefreshManager) pingAndEvictPeers(ctx context.Context) {
+	ctx, span := internal.StartSpan(ctx, "RefreshManager.PingAndEvictPeers")
+	defer span.End()
+
+	var peersChecked int
+	var alive int64
+	var wg sync.WaitGroup
+	peers := r.rt.GetPeerInfos()
+	for _, ps := range peers {
+		if time.Since(ps.LastSuccessfulOutboundQueryAt) <= r.successfulOutboundQueryGracePeriod {
+			continue
+		}
+
+		peersChecked++
+		wg.Add(1)
+		go func(ps kbucket.PeerInfo) {
+			defer wg.Done()
+
+			livelinessCtx, cancel := context.WithTimeout(ctx, peerPingTimeout)
+			defer cancel()
+			peerIdStr := ps.Id.String()
+			livelinessCtx, span := internal.StartSpan(livelinessCtx, "RefreshManager.PingAndEvictPeers.worker", trace.WithAttributes(attribute.String("peer", peerIdStr)))
+			defer span.End()
+
+			if err := r.h.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
+				logger.Debugw("evicting peer after failed connection", "peer", peerIdStr, "error", err)
+				span.RecordError(err)
+				r.rt.RemovePeer(ps.Id)
+				return
+			}
+
+			if err := r.refreshPingFnc(livelinessCtx, ps.Id); err != nil {
+				logger.Debugw("evicting peer after failed ping", "peer", peerIdStr, "error", err)
+				span.RecordError(err)
+				r.rt.RemovePeer(ps.Id)
+				return
+			}
+
+			atomic.AddInt64(&alive, 1)
+		}(ps)
+	}
+	wg.Wait()
+
+	span.SetAttributes(attribute.Int("NumPeersChecked", peersChecked), attribute.Int("NumPeersSkipped", len(peers)-peersChecked), attribute.Int64("NumPeersAlive", alive))
+}
+
 func (r *RtRefreshManager) loop() {
 	defer r.refcount.Done()
 
 	var refreshTickrCh <-chan time.Time
 	if r.enableAutoRefresh {
-		err := r.doRefresh(true)
+		err := r.doRefresh(r.ctx, true)
 		if err != nil {
 			logger.Warn("failed when refreshing routing table", err)
 		}
@@ -171,38 +222,12 @@ func (r *RtRefreshManager) loop() {
 			}
 		}
 
-		// EXECUTE the refresh
+		ctx, span := internal.StartSpan(r.ctx, "RefreshManager.Refresh")
 
-		// ping Routing Table peers that haven't been heard of/from in the interval they should have been.
-		// and evict them if they don't reply.
-		var wg sync.WaitGroup
-		for _, ps := range r.rt.GetPeerInfos() {
-			if time.Since(ps.LastSuccessfulOutboundQueryAt) > r.successfulOutboundQueryGracePeriod {
-				wg.Add(1)
-				go func(ps kbucket.PeerInfo) {
-					defer wg.Done()
-
-					livelinessCtx, cancel := context.WithTimeout(r.ctx, peerPingTimeout)
-					defer cancel()
-
-					if err := r.h.Connect(livelinessCtx, peer.AddrInfo{ID: ps.Id}); err != nil {
-						logger.Debugw("evicting peer after failed connection", "peer", ps.Id, "error", err)
-						r.rt.RemovePeer(ps.Id)
-						return
-					}
-
-					if err := r.refreshPingFnc(livelinessCtx, ps.Id); err != nil {
-						logger.Debugw("evicting peer after failed ping", "peer", ps.Id, "error", err)
-						r.rt.RemovePeer(ps.Id)
-						return
-					}
-				}(ps)
-			}
-		}
-		wg.Wait()
+		r.pingAndEvictPeers(ctx)
 
 		// Query for self and refresh the required buckets
-		err := r.doRefresh(forced)
+		err := r.doRefresh(ctx, forced)
 		for _, w := range waiting {
 			w <- err
 			close(w)
@@ -210,13 +235,18 @@ func (r *RtRefreshManager) loop() {
 		if err != nil {
 			logger.Warnw("failed when refreshing routing table", "error", err)
 		}
+
+		span.End()
 	}
 }
 
-func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
+func (r *RtRefreshManager) doRefresh(ctx context.Context, forceRefresh bool) error {
+	ctx, span := internal.StartSpan(ctx, "RefreshManager.doRefresh")
+	defer span.End()
+
 	var merr error
 
-	if err := r.queryForSelf(); err != nil {
+	if err := r.queryForSelf(ctx); err != nil {
 		merr = multierror.Append(merr, err)
 	}
 
@@ -224,9 +254,9 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 
 	rfnc := func(cpl uint) (err error) {
 		if forceRefresh {
-			err = r.refreshCpl(cpl)
+			err = r.refreshCpl(ctx, cpl)
 		} else {
-			err = r.refreshCplIfEligible(cpl, refreshCpls[cpl])
+			err = r.refreshCplIfEligible(ctx, cpl, refreshCpls[cpl])
 		}
 		return
 	}
@@ -257,8 +287,8 @@ func (r *RtRefreshManager) doRefresh(forceRefresh bool) error {
 
 	select {
 	case r.refreshDoneCh <- struct{}{}:
-	case <-r.ctx.Done():
-		return r.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	return merr
@@ -272,42 +302,53 @@ func min(a int, b int) int {
 	return b
 }
 
-func (r *RtRefreshManager) refreshCplIfEligible(cpl uint, lastRefreshedAt time.Time) error {
+func (r *RtRefreshManager) refreshCplIfEligible(ctx context.Context, cpl uint, lastRefreshedAt time.Time) error {
 	if time.Since(lastRefreshedAt) <= r.refreshInterval {
 		logger.Debugf("not running refresh for cpl %d as time since last refresh not above interval", cpl)
 		return nil
 	}
 
-	return r.refreshCpl(cpl)
+	return r.refreshCpl(ctx, cpl)
 }
 
-func (r *RtRefreshManager) refreshCpl(cpl uint) error {
+func (r *RtRefreshManager) refreshCpl(ctx context.Context, cpl uint) error {
+	ctx, span := internal.StartSpan(ctx, "RefreshManager.refreshCpl", trace.WithAttributes(attribute.Int("cpl", int(cpl))))
+	defer span.End()
+
 	// gen a key for the query to refresh the cpl
 	key, err := r.refreshKeyGenFnc(cpl)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to generated query key for cpl=%d, err=%s", cpl, err)
 	}
 
 	logger.Infof("starting refreshing cpl %d with key %s (routing table size was %d)",
 		cpl, loggableRawKeyString(key), r.rt.Size())
 
-	if err := r.runRefreshDHTQuery(key); err != nil {
+	if err := r.runRefreshDHTQuery(ctx, key); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to refresh cpl=%d, err=%s", cpl, err)
 	}
 
-	logger.Infof("finished refreshing cpl %d, routing table size is now %d", cpl, r.rt.Size())
+	sz := r.rt.Size()
+	logger.Infof("finished refreshing cpl %d, routing table size is now %d", cpl, sz)
+	span.SetAttributes(attribute.Int("NewSize", sz))
 	return nil
 }
 
-func (r *RtRefreshManager) queryForSelf() error {
-	if err := r.runRefreshDHTQuery(string(r.dhtPeerId)); err != nil {
+func (r *RtRefreshManager) queryForSelf(ctx context.Context) error {
+	ctx, span := internal.StartSpan(ctx, "RefreshManager.queryForSelf")
+	defer span.End()
+
+	if err := r.runRefreshDHTQuery(ctx, string(r.dhtPeerId)); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to query for self, err=%s", err)
 	}
 	return nil
 }
 
-func (r *RtRefreshManager) runRefreshDHTQuery(key string) error {
-	queryCtx, cancel := context.WithTimeout(r.ctx, r.refreshQueryTimeout)
+func (r *RtRefreshManager) runRefreshDHTQuery(ctx context.Context, key string) error {
+	queryCtx, cancel := context.WithTimeout(ctx, r.refreshQueryTimeout)
 	defer cancel()
 
 	err := r.refreshQueryFnc(queryCtx, key)

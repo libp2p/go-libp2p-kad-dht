@@ -11,8 +11,8 @@ import (
 	pstore "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 
 	"github.com/gogo/protobuf/proto"
+	u "github.com/ipfs/boxo/util"
 	ds "github.com/ipfs/go-datastore"
-	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"

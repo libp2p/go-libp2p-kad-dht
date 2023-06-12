@@ -7,10 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/peerstore"
-	peerstoreImpl "github.com/libp2p/go-libp2p/p2p/host/peerstore"
-
 	lru "github.com/hashicorp/golang-lru/simplelru"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/autobatch"
@@ -18,17 +14,24 @@ import (
 	logging "github.com/ipfs/go-log"
 	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	peerstoreImpl "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 	"github.com/multiformats/go-base32"
 )
 
-// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
-// keys stored in the data store.
-const ProvidersKeyPrefix = "/providers/"
+const (
+	// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
+	// keys stored in the data store.
+	ProvidersKeyPrefix = "/providers/"
 
-// ProviderAddrTTL is the TTL of an address we've received from a provider.
-// This is also a temporary address, but lasts longer. After this expires,
-// the records we return will require an extra lookup.
-const ProviderAddrTTL = time.Minute * 30
+	// ProviderAddrTTL is the TTL to keep the multi addresses of provider
+	// peers around. Those addresses are returned alongside provider. After
+	// it expires, the returned records will require an extra lookup, to
+	// find the multiaddress associated with the returned peer id.
+	ProviderAddrTTL = 24 * time.Hour
+)
 
 // ProvideValidity is the default time that a Provider Record should last on DHT
 // This value is also known as Provider Record Expiration Interval.
@@ -237,6 +240,9 @@ func (pm *ProviderManager) run(ctx context.Context, proc goprocess.Process) {
 
 // AddProvider adds a provider
 func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
+	ctx, span := internal.StartSpan(ctx, "ProviderManager.AddProvider")
+	defer span.End()
+
 	if provInfo.ID != pm.self { // don't add own addrs.
 		pm.pstore.AddAddrs(provInfo.ID, provInfo.Addrs, ProviderAddrTTL)
 	}
@@ -284,6 +290,9 @@ func mkProvKey(k []byte) string {
 // GetProviders returns the set of providers for the given key.
 // This method _does not_ copy the set. Do not modify it.
 func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.AddrInfo, error) {
+	ctx, span := internal.StartSpan(ctx, "ProviderManager.GetProviders")
+	defer span.End()
+
 	gp := &getProv{
 		ctx:  ctx,
 		key:  k,

@@ -14,11 +14,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
@@ -143,8 +146,19 @@ type IpfsDHT struct {
 
 	rtFreezeTimeout time.Duration
 
+	// network size estimator
+	nsEstimator   *netsize.Estimator
+	enableOptProv bool
+
+	// a bound channel to limit asynchronicity of in-flight ADD_PROVIDER RPCs
+	optProvJobsPool chan struct{}
+
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
+
+	// addrFilter is used to filter the addresses we put into the peer store.
+	// Mostly used to filter out localhost and local addresses.
+	addrFilter func([]ma.Multiaddr) []ma.Multiaddr
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -231,7 +245,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// Fill routing table with currently connected peers that are DHT servers
 	dht.plk.Lock()
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(dht.ctx, p)
+		dht.peerFound(p)
 	}
 	dht.plk.Unlock()
 
@@ -289,11 +303,15 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		queryPeerFilter:        cfg.QueryPeerFilter,
 		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
 		rtPeerDiversityFilter:  cfg.RoutingTable.DiversityFilter,
+		addrFilter:             cfg.AddressFilter,
 
 		fixLowPeersChan: make(chan struct{}, 1),
 
 		addPeerToRTChan:   make(chan peer.ID),
 		refreshFinishedCh: make(chan struct{}),
+
+		enableOptProv:   cfg.EnableOptimisticProvide,
+		optProvJobsPool: nil,
 	}
 
 	var maxLastSuccessfulOutboundThreshold time.Duration
@@ -320,6 +338,13 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.bootstrapPeers = cfg.BootstrapPeers
 
 	dht.lookupCheckTimeout = cfg.RoutingTable.RefreshQueryTimeout
+
+  // init network size estimator
+	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
+
+	if dht.enableOptProv {
+		dht.optProvJobsPool = make(chan struct{}, cfg.OptimisticProvideJobsPoolSize)
+	}
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -487,7 +512,7 @@ func (dht *IpfsDHT) fixLowPeers(ctx context.Context) {
 	// we try to add all peers we are connected to to the Routing Table
 	// in case they aren't already there.
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(ctx, p)
+		dht.peerFound(p)
 	}
 
 	// TODO Active Bootstrapping
@@ -636,7 +661,7 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // peerFound verifies whether the found peer advertises DHT protocols
 // and probe it to make sure it answers DHT queries as expected. If
 // it fails to answer, it isn't added to the routingTable.
-func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
+func (dht *IpfsDHT) peerFound(p peer.ID) {
 	// if the peer is already in the routing table or the appropriate bucket is
 	//  already full, don't try to add the new peer.ID
 	if dht.routingTable.Find(p) != "" || !dht.routingTable.UsefulPeer(p) {
@@ -684,7 +709,7 @@ func (dht *IpfsDHT) validPeerFound(ctx context.Context, p peer.ID) {
 }
 
 // peerStoppedDHT signals the routing table that a peer is unable to responsd to DHT queries anymore.
-func (dht *IpfsDHT) peerStoppedDHT(ctx context.Context, p peer.ID) {
+func (dht *IpfsDHT) peerStoppedDHT(p peer.ID) {
 	logger.Debugw("peer stopped dht", "peer", p)
 	// A peer that does not support the DHT protocol is dead for us.
 	// There's no point in talking to anymore till it starts supporting the DHT protocol again.
@@ -699,7 +724,10 @@ func (dht *IpfsDHT) fixRTIfNeeded() {
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
-func (dht *IpfsDHT) FindLocal(id peer.ID) peer.AddrInfo {
+func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
+	_, span := internal.StartSpan(ctx, "IpfsDHT.FindLocal", trace.WithAttributes(attribute.Stringer("PeerID", id)))
+	defer span.End()
+
 	switch dht.host.Network().Connectedness(id) {
 	case network.Connected, network.CanConnect:
 		return dht.peerstore.PeerInfo(id)
@@ -848,7 +876,16 @@ func (dht *IpfsDHT) Host() host.Host {
 
 // Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Ping", trace.WithAttributes(attribute.Stringer("PeerID", p)))
+	defer span.End()
 	return dht.protoMessenger.Ping(ctx, p)
+}
+
+// NetworkSize returns the most recent estimation of the DHT network size.
+// EXPERIMENTAL: We do not provide any guarantees that this method will
+// continue to exist in the codebase. Use it at your own risk.
+func (dht *IpfsDHT) NetworkSize() (int32, error) {
+	return dht.nsEstimator.NetworkSize()
 }
 
 // newContextWithLocalTags returns a new context.Context with the InstanceID and
@@ -857,7 +894,7 @@ func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...tag.Mutator) context.Context {
 	extraTags = append(
 		extraTags,
-		tag.Upsert(metrics.KeyPeerID, dht.self.Pretty()),
+		tag.Upsert(metrics.KeyPeerID, dht.self.String()),
 		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", dht)),
 	)
 	ctx, _ = tag.New(
@@ -871,6 +908,9 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 	// Don't add addresses for self or our connected peers. We have better ones.
 	if p == dht.self || dht.host.Network().Connectedness(p) == network.Connected {
 		return
+	}
+	if dht.addrFilter != nil {
+		addrs = dht.addrFilter(addrs)
 	}
 	dht.peerstore.AddAddrs(p, addrs, ttl)
 }

@@ -12,6 +12,7 @@
 - [Install](#install)
 - [Usage](#usage)
 - [Contribute](#contribute)
+- [Maintainers](#maintainers)
 - [License](#license)
 
 ## Install
@@ -30,7 +31,15 @@ Contributions welcome. Please check out [the issues](https://github.com/libp2p/g
 
 Check out our [contributing document](https://github.com/libp2p/community/blob/master/CONTRIBUTE.md) for more information on how we work, and about contributing in general. Please be aware that all interactions related to libp2p are subject to the IPFS [Code of Conduct](https://github.com/ipfs/community/blob/master/code-of-conduct.md).
 
-Small note: If editing the README, please conform to the [standard-readme](https://github.com/RichardLitt/standard-readme) specification.
+<!-- Small note: If editing the README, please conform to the [standard-readme](https://github.com/RichardLitt/standard-readme) specification. -->
+
+## Maintainers
+
+- [@ipfs/kubo-maintainers](https://github.com/orgs/ipfs/teams/kubo-maintainers)
+- [@libp2p/go-libp2p-maintainers](https://github.com/orgs/libp2p/teams/go-libp2p-maintainers)
+- [@guillaumemichel](https://github.com/guillaumemichel)
+
+See [CODEOWNERS](./CODEOWNERS).
 
 ## License
 

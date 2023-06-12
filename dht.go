@@ -673,12 +673,6 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		/*
-			if dht.verifyAndLogPeerQuery(p) {
-				// peer was already queried recently, don't query it again
-				return
-			}
-		*/
 
 		livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
 		defer cancel()

@@ -113,7 +113,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		// a peer has queried us, let's add it to RT. A new go routine is required
 		// because we can't block the stream handler until the remote peer answers
 		// our query.
-		go dht.peerFound(mPeer)
+		go dht.peerFound(dht.ctx, mPeer)
 
 		if c := baseLogger.Check(zap.DebugLevel, "handling message"); c != nil {
 			c.Write(zap.String("from", mPeer.String()),

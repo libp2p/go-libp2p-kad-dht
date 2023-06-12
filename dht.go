@@ -245,7 +245,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// Fill routing table with currently connected peers that are DHT servers
 	dht.plk.Lock()
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(p)
+		dht.peerFound(dht.ctx, p)
 	}
 	dht.plk.Unlock()
 
@@ -339,7 +339,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 
 	dht.lookupCheckTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
-  // init network size estimator
+	// init network size estimator
 	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
 
 	if dht.enableOptProv {
@@ -512,7 +512,7 @@ func (dht *IpfsDHT) fixLowPeers(ctx context.Context) {
 	// we try to add all peers we are connected to to the Routing Table
 	// in case they aren't already there.
 	for _, p := range dht.host.Network().Peers() {
-		dht.peerFound(p)
+		dht.peerFound(ctx, p)
 	}
 
 	// TODO Active Bootstrapping
@@ -661,7 +661,7 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // peerFound verifies whether the found peer advertises DHT protocols
 // and probe it to make sure it answers DHT queries as expected. If
 // it fails to answer, it isn't added to the routingTable.
-func (dht *IpfsDHT) peerFound(p peer.ID) {
+func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	// if the peer is already in the routing table or the appropriate bucket is
 	//  already full, don't try to add the new peer.ID
 	if dht.routingTable.Find(p) != "" || !dht.routingTable.UsefulPeer(p) {

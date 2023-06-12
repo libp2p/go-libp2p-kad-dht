@@ -768,7 +768,8 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	connect(t, ctx, dhtA, dhtD)
 
 	// and because of the above bootstrap, A also discovers E !
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
+	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 10*time.Second)
+	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }
 
@@ -1299,6 +1300,49 @@ func TestClientModeConnect(t *testing.T) {
 
 	a := setupDHT(ctx, t, false)
 	b := setupDHT(ctx, t, true)
+
+	connectNoSync(t, ctx, a, b)
+
+	c := testCaseCids[0]
+	p := peer.ID("TestPeer")
+	a.ProviderStore().AddProvider(ctx, c.Hash(), peer.AddrInfo{ID: p})
+	time.Sleep(time.Millisecond * 5) // just in case...
+
+	provs, err := b.FindProviders(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(provs) == 0 {
+		t.Fatal("Expected to get a provider back")
+	}
+
+	if provs[0].ID != p {
+		t.Fatal("expected it to be our test peer")
+	}
+	if a.routingTable.Find(b.self) != "" {
+		t.Fatal("DHT clients should not be added to routing tables")
+	}
+	if b.routingTable.Find(a.self) == "" {
+		t.Fatal("DHT server should have been added to the dht client's routing table")
+	}
+}
+
+func TestInvalidServer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := setupDHT(ctx, t, false)
+	b := setupDHT(ctx, t, true)
+
+	// make b advertise all dht server protocols
+	for _, proto := range a.serverProtocols {
+		// Hang on every request.
+		b.host.SetStreamHandler(proto, func(s network.Stream) {
+			defer s.Reset() // nolint
+			<-ctx.Done()
+		})
+	}
 
 	connectNoSync(t, ctx, a, b)
 
@@ -2125,6 +2169,8 @@ func TestPreconnectedNodes(t *testing.T) {
 	d2, err := New(ctx, h2, opts...)
 	require.NoError(t, err)
 	defer h2.Close()
+
+	connect(t, ctx, d1, d2)
 
 	// See if it works
 	peers, err := d2.GetClosestPeers(ctx, "testkey")

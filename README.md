@@ -11,6 +11,7 @@
 
 - [Install](#install)
 - [Usage](#usage)
+- [Optimizations](#optimizations)
 - [Contribute](#contribute)
 - [Maintainers](#maintainers)
 - [License](#license)
@@ -20,6 +21,10 @@
 ```sh
 go get github.com/libp2p/go-libp2p-kad-dht
 ```
+
+## Optimizations
+
+Client-side optimizations are described in [optimizations.md](./optimizations.md)
 
 ## Usage
 

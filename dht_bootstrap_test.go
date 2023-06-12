@@ -164,11 +164,6 @@ func TestBootstrappersReplacable(t *testing.T) {
 	}
 	require.Len(t, d.routingTable.ListPeers(), 0)
 
-	// Empty recentlyCheckedPeers, to make calls to peerFound predictable
-	d.recentlyCheckedPeersLk.Lock()
-	d.recentlyCheckedPeers = make(map[peer.ID]time.Time)
-	d.recentlyCheckedPeersLk.Unlock()
-
 	// adding d1 & d2 works now because there is space in the Routing Table
 	require.NoError(t, d.host.Network().ClosePeer(d1.self))
 	require.NoError(t, d.host.Network().ClosePeer(d2.self))

@@ -122,11 +122,6 @@ type IpfsDHT struct {
 
 	// timeout for the lookupCheck operation
 	lookupCheckTimeout time.Duration
-	// time interval during which we don't try to query the same peer again
-	lookupCheckInterval time.Duration
-	// recentlyCheckedPeers contains the peers recently queried with the time at which they were queried
-	recentlyCheckedPeers   map[peer.ID]time.Time
-	recentlyCheckedPeersLk sync.Mutex
 
 	// A function returning a set of bootstrap peers to fallback on if all other attempts to fix
 	// the routing table fail (or, e.g., this is the first time this node is
@@ -186,7 +181,6 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
-	dht.lookupCheckInterval = cfg.LookupCheckInterval
 	dht.maxRecordAge = cfg.MaxRecordAge
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
@@ -326,7 +320,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.bootstrapPeers = cfg.BootstrapPeers
 
 	dht.lookupCheckTimeout = cfg.RoutingTable.RefreshQueryTimeout
-	dht.recentlyCheckedPeers = make(map[peer.ID]time.Time)
 
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -369,32 +362,6 @@ func (dht *IpfsDHT) lookupCheck(ctx context.Context, p peer.ID) error {
 		return fmt.Errorf("peer %s failed to return its closest peers, got %d", p, len(peerids))
 	}
 	return err
-}
-
-// verifyAndLogPeerQuery returns true if p has been queried less than dht.lookupCheckInterval ago.
-// If the peer has not been queried recently, log that it is being queried.
-func (dht *IpfsDHT) verifyAndLogPeerQuery(p peer.ID) bool {
-	dht.recentlyCheckedPeersLk.Lock()
-	defer dht.recentlyCheckedPeersLk.Unlock()
-
-	now := time.Now()
-
-	// clean recentlyCheckedPeers
-	for peerid, t := range dht.recentlyCheckedPeers {
-		// remove peers that have been queried more than lookupCheckInterval ago
-		if t.Add(dht.lookupCheckInterval).Before(now) {
-			delete(dht.recentlyCheckedPeers, peerid)
-		}
-	}
-
-	// if p still in recentlyCheckedPeers, it has been queried less than
-	// lookupCheckInterval ago
-	_, ok := dht.recentlyCheckedPeers[p]
-	if !ok {
-		// log that the peer is being queried
-		dht.recentlyCheckedPeers[p] = now
-	}
-	return ok
 }
 
 func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutboundThreshold time.Duration) (*rtrefresh.RtRefreshManager, error) {
@@ -670,8 +637,9 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // and probe it to make sure it answers DHT queries as expected. If
 // it fails to answer, it isn't added to the routingTable.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
-	// if the appropriate bucket is already full, don't try to add the new peer.ID
-	if !dht.routingTable.UsefulPeer(p) {
+	// if the peer is already in the routing table or the appropriate bucket is
+	//  already full, don't try to add the new peer.ID
+	if dht.routingTable.Find(p) != "" || !dht.routingTable.UsefulPeer(p) {
 		return
 	}
 
@@ -680,10 +648,12 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	if err != nil {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
-		if dht.verifyAndLogPeerQuery(p) {
-			// peer was already queried recently, don't query it again
-			return
-		}
+		/*
+			if dht.verifyAndLogPeerQuery(p) {
+				// peer was already queried recently, don't query it again
+				return
+			}
+		*/
 
 		livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
 		defer cancel()

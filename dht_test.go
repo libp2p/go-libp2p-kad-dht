@@ -23,7 +23,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
-	"golang.org/x/exp/maps"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1564,11 +1563,6 @@ func TestFixLowPeers(t *testing.T) {
 		mainD.routingTable.RemovePeer(d.self)
 	}
 
-	// remove blacklist of already contacted peers
-	mainD.recentlyCheckedPeersLk.Lock()
-	maps.Clear(mainD.recentlyCheckedPeers)
-	mainD.recentlyCheckedPeersLk.Unlock()
-
 	// but we will still get enough peers in the RT because of fix low Peers
 	waitForWellFormedTables(t, []*IpfsDHT{mainD}, minRTRefreshThreshold, minRTRefreshThreshold, 5*time.Second)
 }
@@ -1673,15 +1667,6 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	defer dhtB.Close()
 
 	connect(t, ctx, dhtA, dhtB)
-
-	// clear connection history
-	dhtA.recentlyCheckedPeersLk.Lock()
-	maps.Clear(dhtA.recentlyCheckedPeers)
-	dhtA.recentlyCheckedPeersLk.Unlock()
-
-	dhtB.recentlyCheckedPeersLk.Lock()
-	maps.Clear(dhtB.recentlyCheckedPeers)
-	dhtB.recentlyCheckedPeersLk.Unlock()
 
 	// now assert both have each other in their RT
 	waitForWellFormedTables(t, []*IpfsDHT{dhtA, dhtB}, 1, 1, 10*time.Second)
@@ -2182,11 +2167,6 @@ func TestPreconnectedNodes(t *testing.T) {
 	d2, err := New(ctx, h2, opts...)
 	require.NoError(t, err)
 	defer h2.Close()
-
-	// clear d2 recent checked peers
-	d2.recentlyCheckedPeersLk.Lock()
-	maps.Clear(d2.recentlyCheckedPeers)
-	d2.recentlyCheckedPeersLk.Unlock()
 
 	connect(t, ctx, d1, d2)
 

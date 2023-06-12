@@ -164,6 +164,7 @@ func TestBootstrappersReplacable(t *testing.T) {
 	}
 	require.Len(t, d.routingTable.ListPeers(), 0)
 
+	// Empty recentlyCheckedPeers, to make calls to peerFound predictable
 	d.recentlyCheckedPeersLk.Lock()
 	d.recentlyCheckedPeers = make(map[peer.ID]time.Time)
 	d.recentlyCheckedPeersLk.Unlock()

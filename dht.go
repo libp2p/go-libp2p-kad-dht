@@ -14,8 +14,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
@@ -39,6 +37,10 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -153,6 +155,8 @@ type IpfsDHT struct {
 	// a bound channel to limit asynchronicity of in-flight ADD_PROVIDER RPCs
 	optProvJobsPool chan struct{}
 
+	rtSizeGauge prometheus.GaugeFunc
+
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
 }
@@ -219,6 +223,17 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		if err := dht.moveToServerMode(); err != nil {
 			return nil, err
 		}
+	}
+
+	gauge := prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Namespace: "libp2p",
+		Subsystem: "dht_size",
+		Name:      "routing table size",
+		Help:      "The size of the full routing table.",
+	}, dht.getRtSizeForGauge)
+	if err := prometheus.Register(gauge); err == nil {
+		// Only unregister if register is successfull
+		dht.rtSizeGauge = gauge
 	}
 
 	// register for event bus and network notifications
@@ -370,6 +385,10 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.rtFreezeTimeout = rtFreezeTimeout
 
 	return dht, nil
+}
+
+func (dht *IpfsDHT) getRtSizeForGauge() float64 {
+	return float64(dht.routingTable.Size())
 }
 
 // lookupCheck performs a lookup request to a remote peer.ID, verifying that it is able to
@@ -841,7 +860,11 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 
 // Close calls Process Close.
 func (dht *IpfsDHT) Close() error {
-	return dht.proc.Close()
+	err := dht.proc.Close()
+	if dht.rtSizeGauge != nil {
+		prometheus.Unregister(dht.rtSizeGauge)
+	}
+	return err
 }
 
 func mkDsKey(s string) ds.Key {

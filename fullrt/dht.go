@@ -20,7 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
-	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/gogo/protobuf/proto"
 	u "github.com/ipfs/boxo/util"
@@ -44,6 +44,8 @@ import (
 	"github.com/libp2p/go-libp2p-xor/kademlia"
 	kadkey "github.com/libp2p/go-libp2p-xor/key"
 	"github.com/libp2p/go-libp2p-xor/trie"
+
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -95,6 +97,8 @@ type FullRT struct {
 	bulkSendParallelism int
 
 	self peer.ID
+
+	rtSizeGauge prometheus.Gauge
 }
 
 // NewFullRT creates a DHT client that tracks the full network. It takes a protocol prefix for the given network,
@@ -195,6 +199,18 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		bulkSendParallelism: fullrtcfg.bulkSendParallelism,
 
 		self: self,
+	}
+
+	counter := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "libp2p",
+		Subsystem: "dht_size",
+		Name:      "routing table size",
+		Help:      "The size of the full routing table.",
+	})
+	counter.Set(0)
+	if err := prometheus.Register(counter); err == nil {
+		// Only unregister if register is successfull
+		rt.rtSizeGauge = counter
 	}
 
 	rt.wg.Add(1)
@@ -350,12 +366,19 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		dht.rt = newRt
 		dht.lastCrawlTime = time.Now()
 		dht.rtLk.Unlock()
+
+		if dht.rtSizeGauge != nil {
+			dht.rtSizeGauge.Set(float64(len(m)))
+		}
 	}
 }
 
 func (dht *FullRT) Close() error {
 	dht.cancel()
 	err := dht.ProviderManager.Process().Close()
+	if dht.rtSizeGauge != nil {
+		prometheus.Unregister(dht.rtSizeGauge)
+	}
 	dht.wg.Wait()
 	return err
 }

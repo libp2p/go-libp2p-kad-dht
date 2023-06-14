@@ -685,15 +685,17 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 			dht.lookupChecksLk.Unlock()
 			// drop the new peer.ID if the maximal number of concurrent lookup
 			// checks is reached
+			fmt.Println("dropping peer", p, "because of too many concurrent lookup checks")
 			return
 		}
 		dht.concurrentLookupChecks++
 		dht.lookupChecksLk.Unlock()
 
-		livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
-		defer cancel()
-
 		go func() {
+			livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
+			defer cancel()
+
+			//go func() {
 			// performing a FIND_NODE query
 			err := dht.lookupCheck(livelinessCtx, p)
 

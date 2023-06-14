@@ -110,9 +110,6 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			return false
 		}
 
-		// a peer has queried us, let's add it to RT
-		dht.peerFound(dht.ctx, mPeer)
-
 		if c := baseLogger.Check(zap.DebugLevel, "handling message"); c != nil {
 			c.Write(zap.String("from", mPeer.String()),
 				zap.Int32("type", int32(req.GetType())),

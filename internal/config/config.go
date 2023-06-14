@@ -32,20 +32,21 @@ type RouteTableFilterFunc func(dht interface{}, p peer.ID) bool
 
 // Config is a structure containing all the options that can be used when constructing a DHT.
 type Config struct {
-	Datastore          ds.Batching
-	Validator          record.Validator
-	ValidatorChanged   bool // if true implies that the validator has been changed and that Defaults should not be used
-	Mode               ModeOpt
-	ProtocolPrefix     protocol.ID
-	V1ProtocolOverride protocol.ID
-	BucketSize         int
-	Concurrency        int
-	Resiliency         int
-	MaxRecordAge       time.Duration
-	EnableProviders    bool
-	EnableValues       bool
-	ProviderStore      providers.ProviderStore
-	QueryPeerFilter    QueryFilterFunc
+	Datastore              ds.Batching
+	Validator              record.Validator
+	ValidatorChanged       bool // if true implies that the validator has been changed and that Defaults should not be used
+	Mode                   ModeOpt
+	ProtocolPrefix         protocol.ID
+	V1ProtocolOverride     protocol.ID
+	BucketSize             int
+	Concurrency            int
+	Resiliency             int
+	MaxRecordAge           time.Duration
+	EnableProviders        bool
+	EnableValues           bool
+	ProviderStore          providers.ProviderStore
+	QueryPeerFilter        QueryFilterFunc
+	LookupCheckConcurrency int
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
@@ -112,8 +113,8 @@ var Defaults = func(o *Config) error {
 	o.EnableValues = true
 	o.QueryPeerFilter = EmptyQueryFilter
 
-	o.RoutingTable.LatencyTolerance = time.Minute
-	o.RoutingTable.RefreshQueryTimeout = 1 * time.Minute
+	o.RoutingTable.LatencyTolerance = 10 * time.Second
+	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second
 	o.RoutingTable.RefreshInterval = 10 * time.Minute
 	o.RoutingTable.AutoRefresh = true
 	o.RoutingTable.PeerFilter = EmptyRTFilter
@@ -123,6 +124,7 @@ var Defaults = func(o *Config) error {
 	o.BucketSize = defaultBucketSize
 	o.Concurrency = 10
 	o.Resiliency = 3
+	o.LookupCheckConcurrency = 256
 
 	// MAGIC: It makes sense to set it to a multiple of OptProvReturnRatio * BucketSize. We chose a multiple of 4.
 	o.OptimisticProvideJobsPoolSize = 60

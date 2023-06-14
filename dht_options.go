@@ -194,6 +194,15 @@ func Resiliency(beta int) Option {
 	}
 }
 
+// LookupInterval configures maximal number of go routines that can be used to
+// perform a lookup check operation, before adding a new node to the routing table.
+func LookupCheckConcurrency(n int) Option {
+	return func(c *dhtcfg.Config) error {
+		c.LookupCheckConcurrency = n
+		return nil
+	}
+}
+
 // MaxRecordAge specifies the maximum time that any node will hold onto a record ("PutValue record")
 // from the time its received. This does not apply to any other forms of validity that
 // the record may contain.

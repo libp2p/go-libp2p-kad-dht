@@ -125,6 +125,10 @@ type IpfsDHT struct {
 
 	// timeout for the lookupCheck operation
 	lookupCheckTimeout time.Duration
+	// number of concurrent lookupCheck operations
+	concurrentLookupChecks int
+	lookupCheckConcurrency int
+	lookupChecksLk         sync.Mutex
 
 	// A function returning a set of bootstrap peers to fallback on if all other attempts to fix
 	// the routing table fail (or, e.g., this is the first time this node is
@@ -300,6 +304,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		bucketSize:             cfg.BucketSize,
 		alpha:                  cfg.Concurrency,
 		beta:                   cfg.Resiliency,
+		lookupCheckConcurrency: cfg.LookupCheckConcurrency,
 		queryPeerFilter:        cfg.QueryPeerFilter,
 		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
 		rtPeerDiversityFilter:  cfg.RoutingTable.DiversityFilter,
@@ -663,8 +668,8 @@ func (dht *IpfsDHT) rtPeerLoop(proc goprocess.Process) {
 // it fails to answer, it isn't added to the routingTable.
 func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 	// if the peer is already in the routing table or the appropriate bucket is
-	//  already full, don't try to add the new peer.ID
-	if dht.routingTable.Find(p) != "" || !dht.routingTable.UsefulPeer(p) {
+	// already full, don't try to add the new peer.ID
+	if !dht.routingTable.UsefulNewPeer(p) {
 		return
 	}
 
@@ -674,17 +679,36 @@ func (dht *IpfsDHT) peerFound(ctx context.Context, p peer.ID) {
 		logger.Errorw("failed to validate if peer is a DHT peer", "peer", p, "error", err)
 	} else if b {
 
+		// check if the maximal number of concurrent lookup checks is reached
+		dht.lookupChecksLk.Lock()
+		if dht.concurrentLookupChecks >= dht.lookupCheckConcurrency {
+			dht.lookupChecksLk.Unlock()
+			// drop the new peer.ID if the maximal number of concurrent lookup
+			// checks is reached
+			return
+		}
+		dht.concurrentLookupChecks++
+		dht.lookupChecksLk.Unlock()
+
 		livelinessCtx, cancel := context.WithTimeout(ctx, dht.lookupCheckTimeout)
 		defer cancel()
 
-		// performing a FIND_NODE query
-		if err := dht.lookupCheck(livelinessCtx, p); err != nil {
-			logger.Debugw("connected peer not answering DHT request as expected", "peer", p, "error", err)
-			return
-		}
+		go func() {
+			// performing a FIND_NODE query
+			err := dht.lookupCheck(livelinessCtx, p)
 
-		// if the FIND_NODE succeeded, the peer is considered as valid
-		dht.validPeerFound(ctx, p)
+			dht.lookupChecksLk.Lock()
+			dht.concurrentLookupChecks--
+			dht.lookupChecksLk.Unlock()
+
+			if err != nil {
+				logger.Debugw("connected peer not answering DHT request as expected", "peer", p, "error", err)
+				return
+			}
+
+			// if the FIND_NODE succeeded, the peer is considered as valid
+			dht.validPeerFound(ctx, p)
+		}()
 	}
 }
 

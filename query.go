@@ -446,7 +446,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	queryDuration := time.Since(startQuery)
 
 	// query successful, try to add to RT
-	q.dht.validPeerFound(q.dht.ctx, p)
+	q.dht.validPeerFound(p)
 
 	// process new peers
 	saw := []peer.ID{}

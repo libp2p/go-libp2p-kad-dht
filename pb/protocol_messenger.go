@@ -45,6 +45,12 @@ func NewProtocolMessenger(msgSender MessageSender, opts ...ProtocolMessengerOpti
 	return pm, nil
 }
 
+type MessageSenderWithDisconnect interface {
+	MessageSender
+
+	OnDisconnect(context.Context, peer.ID)
+}
+
 // MessageSender handles sending wire protocol messages to a given peer
 type MessageSender interface {
 	// SendRequest sends a peer a message and waits for its response

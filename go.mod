@@ -13,7 +13,6 @@ require (
 	github.com/ipfs/go-datastore v0.6.0
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-log v1.0.5
-	github.com/jbenet/goprocess v0.1.4
 	github.com/libp2p/go-libp2p v0.27.6
 	github.com/libp2p/go-libp2p-kbucket v0.6.3-0.20230615004129-e99cd472ed1e
 	github.com/libp2p/go-libp2p-record v0.2.0
@@ -32,6 +31,7 @@ require (
 	go.opencensus.io v0.24.0
 	go.opentelemetry.io/otel v1.16.0
 	go.opentelemetry.io/otel/trace v1.16.0
+	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
 	gonum.org/v1/gonum v0.13.0
 )
@@ -63,6 +63,7 @@ require (
 	github.com/ipld/go-ipld-prime v0.20.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
+	github.com/jbenet/goprocess v0.1.4 // indirect
 	github.com/klauspost/compress v1.16.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
@@ -108,7 +109,6 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.19.2 // indirect
-	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.10.0 // indirect
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29 // indirect
 	golang.org/x/mod v0.10.0 // indirect

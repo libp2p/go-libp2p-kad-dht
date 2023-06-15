@@ -43,7 +43,7 @@ type messageSenderImpl struct {
 	protocols []protocol.ID
 }
 
-func NewMessageSenderImpl(h host.Host, protos []protocol.ID) pb.MessageSender {
+func NewMessageSenderImpl(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect {
 	return &messageSenderImpl{
 		host:      h,
 		strmap:    make(map[peer.ID]*peerMessageSender),

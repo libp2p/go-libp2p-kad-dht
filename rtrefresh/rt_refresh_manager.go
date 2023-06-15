@@ -31,10 +31,9 @@ type triggerRefreshReq struct {
 }
 
 type RtRefreshManager struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	refcount  sync.WaitGroup
-	closeOnce sync.Once
+	ctx      context.Context
+	cancel   context.CancelFunc
+	refcount sync.WaitGroup
 
 	// peerId of this DHT peer i.e. self peerId.
 	h         host.Host
@@ -89,17 +88,14 @@ func NewRtRefreshManager(h host.Host, rt *kbucket.RoutingTable, autoRefresh bool
 	}, nil
 }
 
-func (r *RtRefreshManager) Start() error {
+func (r *RtRefreshManager) Start() {
 	r.refcount.Add(1)
 	go r.loop()
-	return nil
 }
 
 func (r *RtRefreshManager) Close() error {
-	r.closeOnce.Do(func() {
-		r.cancel()
-		r.refcount.Wait()
-	})
+	r.cancel()
+	r.refcount.Wait()
 	return nil
 }
 
@@ -117,6 +113,7 @@ func (r *RtRefreshManager) Refresh(force bool) <-chan error {
 		case r.triggerRefresh <- &triggerRefreshReq{respCh: resp, forceCplRefresh: force}:
 		case <-r.ctx.Done():
 			resp <- r.ctx.Err()
+			close(resp)
 		}
 	}()
 

@@ -151,7 +151,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 	ctx, cancel := context.WithCancel(context.Background())
 
 	self := h.ID()
-	pm, err := providers.NewProviderManager(ctx, self, h.Peerstore(), dhtcfg.Datastore, fullrtcfg.pmOpts...)
+	pm, err := providers.NewProviderManager(self, h.Peerstore(), dhtcfg.Datastore, fullrtcfg.pmOpts...)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -355,9 +355,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 
 func (dht *FullRT) Close() error {
 	dht.cancel()
-	err := dht.ProviderManager.Process().Close()
 	dht.wg.Wait()
-	return err
+	return dht.ProviderManager.Close()
 }
 
 func (dht *FullRT) Bootstrap(ctx context.Context) error {

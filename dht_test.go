@@ -168,9 +168,7 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 		t.Fatal("peers setup incorrectly: no local address")
 	}
 
-	a.peerstore.AddAddrs(idB, addrB, peerstore.TempAddrTTL)
-	pi := peer.AddrInfo{ID: idB}
-	if err := a.host.Connect(ctx, pi); err != nil {
+	if err := a.host.Connect(ctx, peer.AddrInfo{ID: idB, Addrs: addrB}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -297,8 +295,6 @@ func TestValueGetSet(t *testing.T) {
 	if string(val) != "world" {
 		t.Fatalf("Expected 'world' got '%s'", string(val))
 	}
-
-	// late connect
 
 	connect(t, ctx, dhts[2], dhts[0])
 	connect(t, ctx, dhts[2], dhts[1])
@@ -612,25 +608,6 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 	// test "well-formed-ness" (>= minPeers peers in every routing table)
 	t.Helper()
 
-	checkTables := func() bool {
-		totalPeers := 0
-		for _, dht := range dhts {
-			rtlen := dht.routingTable.Size()
-			totalPeers += rtlen
-			if minPeers > 0 && rtlen < minPeers {
-				// t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
-				return false
-			}
-		}
-		actualAvgPeers := totalPeers / len(dhts)
-		t.Logf("avg rt size: %d", actualAvgPeers)
-		if avgPeers > 0 && actualAvgPeers < avgPeers {
-			t.Logf("avg rt size: %d < %d", actualAvgPeers, avgPeers)
-			return false
-		}
-		return true
-	}
-
 	timeoutA := time.After(timeout)
 	for {
 		select {
@@ -638,12 +615,32 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 			t.Errorf("failed to reach well-formed routing tables after %s", timeout)
 			return
 		case <-time.After(5 * time.Millisecond):
-			if checkTables() {
+			if checkForWellFormedTablesOnce(t, dhts, minPeers, avgPeers) {
 				// succeeded
 				return
 			}
 		}
 	}
+}
+
+func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int) bool {
+	t.Helper()
+	totalPeers := 0
+	for _, dht := range dhts {
+		rtlen := dht.routingTable.Size()
+		totalPeers += rtlen
+		if minPeers > 0 && rtlen < minPeers {
+			//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+			return false
+		}
+	}
+	actualAvgPeers := totalPeers / len(dhts)
+	t.Logf("avg rt size: %d", actualAvgPeers)
+	if avgPeers > 0 && actualAvgPeers < avgPeers {
+		t.Logf("avg rt size: %d < %d", actualAvgPeers, avgPeers)
+		return false
+	}
+	return true
 }
 
 func printRoutingTables(dhts []*IpfsDHT) {
@@ -681,24 +678,16 @@ func TestRefresh(t *testing.T) {
 	<-time.After(100 * time.Millisecond)
 	// bootstrap a few times until we get good tables.
 	t.Logf("bootstrapping them so they find each other %d", nDHTs)
-	ctxT, cancelT := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelT()
 
-	for ctxT.Err() == nil {
-		bootstrap(t, ctxT, dhts)
+	for {
+		bootstrap(t, ctx, dhts)
 
-		// wait a bit.
-		select {
-		case <-time.After(50 * time.Millisecond):
-			continue // being explicit
-		case <-ctxT.Done():
-			return
+		if checkForWellFormedTablesOnce(t, dhts, 7, 10) {
+			break
 		}
+
+		time.Sleep(time.Microsecond * 50)
 	}
-
-	waitForWellFormedTables(t, dhts, 7, 10, 10*time.Second)
-
-	cancelT()
 
 	if u.Debug {
 		// the routing tables should be full now. let's inspect them.
@@ -2123,7 +2112,7 @@ func TestBootstrapPeersFunc(t *testing.T) {
 	bootstrapPeersB = []peer.AddrInfo{addrA}
 	lock.Unlock()
 
-	dhtB.fixLowPeers(ctx)
+	dhtB.fixLowPeers()
 	require.NotEqual(t, 0, len(dhtB.host.Network().Peers()))
 }
 

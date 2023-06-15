@@ -31,7 +31,7 @@ func TestProviderManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(ctx, mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestProviderManager(t *testing.T) {
 		t.Fatalf("Should have got 3 providers, got %d", len(resp))
 	}
 
-	p.proc.Close()
+	p.Close()
 }
 
 func TestProvidersDatastore(t *testing.T) {
@@ -77,11 +77,11 @@ func TestProvidersDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProviderManager(ctx, mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer p.proc.Close()
+	defer p.Close()
 
 	friend := peer.ID("friend")
 	var mhs []mh.Multihash
@@ -166,7 +166,7 @@ func TestProvidesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(ctx, mid, ps, ds)
+	p, err := NewProviderManager(mid, ps, ds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestProvidesExpire(t *testing.T) {
 	time.Sleep(time.Second / 2)
 
 	// Stop to prevent data races
-	p.Process().Close()
+	p.Close()
 
 	if p.cache.Len() != 0 {
 		t.Fatal("providers map not cleaned up")
@@ -278,11 +278,11 @@ func TestLargeProvidersSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProviderManager(ctx, mid, ps, dstore)
+	p, err := NewProviderManager(mid, ps, dstore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer p.proc.Close()
+	defer p.Close()
 
 	var mhs []mh.Multihash
 	for i := 0; i < 1000; i++ {
@@ -318,7 +318,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm, err := NewProviderManager(ctx, p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestWriteUpdatesCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm, err := NewProviderManager(ctx, p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}

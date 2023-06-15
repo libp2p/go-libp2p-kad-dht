@@ -271,7 +271,6 @@ func TestValueGetSet(t *testing.T) {
 		defer dhts[i].host.Close()
 	}
 
-	t.Log("before connect")
 	connect(t, ctx, dhts[0], dhts[1])
 
 	t.Log("adding value on: ", dhts[0].self)
@@ -290,13 +289,11 @@ func TestValueGetSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log("after get value")
 
 	if string(val) != "world" {
 		t.Fatalf("Expected 'world' got '%s'", string(val))
 	}
 
-	t.Log("late connect")
 	connect(t, ctx, dhts[2], dhts[0])
 	connect(t, ctx, dhts[2], dhts[1])
 
@@ -319,7 +316,6 @@ func TestValueGetSet(t *testing.T) {
 		t.Fatalf("Expected 'world' got '%s'", string(val))
 	}
 
-	t.Log("very late connect")
 	for _, d := range dhts[:3] {
 		connect(t, ctx, dhts[3], d)
 	}
@@ -632,7 +628,7 @@ func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPe
 		rtlen := dht.routingTable.Size()
 		totalPeers += rtlen
 		if minPeers > 0 && rtlen < minPeers {
-			t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+			//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
 			return false
 		}
 	}

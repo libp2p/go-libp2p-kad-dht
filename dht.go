@@ -616,7 +616,10 @@ func (dht *IpfsDHT) rtPeerLoop() {
 					// peer not added.
 					continue
 				}
-				if !newlyAdded {
+				if newlyAdded {
+					// peer was added to the RT, it can now be fixed if needed.
+					dht.fixRTIfNeeded()
+				} else {
 					// the peer is already in our RT, but we just successfully queried it and so let's give it a
 					// bump on the query time so we don't ping it too soon for a liveliness check.
 					dht.routingTable.UpdateLastSuccessfulOutboundQueryAt(p, time.Now())

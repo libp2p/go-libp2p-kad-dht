@@ -96,7 +96,6 @@ func handlePeerChangeEvent(dht *IpfsDHT, p peer.ID) {
 		return
 	} else if valid {
 		dht.peerFound(p)
-		dht.fixRTIfNeeded()
 	} else {
 		dht.peerStoppedDHT(p)
 	}

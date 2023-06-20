@@ -13,7 +13,7 @@ require (
 	github.com/ipfs/go-datastore v0.6.0
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-log v1.0.5
-	github.com/libp2p/go-libp2p v0.27.6
+	github.com/libp2p/go-libp2p v0.27.7
 	github.com/libp2p/go-libp2p-kbucket v0.6.3
 	github.com/libp2p/go-libp2p-record v0.2.0
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.0

@@ -47,7 +47,7 @@ type optimisticState struct {
 	putCtx context.Context
 
 	// reference to the DHT
-	dht *IpfsDHT
+	dht *DHT
 
 	// the most recent network size estimation
 	networkSize int32
@@ -81,7 +81,7 @@ type optimisticState struct {
 	putProvDone atomic.Int32
 }
 
-func (dht *IpfsDHT) newOptimisticState(ctx context.Context, key string) (*optimisticState, error) {
+func (dht *DHT) newOptimisticState(ctx context.Context, key string) (*optimisticState, error) {
 	// get network size and err out if there is no reasonable estimate
 	networkSize, err := dht.nsEstimator.NetworkSize()
 	if err != nil {
@@ -107,7 +107,7 @@ func (dht *IpfsDHT) newOptimisticState(ctx context.Context, key string) (*optimi
 	}, nil
 }
 
-func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.Multihash) error {
+func (dht *DHT) optimisticProvide(outerCtx context.Context, keyMH multihash.Multihash) error {
 	key := string(keyMH)
 
 	if key == "" {

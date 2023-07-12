@@ -21,8 +21,8 @@ import (
 //
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
-func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
-	ctx, span := internal.StartSpan(ctx, "IpfsDHT.GetClosestPeers", trace.WithAttributes(attribute.String("Key", key)))
+func (dht *DHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
+	ctx, span := internal.StartSpan(ctx, "DHT.GetClosestPeers", trace.WithAttributes(attribute.String("Key", key)))
 	defer span.End()
 
 	if key == "" {
@@ -56,7 +56,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 }
 
 // pmGetClosestPeers is the protocol messenger version of the GetClosestPeer queryFn.
-func (dht *IpfsDHT) pmGetClosestPeers(key string) queryFn {
+func (dht *DHT) pmGetClosestPeers(key string) queryFn {
 	return func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 		// For DHT query command
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{

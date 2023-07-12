@@ -57,7 +57,7 @@ func GetDefaultBootstrapPeerAddrInfos() []peer.AddrInfo {
 
 // Bootstrap tells the DHT to get into a bootstrapped state satisfying the
 // IpfsRouter interface.
-func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
+func (dht *DHT) Bootstrap(ctx context.Context) error {
 	dht.fixRTIfNeeded()
 	dht.rtRefreshManager.RefreshNoWait()
 	return nil
@@ -67,7 +67,7 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 //
 // The returned channel will block until the refresh finishes, then yield the
 // error and close. The channel is buffered and safe to ignore.
-func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
+func (dht *DHT) RefreshRoutingTable() <-chan error {
 	return dht.rtRefreshManager.Refresh(false)
 }
 
@@ -76,6 +76,6 @@ func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 //
 // The returned channel will block until the refresh finishes, then yield the
 // error and close. The channel is buffered and safe to ignore.
-func (dht *IpfsDHT) ForceRefresh() <-chan error {
+func (dht *DHT) ForceRefresh() <-chan error {
 	return dht.rtRefreshManager.Refresh(true)
 }

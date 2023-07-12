@@ -1,7 +1,10 @@
 package netsize
 
 import (
+	"context"
 	"fmt"
+	"github.com/plprobelab/go-kademlia/network/address/peerid"
+	"github.com/plprobelab/go-kademlia/routing"
 	"math"
 	"math/big"
 	"sort"
@@ -34,8 +37,9 @@ var (
 )
 
 type Estimator struct {
+	self       peer.ID
 	localID    kbucket.ID
-	rt         *kbucket.RoutingTable
+	rt         routing.Table
 	bucketSize int
 
 	measurementsLk sync.RWMutex
@@ -44,7 +48,7 @@ type Estimator struct {
 	netSizeCache int32
 }
 
-func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Estimator {
+func NewEstimator(localID peer.ID, rt routing.Table, bucketSize int) *Estimator {
 	// initialize map to hold measurement observations
 	measurements := map[int][]measurement{}
 	for i := 0; i < bucketSize; i++ {
@@ -52,6 +56,7 @@ func NewEstimator(localID peer.ID, rt *kbucket.RoutingTable, bucketSize int) *Es
 	}
 
 	return &Estimator{
+		self:         localID,
 		localID:      kbucket.ConvertPeerID(localID),
 		rt:           rt,
 		bucketSize:   bucketSize,
@@ -236,7 +241,11 @@ func (e *Estimator) NetworkSize() (int32, error) {
 func (e *Estimator) calcWeight(key string, peers []peer.ID) float64 {
 
 	cpl := kbucket.CommonPrefixLen(kbucket.ConvertKey(key), e.localID)
-	bucketLevel := e.rt.NPeersForCpl(uint(cpl))
+	closest, err := e.rt.NearestPeers(context.TODO(), peerid.NewPeerID(e.self).Key(), int(cpl))
+	if err != nil {
+		panic(err) // TODO
+	}
+	bucketLevel := len(closest)
 
 	if bucketLevel < e.bucketSize {
 		// routing table doesn't have a full bucket. Check how many peers would fit into that bucket

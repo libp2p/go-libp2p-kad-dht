@@ -22,7 +22,7 @@ var dhtStreamIdleTimeout = 1 * time.Minute
 var ErrReadTimeout = net.ErrReadTimeout
 
 // handleNewStream implements the network.StreamHandler
-func (dht *IpfsDHT) handleNewStream(s network.Stream) {
+func (dht *DHT) handleNewStream(s network.Stream) {
 	if dht.handleNewMessage(s) {
 		// If we exited without error, close gracefully.
 		_ = s.Close()
@@ -33,7 +33,7 @@ func (dht *IpfsDHT) handleNewStream(s network.Stream) {
 }
 
 // Returns true on orderly completion of writes (so we can Close the stream).
-func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
+func (dht *DHT) handleNewMessage(s network.Stream) bool {
 	ctx := dht.ctx
 	r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 

@@ -112,7 +112,7 @@ func setupDHT(ctx context.Context, t *testing.T, options ...dht.Option) *DHT {
 	return d
 }
 
-func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
+func connect(ctx context.Context, t *testing.T, a, b *dht.DHT) {
 	t.Helper()
 	bid := b.PeerID()
 	baddr := b.Host().Peerstore().Addrs(bid)
@@ -126,7 +126,7 @@ func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	wait(ctx, t, a, b)
 }
 
-func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
+func wait(ctx context.Context, t *testing.T, a, b *dht.DHT) {
 	t.Helper()
 	for a.RoutingTable().Find(b.PeerID()) == "" {
 		// fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
@@ -138,7 +138,7 @@ func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	}
 }
 
-func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.IpfsDHT) {
+func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.DHT, *dht.DHT) {
 	t.Helper()
 	baseOpts := []dht.Option{
 		dht.NamespacedValidator("v", blankValidator{}),

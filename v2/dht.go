@@ -14,12 +14,23 @@ import (
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
 type DHT struct {
-	host host.Host // host holds a reference to the underlying libp2p host
-	cfg  *Config   // cfg holds a reference to the DHT configuration struct
-	mode mode      // mode indicates the current mode the DHT operates in. This can differ from the desired mode if set to auto-client or auto-server.
+	// host holds a reference to the underlying libp2p host
+	host host.Host
 
-	kad *coord.Coordinator[key.Key256, ma.Multiaddr] // the go-kademlia reference
-	rt  kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+	// cfg holds a reference to the DHT configuration struct
+	cfg *Config
+
+	// mode indicates the current mode the DHT operates in. This can differ from
+	// the desired mode if set to auto-client or auto-server. The desired mode
+	// can be configured via the Config struct.
+	mode mode
+
+	// kad is a reference to the go-kademlia coordinator
+	kad *coord.Coordinator[key.Key256, ma.Multiaddr]
+
+	// rt holds a reference to the routing table implementation. This can be
+	// configured via the Config struct.
+	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
 }
 
 // New constructs a new DHT for the given underlying host and with the given
@@ -36,6 +47,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		host: h,
 		cfg:  cfg,
 	}
+
 	nid := nodeID(d.host.ID())
 
 	// Use the configured routing table if it was provided

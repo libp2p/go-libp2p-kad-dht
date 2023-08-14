@@ -4,9 +4,12 @@ go 1.20
 
 require (
 	github.com/ipfs/go-cid v0.4.1
+	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p v0.29.2
 	github.com/multiformats/go-multiaddr v0.11.0
 	github.com/plprobelab/go-kademlia v0.0.0-20230813192759-e4050185fbde
+	go.uber.org/zap/exp v0.1.0
+	golang.org/x/exp v0.0.0-20230725012225-302865e7556b
 )
 
 require (
@@ -32,7 +35,6 @@ require (
 	github.com/google/pprof v0.0.0-20230705174524-200ffdc848b8 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect
-	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
@@ -88,7 +90,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.11.0 // indirect
-	golang.org/x/exp v0.0.0-20230725012225-302865e7556b // indirect
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/net v0.12.0 // indirect
 	golang.org/x/sync v0.3.0 // indirect

@@ -3,9 +3,12 @@ package dht
 import (
 	"fmt"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
+	"go.uber.org/zap/exp/zapslog"
+	"golang.org/x/exp/slog"
 )
 
 type (
@@ -71,6 +74,10 @@ type Config struct {
 	// implementation that this DHT should use. If this field is nil, the
 	// triert.TrieRT routing table will be used.
 	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+
+	// Logger can be used to configure a custom structured logger instance.
+	// By default go.uber.org/zap is used (wrapped in ipfs/go-log).
+	Logger *slog.Logger
 }
 
 // DefaultConfig returns a configuration struct that can be used as-is to
@@ -80,6 +87,7 @@ func DefaultConfig() *Config {
 		Mode:         ModeOptAutoClient,
 		Kademlia:     coord.DefaultConfig(),
 		RoutingTable: nil,
+		Logger:       slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 	}
 }
 

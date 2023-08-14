@@ -31,6 +31,10 @@ type DHT struct {
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
 	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+
+	// log is a convenience accessor to the logging instance. It gets the value
+	// of the logger field from the configuration.
+	log *slog.Logger
 }
 
 // New constructs a new DHT for the given underlying host and with the given
@@ -46,6 +50,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	d := &DHT{
 		host: h,
 		cfg:  cfg,
+		log:  cfg.Logger,
 	}
 
 	nid := nodeID(d.host.ID())

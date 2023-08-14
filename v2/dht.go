@@ -23,7 +23,8 @@ type DHT struct {
 	// mode indicates the current mode the DHT operates in. This can differ from
 	// the desired mode if set to auto-client or auto-server. The desired mode
 	// can be configured via the Config struct.
-	mode mode
+	mode   mode
+	modeLk sync.RWMutex
 
 	// kad is a reference to the go-kademlia coordinator
 	kad *coord.Coordinator[key.Key256, ma.Multiaddr]
@@ -75,13 +76,47 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	// determine mode to start in
 	switch cfg.Mode {
 	case ModeOptClient, ModeOptAutoClient:
-		d.mode = modeClient
+		d.setClientMode()
 	case ModeOptServer, ModeOptAutoServer:
-		d.mode = modeServer
+		d.setServerMode()
 	default:
 		// should never happen because of the configuration validation above
 		return nil, fmt.Errorf("invalid dht mode %s", cfg.Mode)
 	}
 
+	if err := d.subscribeToNetworkEvents(); err != nil {
+		return nil, err
+	}
+
 	return d, nil
+}
+
+// setServerMode advertises (via libp2p identify updates) that we are able to respond to DHT queries and sets the appropriate stream handlers.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
+func (d *DHT) setServerMode() {
+	d.modeLk.Lock()
+	defer d.modeLk.Unlock()
+
+	if d.mode == modeServer {
+		return
+	}
+
+	d.mode = modeServer
+}
+
+// moveToClientMode stops advertising (and rescinds advertisements via libp2p identify updates) that we are able to
+// respond to DHT queries and removes the appropriate stream handlers. We also kill all inbound streams that were
+// utilizing the handled protocols.
+// Note: We may support responding to queries with protocols aside from our primary ones in order to support
+// interoperability with older versions of the DHT protocol.
+func (d *DHT) setClientMode() {
+	d.modeLk.Lock()
+	defer d.modeLk.Unlock()
+
+	if d.mode == modeClient {
+		return
+	}
+
+	d.mode = modeClient
 }

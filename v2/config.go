@@ -2,6 +2,7 @@ package dht
 
 import (
 	"fmt"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -84,17 +85,20 @@ type Config struct {
 	// Logger can be used to configure a custom structured logger instance.
 	// By default go.uber.org/zap is used (wrapped in ipfs/go-log).
 	Logger *slog.Logger
+
+	TimeoutStreamIdle time.Duration
 }
 
 // DefaultConfig returns a configuration struct that can be used as-is to
 // instantiate a fully functional DHT client.
 func DefaultConfig() *Config {
 	return &Config{
-		Mode:         ModeOptAutoClient,
-		Kademlia:     coord.DefaultConfig(),
-		ProtocolID:   "/ipfs/kad/1.0.0",
-		RoutingTable: nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
-		Logger:       slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
+		Mode:              ModeOptAutoClient,
+		Kademlia:          coord.DefaultConfig(),
+		ProtocolID:        "/ipfs/kad/1.0.0",
+		RoutingTable:      nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
+		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
+		TimeoutStreamIdle: time.Minute,
 	}
 }
 

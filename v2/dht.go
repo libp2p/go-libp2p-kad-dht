@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peerstore"
+
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -20,6 +22,8 @@ import (
 type DHT struct {
 	// host holds a reference to the underlying libp2p host
 	host host.Host
+
+	pstore peerstore.Peerstore
 
 	// cfg holds a reference to the DHT configuration struct
 	cfg *Config
@@ -111,6 +115,20 @@ func (d *DHT) Close() error {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
 	}
 
+	// kill all active streams using the DHT protocol.
+	for _, c := range d.host.Network().Conns() {
+		for _, s := range c.GetStreams() {
+
+			if s.Protocol() != d.cfg.ProtocolID {
+				continue
+			}
+
+			if err := s.Reset(); err != nil {
+				d.log.With("err", err).Debug("failed closing stream")
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -125,7 +143,7 @@ func (d *DHT) setServerMode() {
 	d.log.Info("Activating DHT server mode")
 
 	d.mode = modeServer
-	d.host.SetStreamHandler(d.cfg.ProtocolID, d.handleNewStream)
+	d.host.SetStreamHandler(d.cfg.ProtocolID, d.streamHandler)
 }
 
 // setClientMode stops advertising (and rescinds advertisements via libp2p
@@ -151,7 +169,10 @@ func (d *DHT) setClientMode() {
 				continue
 			}
 
-			if s.Stat().Direction != network.DirInbound {
+			switch s.Stat().Direction {
+			case network.DirUnknown:
+			case network.DirInbound:
+			case network.DirOutbound:
 				continue
 			}
 

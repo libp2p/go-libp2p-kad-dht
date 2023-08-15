@@ -39,6 +39,14 @@ func TestConfig_Validate(t *testing.T) {
 				return c
 			},
 		},
+		{
+			name:    "empty protocol",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.ProtocolID = ""
+				return c
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

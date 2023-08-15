@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/libp2p/go-libp2p v0.29.2
+	github.com/libp2p/go-libp2p v0.27.7
 	github.com/multiformats/go-multiaddr v0.11.0
 	github.com/plprobelab/go-kademlia v0.0.0-20230813192759-e4050185fbde
 	go.uber.org/zap/exp v0.1.0

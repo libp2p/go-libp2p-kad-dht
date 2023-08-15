@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
@@ -70,9 +71,14 @@ type Config struct {
 	// Kademlia holds the configuration of the underlying Kademlia implementation.
 	Kademlia *coord.Config
 
+	// ProtocolID represents the DHT protocol we can query with and respond to.
+	ProtocolID protocol.ID
+
 	// RoutingTable holds a reference to the specific routing table
 	// implementation that this DHT should use. If this field is nil, the
-	// triert.TrieRT routing table will be used.
+	// triert.TrieRT routing table will be used. This field will be nil
+	// in the default configuration because a routing table requires information
+	// about the local node.
 	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
 
 	// Logger can be used to configure a custom structured logger instance.
@@ -86,7 +92,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		Mode:         ModeOptAutoClient,
 		Kademlia:     coord.DefaultConfig(),
-		RoutingTable: nil,
+		ProtocolID:   "/ipfs/kad/1.0.0",
+		RoutingTable: nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
 		Logger:       slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 	}
 }
@@ -107,6 +114,10 @@ func (c *Config) Validate() error {
 
 	if err := c.Kademlia.Validate(); err != nil {
 		return fmt.Errorf("invalid kademlia configuration: %w", err)
+	}
+
+	if c.ProtocolID == "" {
+		return fmt.Errorf("protocolID must not be empty")
 	}
 
 	return nil

@@ -19,11 +19,21 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
+// streamHandler is the function that's registered with the libp2p host for
+// the DHT protocol ID. It sets up metrics and the resource manager scope. It
+// actually starts handling the stream and depending on the outcome resets or
+// closes it.
 func (d *DHT) streamHandler(s network.Stream) {
 	ctx, _ := tag.New(context.Background(),
 		tag.Upsert(metrics.KeyPeerID, d.host.ID().String()),
 		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", d)),
 	)
+
+	if err := s.Scope().SetService(ServiceName); err != nil {
+		d.log.LogAttrs(ctx, slog.LevelWarn, "error attaching stream to DHT service", slog.String("error", err.Error()))
+		_ = s.Reset()
+		return
+	}
 
 	if err := d.handleNewStream(ctx, s); err != nil {
 		// If we exited with an error, let the remote peer know.
@@ -34,7 +44,28 @@ func (d *DHT) streamHandler(s network.Stream) {
 	}
 }
 
+// handleNewStream is a method associated with the DHT type. This function
+// handles the incoming stream from a remote peer.
+//
+// This function goes through the following steps:
+//  1. Starts a new trace span for the stream handling operation.
+//  2. Sets an idle timeout for the stream doing the operation.
+//  3. Reads messages from the stream in a loop.
+//  4. If a message is received, it starts a timer, and unmarshals the message.
+//  5. If the message unmarshals successfully, it resets the stream deadline,
+//     tags the context with the message type and key, updates some metrics and
+//     then handles the message and gathers the response from the handler.
+//  6. If responding is needed, sends the response back to the peer.
+//  7. Logs the latency and updates the relevant metrics before the loop iterates.
+//
+// Returns:
+// It returns an error if any of the operations in the pipeline fails, otherwise
+// it will return nil indicating the end of the stream or all messages have been
+// processed correctly.
 func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
+	ctx, span := tracer.Start(ctx, "DHT.handleNewStream")
+	defer span.End()
+
 	// init structured logger that always contains the remote peers PeerID
 	slogger := d.log.With(slog.String("from", s.Conn().RemotePeer().String()))
 
@@ -117,6 +148,9 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 // corresponding bytes. If an error occurs it, logs it, and updates the metrics.
 // If the bytes are empty and the error is nil, the remote peer returned
 func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.Reader) ([]byte, error) {
+	ctx, span := tracer.Start(ctx, "DHT.streamReadMsg")
+	defer span.End()
+
 	data, err := r.ReadMsg()
 	if err != nil {
 		// if the reader returns an end-of-file signal, exit gracefully
@@ -149,6 +183,9 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 // protobuf message. If an error occurs, it will be logged and the metrics will
 // be updated.
 func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data []byte) (*pb.Message, error) {
+	ctx, span := tracer.Start(ctx, "DHT.streamUnmarshalMsg")
+	defer span.End()
+
 	var req pb.Message
 	if err := req.Unmarshal(data); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("error", err.Error()))
@@ -169,6 +206,9 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 // streamHandleMsg handles the give protobuf message based on its type from the
 // given remote peer.
 func (d *DHT) streamHandleMsg(ctx context.Context, slogger *slog.Logger, remote peer.ID, req *pb.Message) (*pb.Message, error) {
+	ctx, span := tracer.Start(ctx, "DHT.streamHandleMsg")
+	defer span.End()
+
 	slogger.LogAttrs(ctx, slog.LevelDebug, "handling message")
 
 	switch req.GetType() {
@@ -181,7 +221,11 @@ func (d *DHT) streamHandleMsg(ctx context.Context, slogger *slog.Logger, remote 
 	return nil, fmt.Errorf("can't handle received message: %s", req.GetType().String())
 }
 
+// streamWriteMsg sends the given message over the stream.
 func (d *DHT) streamWriteMsg(ctx context.Context, slogger *slog.Logger, s network.Stream, msg *pb.Message) error {
+	ctx, span := tracer.Start(ctx, "DHT.streamWriteMsg")
+	defer span.End()
+
 	if err := writeMsg(s, msg); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error writing response", slog.String("error", err.Error()))
 		stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))

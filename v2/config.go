@@ -9,9 +9,16 @@ import (
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 )
+
+// ServiceName is used to scope incoming streams for the resource manager.
+const ServiceName = "libp2p.KadDHT"
+
+// tracer is an open telemetry tracing instance
+var tracer = otel.Tracer("go-libp2p-kad-dht")
 
 type (
 	// ModeOpt describes in which mode this DHT process should operate in.

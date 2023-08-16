@@ -7,6 +7,17 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
+// ContainsCloserPeer returns true if the provided peer ID is among the
+// list of closer peers contained in this message.
+func (m *Message) ContainsCloserPeer(pid peer.ID) bool {
+	for _, cp := range m.CloserPeers {
+		if cp.Id.Equal(byteString(pid)) {
+			return true
+		}
+	}
+	return false
+}
+
 // Addresses returns the Multiaddresses associated with the Message_Peer entry
 func (m *Message_Peer) Addresses() []ma.Multiaddr {
 	if m == nil {

@@ -173,6 +173,8 @@ func (d *DHT) setClientMode() {
 			case network.DirUnknown:
 			case network.DirInbound:
 			case network.DirOutbound:
+				// don't reset outbound connections because these are queries
+				// that we have initiated.
 				continue
 			}
 

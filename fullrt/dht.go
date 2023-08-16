@@ -45,7 +45,6 @@ import (
 	kadkey "github.com/libp2p/go-libp2p-xor/key"
 	"github.com/libp2p/go-libp2p-xor/trie"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -1303,16 +1302,10 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 			ID:   p,
 		})
 
-		mctx, mspan := internal.StartSpan(ctx, "protoMessenger.GetProviders", trace.WithAttributes(attribute.Stringer("peer", p)))
-		provs, closest, err := dht.protoMessenger.GetProviders(mctx, p, key)
+		provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
 		if err != nil {
-			if mspan.IsRecording() {
-				mspan.SetStatus(codes.Error, err.Error())
-			}
-			mspan.End()
 			return err
 		}
-		mspan.End()
 
 		logger.Debugf("%d provider entries", len(provs))
 

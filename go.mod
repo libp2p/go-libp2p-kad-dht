@@ -1,5 +1,7 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
+retract v0.24.3 // this includes a breaking change and should have been released as v0.25.0
+
 go 1.19
 
 require (

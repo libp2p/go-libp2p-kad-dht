@@ -61,58 +61,6 @@ func (d *DHT) handlePing(ctx context.Context, remote peer.ID, req *pb.Message) (
 	return &pb.Message{Type: pb.Message_PING}, nil
 }
 
-// handleGetValue handles GET_VALUE RPCs from remote peers.
-func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	k := req.GetKey()
-	if len(k) == 0 {
-		return nil, fmt.Errorf("handleGetValue but no key in request")
-	}
-
-	// prepare the response message
-	resp := &pb.Message{
-		Type:        pb.Message_GET_VALUE,
-		Key:         k,
-		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(k)),
-	}
-
-	// fetch record from the datastore for the requested key
-	dsKey := ds.NewKey(base32.RawStdEncoding.EncodeToString(k))
-	buf, err := d.ds.Get(ctx, dsKey)
-	if err != nil {
-		// if we don't have the record, that's fine, just return closer peers
-		if errors.Is(err, ds.ErrNotFound) {
-			return resp, nil
-		}
-
-		return nil, err
-	}
-
-	// we have found a record, parse it and do basic validation
-	rec := &recpb.Record{}
-	err = rec.Unmarshal(buf)
-	if err != nil {
-		return nil, fmt.Errorf("unmarshal stored record: %w", err)
-	}
-
-	// validate that we don't serve stale records.
-	receivedAt, err := time.Parse(time.RFC3339Nano, rec.GetTimeReceived())
-	if err != nil || time.Since(receivedAt) > d.cfg.MaxRecordAge {
-		d.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("error", err.Error()), slog.Duration("age", time.Since(receivedAt)))
-		if err = d.ds.Delete(ctx, dsKey); err != nil {
-			d.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting bad record from datastore", slog.String("error", err.Error()))
-		}
-	}
-
-	// We don't do any additional validation beyond checking the above
-	// timestamp. We put the burden of validating the record on the requester as
-	// checking a record may be computationally expensive.
-
-	// finally, attach the record to the response
-	resp.Record = rec
-
-	return resp, nil
-}
-
 func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
 	if len(req.GetKey()) == 0 {
 		return nil, fmt.Errorf("no key was provided")
@@ -162,6 +110,58 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	}
 
 	return req, nil
+}
+
+// handleGetValue handles GET_VALUE RPCs from remote peers.
+func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
+	k := req.GetKey()
+	if len(k) == 0 {
+		return nil, fmt.Errorf("handleGetValue but no key in request")
+	}
+
+	// prepare the response message
+	resp := &pb.Message{
+		Type:        pb.Message_GET_VALUE,
+		Key:         k,
+		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(k)),
+	}
+
+	// fetch record from the datastore for the requested key
+	dsKey := ds.NewKey(base32.RawStdEncoding.EncodeToString(k))
+	buf, err := d.ds.Get(ctx, dsKey)
+	if err != nil {
+		// if we don't have the record, that's fine, just return closer peers
+		if errors.Is(err, ds.ErrNotFound) {
+			return resp, nil
+		}
+
+		return nil, err
+	}
+
+	// we have found a record, parse it and do basic validation
+	rec := &recpb.Record{}
+	err = rec.Unmarshal(buf)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal stored record: %w", err)
+	}
+
+	// validate that we don't serve stale records.
+	receivedAt, err := time.Parse(time.RFC3339Nano, rec.GetTimeReceived())
+	if err != nil || time.Since(receivedAt) > d.cfg.MaxRecordAge {
+		d.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("err", err.Error()), slog.Duration("age", time.Since(receivedAt)))
+		if err = d.ds.Delete(ctx, dsKey); err != nil {
+			d.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting bad record from datastore", slog.String("err", err.Error()))
+		}
+	}
+
+	// We don't do any additional validation beyond checking the above
+	// timestamp. We put the burden of validating the record on the requester as
+	// checking a record may be computationally expensive.
+
+	// finally, attach the record to the response
+	resp.Record = rec
+
+	return resp, nil
 }
 
 func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
@@ -254,6 +254,7 @@ func (d *DHT) shouldReplaceExistingRecord(ctx context.Context, dstore ds.Read, n
 	if err := d.validator.Validate(string(existingRec.GetKey()), existingRec.GetValue()); err != nil {
 		return true, nil
 	}
+
 	records := [][]byte{newRec.GetValue(), existingRec.GetValue()}
 	i, err := d.validator.Select(string(newRec.GetKey()), records)
 	if err != nil {

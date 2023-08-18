@@ -110,8 +110,11 @@ type Config struct {
 	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
 
 	// Datastore configures the DHT to use the specified datastore. The
-	// datastore must support batching and transactions. Defaults to a leveldb
-	// in-memory (temporary) map.
+	// datastore must support batching and transactions. If a datastore is
+	// configured by the user, they are responsible for the datastore's
+	// lifecycle - like closing it on shutdown. If the default datastore
+	// is used (this field stays nil), go-libp2p-kad-dht will handle that.
+	// Defaults to a leveldb in-memory (temporary) map.
 	Datastore Datastore
 
 	// Validator

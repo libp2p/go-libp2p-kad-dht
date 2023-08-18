@@ -28,7 +28,7 @@ const (
 	testPath = path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
 )
 
-var rng = rand.New(rand.NewSource(150))
+var rng = rand.New(rand.NewSource(1337))
 
 func newTestDHT(t testing.TB) *DHT {
 	t.Helper()
@@ -278,8 +278,8 @@ func TestDHT_handleFindPeer_unknown_addresses_but_in_routing_table(t *testing.T)
 		d.host.Peerstore().AddAddr(pid, a, time.Hour)
 	}
 
-	_, pubk, _ := crypto.GenerateEd25519Key(rng)
-	requester, err := peer.IDFromPublicKey(pubk)
+	_, pub, _ := crypto.GenerateEd25519Key(rng)
+	requester, err := peer.IDFromPublicKey(pub)
 	require.NoError(t, err)
 
 	req := &pb.Message{
@@ -681,7 +681,7 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 	reqs := make([]*pb.Message, b.N)
 	peers := make([]peer.ID, b.N)
 	for i := 0; i < b.N; i++ {
-		peer, priv := newIdentity(b)
+		pid, priv := newIdentity(b)
 
 		putReq := newPutIPNSRequest(b, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
@@ -691,7 +691,7 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 		err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
 		require.NoError(b, err)
 
-		peers[i] = peer
+		peers[i] = pid
 		reqs[i] = &pb.Message{
 			Type: pb.Message_GET_VALUE,
 			Key:  putReq.GetKey(),

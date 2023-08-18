@@ -1,16 +1,19 @@
 package dht
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
+	"github.com/libp2p/go-msgio/protoio"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"golang.org/x/exp/slog"
@@ -118,7 +121,8 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		)
 
 		// 3. handle the message and gather response
-		resp, err := d.streamHandleMsg(ctx, slogger, s.Conn().RemotePeer(), req)
+		slogger.LogAttrs(ctx, slog.LevelDebug, "handling message")
+		resp, err := d.handleMsg(ctx, s.Conn().RemotePeer(), req)
 		if err != nil {
 			slogger.LogAttrs(ctx, slog.LevelDebug, "error handling message", slog.Duration("time", time.Since(startTime)), slog.String("error", err.Error()))
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
@@ -203,25 +207,32 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 	return &req, nil
 }
 
-// streamHandleMsg handles the give protobuf message based on its type from the
+// handleMsg handles the give protobuf message based on its type from the
 // given remote peer.
-func (d *DHT) streamHandleMsg(ctx context.Context, slogger *slog.Logger, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	ctx, span := tracer.Start(ctx, "DHT.streamHandleMsg")
+func (d *DHT) handleMsg(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
+	ctx, span := tracer.Start(ctx, "DHT.handle_"+req.GetType().String())
 	defer span.End()
-
-	slogger.LogAttrs(ctx, slog.LevelDebug, "handling message")
 
 	switch req.GetType() {
 	case pb.Message_FIND_NODE:
 		return d.handleFindPeer(ctx, remote, req)
 	case pb.Message_PING:
 		return d.handlePing(ctx, remote, req)
+	case pb.Message_PUT_VALUE:
+		return d.handlePutValue(ctx, remote, req)
+	case pb.Message_GET_VALUE:
+		return d.handleGetValue(ctx, remote, req)
+	case pb.Message_ADD_PROVIDER:
+		return d.handleAddProvider(ctx, remote, req)
+	case pb.Message_GET_PROVIDERS:
+		return d.handleGetProviders(ctx, remote, req)
+	default:
+		return nil, fmt.Errorf("can't handle received message: %s", req.GetType().String())
 	}
-
-	return nil, fmt.Errorf("can't handle received message: %s", req.GetType().String())
 }
 
-// streamWriteMsg sends the given message over the stream.
+// streamWriteMsg sends the given message over the stream and handles traces
+// and telemetry.
 func (d *DHT) streamWriteMsg(ctx context.Context, slogger *slog.Logger, s network.Stream, msg *pb.Message) error {
 	ctx, span := tracer.Start(ctx, "DHT.streamWriteMsg")
 	defer span.End()
@@ -233,4 +244,38 @@ func (d *DHT) streamWriteMsg(ctx context.Context, slogger *slog.Logger, s networ
 	}
 
 	return nil
+}
+
+// The Protobuf writer performs multiple small writes when writing a message.
+// We need to buffer those writes, to make sure that we're not sending a new
+// packet for every single write.
+type bufferedDelimitedWriter struct {
+	*bufio.Writer
+	protoio.WriteCloser
+}
+
+var writerPool = sync.Pool{
+	New: func() interface{} {
+		w := bufio.NewWriter(nil)
+		return &bufferedDelimitedWriter{
+			Writer:      w,
+			WriteCloser: protoio.NewDelimitedWriter(w),
+		}
+	},
+}
+
+func writeMsg(w io.Writer, mes *pb.Message) error {
+	bw := writerPool.Get().(*bufferedDelimitedWriter)
+	bw.Reset(w)
+	err := bw.WriteMsg(mes)
+	if err == nil {
+		err = bw.Flush()
+	}
+	bw.Reset(nil)
+	writerPool.Put(bw)
+	return err
+}
+
+func (w *bufferedDelimitedWriter) Flush() error {
+	return w.Writer.Flush()
 }

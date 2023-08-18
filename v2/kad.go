@@ -1,8 +1,6 @@
 package dht
 
 import (
-	"crypto/sha256"
-
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
@@ -21,9 +19,7 @@ var _ kad.NodeID[key.Key256] = nodeID("")
 // hashes of, in this case, peer.IDs. This means this Key method takes
 // the peer.ID, hashes it and constructs a 256-bit key.
 func (p nodeID) Key() key.Key256 {
-	h := sha256.New()
-	h.Write([]byte(p))
-	return key.NewKey256(h.Sum(nil))
+	return key.NewSha256([]byte(p))
 }
 
 // String calls String on the underlying peer.ID and returns a string like

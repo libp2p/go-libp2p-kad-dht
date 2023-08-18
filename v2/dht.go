@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/libp2p/go-libp2p/core/peerstore"
-
+	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -13,7 +12,6 @@ import (
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/routing/triert"
 	"golang.org/x/exp/slog"
 )
 
@@ -23,7 +21,8 @@ type DHT struct {
 	// host holds a reference to the underlying libp2p host
 	host host.Host
 
-	pstore peerstore.Peerstore
+	// ds is the datastore where provider, peer, and IPNS records are stored
+	ds Datastore
 
 	// cfg holds a reference to the DHT configuration struct
 	cfg *Config
@@ -31,8 +30,8 @@ type DHT struct {
 	// mode indicates the current mode the DHT operates in. This can differ from
 	// the desired mode if set to auto-client or auto-server. The desired mode
 	// can be configured via the Config struct.
+	modeMu sync.RWMutex
 	mode   mode
-	modeLk sync.RWMutex
 
 	// kad is a reference to the go-kademlia coordinator
 	kad *coord.Coordinator[key.Key256, ma.Multiaddr]
@@ -40,6 +39,9 @@ type DHT struct {
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
 	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+
+	// validator .
+	validator record.Validator
 
 	// log is a convenience accessor to the logging instance. It gets the value
 	// of the logger field from the configuration.
@@ -72,16 +74,26 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	// Use the configured routing table if it was provided
 	if cfg.RoutingTable != nil {
 		d.rt = cfg.RoutingTable
+	} else if d.rt, err = DefaultRoutingTable(nid); err != nil {
+		return nil, fmt.Errorf("new trie routing table: %w", err)
+	}
+
+	// Use configured validator if it was provided
+	if cfg.Validator != nil {
+		d.validator = cfg.Validator
 	} else {
-		rtCfg := triert.DefaultConfig[key.Key256, kad.NodeID[key.Key256]]()
-		d.rt, err = triert.New[key.Key256, kad.NodeID[key.Key256]](nid, rtCfg)
-		if err != nil {
-			return nil, fmt.Errorf("new trie routing table: %w", err)
-		}
+		d.validator = DefaultValidator(h.Peerstore())
+	}
+
+	// Use configured datastore or default leveldb in-memory one
+	if cfg.Datastore != nil {
+		d.ds = cfg.Datastore
+	} else if d.ds, err = DefaultDatastore(); err != nil {
+		return nil, fmt.Errorf("new default datastore: %w", err)
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	d.kad, err = coord.NewCoordinator[key.Key256, ma.Multiaddr](nid, nil, d.rt, cfg.Kademlia)
+	d.kad, err = coord.NewCoordinator[key.Key256, ma.Multiaddr](nid, nil, nil, d.rt, cfg.Kademlia)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -137,8 +149,8 @@ func (d *DHT) Close() error {
 // stream handler. This method is safe to call even if the DHT is already in
 // server mode.
 func (d *DHT) setServerMode() {
-	d.modeLk.Lock()
-	defer d.modeLk.Unlock()
+	d.modeMu.Lock()
+	defer d.modeMu.Unlock()
 
 	d.log.Info("Activating DHT server mode")
 
@@ -153,15 +165,18 @@ func (d *DHT) setServerMode() {
 // already in client mode, this method is a no-op. This method is safe to call
 // even if the DHT is already in client mode.
 func (d *DHT) setClientMode() {
-	d.modeLk.Lock()
-	defer d.modeLk.Unlock()
+	d.modeMu.Lock()
+	defer d.modeMu.Unlock()
 
 	d.log.Info("Activating DHT client mode")
 
 	d.mode = modeClient
 	d.host.RemoveStreamHandler(d.cfg.ProtocolID)
 
-	// kill all active inbound streams using the DHT protocol.
+	// kill all active inbound streams using the DHT protocol. Note that if we
+	// request something from a remote peer behind a NAT that succeeds with a
+	// connection reversal, the connection would be inbound but the stream would
+	// still be outbound and therefore not reset here.
 	for _, c := range d.host.Network().Conns() {
 		for _, s := range c.GetStreams() {
 

@@ -2,6 +2,7 @@ package dht
 
 import (
 	"testing"
+	"time"
 )
 
 func TestConfig_Validate(t *testing.T) {
@@ -44,6 +45,46 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			mutate: func(c *Config) *Config {
 				c.ProtocolID = ""
+				return c
+			},
+		},
+		{
+			name:    "nil logger",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.Logger = nil
+				return c
+			},
+		},
+		{
+			name:    "0 max record age",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.MaxRecordAge = time.Duration(0)
+				return c
+			},
+		},
+		{
+			name:    "negative max record age",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.MaxRecordAge = time.Duration(-1)
+				return c
+			},
+		},
+		{
+			name:    "0 stream idle timeout",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.TimeoutStreamIdle = time.Duration(0)
+				return c
+			},
+		},
+		{
+			name:    "negative stream idle timeout",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.TimeoutStreamIdle = time.Duration(-1)
 				return c
 			},
 		},

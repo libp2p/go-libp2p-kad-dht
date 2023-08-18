@@ -10,6 +10,6 @@ func TestBadAddrsDontReturnNil(t *testing.T) {
 
 	addrs := mp.Addresses()
 	if len(addrs) > 0 {
-		t.Fatal("shouldnt have any multiaddrs")
+		t.Fatal("shouldn't have any multiaddrs")
 	}
 }

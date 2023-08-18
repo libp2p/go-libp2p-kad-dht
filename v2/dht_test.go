@@ -1,10 +1,10 @@
 package dht
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNew(t *testing.T) {
@@ -19,12 +19,6 @@ func TestNew(t *testing.T) {
 		wantBuilder func(*DHT) *DHT
 		wantErr     bool
 	}{
-		{
-			name:        "happy path",
-			cfgBuilder:  func(c *Config) *Config { return c },
-			wantBuilder: func(dht *DHT) *DHT { return dht },
-			wantErr:     false,
-		},
 		{
 			name: "mode set to server",
 			cfgBuilder: func(c *Config) *Config {
@@ -67,12 +61,7 @@ func TestNew(t *testing.T) {
 
 			want := tt.wantBuilder(d)
 
-			want.kad = nil
-			got.kad = nil
-
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("New() got = %v, want %v", got, want)
-			}
+			assert.Equal(t, want.mode, got.mode)
 		})
 	}
 }

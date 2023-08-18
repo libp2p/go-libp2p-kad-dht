@@ -10,8 +10,9 @@ import (
 // ContainsCloserPeer returns true if the provided peer ID is among the
 // list of closer peers contained in this message.
 func (m *Message) ContainsCloserPeer(pid peer.ID) bool {
+	b := byteString(pid)
 	for _, cp := range m.CloserPeers {
-		if cp.Id.Equal(byteString(pid)) {
+		if cp.Id.Equal(&b) {
 			return true
 		}
 	}

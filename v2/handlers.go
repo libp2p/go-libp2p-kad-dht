@@ -61,6 +61,7 @@ func (d *DHT) handlePing(ctx context.Context, remote peer.ID, req *pb.Message) (
 	return &pb.Message{Type: pb.Message_PING}, nil
 }
 
+// handleGetValue handles PUT_VALUE RPCs from remote peers.
 func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
 	if len(req.GetKey()) == 0 {
 		return nil, fmt.Errorf("no key was provided")
@@ -142,16 +143,28 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	rec := &recpb.Record{}
 	err = rec.Unmarshal(buf)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal stored record: %w", err)
+		// we have a corrupt record in the datastore -> delete it and pretend
+		// that we don't know about it
+		if err := d.ds.Delete(ctx, dsKey); err != nil {
+			d.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting corrupt record from datastore", slog.String("err", err.Error()))
+		}
+
+		return resp, nil
 	}
 
 	// validate that we don't serve stale records.
 	receivedAt, err := time.Parse(time.RFC3339Nano, rec.GetTimeReceived())
 	if err != nil || time.Since(receivedAt) > d.cfg.MaxRecordAge {
-		d.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("err", err.Error()), slog.Duration("age", time.Since(receivedAt)))
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+
+		d.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("err", errStr), slog.Duration("age", time.Since(receivedAt)))
 		if err = d.ds.Delete(ctx, dsKey); err != nil {
 			d.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting bad record from datastore", slog.String("err", err.Error()))
 		}
+		return resp, nil
 	}
 
 	// We don't do any additional validation beyond checking the above
@@ -164,6 +177,7 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	return resp, nil
 }
 
+// handleGetProviders handles GET_PROVIDERS RPCs from remote peers.
 func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
 	k := req.GetKey()
 	if len(k) > 80 {
@@ -181,6 +195,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 	return resp, nil
 }
 
+// handleAddProvider handles ADD_PROVIDER RPCs from remote peers.
 func (d *DHT) handleAddProvider(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
 	k := req.GetKey()
 	if len(k) == 0 {

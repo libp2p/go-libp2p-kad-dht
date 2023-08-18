@@ -82,6 +82,24 @@ func mustUnmarshalIpnsRecord(t *testing.T, data []byte) *ipns.Record {
 	return rec
 }
 
+func fillRoutingTable(t testing.TB, d *DHT) {
+	// 250 is a common number of peers to have in the routing table
+	for i := 0; i < 250; i++ {
+		// generate peer ID
+		pid := newPeerID(t)
+
+		// add peer to routing table
+		d.rt.AddNode(nodeID(pid))
+
+		// craft network address for peer
+		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
+		require.NoError(t, err)
+
+		// add peer information to peer store
+		d.host.Peerstore().AddAddr(pid, a, time.Hour)
+	}
+}
+
 func TestMessage_noKey(t *testing.T) {
 	d := newTestDHT(t)
 	for _, typ := range []pb.Message_MessageType{
@@ -131,7 +149,8 @@ func BenchmarkDHT_handleFindPeer(b *testing.B) {
 	reqs := make([]*pb.Message, b.N)
 	for i := 0; i < b.N; i++ {
 		reqs[i] = &pb.Message{
-			Key: []byte("random-key-" + strconv.Itoa(i)),
+			Type: pb.Message_FIND_NODE,
+			Key:  []byte("random-key-" + strconv.Itoa(i)),
 		}
 	}
 
@@ -416,7 +435,7 @@ func BenchmarkDHT_handlePing(b *testing.B) {
 	}
 }
 
-func newIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.Time, ttl time.Duration) *pb.Message {
+func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.Time, ttl time.Duration) *pb.Message {
 	rec, err := ipns.NewRecord(priv, testPath, seq, eol, ttl)
 	require.NoError(t, err)
 
@@ -431,8 +450,9 @@ func newIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.Time
 		Type: pb.Message_PUT_VALUE,
 		Key:  key,
 		Record: &recpb.Record{
-			Key:   key,
-			Value: data,
+			Key:          key,
+			Value:        data,
+			TimeReceived: time.Now().Format(time.RFC3339Nano),
 		},
 	}
 
@@ -448,7 +468,7 @@ func BenchmarkDHT_handlePutValue_unique_peers(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		remote, priv := newIdentity(b)
 		peers[i] = remote
-		reqs[i] = newIPNSRequest(b, priv, uint64(i), time.Now().Add(time.Hour), time.Hour)
+		reqs[i] = newPutIPNSRequest(b, priv, uint64(i), time.Now().Add(time.Hour), time.Hour)
 	}
 
 	ctx := context.Background()
@@ -470,7 +490,7 @@ func BenchmarkDHT_handlePutValue_single_peer(b *testing.B) {
 	remote, priv := newIdentity(b)
 	reqs := make([]*pb.Message, b.N)
 	for i := 0; i < b.N; i++ {
-		reqs[i] = newIPNSRequest(b, priv, uint64(i), time.Now().Add(time.Hour), time.Hour)
+		reqs[i] = newPutIPNSRequest(b, priv, uint64(i), time.Now().Add(time.Hour), time.Hour)
 	}
 
 	ctx := context.Background()
@@ -491,7 +511,7 @@ func TestDHT_handlePutValue_happy_path_ipns_record(t *testing.T) {
 	remote, priv := newIdentity(t)
 
 	// expired record
-	req := newIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	req := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
 	ctx := context.Background()
 	_, err := d.ds.Get(ctx, datastoreKey(req.Key))
@@ -554,7 +574,7 @@ func TestDHT_handlePutValue_bad_ipns_record(t *testing.T) {
 	remote, priv := newIdentity(t)
 
 	// expired record
-	req := newIPNSRequest(t, priv, 10, time.Now().Add(-time.Hour), -time.Hour)
+	req := newPutIPNSRequest(t, priv, 10, time.Now().Add(-time.Hour), -time.Hour)
 
 	resp, err := d.handlePutValue(context.Background(), remote, req)
 	assert.Error(t, err)
@@ -567,8 +587,8 @@ func TestDHT_handlePutValue_worse_ipns_record_after_first_put(t *testing.T) {
 
 	remote, priv := newIdentity(t)
 
-	goodReq := newIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
-	worseReq := newIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	goodReq := newPutIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
+	worseReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
 	for i, req := range []*pb.Message{goodReq, worseReq} {
 
@@ -599,8 +619,8 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 
-		req1 := newIPNSRequest(t, priv, uint64(2*i), time.Now().Add(time.Hour), time.Hour)
-		req2 := newIPNSRequest(t, priv, uint64(2*i+1), time.Now().Add(time.Hour), time.Hour)
+		req1 := newPutIPNSRequest(t, priv, uint64(2*i), time.Now().Add(time.Hour), time.Hour)
+		req2 := newPutIPNSRequest(t, priv, uint64(2*i+1), time.Now().Add(time.Hour), time.Hour)
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -635,7 +655,7 @@ func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) 
 
 	remote, priv := newIdentity(t)
 
-	req := newIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
+	req := newPutIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
 
 	// store corrupt record
 	err := d.ds.Put(context.Background(), datastoreKey(req.Record.GetKey()), []byte("corrupt-record"))
@@ -650,4 +670,193 @@ func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) 
 	require.NoError(t, err)
 
 	mustUnmarshalIpnsRecord(t, dat)
+}
+
+func BenchmarkDHT_handleGetValue(b *testing.B) {
+	d := newTestDHT(b)
+
+	fillRoutingTable(b, d)
+
+	// fill datastore and build requests
+	reqs := make([]*pb.Message, b.N)
+	peers := make([]peer.ID, b.N)
+	for i := 0; i < b.N; i++ {
+		peer, priv := newIdentity(b)
+
+		putReq := newPutIPNSRequest(b, priv, 0, time.Now().Add(time.Hour), time.Hour)
+
+		data, err := putReq.Record.Marshal()
+		require.NoError(b, err)
+
+		err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+		require.NoError(b, err)
+
+		peers[i] = peer
+		reqs[i] = &pb.Message{
+			Type: pb.Message_GET_VALUE,
+			Key:  putReq.GetKey(),
+		}
+	}
+
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := d.handleGetValue(ctx, peers[b.N-i-1], reqs[i])
+		if err != nil {
+			b.Error(err)
+		}
+	}
+}
+
+func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	remote, priv := newIdentity(t)
+
+	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+
+	data, err := putReq.Record.Marshal()
+	require.NoError(t, err)
+
+	err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+	require.NoError(t, err)
+
+	getReq := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  putReq.GetKey(),
+	}
+
+	resp, err := d.handleGetValue(context.Background(), remote, getReq)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+	assert.Equal(t, putReq.Key, resp.Key)
+	require.NotNil(t, putReq.Record)
+	assert.Equal(t, putReq.Record.String(), resp.Record.String())
+	assert.Len(t, resp.CloserPeers, 20)
+	assert.Len(t, resp.ProviderPeers, 0)
+}
+
+func TestDHT_handleGetValue_record_not_found(t *testing.T) {
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  []byte("unknown-record-key"),
+	}
+
+	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+	assert.Equal(t, req.Key, resp.Key)
+	assert.Nil(t, resp.Record)
+	assert.Len(t, resp.CloserPeers, 20)
+	assert.Len(t, resp.ProviderPeers, 0)
+}
+
+func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	key := []byte("record-key")
+
+	err := d.ds.Put(context.Background(), datastoreKey(key), []byte("corrupt-data"))
+	require.NoError(t, err)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  key,
+	}
+
+	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+	assert.Equal(t, req.Key, resp.Key)
+	assert.Nil(t, resp.Record)
+	assert.Len(t, resp.CloserPeers, 20)
+	assert.Len(t, resp.ProviderPeers, 0)
+
+	// check that the record was deleted from the datastore
+	data, err := d.ds.Get(context.Background(), datastoreKey(key))
+	assert.ErrorIs(t, err, ds.ErrNotFound)
+	assert.Len(t, data, 0)
+}
+
+func TestDHT_handleGetValue_max_age_exceeded_record_in_datastore(t *testing.T) {
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	remote, priv := newIdentity(t)
+
+	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+
+	data, err := putReq.Record.Marshal()
+	require.NoError(t, err)
+
+	err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+	require.NoError(t, err)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  putReq.GetKey(),
+	}
+
+	d.cfg.MaxRecordAge = 0
+
+	resp, err := d.handleGetValue(context.Background(), remote, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+	assert.Equal(t, req.Key, resp.Key)
+	assert.Nil(t, resp.Record)
+	assert.Len(t, resp.CloserPeers, 20)
+	assert.Len(t, resp.ProviderPeers, 0)
+
+	// check that the record was deleted from the datastore
+	data, err = d.ds.Get(context.Background(), datastoreKey(putReq.GetKey()))
+	assert.ErrorIs(t, err, ds.ErrNotFound)
+	assert.Len(t, data, 0)
+}
+
+func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	remote, priv := newIdentity(t)
+
+	// generate expired record (doesn't pass validation)
+	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(-time.Hour), -time.Hour)
+
+	data, err := putReq.Record.Marshal()
+	require.NoError(t, err)
+
+	err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+	require.NoError(t, err)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  putReq.GetKey(),
+	}
+
+	resp, err := d.handleGetValue(context.Background(), remote, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+	assert.Equal(t, req.Key, resp.Key)
+	require.NotNil(t, putReq.Record)
+	assert.Equal(t, putReq.Record.String(), resp.Record.String())
+	assert.Len(t, resp.CloserPeers, 20)
+	assert.Len(t, resp.ProviderPeers, 0)
 }

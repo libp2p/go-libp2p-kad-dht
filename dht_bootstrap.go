@@ -14,11 +14,14 @@ var DefaultBootstrapPeers []multiaddr.Multiaddr
 
 // Minimum number of peers in the routing table. If we drop below this and we
 // see a new peer, we trigger a bootstrap round.
+// GOKAD: config belongs to go-kademlia
 var minRTRefreshThreshold = 10
 
 const (
+	// GOKAD: config belongs to go-kademlia
 	periodicBootstrapInterval = 2 * time.Minute
-	maxNBoostrappers          = 2
+	// GOKAD: config belongs to go-kademlia
+	maxNBoostrappers = 2
 )
 
 func init() {
@@ -67,6 +70,7 @@ func (dht *IpfsDHT) Bootstrap(ctx context.Context) error {
 //
 // The returned channel will block until the refresh finishes, then yield the
 // error and close. The channel is buffered and safe to ignore.
+// TRIAGE: needed or alternative?
 func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 	return dht.rtRefreshManager.Refresh(false)
 }
@@ -76,6 +80,7 @@ func (dht *IpfsDHT) RefreshRoutingTable() <-chan error {
 //
 // The returned channel will block until the refresh finishes, then yield the
 // error and close. The channel is buffered and safe to ignore.
+// TRIAGE: needed or alternative?
 func (dht *IpfsDHT) ForceRefresh() <-chan error {
 	return dht.rtRefreshManager.Refresh(true)
 }

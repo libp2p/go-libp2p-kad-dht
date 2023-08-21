@@ -4,12 +4,12 @@ import (
 	"testing"
 )
 
-func TestBadAddrsDontReturnNil(t *testing.T) {
-	mp := new(Message_Peer)
-	mp.Addrs = [][]byte{[]byte("NOT A VALID MULTIADDR")}
+func TestMessage_Peer_invalid_maddr(t *testing.T) {
+	msg := Message_Peer{
+		Addrs: [][]byte{[]byte("invalid-maddr")},
+	}
 
-	addrs := mp.Addresses()
-	if len(addrs) > 0 {
+	if len(msg.Addresses()) > 0 {
 		t.Fatal("shouldn't have any multiaddrs")
 	}
 }

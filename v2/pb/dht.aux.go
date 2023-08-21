@@ -19,6 +19,24 @@ func (m *Message) ContainsCloserPeer(pid peer.ID) bool {
 	return false
 }
 
+// ProviderAddrInfos returns the peer.AddrInfo's of the provider peers in this
+// message.
+func (m *Message) ProviderAddrInfos() []peer.AddrInfo {
+	if m == nil {
+		return nil
+	}
+
+	addrInfos := make([]peer.AddrInfo, 0, len(m.ProviderPeers))
+	for _, p := range m.ProviderPeers {
+		addrInfos = append(addrInfos, peer.AddrInfo{
+			ID:    peer.ID(p.Id),
+			Addrs: p.Addresses(),
+		})
+	}
+
+	return addrInfos
+}
+
 // Addresses returns the Multiaddresses associated with the Message_Peer entry
 func (m *Message_Peer) Addresses() []ma.Multiaddr {
 	if m == nil {

@@ -110,7 +110,7 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("committing new record to datastore: %w", err)
 	}
 
-	return req, nil
+	return nil, nil
 }
 
 // handleGetValue handles GET_VALUE RPCs from remote peers.
@@ -177,6 +177,30 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	return resp, nil
 }
 
+// handleAddProvider handles ADD_PROVIDER RPCs from remote peers.
+func (d *DHT) handleAddProvider(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
+	k := req.GetKey()
+	if len(k) > 80 {
+		return nil, fmt.Errorf("handleAddProvider key size too large")
+	} else if len(k) == 0 {
+		return nil, fmt.Errorf("handleAddProvider key is empty")
+	}
+
+	for _, addrInfo := range req.ProviderAddrInfos() {
+		if addrInfo.ID == remote {
+			continue
+		}
+
+		if len(addrInfo.Addrs) == 0 {
+			continue
+		}
+
+		// TODO: store
+	}
+
+	return nil, nil
+}
+
 // handleGetProviders handles GET_PROVIDERS RPCs from remote peers.
 func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
 	k := req.GetKey()
@@ -186,22 +210,16 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("handleGetProviders key is empty")
 	}
 
+	// TODO: fetch providers
+
 	resp := &pb.Message{
-		Type:        pb.Message_GET_PROVIDERS,
-		Key:         k,
-		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(k)),
+		Type:          pb.Message_GET_PROVIDERS,
+		Key:           k,
+		CloserPeers:   d.closerPeers(ctx, remote, key.NewSha256(k)),
+		ProviderPeers: nil, // TODO: Fill
 	}
 
 	return resp, nil
-}
-
-// handleAddProvider handles ADD_PROVIDER RPCs from remote peers.
-func (d *DHT) handleAddProvider(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	k := req.GetKey()
-	if len(k) == 0 {
-		return nil, fmt.Errorf("handleAddProvider but no key in request")
-	}
-	return nil, nil
 }
 
 // closerPeers returns the closest peers to the given target key this host knows
@@ -248,8 +266,8 @@ func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256
 // existing one in the local datastore. It queries the datastore, unmarshalls
 // the record, validates it, and compares it to the incoming record. If the
 // incoming one is "better" (e.g., just newer), this function returns true.
-// If unmarshalling or validation fails, this function also returns true because
-// the existing record should be replaced.
+// If unmarshalling or validation fails, this function (alongside an error) also
+// returns true because the existing record should be replaced.
 func (d *DHT) shouldReplaceExistingRecord(ctx context.Context, dstore ds.Read, newRec *recpb.Record) (bool, error) {
 	ctx, span := tracer.Start(ctx, "DHT.shouldReplaceExistingRecord")
 	defer span.End()

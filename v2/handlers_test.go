@@ -596,7 +596,7 @@ func TestDHT_handlePutValue_worse_ipns_record_after_first_put(t *testing.T) {
 		switch i {
 		case 0:
 			assert.NoError(t, err)
-			assert.NotNil(t, resp)
+			assert.Nil(t, resp)
 		case 1:
 			assert.Error(t, err)
 			assert.Nil(t, resp)

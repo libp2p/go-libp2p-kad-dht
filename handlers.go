@@ -16,7 +16,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/multiformats/go-base32"
 )
 
 // dhthandler specifies the signature of functions that handle DHT messages.
@@ -359,7 +358,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 			continue
 		}
 
-		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: p})
+		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: pi.Addrs})
 	}
 
 	return nil, nil

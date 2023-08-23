@@ -21,6 +21,7 @@ func (d *DHT) handleFindPeer(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("handleFindPeer with empty key")
 	}
 
+	// "parse" requested peer ID from the key field
 	target := peer.ID(req.GetKey())
 
 	// initialize the response message
@@ -61,6 +62,7 @@ func (d *DHT) handlePing(ctx context.Context, remote peer.ID, req *pb.Message) (
 
 // handleGetValue handles PUT_VALUE RPCs from remote peers.
 func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
+	// validate incoming request -> key and record must not be empty/nil
 	k := string(req.GetKey())
 	if len(k) == 0 {
 		return nil, fmt.Errorf("no key was provided")

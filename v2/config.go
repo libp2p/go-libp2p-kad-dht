@@ -24,27 +24,27 @@ const ServiceName = "libp2p.DHT"
 var tracer = otel.Tracer("go-libp2p-kad-dht")
 
 type (
-	// ModeOpt describes in which mode this DHT process should operate in.
+	// ModeOpt describes in which mode this [DHT] process should operate in.
 	// Possible options are client, server, and any variant that switches
-	// between both automatically based on public reachability. The DHT receives
+	// between both automatically based on public reachability. The [DHT] receives
 	// reachability updates from libp2p via the EvtLocalReachabilityChanged
-	// event. A DHT that operates in client mode won't register a stream handler
+	// event. A [DHT] that operates in client mode won't register a stream handler
 	// for incoming requests and therefore won't store, e.g., any provider or
-	// IPNS records. A DHT in server mode, on the other hand, does all of that.
+	// IPNS records. A [DHT] in server mode, on the other hand, does all of that.
 	//
-	// The `mode` type, on the other hand, captures the current state that the
-	// DHT is in. This can either be client or server.
+	// The unexported "mode" type, on the other hand, captures the current state
+	// that the [DHT] is in. This can either be client or server.
 	ModeOpt string
 
-	// mode describes in which mode the DHT currently operates. Because the ModeOpt
+	// mode describes in which mode the [DHT] currently operates. Because the [ModeOpt]
 	// type has options that automatically switch between client and server mode
-	// based on public connectivity, the DHT mode at any point in time can differ
+	// based on public connectivity, the [DHT] mode at any point in time can differ
 	// from the desired mode. Therefore, we define this second mode type that
 	// only has the two forms: client or server.
 	mode string
 
 	// Datastore is an interface definition that gathers the datastore
-	// requirements. The DHT requires the datastore to support batching and
+	// requirements. The [DHT] requires the datastore to support batching and
 	// transactions. Example datastores that implement both features are leveldb
 	// and badger. leveldb can also be used in memory - this is used as the
 	// default datastore.
@@ -73,18 +73,18 @@ const (
 	// to client mode.
 	ModeOptAutoServer ModeOpt = "auto-server"
 
-	// modeClient means that the DHT is currently operating in client mode.
+	// modeClient means that the [DHT] is currently operating in client [mode].
 	// For more information, check ModeOpt documentation.
 	modeClient mode = "client"
 
-	// modeServer means that the DHT is currently operating in server mode.
+	// modeServer means that the [DHT] is currently operating in server [mode].
 	// For more information, check ModeOpt documentation.
 	modeServer mode = "server"
 )
 
-// Config contains all the configuration options for a DHT. Use DefaultConfig
-// to build up your own configuration struct. The DHT constructor New uses the
-// below method Validate to test for violations of configuration invariants.
+// Config contains all the configuration options for a [DHT]. Use [DefaultConfig]
+// to build up your own configuration struct. The [DHT] constructor [New] uses the
+// below method [*Config.Validate] to test for violations of configuration invariants.
 type Config struct {
 	// Mode defines if the DHT should operate as a server or client or switch
 	// between both automatically (see ModeOpt).
@@ -106,16 +106,17 @@ type Config struct {
 	// about the local node.
 	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
 
-	// Backends ...
+	// The Backends field holds a map of key namespaces to their corresponding
+	// backend implementation. For example, if we received an IPNS record, the
+	// key will have the form "/ipns/binary_id". We will forward the handling
+	// of this record the corresponding backend behind the "ipns" key in this
+	// map. A backend does record validation and handles the storage of the
+	// record.
 	Backends map[string]Backend
 
 	// Logger can be used to configure a custom structured logger instance.
 	// By default go.uber.org/zap is used (wrapped in ipfs/go-log).
 	Logger *slog.Logger
-
-	// MaxRecordAge is the default time that a record should last in the DHT.
-	// This value is also known as the provider record expiration.
-	MaxRecordAge time.Duration
 
 	// TimeoutStreamIdle is the duration we're reading from a stream without
 	// receiving before closing/resetting it. The timeout gets reset every time
@@ -124,7 +125,7 @@ type Config struct {
 }
 
 // DefaultConfig returns a configuration struct that can be used as-is to
-// instantiate a fully functional DHT client. All fields that are nil require
+// instantiate a fully functional [DHT] client. All fields that are nil require
 // some additional information to instantiate. The default values for these
 // fields come from separate top-level methods prefixed with Default.
 func DefaultConfig() *Config {
@@ -134,15 +135,15 @@ func DefaultConfig() *Config {
 		BucketSize:        20,
 		ProtocolID:        "/ipfs/kad/1.0.0",
 		RoutingTable:      nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
+		Backends:          map[string]Backend{},
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
-		MaxRecordAge:      48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
-		TimeoutStreamIdle: time.Minute,    // MAGIC: could be done dynamically
+		TimeoutStreamIdle: time.Minute, // MAGIC: could be done dynamically
 	}
 }
 
 // DefaultRoutingTable returns a triert.TrieRT routing table. This routing table
-// cannot be initialized in DefaultConfig because it requires information about
-// the local peer.
+// cannot be initialized in [DefaultConfig] because it requires information
+// about the local peer.
 func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]], error) {
 	rtCfg := triert.DefaultConfig[key.Key256, kad.NodeID[key.Key256]]()
 	rt, err := triert.New[key.Key256, kad.NodeID[key.Key256]](nodeID, rtCfg)
@@ -152,13 +153,9 @@ func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (kad.RoutingTable[key.Ke
 	return rt, nil
 }
 
-// DefaultDatastore returns an in-memory leveldb datastore.
-func DefaultDatastore() (Datastore, error) {
+// InMemoryDatastore returns an in-memory leveldb datastore.
+func InMemoryDatastore() (Datastore, error) {
 	return leveldb.NewDatastore("", nil)
-}
-
-func (c *Config) RegisterBackend(namespace string, backend Backend) {
-	c.Backends[namespace] = backend
 }
 
 // Validate validates the configuration struct it is called on. It returns
@@ -188,10 +185,6 @@ func (c *Config) Validate() error {
 
 	if c.Logger == nil {
 		return fmt.Errorf("logger must not be nil")
-	}
-
-	if c.MaxRecordAge <= 0 {
-		return fmt.Errorf("max record age must be a positive duration")
 	}
 
 	if c.TimeoutStreamIdle <= 0 {

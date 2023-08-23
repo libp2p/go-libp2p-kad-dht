@@ -49,8 +49,8 @@ type DHT struct {
 	sub event.Subscription
 }
 
-// New constructs a new DHT for the given underlying host and with the given
-// configuration. Use DefaultConfig() to construct a configuration.
+// New constructs a new [DHT] for the given underlying host and with the given
+// configuration. Use [DefaultConfig] to construct a configuration.
 func New(h host.Host, cfg *Config) (*DHT, error) {
 	var err error
 
@@ -77,7 +77,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	if len(cfg.Backends) != 0 {
 		d.backends = cfg.Backends
 	} else {
-		dstore, err := DefaultDatastore()
+		dstore, err := InMemoryDatastore()
 		if err != nil {
 			return nil, fmt.Errorf("new default datastore: %w", err)
 		}
@@ -85,17 +85,17 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		pbeCfg := DefaultProviderBackendConfig()
 		pbeCfg.Logger = cfg.Logger
 
-		pbe, err := NewProviderBackend(h.Peerstore(), dstore, pbeCfg)
+		pbe, err := NewBackendProvider(h.Peerstore(), dstore, pbeCfg)
 		if err != nil {
 			return nil, fmt.Errorf("new provider backend: %w", err)
 		}
 
-		vbeCfg := DefaultValueBackendConfig()
+		vbeCfg := DefaultRecordBackendConfig()
 		vbeCfg.Logger = cfg.Logger
 
 		d.backends = map[string]Backend{
-			"ipns":      NewIPNSBackend(dstore, h.Peerstore(), vbeCfg),
-			"pk":        NewPublicKeyBackend(dstore, vbeCfg),
+			"ipns":      NewBackendIPNS(dstore, h.Peerstore(), vbeCfg),
+			"pk":        NewBackendPublicKey(dstore, vbeCfg),
 			"providers": pbe,
 		}
 	}

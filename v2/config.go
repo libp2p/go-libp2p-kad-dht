@@ -20,6 +20,19 @@ import (
 // ServiceName is used to scope incoming streams for the resource manager.
 const ServiceName = "libp2p.DHT"
 
+const (
+	// ProtocolIPFS is the protocol identifier for the main IPFS network. If the
+	// DHT is configured with this protocol, you must configure backends for
+	// IPNS, Public Key, and provider records (ipns, pk, and providers
+	// namespaces).
+	ProtocolIPFS protocol.ID = "/ipfs/kad/1.0.0"
+
+	// ProtocolFilecoin is the protocol identifier for Filecoin mainnet. If this
+	// protocol is configured, the DHT won't automatically add support for any
+	// of the above record types.
+	ProtocolFilecoin protocol.ID = "/fil/kad/testnetnet/kad/1.0.0"
+)
+
 // tracer is an open telemetry tracing instance
 var tracer = otel.Tracer("go-libp2p-kad-dht")
 
@@ -109,10 +122,17 @@ type Config struct {
 	// The Backends field holds a map of key namespaces to their corresponding
 	// backend implementation. For example, if we received an IPNS record, the
 	// key will have the form "/ipns/binary_id". We will forward the handling
-	// of this record the corresponding backend behind the "ipns" key in this
+	// of this record to the corresponding backend behind the "ipns" key in this
 	// map. A backend does record validation and handles the storage of the
-	// record.
+	// record. If this map stays empty, it will be populated with the default
+	// IPNS ([NewBackendIPNS]), PublicKey ([NewBackendPublicKey]), and
+	// Providers ([NewBackendProvider]) backends.
 	Backends map[string]Backend
+
+	// Datastore will be used to construct the default backends. If this is nil,
+	// an in-memory leveldb from [InMemoryDatastore] will be used for all
+	// backends.
+	Datastore Datastore
 
 	// Logger can be used to configure a custom structured logger instance.
 	// By default go.uber.org/zap is used (wrapped in ipfs/go-log).
@@ -133,11 +153,12 @@ func DefaultConfig() *Config {
 		Mode:              ModeOptAutoClient,
 		Kademlia:          coord.DefaultConfig(),
 		BucketSize:        20,
-		ProtocolID:        "/ipfs/kad/1.0.0",
+		ProtocolID:        ProtocolIPFS,
 		RoutingTable:      nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
 		Backends:          map[string]Backend{},
+		Datastore:         nil,
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
-		TimeoutStreamIdle: time.Minute, // MAGIC: could be done dynamically
+		TimeoutStreamIdle: time.Minute, // MAGIC
 	}
 }
 

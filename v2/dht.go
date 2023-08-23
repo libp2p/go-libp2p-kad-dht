@@ -76,9 +76,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 
 	if len(cfg.Backends) != 0 {
 		d.backends = cfg.Backends
-	} else {
-		dstore, err := InMemoryDatastore()
-		if err != nil {
+	} else if cfg.ProtocolID == ProtocolIPFS {
+
+		var dstore Datastore
+		if cfg.Datastore != nil {
+			dstore = cfg.Datastore
+		} else if dstore, err = InMemoryDatastore(); err != nil {
 			return nil, fmt.Errorf("new default datastore: %w", err)
 		}
 
@@ -90,12 +93,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 			return nil, fmt.Errorf("new provider backend: %w", err)
 		}
 
-		vbeCfg := DefaultRecordBackendConfig()
-		vbeCfg.Logger = cfg.Logger
+		rbeCfg := DefaultRecordBackendConfig()
+		rbeCfg.Logger = cfg.Logger
 
 		d.backends = map[string]Backend{
-			"ipns":      NewBackendIPNS(dstore, h.Peerstore(), vbeCfg),
-			"pk":        NewBackendPublicKey(dstore, vbeCfg),
+			"ipns":      NewBackendIPNS(dstore, h.Peerstore(), rbeCfg),
+			"pk":        NewBackendPublicKey(dstore, rbeCfg),
 			"providers": pbe,
 		}
 	}

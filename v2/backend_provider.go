@@ -38,11 +38,24 @@ var _ Backend = (*ProvidersBackend)(nil)
 // [DefaultProviderBackendConfig] to get a default configuration struct and then
 // modify it to your liking.
 type ProviderBackendConfig struct {
-	ProvideValidity time.Duration // specifies for how long provider records are valid
-	AddressTTL      time.Duration // specifies for how long we will keep around provider multi addresses in the peerstore. If such multiaddresses are present we send them alongside the peer ID to the requesting peer. This prevents the necessity for a second look for the multiaddresses on the requesting peers' side.
-	BatchSize       int           // specifies how many provider record writes should be batched
-	CacheSize       int           // specifies the LRU cache size
-	Logger          *slog.Logger  // the logger to use
+	// ProvideValidity specifies for how long provider records are valid
+	ProvideValidity time.Duration
+
+	// AddressTTL specifies for how long we will keep around provider multi
+	// addresses in the peerstore. If such multiaddresses are present we send
+	// them alongside the peer ID to the requesting peer. This prevents the
+	// necessity for a second look for the multiaddresses on the requesting
+	// peers' side.
+	AddressTTL time.Duration
+
+	// BatchSize specifies how many provider record writes should be batched
+	BatchSize int
+
+	// CacheSize specifies the LRU cache size
+	CacheSize int
+
+	// Logger is the logger to use
+	Logger *slog.Logger
 }
 
 // DefaultProviderBackendConfig returns a default [ProvidersBackend]
@@ -82,7 +95,7 @@ func (p *ProvidersBackend) Store(ctx context.Context, key string, value any) (an
 	}
 
 	if provs, ok := p.cache.Get(key); ok {
-		provs.setVal(addrInfo, rec.expiry)
+		provs.addProvider(addrInfo, rec.expiry)
 	}
 
 	p.peerstore.AddAddrs(addrInfo.ID, addrInfo.Addrs, p.cfg.AddressTTL)
@@ -137,7 +150,10 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 	}()
 
 	now := time.Now()
-	out := newProviderSet()
+	out := &providerSet{
+		providers: []peer.AddrInfo{},
+		set:       make(map[peer.ID]time.Time),
+	}
 
 	for e := range q.Next() {
 		if e.Error != nil {
@@ -166,7 +182,7 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 
 		addrInfo := p.peerstore.PeerInfo(peer.ID(binPeerID))
 
-		out.setVal(addrInfo, rec.expiry)
+		out.addProvider(addrInfo, rec.expiry)
 	}
 
 	if len(out.providers) > 0 {
@@ -263,19 +279,16 @@ func (e *expiryRecord) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+// A providerSet is used to gather provider information in a single struct. It
+// also makes sure that the user doesn't add any duplicate peers.
 type providerSet struct {
 	providers []peer.AddrInfo
 	set       map[peer.ID]time.Time
 }
 
-func newProviderSet() *providerSet {
-	return &providerSet{
-		providers: []peer.AddrInfo{},
-		set:       make(map[peer.ID]time.Time),
-	}
-}
-
-func (ps *providerSet) setVal(addrInfo peer.AddrInfo, t time.Time) {
+// addProvider adds the given address information to the providerSet. If the
+// provider already exists, only the time is updated.
+func (ps *providerSet) addProvider(addrInfo peer.AddrInfo, t time.Time) {
 	_, found := ps.set[addrInfo.ID]
 	if !found {
 		ps.providers = append(ps.providers, addrInfo)

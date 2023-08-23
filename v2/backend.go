@@ -18,15 +18,16 @@ const (
 	namespaceProviders = "providers"
 )
 
-// A Backend implementation handles requests from other peers. Depending on the
-// keys root namespace, we pass the request to the corresponding backend. For
-// example, the root namespace for the key "/ipns/BINARY_ID" is "ipns." If
-// we receive a PUT_VALUE request from another peer for the above key, we will
-// pass the included record to the "ipns backend." This backend is responsible
-// for validating the record and storing or discarding it. The same applies for,
-// e.g., "/providers/..." keys which we will receive for ADD_PROVIDER and
-// GET_PROVIDERS requests. The [ProvidersBackend] will take care of storing the
-// records so that they can be retrieved efficiently via Fetch.
+// A Backend implementation handles requests for certain record types from other
+// peers. A Backend always belongs to a certain namespace. In this case a
+// namespace is equivalent to a type of record that this DHT supports. In the
+// case of IPFS, the DHT supports the "ipns", "pk", and "providers" namespaces
+// and therefore uses three different backends. Depending on the request's key
+// the DHT invokes the corresponding backend Store and Fetch methods. A key
+// has the structure "/$namespace/$path". The DHT parses uses the $namespace
+// part to decide which Backend to use. The $path part is then passed to the
+// Backend's Store and Fetch methods as the "key" parameter. Backends for
+// different namespace may or may not operate on the same underlying datastore.
 //
 // To support additional record types, users would implement this Backend
 // interface and register it for a custom namespace with the [DHT] [Config] by
@@ -36,17 +37,18 @@ const (
 // that type because provider records are handled slightly differently. For
 // example, with provider records, the return values are not assigned to the
 // [pb.Message.Record] field but to the [pb.Message.ProviderPeers] field.
+//
+// This repository defines default Backends for the "ipns", "pk", and
+// "providers" namespaces. They can be instantiated with [NewBackendIPNS],
+// [NewBackendPublicKey], and [NewBackendProvider] respectively.
 type Backend interface {
-	// Store stores the given value at the give key (prefixed with the namespace
-	// that this backend operates in). It returns the written record. The key
+	// Store stores the given value such that it can be retrieved via Fetch
+	// with the same key parameter. It returns the written record. The key
 	// that will be handed into the Store won't contain the namespace prefix. For
-	// example, if we receive a request for /ipns/BINARY_ID, key will be set to
-	// BINARY_ID. The backend implementation is free to decide how to store the
+	// example, if we receive a request for /ipns/$binary_id, key will be set to
+	// $binary_id. The backend implementation is free to decide how to store the
 	// data in the datastore. However, it makes sense to prefix the record with
-	// the namespace that this Backend operates in. The written record that gets
-	// returned from this method could have a different type than the value that
-	// was passed into Store, or it could be enriched with additional information
-	// like the timestamp when it was written.
+	// the namespace that this Backend operates in.
 	Store(ctx context.Context, key string, value any) (any, error)
 
 	// Fetch returns the record for the given path or a [ds.ErrNotFound] if it
@@ -92,9 +94,10 @@ func NewBackendPublicKey(ds ds.TxnDatastore, cfg *RecordBackendConfig) *RecordBa
 
 // NewBackendProvider initializes a new backend for the "providers" namespace
 // that can store and fetch provider records from the given datastore. The
-// values passed into Store must be of type [peer.AddrInfo]. The values returned
-// from Fetch will be of type [providerSet] (unexported). The cfg parameter can
-// be nil, in which case the [DefaultProviderBackendConfig] will be used.
+// values passed into [ProvidersBackend.Store] must be of type [peer.AddrInfo].
+// The values returned from [ProvidersBackend.Fetch] will be of type
+// [*providerSet] (unexported). The cfg parameter can be nil, in which case the
+// [DefaultProviderBackendConfig] will be used.
 func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Batching, cfg *ProviderBackendConfig) (*ProvidersBackend, error) {
 	if cfg == nil {
 		cfg = DefaultProviderBackendConfig()

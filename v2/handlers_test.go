@@ -635,7 +635,7 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 		}()
 		wg.Wait()
 
-		// an IPNS record key has the form /ipns/BINARY_ID where binary_id
+		// an IPNS record key has the form /ipns/$binary_id where $binary_id
 		// is just the peer ID of the peer that belongs to the IPNS record.
 		// Therefore, we can just string-cast the remote peer.ID here.
 		val, err := d.backends[namespaceIPNS].Fetch(context.Background(), string(remote))

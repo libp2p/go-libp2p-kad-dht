@@ -78,7 +78,7 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("key doesn't match record key")
 	}
 
-	// key is /$namespace/BINARY_ID
+	// key is /$namespace/$binary_id
 	ns, path, err := record.SplitKey(k) // get namespace (prefix of the key)
 	if err != nil || len(path) == 0 {
 		return nil, fmt.Errorf("invalid key %s: %w", k, err)

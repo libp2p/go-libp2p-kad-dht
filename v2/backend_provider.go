@@ -281,8 +281,8 @@ func (ps *providerSet) addProvider(addrInfo peer.AddrInfo, t time.Time) {
 
 // newDatastoreKey assembles a datastore for the given namespace and set of
 // binary strings. For example, the IPNS record keys have the format:
-// "/ipns/BINARY_ID" (see [Routing Record]). To construct a datastore key this
-// function base32-encodes the BINARY_ID (and any additional path components)
+// "/ipns/$binary_id" (see [Routing Record]). To construct a datastore key this
+// function base32-encodes the $binary_id (and any additional path components)
 // and joins the parts together separated by forward slashes.
 //
 // [Routing Record]: https://specs.ipfs.tech/ipns/ipns-record/#routing-record

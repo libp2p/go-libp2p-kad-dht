@@ -72,6 +72,32 @@ func TestConfig_Validate(t *testing.T) {
 				return c
 			},
 		},
+		{
+			// When we're using the IPFS protocol, we always require support
+			// for ipns, pk, and provider records.
+			// If the Backends map is empty and the IPFS protocol is configured,
+			// we automatically populate the DHT backends for these record
+			// types.
+			name:    "incompatible backends with ipfs protocol",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.ProtocolID = ProtocolIPFS
+				c.Backends["another"] = &RecordBackend{}
+				return c
+			},
+		},
+		{
+			name:    "additional backends for ipfs protocol",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.ProtocolID = ProtocolIPFS
+				c.Backends[namespaceProviders] = &RecordBackend{}
+				c.Backends[namespaceIPNS] = &RecordBackend{}
+				c.Backends[namespacePublicKey] = &RecordBackend{}
+				c.Backends["another"] = &RecordBackend{}
+				return c
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

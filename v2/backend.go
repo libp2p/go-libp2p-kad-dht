@@ -20,7 +20,7 @@ const (
 
 // A Backend implementation handles requests from other peers. Depending on the
 // keys root namespace, we pass the request to the corresponding backend. For
-// example, the root namespace for the key "/ipns/$binary_id" is "ipns." If
+// example, the root namespace for the key "/ipns/BINARY_ID" is "ipns." If
 // we receive a PUT_VALUE request from another peer for the above key, we will
 // pass the included record to the "ipns backend." This backend is responsible
 // for validating the record and storing or discarding it. The same applies for,
@@ -37,12 +37,19 @@ const (
 // example, with provider records, the return values are not assigned to the
 // [pb.Message.Record] field but to the [pb.Message.ProviderPeers] field.
 type Backend interface {
-	// Store stores the given value at the give key, returning the written record.
-	// The written record could be of a different type than the value that was
-	// passed into Store.
+	// Store stores the given value at the give key (prefixed with the namespace
+	// that this backend operates in). It returns the written record. The key
+	// that will be handed into the Store won't contain the namespace prefix. For
+	// example, if we receive a request for /ipns/BINARY_ID, key will be set to
+	// BINARY_ID. The backend implementation is free to decide how to store the
+	// data in the datastore. However, it makes sense to prefix the record with
+	// the namespace that this Backend operates in. The written record that gets
+	// returned from this method could have a different type than the value that
+	// was passed into Store, or it could be enriched with additional information
+	// like the timestamp when it was written.
 	Store(ctx context.Context, key string, value any) (any, error)
 
-	// Fetch returns the record for the given key or a [ds.ErrNotFound] if it
+	// Fetch returns the record for the given path or a [ds.ErrNotFound] if it
 	// wasn't found or another error if any occurred.
 	Fetch(ctx context.Context, key string) (any, error)
 }

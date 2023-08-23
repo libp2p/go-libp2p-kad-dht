@@ -13,7 +13,6 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/autobatch"
 	dsq "github.com/ipfs/go-datastore/query"
-	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/multiformats/go-base32"
@@ -81,31 +80,22 @@ func (p *ProvidersBackend) Store(ctx context.Context, key string, value any) (an
 		return nil, fmt.Errorf("expected peer.AddrInfo value type, got: %T", value)
 	}
 
-	ns, suffix, err := record.SplitKey(key) // get namespace (prefix of the key)
-	if err != nil {
-		return nil, fmt.Errorf("invalid key %s: %w", key, err)
-	}
-
-	if p.namespace != ns {
-		return nil, fmt.Errorf("expected namespace %s, got %s", p.namespace, ns)
-	}
-
 	rec := expiryRecord{
 		expiry: time.Now(),
 	}
 
-	if provs, ok := p.cache.Get(key); ok {
+	cacheKey := newDatastoreKey(p.namespace, key).String()
+	dsKey := newDatastoreKey(p.namespace, key, string(addrInfo.ID))
+	if provs, ok := p.cache.Get(cacheKey); ok {
 		provs.addProvider(addrInfo, rec.expiry)
 	}
 
 	p.peerstore.AddAddrs(addrInfo.ID, addrInfo.Addrs, p.cfg.AddressTTL)
 
-	dsKey := newDatastoreKey(ns, suffix, string(addrInfo.ID))
-
 	_, found := p.gcSkip.LoadOrStore(dsKey.String(), struct{}{})
 
 	if err := p.datastore.Put(ctx, dsKey, rec.MarshalBinary()); err != nil {
-		p.cache.Remove(key)
+		p.cache.Remove(cacheKey)
 
 		// if we have just added the key to the gc skip list, delete it again
 		// if we have added it in a previous Store invocation, keep it around
@@ -124,20 +114,12 @@ func (p *ProvidersBackend) Store(ctx context.Context, key string, value any) (an
 // and known multiaddresses for the given key. The key parameter should be of
 // the form "/providers/$binary_multihash".
 func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
-	ns, suffix, err := record.SplitKey(key) // get namespace (prefix of the key)
-	if err != nil {
-		return nil, fmt.Errorf("invalid key %s: %w", key, err)
-	}
+	qKey := newDatastoreKey(p.namespace, key)
 
-	if p.namespace != ns {
-		return nil, fmt.Errorf("expected namespace %s, got %s", p.namespace, ns)
-	}
-
-	if cached, ok := p.cache.Get(key); ok {
+	if cached, ok := p.cache.Get(qKey.String()); ok {
 		return cached, nil
 	}
 
-	qKey := newDatastoreKey(ns, suffix)
 	q, err := p.datastore.Query(ctx, dsq.Query{Prefix: qKey.String()})
 	if err != nil {
 		return nil, err
@@ -186,7 +168,7 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 	}
 
 	if len(out.providers) > 0 {
-		p.cache.Add(key, *out)
+		p.cache.Add(qKey.String(), *out)
 	}
 
 	return out, nil
@@ -297,6 +279,13 @@ func (ps *providerSet) addProvider(addrInfo peer.AddrInfo, t time.Time) {
 	ps.set[addrInfo.ID] = t
 }
 
+// newDatastoreKey assembles a datastore for the given namespace and set of
+// binary strings. For example, the IPNS record keys have the format:
+// "/ipns/BINARY_ID" (see [Routing Record]). To construct a datastore key this
+// function base32-encodes the BINARY_ID (and any additional path components)
+// and joins the parts together separated by forward slashes.
+//
+// [Routing Record]: https://specs.ipfs.tech/ipns/ipns-record/#routing-record
 func newDatastoreKey(namespace string, binStrs ...string) ds.Key {
 	elems := make([]string, len(binStrs)+1)
 	elems[0] = namespace

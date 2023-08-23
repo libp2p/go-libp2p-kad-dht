@@ -212,5 +212,23 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("stream idle timeout must be a positive duration")
 	}
 
+	if c.ProtocolID == ProtocolIPFS && len(c.Backends) != 0 {
+		if len(c.Backends) != 3 {
+			return fmt.Errorf("ipfs protocol requires exactly three backends")
+		}
+
+		if _, found := c.Backends[namespaceIPNS]; !found {
+			return fmt.Errorf("ipfs protocol requires an IPNS backend")
+		}
+
+		if _, found := c.Backends[namespacePublicKey]; !found {
+			return fmt.Errorf("ipfs protocol requires a public key backend")
+		}
+
+		if _, found := c.Backends[namespaceProviders]; !found {
+			return fmt.Errorf("ipfs protocol requires a providers backend")
+		}
+	}
+
 	return nil
 }

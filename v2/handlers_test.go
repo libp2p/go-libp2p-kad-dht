@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,16 +16,13 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p"
 	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-const (
-	testPath = path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
 )
 
 var rng = rand.New(rand.NewSource(1337))
@@ -70,17 +66,6 @@ func newIdentity(t testing.TB) (peer.ID, crypto.PrivKey) {
 	require.NoError(t, err)
 
 	return id, priv
-}
-
-func mustUnmarshalIpnsRecord(t *testing.T, data []byte) *ipns.Record {
-	r := &recpb.Record{}
-	err := r.Unmarshal(data)
-	require.NoError(t, err)
-
-	rec, err := ipns.UnmarshalRecord(r.Value)
-	require.NoError(t, err)
-
-	return rec
 }
 
 func fillRoutingTable(t testing.TB, d *DHT) {
@@ -437,6 +422,8 @@ func BenchmarkDHT_handlePing(b *testing.B) {
 }
 
 func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.Time, ttl time.Duration) *pb.Message {
+	testPath := path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
+
 	rec, err := ipns.NewRecord(priv, testPath, seq, eol, ttl)
 	require.NoError(t, err)
 
@@ -507,22 +494,27 @@ func BenchmarkDHT_handlePutValue_single_peer(b *testing.B) {
 }
 
 func TestDHT_handlePutValue_happy_path_ipns_record(t *testing.T) {
+	ctx := context.Background()
+
+	// init new DHT
 	d := newTestDHT(t)
 
+	// generate new identity for the peer that issues the request
 	remote, priv := newIdentity(t)
 
 	// expired record
 	req := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	ns, suffix, err := record.SplitKey(string(req.Key))
+	require.NoError(t, err)
 
-	ctx := context.Background()
-	_, err := d.backends[namespaceIPNS].Fetch(ctx, string(req.Key))
+	_, err = d.backends[ns].Fetch(ctx, suffix)
 	require.ErrorIs(t, err, ds.ErrNotFound)
 
 	cloned := proto.Clone(req).(*pb.Message)
 	_, err = d.handlePutValue(ctx, remote, cloned)
 	require.NoError(t, err)
 
-	dat, err := d.backends[namespaceIPNS].Fetch(ctx, string(req.Key))
+	dat, err := d.backends[ns].Fetch(ctx, suffix)
 	require.NoError(t, err)
 
 	r, ok := dat.(*recpb.Record)
@@ -536,36 +528,45 @@ func TestDHT_handlePutValue_happy_path_ipns_record(t *testing.T) {
 	assert.True(t, reflect.DeepEqual(r, req.Record))
 }
 
-func TestDHT_handlePutValue_nil_record(t *testing.T) {
+func TestDHT_handlePutValue_nil_records(t *testing.T) {
 	d := newTestDHT(t)
 
-	req := &pb.Message{
-		Type:   pb.Message_PUT_VALUE,
-		Key:    []byte("/ipns/random-key"),
-		Record: nil, // nil record
-	}
+	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
+		req := &pb.Message{
+			Type:   pb.Message_PUT_VALUE,
+			Key:    []byte(fmt.Sprintf("/%s/random-key", ns)),
+			Record: nil, // nil record
+		}
 
-	resp, err := d.handlePutValue(context.Background(), newPeerID(t), req)
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.ErrorContains(t, err, "nil record")
+		resp, err := d.handlePutValue(context.Background(), newPeerID(t), req)
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		assert.ErrorContains(t, err, "nil record")
+	}
 }
 
 func TestDHT_handlePutValue_record_key_mismatch(t *testing.T) {
 	d := newTestDHT(t)
 
-	req := &pb.Message{
-		Type: pb.Message_PUT_VALUE,
-		Key:  []byte("/ipns/key-1"),
-		Record: &recpb.Record{
-			Key: []byte("/ipns/key-2"),
-		},
-	}
+	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
+		t.Run(ns, func(t *testing.T) {
+			key1 := []byte(fmt.Sprintf("/%s/key-1", ns))
+			key2 := []byte(fmt.Sprintf("/%s/key-2", ns))
 
-	resp, err := d.handlePutValue(context.Background(), newPeerID(t), req)
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.ErrorContains(t, err, "key doesn't match record key")
+			req := &pb.Message{
+				Type: pb.Message_PUT_VALUE,
+				Key:  key1,
+				Record: &recpb.Record{
+					Key: key2,
+				},
+			}
+
+			resp, err := d.handlePutValue(context.Background(), newPeerID(t), req)
+			assert.Error(t, err)
+			assert.Nil(t, resp)
+			assert.ErrorContains(t, err, "key doesn't match record key")
+		})
+	}
 }
 
 func TestDHT_handlePutValue_bad_ipns_record(t *testing.T) {
@@ -591,7 +592,6 @@ func TestDHT_handlePutValue_worse_ipns_record_after_first_put(t *testing.T) {
 	worseReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
 	for i, req := range []*pb.Message{goodReq, worseReq} {
-
 		resp, err := d.handlePutValue(context.Background(), remote, req)
 		switch i {
 		case 0:
@@ -615,8 +615,6 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 
 	remote, priv := newIdentity(t)
 
-	ipnsKey := ipns.NameFromPeer(remote).RoutingKey()
-
 	for i := 0; i < 100; i++ {
 
 		req1 := newPutIPNSRequest(t, priv, uint64(2*i), time.Now().Add(time.Hour), time.Hour)
@@ -637,7 +635,10 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 		}()
 		wg.Wait()
 
-		val, err := d.backends[namespaceIPNS].Fetch(context.Background(), string(ipnsKey))
+		// an IPNS record key has the form /ipns/BINARY_ID where binary_id
+		// is just the peer ID of the peer that belongs to the IPNS record.
+		// Therefore, we can just string-cast the remote peer.ID here.
+		val, err := d.backends[namespaceIPNS].Fetch(context.Background(), string(remote))
 		require.NoError(t, err)
 
 		r, ok := val.(*recpb.Record)
@@ -661,25 +662,74 @@ func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) 
 
 	req := newPutIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
 
+	dsKey := newDatastoreKey(namespaceIPNS, string(remote)) // string(remote) is the key suffix
+
 	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
 	require.True(t, ok)
 
-	err := rbe.datastore.Put(context.Background(), ds.NewKey(string(req.GetKey())), []byte("corrupt-record"))
+	err := rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-record"))
 	require.NoError(t, err)
 
 	// put the correct record through handler
 	_, err = d.handlePutValue(context.Background(), remote, req)
 	require.NoError(t, err)
 
-	// check if the corrupt record was overwritten
-	val, err := d.backends[namespaceIPNS].Fetch(context.Background(), string(req.GetKey()))
+	value, err := rbe.datastore.Get(context.Background(), dsKey)
 	require.NoError(t, err)
 
-	r, ok := val.(*recpb.Record)
-	require.True(t, ok)
+	r := &recpb.Record{}
+	require.NoError(t, r.Unmarshal(value))
 
 	_, err = ipns.UnmarshalRecord(r.Value)
 	require.NoError(t, err)
+}
+
+func TestDHT_handlePutValue_malformed_key(t *testing.T) {
+	d := newTestDHT(t)
+
+	keys := []string{
+		"malformed-key",
+		"     ",
+		"/ipns/",
+		"/pk/",
+		"/ipns",
+		"/pk",
+		"ipns/",
+		"pk/",
+	}
+	for _, k := range keys {
+		t.Run("malformed key: "+k, func(t *testing.T) {
+			req := &pb.Message{
+				Type: pb.Message_PUT_VALUE,
+				Key:  []byte(k),
+				Record: &recpb.Record{
+					Key: []byte(k),
+				},
+			}
+
+			resp, err := d.handlePutValue(context.Background(), newPeerID(t), req)
+			assert.Error(t, err)
+			assert.Nil(t, resp)
+			assert.ErrorContains(t, err, "invalid key")
+		})
+	}
+}
+
+func TestDHT_handlePutValue_unknown_backend(t *testing.T) {
+	d := newTestDHT(t)
+
+	req := &pb.Message{
+		Type: pb.Message_PUT_VALUE,
+		Key:  []byte("/other-namespace/record-key"),
+		Record: &recpb.Record{
+			Key: []byte("/other-namespace/record-key"),
+		},
+	}
+
+	resp, err := d.handlePutValue(context.Background(), newPeerID(t), req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.ErrorContains(t, err, "unsupported record type")
 }
 
 func BenchmarkDHT_handleGetValue(b *testing.B) {
@@ -701,7 +751,7 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 		data, err := putReq.Record.Marshal()
 		require.NoError(b, err)
 
-		dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+		dsKey := newDatastoreKey(namespaceIPNS, string(pid))
 
 		err = rbe.datastore.Put(context.Background(), dsKey, data)
 		require.NoError(b, err)
@@ -731,17 +781,17 @@ func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
-
 	remote, priv := newIdentity(t)
 
 	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
+
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
 
-	dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+	dsKey := newDatastoreKey(namespaceIPNS, string(remote))
 	err = rbe.datastore.Put(context.Background(), dsKey, data)
 	require.NoError(t, err)
 
@@ -766,19 +816,23 @@ func TestDHT_handleGetValue_record_not_found(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
-	req := &pb.Message{
-		Type: pb.Message_GET_VALUE,
-		Key:  []byte("/ipns/unknown-record-key"),
+	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
+		t.Run(ns, func(t *testing.T) {
+			req := &pb.Message{
+				Type: pb.Message_GET_VALUE,
+				Key:  []byte(fmt.Sprintf("/%s/unknown-record-key", ns)),
+			}
+
+			resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+			require.NoError(t, err)
+
+			assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+			assert.Equal(t, req.Key, resp.Key)
+			assert.Nil(t, resp.Record)
+			assert.Len(t, resp.CloserPeers, 20)
+			assert.Len(t, resp.ProviderPeers, 0)
+		})
 	}
-
-	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
-	require.NoError(t, err)
-
-	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
-	assert.Equal(t, req.Key, resp.Key)
-	assert.Nil(t, resp.Record)
-	assert.Len(t, resp.CloserPeers, 20)
-	assert.Len(t, resp.ProviderPeers, 0)
 }
 
 func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
@@ -786,49 +840,52 @@ func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
+	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
+		t.Run(ns, func(t *testing.T) {
+			rbe, ok := d.backends[ns].(*RecordBackend)
+			require.True(t, ok)
 
-	key := []byte("/ipns/record-key")
+			key := []byte(fmt.Sprintf("/%s/record-key", ns))
 
-	dsKey := newDatastoreKey(namespaceIPNS, "record-key")
+			dsKey := newDatastoreKey(ns, "record-key")
+			err := rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-data"))
+			require.NoError(t, err)
 
-	err := rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-data"))
-	require.NoError(t, err)
+			req := &pb.Message{
+				Type: pb.Message_GET_VALUE,
+				Key:  key,
+			}
 
-	req := &pb.Message{
-		Type: pb.Message_GET_VALUE,
-		Key:  key,
+			resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+			require.NoError(t, err)
+
+			assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
+			assert.Equal(t, req.Key, resp.Key)
+			assert.Nil(t, resp.Record)
+			assert.Len(t, resp.CloserPeers, 20)
+			assert.Len(t, resp.ProviderPeers, 0)
+
+			// check that the record was deleted from the datastore
+			data, err := rbe.datastore.Get(context.Background(), dsKey)
+			assert.ErrorIs(t, err, ds.ErrNotFound)
+			assert.Len(t, data, 0)
+		})
 	}
-
-	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
-	require.NoError(t, err)
-
-	assert.Equal(t, pb.Message_GET_VALUE, resp.Type)
-	assert.Equal(t, req.Key, resp.Key)
-	assert.Nil(t, resp.Record)
-	assert.Len(t, resp.CloserPeers, 20)
-	assert.Len(t, resp.ProviderPeers, 0)
-
-	// check that the record was deleted from the datastore
-	data, err := rbe.datastore.Get(context.Background(), dsKey)
-	assert.ErrorIs(t, err, ds.ErrNotFound)
-	assert.Len(t, data, 0)
 }
 
-func TestDHT_handleGetValue_max_age_exceeded_record_in_datastore(t *testing.T) {
+func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
 	d := newTestDHT(t)
 
 	fillRoutingTable(t, d)
-
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
 
 	remote, priv := newIdentity(t)
 
 	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
-	dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
+
+	dsKey := newDatastoreKey(namespaceIPNS, string(remote))
 
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
@@ -874,7 +931,7 @@ func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
 
-	dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+	dsKey := newDatastoreKey(namespaceIPNS, string(remote))
 
 	err = rbe.datastore.Put(context.Background(), dsKey, data)
 	require.NoError(t, err)
@@ -893,4 +950,53 @@ func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 	assert.Equal(t, putReq.Record.String(), resp.Record.String())
 	assert.Len(t, resp.CloserPeers, 20)
 	assert.Len(t, resp.ProviderPeers, 0)
+}
+
+func TestDHT_handleGetValue_malformed_key(t *testing.T) {
+	d := newTestDHT(t)
+
+	keys := []string{
+		"malformed-key",
+		"     ",
+		"/ipns/",
+		"/pk/",
+		"/ipns",
+		"/pk",
+		"ipns/",
+		"pk/",
+	}
+	for _, k := range keys {
+		t.Run("malformed key: "+k, func(t *testing.T) {
+			req := &pb.Message{
+				Type: pb.Message_GET_VALUE,
+				Key:  []byte(k),
+			}
+
+			resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+			assert.Error(t, err)
+			assert.Nil(t, resp)
+			assert.ErrorContains(t, err, "invalid key")
+		})
+	}
+}
+
+func TestDHT_handleGetValue_unknown_backend(t *testing.T) {
+	d := newTestDHT(t)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  []byte("/other-namespace/record-key"),
+		Record: &recpb.Record{
+			Key: []byte("/other-namespace/record-key"),
+		},
+	}
+
+	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.ErrorContains(t, err, "unsupported record type")
+}
+
+func TestDHT_handleGetValue_supports_providers(t *testing.T) {
+	t.Skip("TODO")
 }

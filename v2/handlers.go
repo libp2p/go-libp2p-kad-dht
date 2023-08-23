@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -73,18 +74,22 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("nil record")
 	}
 
-	// key is /$namespace/$binary_id
-	ns, _, err := record.SplitKey(k) // get namespace (prefix of the key)
-	if err != nil {
+	if !bytes.Equal(req.GetKey(), rec.GetKey()) {
+		return nil, fmt.Errorf("key doesn't match record key")
+	}
+
+	// key is /$namespace/BINARY_ID
+	ns, path, err := record.SplitKey(k) // get namespace (prefix of the key)
+	if err != nil || len(path) == 0 {
 		return nil, fmt.Errorf("invalid key %s: %w", k, err)
 	}
 
 	backend, found := d.backends[ns]
 	if !found {
-		return nil, fmt.Errorf("unsupported key namespace: %s", ns)
+		return nil, fmt.Errorf("unsupported record type: %s", ns)
 	}
 
-	_, err = backend.Store(ctx, k, rec)
+	_, err = backend.Store(ctx, path, rec)
 
 	return nil, err
 }
@@ -103,8 +108,8 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(req.GetKey())),
 	}
 
-	ns, _, err := record.SplitKey(k) // get namespace (prefix of the key)
-	if err != nil {
+	ns, path, err := record.SplitKey(k) // get namespace (prefix of the key)
+	if err != nil || path == "" {
 		return nil, fmt.Errorf("invalid key %s: %w", k, err)
 	}
 
@@ -113,7 +118,7 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("unsupported record type: %s", ns)
 	}
 
-	fetched, err := backend.Fetch(ctx, k)
+	fetched, err := backend.Fetch(ctx, path)
 	if err != nil {
 		if errors.Is(err, ds.ErrNotFound) {
 			return resp, nil
@@ -128,6 +133,7 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		resp.Record = rec
 		return resp, nil
 	}
+	// the returned value wasn't a record
 
 	pset, ok := fetched.(*providerSet)
 	if ok {
@@ -191,7 +197,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
 	}
 
-	fetched, err := backend.Fetch(ctx, fmt.Sprintf("/%s/%s", namespaceProviders, req.GetKey()))
+	fetched, err := backend.Fetch(ctx, string(req.GetKey()))
 	if err != nil {
 		return nil, fmt.Errorf("fetch providers from datastore: %w", err)
 	}

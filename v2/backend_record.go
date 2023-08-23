@@ -34,38 +34,24 @@ func DefaultRecordBackendConfig() *RecordBackendConfig {
 	}
 }
 
-func (v *RecordBackend) Store(ctx context.Context, key string, value any) (any, error) {
+func (r *RecordBackend) Store(ctx context.Context, key string, value any) (any, error) {
 	rec, ok := value.(*recpb.Record)
 	if !ok {
 		return nil, fmt.Errorf("expected *recpb.Record value type, got: %T", value)
 	}
 
-	if key != string(rec.GetKey()) {
-		return nil, fmt.Errorf("key doesn't match record key")
-	}
-
-	ns, suffix, err := record.SplitKey(key) // get namespace (prefix of the key)
-	if err != nil {
-		return nil, fmt.Errorf("invalid key %s: %w", key, err)
-	}
-
-	if v.namespace != ns {
-		return nil, fmt.Errorf("expected namespace %s, got %s", v.namespace, ns)
-	}
-
-	dsKey := newDatastoreKey(v.namespace, suffix)
-
-	if err := v.validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
+	if err := r.validator.Validate(r.routingKey(key), rec.GetValue()); err != nil {
 		return nil, fmt.Errorf("put bad record: %w", err)
 	}
 
-	txn, err := v.datastore.NewTransaction(ctx, false)
+	txn, err := r.datastore.NewTransaction(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("new transaction: %w", err)
 	}
 	defer txn.Discard(ctx) // discard is a no-op if txn was committed beforehand
 
-	shouldReplace, err := v.shouldReplaceExistingRecord(ctx, txn, dsKey, rec)
+	dsKey := newDatastoreKey(r.namespace, key)
+	shouldReplace, err := r.shouldReplaceExistingRecord(ctx, txn, dsKey, rec.GetValue())
 	if err != nil {
 		return nil, fmt.Errorf("checking datastore for better record: %w", err)
 	} else if !shouldReplace {
@@ -91,20 +77,11 @@ func (v *RecordBackend) Store(ctx context.Context, key string, value any) (any, 
 	return rec, nil
 }
 
-func (v *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
-	ns, suffix, err := record.SplitKey(key) // get namespace (prefix of the key)
-	if err != nil {
-		return nil, fmt.Errorf("invalid key %s: %w", key, err)
-	}
-
-	if v.namespace != ns {
-		return nil, fmt.Errorf("expected namespace %s, got %s", v.namespace, ns)
-	}
-
-	dsKey := newDatastoreKey(v.namespace, suffix)
+func (r *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
+	dsKey := newDatastoreKey(r.namespace, key)
 
 	// fetch record from the datastore for the requested key
-	buf, err := v.datastore.Get(ctx, dsKey)
+	buf, err := r.datastore.Get(ctx, dsKey)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +92,8 @@ func (v *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 	if err != nil {
 		// we have a corrupt record in the datastore -> delete it and pretend
 		// that we don't know about it
-		if err := v.datastore.Delete(ctx, dsKey); err != nil {
-			v.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting corrupt record from datastore", slog.String("err", err.Error()))
+		if err := r.datastore.Delete(ctx, dsKey); err != nil {
+			r.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting corrupt record from datastore", slog.String("err", err.Error()))
 		}
 
 		return nil, nil
@@ -124,15 +101,15 @@ func (v *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 
 	// validate that we don't serve stale records.
 	receivedAt, err := time.Parse(time.RFC3339Nano, rec.GetTimeReceived())
-	if err != nil || time.Since(receivedAt) > v.cfg.MaxRecordAge {
+	if err != nil || time.Since(receivedAt) > r.cfg.MaxRecordAge {
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
 		}
 
-		v.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("err", errStr), slog.Duration("age", time.Since(receivedAt)))
-		if err = v.datastore.Delete(ctx, dsKey); err != nil {
-			v.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting bad record from datastore", slog.String("err", err.Error()))
+		r.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("err", errStr), slog.Duration("age", time.Since(receivedAt)))
+		if err = r.datastore.Delete(ctx, dsKey); err != nil {
+			r.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting bad record from datastore", slog.String("err", err.Error()))
 		}
 		return nil, nil
 	}
@@ -150,7 +127,7 @@ func (v *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 // incoming one is "better" (e.g., just newer), this function returns true.
 // If unmarshalling or validation fails, this function (alongside an error) also
 // returns true because the existing record should be replaced.
-func (v *RecordBackend) shouldReplaceExistingRecord(ctx context.Context, txn ds.Read, dsKey ds.Key, newRec *recpb.Record) (bool, error) {
+func (r *RecordBackend) shouldReplaceExistingRecord(ctx context.Context, txn ds.Read, dsKey ds.Key, value []byte) (bool, error) {
 	ctx, span := tracer.Start(ctx, "DHT.shouldReplaceExistingRecord")
 	defer span.End()
 
@@ -166,12 +143,12 @@ func (v *RecordBackend) shouldReplaceExistingRecord(ctx context.Context, txn ds.
 		return true, nil
 	}
 
-	if err := v.validator.Validate(string(existingRec.GetKey()), existingRec.GetValue()); err != nil {
+	if err := r.validator.Validate(string(existingRec.GetKey()), existingRec.GetValue()); err != nil {
 		return true, nil
 	}
 
-	records := [][]byte{newRec.GetValue(), existingRec.GetValue()}
-	i, err := v.validator.Select(string(newRec.GetKey()), records)
+	records := [][]byte{value, existingRec.GetValue()}
+	i, err := r.validator.Select(dsKey.String(), records)
 	if err != nil {
 		return false, fmt.Errorf("record selection: %w", err)
 	} else if i != 0 {
@@ -179,4 +156,10 @@ func (v *RecordBackend) shouldReplaceExistingRecord(ctx context.Context, txn ds.
 	}
 
 	return true, nil
+}
+
+// routingKey returns the routing key for the given key by prefixing it with
+// the namespace.
+func (r *RecordBackend) routingKey(key string) string {
+	return fmt.Sprintf("/%s/%s", r.namespace, key)
 }

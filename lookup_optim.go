@@ -236,7 +236,10 @@ func (os *optimisticState) stopFn(qps *qpeerset.QueryPeerset) bool {
 }
 
 func (os *optimisticState) putProviderRecord(pid peer.ID) {
-	err := os.dht.protoMessenger.PutProvider(os.putCtx, pid, []byte(os.key), os.dht.host)
+	err := os.dht.protoMessenger.PutProviderAddrs(os.putCtx, pid, []byte(os.key), peer.AddrInfo{
+		ID:    os.dht.self,
+		Addrs: os.dht.filterAddrs(os.dht.host.Addrs()),
+	})
 	os.peerStatesLk.Lock()
 	if err != nil {
 		os.peerStates[pid] = failure

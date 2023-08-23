@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ipfs/go-datastore/trace"
+
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -84,6 +86,9 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		} else if dstore, err = InMemoryDatastore(); err != nil {
 			return nil, fmt.Errorf("new default datastore: %w", err)
 		}
+
+		// wrap datastore in open telemetry tracing
+		dstore = trace.New(dstore, tracer)
 
 		pbeCfg := DefaultProviderBackendConfig()
 		pbeCfg.Logger = cfg.Logger

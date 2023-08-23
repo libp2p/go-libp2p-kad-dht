@@ -13,6 +13,8 @@ var (
 
 // Keys
 var (
+	KeyCacheHit, _    = tag.NewKey("hit")
+	KeyRecordType, _  = tag.NewKey("record_type") // currently only used for the provider backend LRU cache
 	KeyMessageType, _ = tag.NewKey("message_type")
 	KeyPeerID, _      = tag.NewKey("peer_id")
 	// KeyInstanceID identifies a dht instance by the pointer address.
@@ -32,6 +34,7 @@ var (
 	SentRequests           = stats.Int64("libp2p.io/dht/kad/sent_requests", "Total number of requests sent per RPC", stats.UnitDimensionless)
 	SentRequestErrors      = stats.Int64("libp2p.io/dht/kad/sent_request_errors", "Total number of errors for requests sent per RPC", stats.UnitDimensionless)
 	SentBytes              = stats.Int64("libp2p.io/dht/kad/sent_bytes", "Total sent bytes per RPC", stats.UnitBytes)
+	LRUCache               = stats.Int64("libp2p.io/dht/kad/lru_cache", "Cache hit or miss counter", stats.UnitDimensionless)
 	NetworkSize            = stats.Int64("libp2p.io/dht/kad/network_size", "Network size estimation", stats.UnitDimensionless)
 )
 
@@ -86,6 +89,11 @@ var (
 		Measure:     SentBytes,
 		TagKeys:     []tag.Key{KeyMessageType, KeyPeerID, KeyInstanceID},
 		Aggregation: defaultBytesDistribution,
+	}
+	LRUCacheView = &view.View{
+		Measure:     LRUCache,
+		TagKeys:     []tag.Key{KeyPeerID, KeyInstanceID},
+		Aggregation: view.Count(),
 	}
 	NetworkSizeView = &view.View{
 		Measure:     NetworkSize,

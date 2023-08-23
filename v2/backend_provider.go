@@ -5,10 +5,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	ds "github.com/ipfs/go-datastore"
@@ -143,8 +148,10 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 	qKey := newDatastoreKey(p.namespace, key)
 
 	if cached, ok := p.cache.Get(qKey.String()); ok {
+		p.trackCacheQuery(ctx, true)
 		return cached, nil
 	}
+	p.trackCacheQuery(ctx, false)
 
 	q, err := p.datastore.Query(ctx, dsq.Query{Prefix: qKey.String()})
 	if err != nil {
@@ -275,6 +282,17 @@ func (p *ProvidersBackend) collectGarbage(ctx context.Context) {
 		// record expired -> garbage collect
 		p.delete(ctx, ds.RawKey(e.Key))
 	}
+}
+
+// trackCacheQuery updates the prometheus metrics about cache hit/miss performance
+func (p *ProvidersBackend) trackCacheQuery(ctx context.Context, hit bool) {
+	_ = stats.RecordWithTags(ctx,
+		[]tag.Mutator{
+			tag.Upsert(metrics.KeyCacheHit, strconv.FormatBool(hit)),
+			tag.Upsert(metrics.KeyRecordType, "provider"),
+		},
+		metrics.LRUCache.M(1),
+	)
 }
 
 // delete is a convenience method to delete the record at the given datastore

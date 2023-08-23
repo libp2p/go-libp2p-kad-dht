@@ -155,26 +155,31 @@ func (d *DHT) handleAddProvider(ctx context.Context, remote peer.ID, req *pb.Mes
 		return nil, fmt.Errorf("key size too large")
 	} else if len(k) == 0 {
 		return nil, fmt.Errorf("key is empty")
+	} else if len(req.GetProviderPeers()) == 0 {
+		return nil, fmt.Errorf("no provider peers given")
 	}
 
-	backend, ok := d.cfg.Backends[namespaceProviders]
-	if !ok {
-		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
-	}
-
+	var addrInfos []peer.AddrInfo
 	for _, addrInfo := range req.ProviderAddrInfos() {
 		addrInfo := addrInfo // TODO: remove after go.mod was updated to go 1.21
 
 		if addrInfo.ID != remote {
-			d.log.Debug("remote attempted to store provider record for other peer", "remote", remote, "other", addrInfo.ID)
-			continue
+			return nil, fmt.Errorf("attempted to store provider record for other peer %s", addrInfo.ID)
 		}
 
 		if len(addrInfo.Addrs) == 0 {
-			d.log.Debug("no valid addresses for provider", "remote", addrInfo.ID)
-			continue
+			return nil, fmt.Errorf("no addresses for provider")
 		}
 
+		addrInfos = append(addrInfos, addrInfo)
+	}
+
+	backend, ok := d.backends[namespaceProviders]
+	if !ok {
+		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
+	}
+
+	for _, addrInfo := range addrInfos {
 		if _, err := backend.Store(ctx, k, addrInfo); err != nil {
 			return nil, fmt.Errorf("storing provider record: %w", err)
 		}
@@ -192,7 +197,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("handleGetProviders key is empty")
 	}
 
-	backend, ok := d.cfg.Backends[namespaceProviders]
+	backend, ok := d.backends[namespaceProviders]
 	if !ok {
 		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
 	}

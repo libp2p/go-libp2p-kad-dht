@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -22,21 +23,42 @@ import (
 // ProvidersBackend implements the [Backend] interface and handles provider
 // record requests for the "/providers/" namespace.
 type ProvidersBackend struct {
-	namespace string                          // the namespace string, usually set to namespaceProviders ("providers")
-	cfg       *ProviderBackendConfig          // default is given by DefaultProviderBackendConfig
-	log       *slog.Logger                    // convenience accessor of cfg.Logger
-	cache     *lru.Cache[string, providerSet] // LRU cache for frequently requested records. TODO: is that really so effective? The cache size is quite low either.
-	peerstore peerstore.Peerstore             // reference to the peer store to store and fetch peer multiaddresses from (we don't save them in the datastore)
-	datastore *autobatch.Datastore            // the datastore where we save the peer IDs providing a certain multihash
-	gcSkip    sync.Map                        // a sync map that marks records as to-be-skipped by the garbage collection process
+	// namespace holds the namespace string - usually
+	// this is set to namespaceProviders ("providers")
+	namespace string
+
+	// cfg is set to DefaultProviderBackendConfig by default
+	cfg *ProvidersBackendConfig
+
+	// log is convenience accessor of cfg.Logger
+	log *slog.Logger
+
+	// cache is a LRU cache for frequently requested records. It is populated
+	// when peers request a record and pruned during garbage collection.
+	// TODO: is that really so effective? The cache size is quite low either.
+	cache *lru.Cache[string, providerSet]
+
+	// peerstore holds a reference to the peer store to store and fetch peer
+	// multiaddresses from (we don't save them in the datastore).
+	peerstore peerstore.Peerstore
+
+	// datastore is where we save the peer IDs providing a certain multihash
+	datastore *autobatch.Datastore
+
+	// gcSkip is a sync map that marks records as to-be-skipped by the garbage
+	// collection process. TODO: this is a sub-optimal pattern.
+	gcSkip sync.Map
+
+	// gcActive indicates whether garbage collection is scheduled
+	gcActive atomic.Bool
 }
 
 var _ Backend = (*ProvidersBackend)(nil)
 
-// ProviderBackendConfig is used to construct a [ProvidersBackend]. Use
+// ProvidersBackendConfig is used to construct a [ProvidersBackend]. Use
 // [DefaultProviderBackendConfig] to get a default configuration struct and then
 // modify it to your liking.
-type ProviderBackendConfig struct {
+type ProvidersBackendConfig struct {
 	// ProvideValidity specifies for how long provider records are valid
 	ProvideValidity time.Duration
 
@@ -53,6 +75,9 @@ type ProviderBackendConfig struct {
 	// CacheSize specifies the LRU cache size
 	CacheSize int
 
+	// GCInterval defines how frequently garbage collection should run
+	GCInterval time.Duration
+
 	// Logger is the logger to use
 	Logger *slog.Logger
 }
@@ -61,12 +86,13 @@ type ProviderBackendConfig struct {
 // configuration. Use this as a starting point and modify it. If a nil
 // configuration is passed to [NewBackendProvider], this default configuration
 // here is used.
-func DefaultProviderBackendConfig() *ProviderBackendConfig {
-	return &ProviderBackendConfig{
+func DefaultProviderBackendConfig() *ProvidersBackendConfig {
+	return &ProvidersBackendConfig{
 		ProvideValidity: time.Hour * 48, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		AddressTTL:      24 * time.Hour,
-		BatchSize:       256, // MAGIC
-		CacheSize:       256, // MAGIC
+		BatchSize:       256,       // MAGIC
+		CacheSize:       256,       // MAGIC
+		GCInterval:      time.Hour, // MAGIC
 		Logger:          slog.Default(),
 	}
 }
@@ -97,7 +123,7 @@ func (p *ProvidersBackend) Store(ctx context.Context, key string, value any) (an
 	if err := p.datastore.Put(ctx, dsKey, rec.MarshalBinary()); err != nil {
 		p.cache.Remove(cacheKey)
 
-		// if we have just added the key to the gc skip list, delete it again
+		// if we have just added the key to the collectGarbage skip list, delete it again
 		// if we have added it in a previous Store invocation, keep it around
 		if !found {
 			p.gcSkip.Delete(dsKey.String())
@@ -174,14 +200,46 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 	return out, nil
 }
 
-// CollectGarbage sweeps through the datastore and deletes all provider records
+// StartGarbageCollection starts the garbage collection loop. The garbage
+// collection interval can be configured with [ProvidersBackendConfig.GCInterval].
+func (p *ProvidersBackend) StartGarbageCollection(ctx context.Context) {
+	if p.gcActive.Swap(true) {
+		p.log.Info("Provider backend's garbage collection is already running")
+		return
+	}
+
+	p.log.Info("Provider backend's started garbage collection schedule")
+
+	ticker := time.NewTicker(p.cfg.GCInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			p.gcActive.Store(false)
+			p.log.Info("Provider backend's garbage collection stopped")
+			return
+		case <-ticker.C:
+			p.collectGarbage(ctx)
+		}
+	}
+}
+
+// collectGarbage sweeps through the datastore and deletes all provider records
 // that have expired. A record is expired if the
-// [ProviderBackendConfig].ProvideValidity is exceeded.
-func (p *ProvidersBackend) CollectGarbage(ctx context.Context) {
+// [ProvidersBackendConfig].ProvideValidity is exceeded.
+func (p *ProvidersBackend) collectGarbage(ctx context.Context) {
+	p.log.Info("Provider backend starting garbage collection...")
+	defer p.log.Info("Provider backend finished garbage collection!")
+
 	// Faster to purge than garbage collecting
 	p.cache.Purge()
 
-	p.gcSkip = sync.Map{} // TODO: racy
+	// erase map
+	p.gcSkip.Range(func(key interface{}, value interface{}) bool {
+		p.gcSkip.Delete(key)
+		return true
+	})
 
 	// Now, kick off a GC of the datastore.
 	q, err := p.datastore.Query(ctx, dsq.Query{Prefix: p.namespace})

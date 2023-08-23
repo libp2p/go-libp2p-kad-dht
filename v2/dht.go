@@ -138,13 +138,7 @@ func (d *DHT) Close() error {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
 	}
 
-	//// If the user hasn't configured a custom datastore, the responsibility is
-	//// on us to properly clean up after ourselves.
-	//if d.cfg.Datastore == nil {
-	//	if err := d.ds.Close(); err != nil {
-	//		d.log.With("err", err).Debug("failed closing default datastore")
-	//	}
-	//}
+	// TODO clean up backends
 
 	// kill all active streams using the DHT protocol.
 	for _, c := range d.host.Network().Conns() {

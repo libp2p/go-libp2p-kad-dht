@@ -986,9 +986,6 @@ func TestDHT_handleGetValue_unknown_backend(t *testing.T) {
 	req := &pb.Message{
 		Type: pb.Message_GET_VALUE,
 		Key:  []byte("/other-namespace/record-key"),
-		Record: &recpb.Record{
-			Key: []byte("/other-namespace/record-key"),
-		},
 	}
 
 	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
@@ -998,5 +995,348 @@ func TestDHT_handleGetValue_unknown_backend(t *testing.T) {
 }
 
 func TestDHT_handleGetValue_supports_providers(t *testing.T) {
-	t.Skip("TODO")
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	p := newAddrInfo(t)
+	key := []byte("random-key")
+
+	fillRoutingTable(t, d)
+
+	// add to addresses peerstore
+	d.host.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
+
+	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
+	require.True(t, ok)
+
+	// write to datastore
+	dsKey := newDatastoreKey(namespaceProviders, string(key), string(p.ID))
+	rec := expiryRecord{expiry: time.Now()}
+	err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	require.NoError(t, err)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  []byte("/providers/random-key"),
+	}
+
+	res, err := d.handleGetValue(context.Background(), newPeerID(t), req)
+	assert.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_VALUE, res.Type)
+	assert.Equal(t, req.Key, res.Key)
+	assert.Nil(t, res.Record)
+	assert.Len(t, res.CloserPeers, 20)
+	require.Len(t, res.ProviderPeers, 1)
+	for _, p := range res.ProviderPeers {
+		assert.Len(t, p.Addresses(), 1)
+	}
+
+	cacheKey := newDatastoreKey(be.namespace, string(key))
+	set, found := be.cache.Get(cacheKey.String())
+	require.True(t, found)
+	assert.Len(t, set.providers, 1)
+}
+
+func newAddrInfo(t testing.TB) peer.AddrInfo {
+	return peer.AddrInfo{
+		ID: newPeerID(t),
+		Addrs: []ma.Multiaddr{
+			ma.StringCast("/ip4/100.100.100.100/tcp/2000"),
+		},
+	}
+}
+
+func newAddProviderRequest(key []byte, addrInfos ...peer.AddrInfo) *pb.Message {
+	providerPeers := make([]pb.Message_Peer, len(addrInfos))
+	for i, addrInfo := range addrInfos {
+		providerPeers[i] = pb.FromAddrInfo(addrInfo)
+	}
+
+	return &pb.Message{
+		Type:          pb.Message_ADD_PROVIDER,
+		Key:           key,
+		ProviderPeers: providerPeers,
+	}
+}
+
+func BenchmarkDHT_handleAddProvider_unique_peers(b *testing.B) {
+	d := newTestDHT(b)
+
+	// build requests
+	peers := make([]peer.ID, b.N)
+	reqs := make([]*pb.Message, b.N)
+	for i := 0; i < b.N; i++ {
+		addrInfo := newAddrInfo(b)
+		req := newAddProviderRequest([]byte(fmt.Sprintf("key-%d", i)), addrInfo)
+		peers[i] = addrInfo.ID
+		reqs[i] = req
+	}
+
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := d.handleAddProvider(ctx, peers[i], reqs[i])
+		if err != nil {
+			b.Error(err)
+		}
+	}
+}
+
+func TestDHT_handleAddProvider_happy_path(t *testing.T) {
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	// construct request
+	addrInfo := newAddrInfo(t)
+	key := []byte("random-key")
+	req := newAddProviderRequest(key, addrInfo)
+
+	// do the request
+	_, err := d.handleAddProvider(ctx, addrInfo.ID, req)
+	require.NoError(t, err)
+
+	addrs := d.host.Peerstore().Addrs(addrInfo.ID)
+	require.Len(t, addrs, 1)
+	assert.Equal(t, addrs[0], addrInfo.Addrs[0])
+
+	// check if the record was store in the datastore
+	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
+	require.True(t, ok)
+
+	dsKey := newDatastoreKey(be.namespace, string(key), string(addrInfo.ID))
+
+	val, err := be.datastore.Get(ctx, dsKey)
+	assert.NoError(t, err)
+
+	rec := expiryRecord{}
+	err = rec.UnmarshalBinary(val)
+	require.NoError(t, err)
+	assert.False(t, rec.expiry.IsZero())
+
+	cacheKey := newDatastoreKey(be.namespace, string(key)).String()
+	_, found := be.cache.Get(cacheKey)
+	assert.False(t, found) // only cache on Fetch, not on write
+}
+
+func TestDHT_handleAddProvider_key_size_check(t *testing.T) {
+	d := newTestDHT(t)
+
+	// construct request
+	addrInfo := newAddrInfo(t)
+	req := newAddProviderRequest(make([]byte, 81), addrInfo)
+
+	_, err := d.handleAddProvider(context.Background(), addrInfo.ID, req)
+	assert.Error(t, err)
+
+	// same exercise with valid key length
+	req = newAddProviderRequest(make([]byte, 80), addrInfo)
+
+	_, err = d.handleAddProvider(context.Background(), addrInfo.ID, req)
+	assert.NoError(t, err)
+}
+
+func TestDHT_handleAddProvider_unsupported_record_type(t *testing.T) {
+	d := newTestDHT(t)
+
+	addrInfo := newAddrInfo(t)
+	req := newAddProviderRequest([]byte("random-key"), addrInfo)
+
+	// remove backend
+	delete(d.backends, namespaceProviders)
+
+	_, err := d.handleAddProvider(context.Background(), addrInfo.ID, req)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported record type")
+}
+
+func TestDHT_handleAddProvider_record_for_other_peer(t *testing.T) {
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	// construct request
+	addrInfo := newAddrInfo(t)
+	req := newAddProviderRequest([]byte("random-key"), addrInfo)
+
+	// do the request
+	_, err := d.handleAddProvider(ctx, newPeerID(t), req) // other peer
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "attempted to store provider record for other peer")
+}
+
+func TestDHT_handleAddProvider_record_with_empty_addresses(t *testing.T) {
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	// construct request
+	addrInfo := newAddrInfo(t)
+	addrInfo.Addrs = make([]ma.Multiaddr, 0) // overwrite
+
+	req := newAddProviderRequest([]byte("random-key"), addrInfo)
+	_, err := d.handleAddProvider(ctx, addrInfo.ID, req)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "no addresses for provider")
+}
+
+func TestDHT_handleAddProvider_empty_provider_peers(t *testing.T) {
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	// construct request
+	req := newAddProviderRequest([]byte("random-key"))
+
+	req.ProviderPeers = make([]pb.Message_Peer, 0) // overwrite
+
+	// do the request
+	_, err := d.handleAddProvider(ctx, newPeerID(t), req)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "no provider peers given")
+}
+
+func BenchmarkDHT_handleGetProviders(b *testing.B) {
+	ctx := context.Background()
+	d := newTestDHT(b)
+
+	fillRoutingTable(b, d)
+
+	be, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(b, ok)
+
+	// fill datastore and build requests
+	keys := make([][]byte, b.N)
+	reqs := make([]*pb.Message, b.N)
+	peers := make([]peer.ID, b.N)
+	for i := 0; i < b.N; i++ {
+
+		p := newAddrInfo(b)
+		k := fmt.Sprintf("key-%d", i)
+		keys[i] = []byte(k)
+
+		// add to addresses peerstore
+		d.host.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
+
+		// write to datastore
+		dsKey := newDatastoreKey(namespaceProviders, k, string(p.ID))
+		rec := expiryRecord{expiry: time.Now()}
+		err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+		require.NoError(b, err)
+
+		peers[i] = p.ID
+		reqs[i] = &pb.Message{
+			Type: pb.Message_GET_PROVIDERS,
+			Key:  keys[i],
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := d.handleGetProviders(ctx, peers[b.N-i-1], reqs[i])
+		if err != nil {
+			b.Error(err)
+		}
+	}
+}
+
+func TestDHT_handleGetProviders_happy_path(t *testing.T) {
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	key := []byte("random-key")
+
+	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
+	require.True(t, ok)
+
+	providers := []peer.AddrInfo{
+		newAddrInfo(t),
+		newAddrInfo(t),
+		newAddrInfo(t),
+	}
+
+	for _, p := range providers {
+		// add to addresses peerstore
+		d.host.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
+
+		// write to datastore
+		dsKey := newDatastoreKey(namespaceProviders, string(key), string(p.ID))
+		rec := expiryRecord{expiry: time.Now()}
+		err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+		require.NoError(t, err)
+	}
+
+	req := &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  key,
+	}
+
+	res, err := d.handleGetProviders(ctx, newPeerID(t), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_PROVIDERS, res.Type)
+	assert.Equal(t, req.Key, res.Key)
+	assert.Nil(t, res.Record)
+	assert.Len(t, res.CloserPeers, 20)
+	require.Len(t, res.ProviderPeers, 3)
+	for _, p := range res.ProviderPeers {
+		assert.Len(t, p.Addresses(), 1)
+	}
+
+	cacheKey := newDatastoreKey(be.namespace, string(key))
+	set, found := be.cache.Get(cacheKey.String())
+	require.True(t, found)
+	assert.Len(t, set.providers, 3)
+}
+
+func TestDHT_handleGetProviders_do_not_return_expired_records(t *testing.T) {
+	ctx := context.Background()
+	d := newTestDHT(t)
+
+	fillRoutingTable(t, d)
+
+	key := []byte("random-key")
+
+	// check if the record was store in the datastore
+	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
+	require.True(t, ok)
+
+	provider1 := newAddrInfo(t)
+	provider2 := newAddrInfo(t)
+
+	d.host.Peerstore().AddAddrs(provider1.ID, provider1.Addrs, time.Hour)
+	d.host.Peerstore().AddAddrs(provider2.ID, provider2.Addrs, time.Hour)
+
+	// write valid record
+	dsKey := newDatastoreKey(namespaceProviders, string(key), string(provider1.ID))
+	rec := expiryRecord{expiry: time.Now()}
+	err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	require.NoError(t, err)
+
+	// write expired record
+	dsKey = newDatastoreKey(namespaceProviders, string(key), string(provider2.ID))
+	rec = expiryRecord{expiry: time.Now().Add(-be.cfg.ProvideValidity - time.Second)}
+	err = be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	require.NoError(t, err)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  key,
+	}
+
+	res, err := d.handleGetProviders(ctx, newPeerID(t), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, pb.Message_GET_PROVIDERS, res.Type)
+	assert.Equal(t, req.Key, res.Key)
+	assert.Nil(t, res.Record)
+	assert.Len(t, res.CloserPeers, 20)
+	require.Len(t, res.ProviderPeers, 1) // only one provider
+
+	// record was deleted
+	_, err = be.datastore.Get(ctx, dsKey)
+	assert.ErrorIs(t, err, ds.ErrNotFound)
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -20,9 +19,6 @@ import (
 type DHT struct {
 	// host holds a reference to the underlying libp2p host
 	host host.Host
-
-	// ds is the datastore where provider, peer, and IPNS records are stored
-	ds Datastore
 
 	// cfg holds a reference to the DHT configuration struct
 	cfg *Config
@@ -40,8 +36,8 @@ type DHT struct {
 	// configured via the Config struct.
 	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
 
-	// validator .
-	validator record.Validator
+	// backends
+	backends map[string]Backend
 
 	// log is a convenience accessor to the logging instance. It gets the value
 	// of the logger field from the configuration.
@@ -78,18 +74,30 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		return nil, fmt.Errorf("new trie routing table: %w", err)
 	}
 
-	// Use configured validator if it was provided
-	if cfg.Validator != nil {
-		d.validator = cfg.Validator
+	if len(cfg.Backends) != 0 {
+		d.backends = cfg.Backends
 	} else {
-		d.validator = DefaultValidator(h.Peerstore())
-	}
+		dstore, err := DefaultDatastore()
+		if err != nil {
+			return nil, fmt.Errorf("new default datastore: %w", err)
+		}
 
-	// Use configured datastore or default leveldb in-memory one
-	if cfg.Datastore != nil {
-		d.ds = cfg.Datastore
-	} else if d.ds, err = DefaultDatastore(); err != nil {
-		return nil, fmt.Errorf("new default datastore: %w", err)
+		pbeCfg := DefaultProviderBackendConfig()
+		pbeCfg.Logger = cfg.Logger
+
+		pbe, err := NewProviderBackend(h.Peerstore(), dstore, pbeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("new provider backend: %w", err)
+		}
+
+		vbeCfg := DefaultValueBackendConfig()
+		vbeCfg.Logger = cfg.Logger
+
+		d.backends = map[string]Backend{
+			"ipns":      NewIPNSBackend(dstore, h.Peerstore(), vbeCfg),
+			"pk":        NewPublicKeyBackend(dstore, vbeCfg),
+			"providers": pbe,
+		}
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
@@ -127,13 +135,13 @@ func (d *DHT) Close() error {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
 	}
 
-	// If the user hasn't configured a custom datastore, the responsibility is
-	// on us to properly clean up after ourselves.
-	if d.cfg.Datastore == nil {
-		if err := d.ds.Close(); err != nil {
-			d.log.With("err", err).Debug("failed closing default datastore")
-		}
-	}
+	//// If the user hasn't configured a custom datastore, the responsibility is
+	//// on us to properly clean up after ourselves.
+	//if d.cfg.Datastore == nil {
+	//	if err := d.ds.Close(); err != nil {
+	//		d.log.With("err", err).Debug("failed closing default datastore")
+	//	}
+	//}
 
 	// kill all active streams using the DHT protocol.
 	for _, c := range d.host.Network().Conns() {

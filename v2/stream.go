@@ -33,7 +33,7 @@ func (d *DHT) streamHandler(s network.Stream) {
 	)
 
 	if err := s.Scope().SetService(ServiceName); err != nil {
-		d.log.LogAttrs(ctx, slog.LevelWarn, "error attaching stream to DHT service", slog.String("error", err.Error()))
+		d.log.LogAttrs(ctx, slog.LevelWarn, "error attaching stream to DHT service", slog.String("err", err.Error()))
 		_ = s.Reset()
 		return
 	}
@@ -164,7 +164,7 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 
 		// log any other errors than stream resets
 		if err.Error() != "stream reset" {
-			slogger.LogAttrs(ctx, slog.LevelDebug, "error reading message", slog.String("error", err.Error()))
+			slogger.LogAttrs(ctx, slog.LevelDebug, "error reading message", slog.String("err", err.Error()))
 		}
 
 		// record any potential partial message we have received
@@ -192,7 +192,7 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 
 	var req pb.Message
 	if err := req.Unmarshal(data); err != nil {
-		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("error", err.Error()))
+		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("err", err.Error()))
 
 		_ = stats.RecordWithTags(ctx,
 			[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
@@ -238,7 +238,7 @@ func (d *DHT) streamWriteMsg(ctx context.Context, slogger *slog.Logger, s networ
 	defer span.End()
 
 	if err := writeMsg(s, msg); err != nil {
-		slogger.LogAttrs(ctx, slog.LevelDebug, "error writing response", slog.String("error", err.Error()))
+		slogger.LogAttrs(ctx, slog.LevelDebug, "error writing response", slog.String("err", err.Error()))
 		stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 		return err
 	}

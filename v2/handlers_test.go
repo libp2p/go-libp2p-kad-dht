@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -514,19 +515,18 @@ func TestDHT_handlePutValue_happy_path_ipns_record(t *testing.T) {
 	req := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
 	ctx := context.Background()
-	_, err := d.ds.Get(ctx, datastoreKey(req.Key))
+	_, err := d.backends[namespaceIPNS].Fetch(ctx, string(req.Key))
 	require.ErrorIs(t, err, ds.ErrNotFound)
 
 	cloned := proto.Clone(req).(*pb.Message)
 	_, err = d.handlePutValue(ctx, remote, cloned)
 	require.NoError(t, err)
 
-	dat, err := d.ds.Get(ctx, datastoreKey(req.Key))
+	dat, err := d.backends[namespaceIPNS].Fetch(ctx, string(req.Key))
 	require.NoError(t, err)
 
-	r := &recpb.Record{}
-	err = r.Unmarshal(dat)
-	require.NoError(t, err)
+	r, ok := dat.(*recpb.Record)
+	require.True(t, ok)
 
 	assert.NotEqual(t, r.TimeReceived, req.Record.TimeReceived)
 
@@ -541,7 +541,7 @@ func TestDHT_handlePutValue_nil_record(t *testing.T) {
 
 	req := &pb.Message{
 		Type:   pb.Message_PUT_VALUE,
-		Key:    []byte("random-key"),
+		Key:    []byte("/ipns/random-key"),
 		Record: nil, // nil record
 	}
 
@@ -556,9 +556,9 @@ func TestDHT_handlePutValue_record_key_mismatch(t *testing.T) {
 
 	req := &pb.Message{
 		Type: pb.Message_PUT_VALUE,
-		Key:  []byte("key-1"),
+		Key:  []byte("/ipns/key-1"),
 		Record: &recpb.Record{
-			Key: []byte("key-2"),
+			Key: []byte("/ipns/key-2"),
 		},
 	}
 
@@ -607,7 +607,7 @@ func TestDHT_handlePutValue_worse_ipns_record_after_first_put(t *testing.T) {
 
 func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 	// we're storing two sequential records simultaneously many times in a row.
-	// After each insert, we check that indeed the record with the higher
+	// After each insert, we check that indeed, the record with the higher
 	// sequence number was stored. If the handler didn't use transactions,
 	// this test fails.
 
@@ -637,10 +637,14 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 		}()
 		wg.Wait()
 
-		dat, err := d.ds.Get(context.Background(), datastoreKey(ipnsKey))
+		val, err := d.backends[namespaceIPNS].Fetch(context.Background(), string(ipnsKey))
 		require.NoError(t, err)
 
-		storedRec := mustUnmarshalIpnsRecord(t, dat)
+		r, ok := val.(*recpb.Record)
+		require.True(t, ok)
+
+		storedRec, err := ipns.UnmarshalRecord(r.Value)
+		require.NoError(t, err)
 
 		seq, err := storedRec.Sequence()
 		require.NoError(t, err)
@@ -657,8 +661,10 @@ func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) 
 
 	req := newPutIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
 
-	// store corrupt record
-	err := d.ds.Put(context.Background(), datastoreKey(req.Record.GetKey()), []byte("corrupt-record"))
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
+
+	err := rbe.datastore.Put(context.Background(), ds.NewKey(string(req.GetKey())), []byte("corrupt-record"))
 	require.NoError(t, err)
 
 	// put the correct record through handler
@@ -666,16 +672,23 @@ func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) 
 	require.NoError(t, err)
 
 	// check if the corrupt record was overwritten
-	dat, err := d.ds.Get(context.Background(), datastoreKey(req.Record.GetKey()))
+	val, err := d.backends[namespaceIPNS].Fetch(context.Background(), string(req.GetKey()))
 	require.NoError(t, err)
 
-	mustUnmarshalIpnsRecord(t, dat)
+	r, ok := val.(*recpb.Record)
+	require.True(t, ok)
+
+	_, err = ipns.UnmarshalRecord(r.Value)
+	require.NoError(t, err)
 }
 
 func BenchmarkDHT_handleGetValue(b *testing.B) {
 	d := newTestDHT(b)
 
 	fillRoutingTable(b, d)
+
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(b, ok)
 
 	// fill datastore and build requests
 	reqs := make([]*pb.Message, b.N)
@@ -688,7 +701,9 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 		data, err := putReq.Record.Marshal()
 		require.NoError(b, err)
 
-		err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+		dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+
+		err = rbe.datastore.Put(context.Background(), dsKey, data)
 		require.NoError(b, err)
 
 		peers[i] = pid
@@ -716,6 +731,9 @@ func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
+
 	remote, priv := newIdentity(t)
 
 	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
@@ -723,7 +741,8 @@ func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
 
-	err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+	dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+	err = rbe.datastore.Put(context.Background(), dsKey, data)
 	require.NoError(t, err)
 
 	getReq := &pb.Message{
@@ -749,7 +768,7 @@ func TestDHT_handleGetValue_record_not_found(t *testing.T) {
 
 	req := &pb.Message{
 		Type: pb.Message_GET_VALUE,
-		Key:  []byte("unknown-record-key"),
+		Key:  []byte("/ipns/unknown-record-key"),
 	}
 
 	resp, err := d.handleGetValue(context.Background(), newPeerID(t), req)
@@ -767,9 +786,14 @@ func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
-	key := []byte("record-key")
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
 
-	err := d.ds.Put(context.Background(), datastoreKey(key), []byte("corrupt-data"))
+	key := []byte("/ipns/record-key")
+
+	dsKey := newDatastoreKey(namespaceIPNS, "record-key")
+
+	err := rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-data"))
 	require.NoError(t, err)
 
 	req := &pb.Message{
@@ -787,7 +811,7 @@ func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 	assert.Len(t, resp.ProviderPeers, 0)
 
 	// check that the record was deleted from the datastore
-	data, err := d.ds.Get(context.Background(), datastoreKey(key))
+	data, err := rbe.datastore.Get(context.Background(), dsKey)
 	assert.ErrorIs(t, err, ds.ErrNotFound)
 	assert.Len(t, data, 0)
 }
@@ -797,14 +821,19 @@ func TestDHT_handleGetValue_max_age_exceeded_record_in_datastore(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
+
 	remote, priv := newIdentity(t)
 
 	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
+	dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
 
-	err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+	err = rbe.datastore.Put(context.Background(), dsKey, data)
 	require.NoError(t, err)
 
 	req := &pb.Message{
@@ -812,7 +841,7 @@ func TestDHT_handleGetValue_max_age_exceeded_record_in_datastore(t *testing.T) {
 		Key:  putReq.GetKey(),
 	}
 
-	d.cfg.MaxRecordAge = 0
+	rbe.cfg.MaxRecordAge = 0
 
 	resp, err := d.handleGetValue(context.Background(), remote, req)
 	require.NoError(t, err)
@@ -824,7 +853,7 @@ func TestDHT_handleGetValue_max_age_exceeded_record_in_datastore(t *testing.T) {
 	assert.Len(t, resp.ProviderPeers, 0)
 
 	// check that the record was deleted from the datastore
-	data, err = d.ds.Get(context.Background(), datastoreKey(putReq.GetKey()))
+	data, err = rbe.datastore.Get(context.Background(), dsKey)
 	assert.ErrorIs(t, err, ds.ErrNotFound)
 	assert.Len(t, data, 0)
 }
@@ -834,6 +863,9 @@ func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
+	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
+	require.True(t, ok)
+
 	remote, priv := newIdentity(t)
 
 	// generate expired record (doesn't pass validation)
@@ -842,7 +874,9 @@ func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
 
-	err = d.ds.Put(context.Background(), datastoreKey(putReq.GetKey()), data)
+	dsKey := newDatastoreKey(namespaceIPNS, strings.TrimPrefix(string(putReq.GetKey()), fmt.Sprintf("/%s/", namespaceIPNS)))
+
+	err = rbe.datastore.Put(context.Background(), dsKey, data)
 	require.NoError(t, err)
 
 	req := &pb.Message{

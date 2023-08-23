@@ -4,12 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ipfs/boxo/ipns"
 	ds "github.com/ipfs/go-datastore"
 	leveldb "github.com/ipfs/go-ds-leveldb"
 	logging "github.com/ipfs/go-log/v2"
-	record "github.com/libp2p/go-libp2p-record"
-	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
@@ -109,16 +106,8 @@ type Config struct {
 	// about the local node.
 	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
 
-	// Datastore configures the DHT to use the specified datastore. The
-	// datastore must support batching and transactions. If a datastore is
-	// configured by the user, they are responsible for the datastore's
-	// lifecycle - like closing it on shutdown. If the default datastore
-	// is used (this field stays nil), go-libp2p-kad-dht will handle that.
-	// Defaults to a leveldb in-memory (temporary) map.
-	Datastore Datastore
-
-	// Validator
-	Validator record.Validator
+	// Backends ...
+	Backends map[string]Backend
 
 	// Logger can be used to configure a custom structured logger instance.
 	// By default go.uber.org/zap is used (wrapped in ipfs/go-log).
@@ -144,23 +133,10 @@ func DefaultConfig() *Config {
 		Kademlia:          coord.DefaultConfig(),
 		BucketSize:        20,
 		ProtocolID:        "/ipfs/kad/1.0.0",
-		Datastore:         nil, // nil because the initialization of a datastore can fail. An in-memory leveldb datastore will be used if this field is nil.
-		Validator:         nil, // nil because the default validator requires a peerstore.KeyBook.
 		RoutingTable:      nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		MaxRecordAge:      48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		TimeoutStreamIdle: time.Minute,    // MAGIC: could be done dynamically
-	}
-}
-
-// DefaultValidator returns a namespaced validator that can validate both public
-// key (under the "pk" namespace) and IPNS records (under the "ipns" namespace).
-// The validator can't be initialized in DefaultConfig because it requires
-// access to a peerstore.KeyBook for the IPNS validator.
-func DefaultValidator(kb peerstore.KeyBook) record.Validator {
-	return record.NamespacedValidator{
-		"pk":   record.PublicKeyValidator{},
-		"ipns": ipns.Validator{KeyBook: kb},
 	}
 }
 
@@ -179,6 +155,10 @@ func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (kad.RoutingTable[key.Ke
 // DefaultDatastore returns an in-memory leveldb datastore.
 func DefaultDatastore() (Datastore, error) {
 	return leveldb.NewDatastore("", nil)
+}
+
+func (c *Config) RegisterBackend(namespace string, backend Backend) {
+	c.Backends[namespace] = backend
 }
 
 // Validate validates the configuration struct it is called on. It returns

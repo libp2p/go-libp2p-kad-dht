@@ -1,16 +1,14 @@
 package dht
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	ds "github.com/ipfs/go-datastore"
+	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-base32"
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 
@@ -63,7 +61,8 @@ func (d *DHT) handlePing(ctx context.Context, remote peer.ID, req *pb.Message) (
 
 // handleGetValue handles PUT_VALUE RPCs from remote peers.
 func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	if len(req.GetKey()) == 0 {
+	k := string(req.GetKey())
+	if len(k) == 0 {
 		return nil, fmt.Errorf("no key was provided")
 	}
 
@@ -72,50 +71,25 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("nil record")
 	}
 
-	if !bytes.Equal(req.GetKey(), rec.GetKey()) {
-		return nil, fmt.Errorf("key doesn't match record key")
-	}
-
-	// avoid storing arbitrary data
-	rec.TimeReceived = ""
-
-	if err := d.validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
-		return nil, fmt.Errorf("put bad record: %w", err)
-	}
-
-	txn, err := d.ds.NewTransaction(ctx, false)
+	// key is /$namespace/$binary_id
+	ns, _, err := record.SplitKey(k) // get namespace (prefix of the key)
 	if err != nil {
-		return nil, fmt.Errorf("new transaction: %w", err)
-	}
-	defer txn.Discard(ctx) // discard is a no-op if committed beforehand
-
-	shouldReplace, err := d.shouldReplaceExistingRecord(ctx, txn, rec)
-	if err != nil {
-		return nil, fmt.Errorf("checking datastore for better record: %w", err)
-	} else if !shouldReplace {
-		return nil, fmt.Errorf("received worse record")
+		return nil, fmt.Errorf("invalid key %s: %w", k, err)
 	}
 
-	rec.TimeReceived = time.Now().UTC().Format(time.RFC3339Nano)
-	data, err := rec.Marshal()
-	if err != nil {
-		return nil, fmt.Errorf("marshal incoming record: %w", err)
+	backend, found := d.backends[ns]
+	if !found {
+		return nil, fmt.Errorf("unsupported key namespace: %s", ns)
 	}
 
-	if err = txn.Put(ctx, datastoreKey(rec.GetKey()), data); err != nil {
-		return nil, fmt.Errorf("storing record in datastore: %w", err)
-	}
+	_, err = backend.Store(ctx, k, rec)
 
-	if err = txn.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing new record to datastore: %w", err)
-	}
-
-	return nil, nil
+	return nil, err
 }
 
 // handleGetValue handles GET_VALUE RPCs from remote peers.
 func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	k := req.GetKey()
+	k := string(req.GetKey())
 	if len(k) == 0 {
 		return nil, fmt.Errorf("handleGetValue but no key in request")
 	}
@@ -123,79 +97,79 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	// prepare the response message
 	resp := &pb.Message{
 		Type:        pb.Message_GET_VALUE,
-		Key:         k,
-		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(k)),
+		Key:         req.GetKey(),
+		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(req.GetKey())),
 	}
 
-	// fetch record from the datastore for the requested key
-	dsKey := ds.NewKey(base32.RawStdEncoding.EncodeToString(k))
-	buf, err := d.ds.Get(ctx, dsKey)
+	ns, _, err := record.SplitKey(k) // get namespace (prefix of the key)
 	if err != nil {
-		// if we don't have the record, that's fine, just return closer peers
+		return nil, fmt.Errorf("invalid key %s: %w", k, err)
+	}
+
+	backend, found := d.backends[ns]
+	if !found {
+		return nil, fmt.Errorf("unsupported record type: %s", ns)
+	}
+
+	fetched, err := backend.Fetch(ctx, k)
+	if err != nil {
 		if errors.Is(err, ds.ErrNotFound) {
 			return resp, nil
 		}
-
-		return nil, err
+		return nil, fmt.Errorf("fetch record for key %s: %w", k, err)
+	} else if fetched == nil {
+		return resp, nil
 	}
 
-	// we have found a record, parse it and do basic validation
-	rec := &recpb.Record{}
-	err = rec.Unmarshal(buf)
-	if err != nil {
-		// we have a corrupt record in the datastore -> delete it and pretend
-		// that we don't know about it
-		if err := d.ds.Delete(ctx, dsKey); err != nil {
-			d.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting corrupt record from datastore", slog.String("err", err.Error()))
+	rec, ok := fetched.(*recpb.Record)
+	if ok {
+		resp.Record = rec
+		return resp, nil
+	}
+
+	pset, ok := fetched.(*providerSet)
+	if ok {
+		resp.ProviderPeers = make([]pb.Message_Peer, len(pset.providers))
+		for i, p := range pset.providers {
+			resp.ProviderPeers[i] = pb.FromAddrInfo(p)
 		}
 
 		return resp, nil
 	}
 
-	// validate that we don't serve stale records.
-	receivedAt, err := time.Parse(time.RFC3339Nano, rec.GetTimeReceived())
-	if err != nil || time.Since(receivedAt) > d.cfg.MaxRecordAge {
-		errStr := ""
-		if err != nil {
-			errStr = err.Error()
-		}
-
-		d.log.LogAttrs(ctx, slog.LevelWarn, "Invalid received timestamp on stored record", slog.String("err", errStr), slog.Duration("age", time.Since(receivedAt)))
-		if err = d.ds.Delete(ctx, dsKey); err != nil {
-			d.log.LogAttrs(ctx, slog.LevelWarn, "Failed deleting bad record from datastore", slog.String("err", err.Error()))
-		}
-		return resp, nil
-	}
-
-	// We don't do any additional validation beyond checking the above
-	// timestamp. We put the burden of validating the record on the requester as
-	// checking a record may be computationally expensive.
-
-	// finally, attach the record to the response
-	resp.Record = rec
-
-	return resp, nil
+	return nil, fmt.Errorf("expected *recpb.Record or *providerSet value type, got: %T", pset)
 }
 
 // handleAddProvider handles ADD_PROVIDER RPCs from remote peers.
 func (d *DHT) handleAddProvider(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	k := req.GetKey()
+	k := string(req.GetKey())
 	if len(k) > 80 {
-		return nil, fmt.Errorf("handleAddProvider key size too large")
+		return nil, fmt.Errorf("key size too large")
 	} else if len(k) == 0 {
-		return nil, fmt.Errorf("handleAddProvider key is empty")
+		return nil, fmt.Errorf("key is empty")
+	}
+
+	backend, ok := d.cfg.Backends[namespaceProviders]
+	if !ok {
+		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
 	}
 
 	for _, addrInfo := range req.ProviderAddrInfos() {
-		if addrInfo.ID == remote {
+		addrInfo := addrInfo // TODO: remove after go.mod was updated to go 1.21
+
+		if addrInfo.ID != remote {
+			d.log.Debug("remote attempted to store provider record for other peer", "remote", remote, "other", addrInfo.ID)
 			continue
 		}
 
 		if len(addrInfo.Addrs) == 0 {
+			d.log.Debug("no valid addresses for provider", "remote", addrInfo.ID)
 			continue
 		}
 
-		// TODO: store
+		if _, err := backend.Store(ctx, k, addrInfo); err != nil {
+			return nil, fmt.Errorf("storing provider record: %w", err)
+		}
 	}
 
 	return nil, nil
@@ -210,13 +184,31 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("handleGetProviders key is empty")
 	}
 
-	// TODO: fetch providers
+	backend, ok := d.cfg.Backends[namespaceProviders]
+	if !ok {
+		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
+	}
+
+	fetched, err := backend.Fetch(ctx, fmt.Sprintf("/%s/%s", namespaceProviders, req.GetKey()))
+	if err != nil {
+		return nil, fmt.Errorf("fetch providers from datastore: %w", err)
+	}
+
+	pset, ok := fetched.(*providerSet)
+	if !ok {
+		return nil, fmt.Errorf("expected *providerSet value type, got: %T", pset)
+	}
+
+	pbProviders := make([]pb.Message_Peer, len(pset.providers))
+	for i, p := range pset.providers {
+		pbProviders[i] = pb.FromAddrInfo(p)
+	}
 
 	resp := &pb.Message{
 		Type:          pb.Message_GET_PROVIDERS,
 		Key:           k,
 		CloserPeers:   d.closerPeers(ctx, remote, key.NewSha256(k)),
-		ProviderPeers: nil, // TODO: Fill
+		ProviderPeers: pbProviders,
 	}
 
 	return resp, nil
@@ -260,45 +252,4 @@ func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256
 	}
 
 	return filtered
-}
-
-// shouldReplaceExistingRecord returns true if the given record should replace any
-// existing one in the local datastore. It queries the datastore, unmarshalls
-// the record, validates it, and compares it to the incoming record. If the
-// incoming one is "better" (e.g., just newer), this function returns true.
-// If unmarshalling or validation fails, this function (alongside an error) also
-// returns true because the existing record should be replaced.
-func (d *DHT) shouldReplaceExistingRecord(ctx context.Context, dstore ds.Read, newRec *recpb.Record) (bool, error) {
-	ctx, span := tracer.Start(ctx, "DHT.shouldReplaceExistingRecord")
-	defer span.End()
-
-	existingBytes, err := dstore.Get(ctx, datastoreKey(newRec.GetKey()))
-	if errors.Is(err, ds.ErrNotFound) {
-		return true, nil
-	} else if err != nil {
-		return false, fmt.Errorf("getting record from datastore: %w", err)
-	}
-
-	existingRec := &recpb.Record{}
-	if err := existingRec.Unmarshal(existingBytes); err != nil {
-		return true, nil
-	}
-
-	if err := d.validator.Validate(string(existingRec.GetKey()), existingRec.GetValue()); err != nil {
-		return true, nil
-	}
-
-	records := [][]byte{newRec.GetValue(), existingRec.GetValue()}
-	i, err := d.validator.Select(string(newRec.GetKey()), records)
-	if err != nil {
-		return false, fmt.Errorf("record selection: %w", err)
-	} else if i != 0 {
-		return false, nil
-	}
-
-	return true, nil
-}
-
-func datastoreKey(k []byte) ds.Key {
-	return ds.NewKey(base32.RawStdEncoding.EncodeToString(k))
 }

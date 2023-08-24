@@ -35,14 +35,10 @@ func newTestDHTWithConfig(t testing.TB, cfg *Config) *DHT {
 	t.Helper()
 
 	h, err := libp2p.New(libp2p.NoListenAddrs)
-	if err != nil {
-		t.Fatalf("new libp2p host: %s", err)
-	}
+	require.NoError(t, err)
 
 	d, err := New(h, cfg)
-	if err != nil {
-		t.Fatalf("new dht: %s", err)
-	}
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		if err = d.Close(); err != nil {
@@ -63,6 +59,8 @@ func newPeerID(t testing.TB) peer.ID {
 }
 
 func newIdentity(t testing.TB) (peer.ID, crypto.PrivKey) {
+	t.Helper()
+
 	priv, pub, err := crypto.GenerateEd25519Key(rng)
 	require.NoError(t, err)
 
@@ -73,6 +71,8 @@ func newIdentity(t testing.TB) (peer.ID, crypto.PrivKey) {
 }
 
 func fillRoutingTable(t testing.TB, d *DHT) {
+	t.Helper()
+
 	// 250 is a common number of peers to have in the routing table
 	for i := 0; i < 250; i++ {
 		// generate peer ID
@@ -426,6 +426,8 @@ func BenchmarkDHT_handlePing(b *testing.B) {
 }
 
 func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.Time, ttl time.Duration) *pb.Message {
+	t.Helper()
+
 	testPath := path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
 
 	rec, err := ipns.NewRecord(priv, testPath, seq, eol, ttl)

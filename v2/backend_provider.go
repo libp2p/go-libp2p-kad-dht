@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/benbjohnson/clock"
+
 	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
@@ -54,8 +56,10 @@ type ProvidersBackend struct {
 	// collection process. TODO: this is a sub-optimal pattern.
 	gcSkip sync.Map
 
-	// gcActive indicates whether garbage collection is scheduled
+	// gcActive indicates whether the garbage collection loop is running
 	gcActive atomic.Bool
+	gcCancel context.CancelFunc
+	gcDone   chan struct{}
 }
 
 var _ Backend = (*ProvidersBackend)(nil)
@@ -64,6 +68,9 @@ var _ Backend = (*ProvidersBackend)(nil)
 // [DefaultProviderBackendConfig] to get a default configuration struct and then
 // modify it to your liking.
 type ProvidersBackendConfig struct {
+	// clk is an unexported field that's used for testing time related methods
+	clk clock.Clock
+
 	// ProvideValidity specifies for how long provider records are valid
 	ProvideValidity time.Duration
 
@@ -99,6 +106,7 @@ type ProvidersBackendConfig struct {
 // here is used.
 func DefaultProviderBackendConfig() *ProvidersBackendConfig {
 	return &ProvidersBackendConfig{
+		clk:             clock.New(),
 		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		AddressTTL:      24 * time.Hour,
 		BatchSize:       256,       // MAGIC
@@ -119,7 +127,7 @@ func (p *ProvidersBackend) Store(ctx context.Context, key string, value any) (an
 	}
 
 	rec := expiryRecord{
-		expiry: time.Now(),
+		expiry: p.cfg.clk.Now(),
 	}
 
 	cacheKey := newDatastoreKey(p.namespace, key).String()
@@ -172,7 +180,7 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 		}
 	}()
 
-	now := time.Now()
+	now := p.cfg.clk.Now()
 	out := &providerSet{
 		providers: []peer.AddrInfo{},
 		set:       make(map[peer.ID]time.Time),
@@ -221,27 +229,49 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 
 // StartGarbageCollection starts the garbage collection loop. The garbage
 // collection interval can be configured with [ProvidersBackendConfig.GCInterval].
-func (p *ProvidersBackend) StartGarbageCollection(ctx context.Context) {
+// The garbage collection loop can only be started a single time. Use
+// [StopGarbageCollection] to stop the garbage collection loop.
+func (p *ProvidersBackend) StartGarbageCollection() {
 	if p.gcActive.Swap(true) {
 		p.log.Info("Provider backend's garbage collection is already running")
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	p.gcCancel = cancel
+	defer close(p.gcDone)
+
 	p.log.Info("Provider backend's started garbage collection schedule")
 
-	ticker := time.NewTicker(p.cfg.GCInterval)
+	ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			p.gcActive.Store(false)
-			p.log.Info("Provider backend's garbage collection stopped")
 			return
 		case <-ticker.C:
 			p.collectGarbage(ctx)
 		}
 	}
+}
+
+// StopGarbageCollection stops the garbage collection loop started with
+// [StartGarbageCollection]. If garbage collection is not running, this method
+// is a no-op.
+func (p *ProvidersBackend) StopGarbageCollection() {
+	if !p.gcActive.Load() {
+		return
+	}
+
+	p.gcCancel()
+	<-p.gcDone
+
+	p.gcCancel = nil
+	p.gcDone = make(chan struct{})
+
+	p.gcActive.Store(false)
+	p.log.Info("Provider backend's garbage collection stopped")
 }
 
 // collectGarbage sweeps through the datastore and deletes all provider records

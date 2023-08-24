@@ -218,7 +218,7 @@ func (pm *ProtocolMessenger) GetProviders(ctx context.Context, p peer.ID, key mu
 					provsStr[i] = v.String()
 				}
 				closerPeersStr := make([]string, len(provs))
-				for i, v := range closerPeers {
+				for i, v := range provs {
 					closerPeersStr[i] = v.String()
 				}
 				span.SetAttributes(attribute.StringSlice("provs", provsStr), attribute.StringSlice("closestPeers", closerPeersStr))

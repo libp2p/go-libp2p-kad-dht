@@ -105,7 +105,7 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	resp := &pb.Message{
 		Type:        pb.Message_GET_VALUE,
 		Key:         req.GetKey(),
-		CloserPeers: d.closerPeers(ctx, remote, key.NewSha256(req.GetKey())),
+		CloserPeers: d.closerPeers(ctx, remote, newSHA256Key(req.GetKey())),
 	}
 
 	ns, path, err := record.SplitKey(k) // get namespace (prefix of the key)
@@ -220,7 +220,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 	resp := &pb.Message{
 		Type:          pb.Message_GET_PROVIDERS,
 		Key:           k,
-		CloserPeers:   d.closerPeers(ctx, remote, key.NewSha256(k)),
+		CloserPeers:   d.closerPeers(ctx, remote, newSHA256Key(k)),
 		ProviderPeers: pbProviders,
 	}
 

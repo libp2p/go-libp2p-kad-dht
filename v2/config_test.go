@@ -98,6 +98,14 @@ func TestConfig_Validate(t *testing.T) {
 				return c
 			},
 		},
+		{
+			name:    "nil address filter",
+			wantErr: true,
+			mutate: func(c *Config) *Config {
+				c.AddressFilter = nil
+				return c
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

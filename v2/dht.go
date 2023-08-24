@@ -92,6 +92,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 
 		pbeCfg := DefaultProviderBackendConfig()
 		pbeCfg.Logger = cfg.Logger
+		pbeCfg.AddressFilter = cfg.AddressFilter
 
 		pbe, err := NewBackendProvider(h.Peerstore(), dstore, pbeCfg)
 		if err != nil {

@@ -113,7 +113,7 @@ func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Batching, cfg *Pro
 		log:       cfg.Logger,
 		cache:     cache,
 		namespace: namespaceProviders,
-		peerstore: pstore,
+		addrBook:  pstore,
 		datastore: autobatch.NewAutoBatching(dstore, cfg.BatchSize),
 	}
 

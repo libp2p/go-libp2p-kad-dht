@@ -43,9 +43,9 @@ type ProvidersBackend struct {
 	// TODO: is that really so effective? The cache size is quite low either.
 	cache *lru.Cache[string, providerSet]
 
-	// peerstore holds a reference to the peer store to store and fetch peer
-	// multiaddresses from (we don't save them in the datastore).
-	peerstore peerstore.Peerstore
+	// addrBook holds a reference to the peerstore's address book to store and
+	// fetch peer multiaddresses from (we don't save them in the datastore).
+	addrBook peerstore.AddrBook
 
 	// datastore is where we save the peer IDs providing a certain multihash
 	datastore *autobatch.Datastore
@@ -68,10 +68,10 @@ type ProvidersBackendConfig struct {
 	ProvideValidity time.Duration
 
 	// AddressTTL specifies for how long we will keep around provider multi
-	// addresses in the peerstore. If such multiaddresses are present we send
-	// them alongside the peer ID to the requesting peer. This prevents the
-	// necessity for a second look for the multiaddresses on the requesting
-	// peers' side.
+	// addresses in the peerstore's address book. If such multiaddresses are
+	// present we send them alongside the peer ID to the requesting peer. This
+	// prevents the necessity for a second look for the multiaddresses on the
+	// requesting peers' side.
 	AddressTTL time.Duration
 
 	// BatchSize specifies how many provider record writes should be batched
@@ -85,6 +85,12 @@ type ProvidersBackendConfig struct {
 
 	// Logger is the logger to use
 	Logger *slog.Logger
+
+	// AddressFilter is a filter function that any addresses that we attempt to
+	// store or fetch from the peerstore's address book need to pass through.
+	// If you're manually configuring this backend, make sure to align the
+	// filter with the one configured in [Config.AddressFilter].
+	AddressFilter AddressFilter
 }
 
 // DefaultProviderBackendConfig returns a default [ProvidersBackend]
@@ -93,12 +99,13 @@ type ProvidersBackendConfig struct {
 // here is used.
 func DefaultProviderBackendConfig() *ProvidersBackendConfig {
 	return &ProvidersBackendConfig{
-		ProvideValidity: time.Hour * 48, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
+		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		AddressTTL:      24 * time.Hour,
 		BatchSize:       256,       // MAGIC
 		CacheSize:       256,       // MAGIC
 		GCInterval:      time.Hour, // MAGIC
 		Logger:          slog.Default(),
+		AddressFilter:   AddrFilterIdentity,
 	}
 }
 
@@ -121,7 +128,8 @@ func (p *ProvidersBackend) Store(ctx context.Context, key string, value any) (an
 		provs.addProvider(addrInfo, rec.expiry)
 	}
 
-	p.peerstore.AddAddrs(addrInfo.ID, addrInfo.Addrs, p.cfg.AddressTTL)
+	filtered := p.cfg.AddressFilter(addrInfo.Addrs)
+	p.addrBook.AddAddrs(addrInfo.ID, filtered, p.cfg.AddressTTL)
 
 	_, found := p.gcSkip.LoadOrStore(dsKey.String(), struct{}{})
 
@@ -195,7 +203,11 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 			continue
 		}
 
-		addrInfo := p.peerstore.PeerInfo(peer.ID(binPeerID))
+		maddrs := p.addrBook.Addrs(peer.ID(binPeerID))
+		addrInfo := peer.AddrInfo{
+			ID:    peer.ID(binPeerID),
+			Addrs: p.cfg.AddressFilter(maddrs),
+		}
 
 		out.addProvider(addrInfo, rec.expiry)
 	}
@@ -306,7 +318,7 @@ func (p *ProvidersBackend) delete(ctx context.Context, dsKey ds.Key) {
 // expiryRecord is captures the information that gets written to the datastore
 // for any provider record. This record doesn't include any peer IDs or
 // multiaddresses because peer IDs are part of the key that this record gets
-// stored under and multiaddresses are stored in the peerstore. This record
+// stored under and multiaddresses are stored in the addrBook. This record
 // just tracks the expiry time of the record. It implements binary marshalling
 // and unmarshalling methods for easy (de)serialization into the datastore.
 type expiryRecord struct {

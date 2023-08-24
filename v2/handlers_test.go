@@ -28,6 +28,10 @@ import (
 var rng = rand.New(rand.NewSource(1337))
 
 func newTestDHT(t testing.TB) *DHT {
+	return newTestDHTWithConfig(t, DefaultConfig())
+}
+
+func newTestDHTWithConfig(t testing.TB, cfg *Config) *DHT {
 	t.Helper()
 
 	h, err := libp2p.New(libp2p.NoListenAddrs)
@@ -35,7 +39,7 @@ func newTestDHT(t testing.TB) *DHT {
 		t.Fatalf("new libp2p host: %s", err)
 	}
 
-	d, err := New(h, DefaultConfig())
+	d, err := New(h, cfg)
 	if err != nil {
 		t.Fatalf("new dht: %s", err)
 	}
@@ -1042,7 +1046,7 @@ func newAddrInfo(t testing.TB) peer.AddrInfo {
 	return peer.AddrInfo{
 		ID: newPeerID(t),
 		Addrs: []ma.Multiaddr{
-			ma.StringCast("/ip4/100.100.100.100/tcp/2000"),
+			ma.StringCast("/ip4/99.99.99.99/tcp/2000"), // must be a public address
 		},
 	}
 }
@@ -1195,6 +1199,35 @@ func TestDHT_handleAddProvider_empty_provider_peers(t *testing.T) {
 	assert.ErrorContains(t, err, "no provider peers given")
 }
 
+func TestDHT_handleAddProvider_only_store_filtered_addresses(t *testing.T) {
+	ctx := context.Background()
+	cfg := DefaultConfig()
+
+	testMaddr := ma.StringCast("/dns/maddr.dummy")
+
+	// define a filter that returns a completely different address and discards
+	// every other
+	cfg.AddressFilter = func(maddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{testMaddr}
+	}
+
+	d := newTestDHTWithConfig(t, cfg)
+
+	addrInfo := newAddrInfo(t)
+	require.True(t, len(addrInfo.Addrs) > 0, "need addr info with at least one address")
+
+	// construct request
+	req := newAddProviderRequest([]byte("random-key"), addrInfo)
+
+	// do the request
+	_, err := d.handleAddProvider(ctx, addrInfo.ID, req)
+	assert.NoError(t, err)
+
+	maddrs := d.host.Peerstore().Addrs(addrInfo.ID)
+	require.Len(t, maddrs, 1)
+	assert.True(t, maddrs[0].Equal(testMaddr), "address filter wasn't applied")
+}
+
 func BenchmarkDHT_handleGetProviders(b *testing.B) {
 	ctx := context.Background()
 	d := newTestDHT(b)
@@ -1339,4 +1372,51 @@ func TestDHT_handleGetProviders_do_not_return_expired_records(t *testing.T) {
 	// record was deleted
 	_, err = be.datastore.Get(ctx, dsKey)
 	assert.ErrorIs(t, err, ds.ErrNotFound)
+}
+
+func TestDHT_handleGetProviders_only_serve_filtered_addresses(t *testing.T) {
+	ctx := context.Background()
+	cfg := DefaultConfig()
+
+	testMaddr := ma.StringCast("/dns/maddr.dummy")
+
+	// define a filter that returns a completely different address and discards
+	// every other
+	cfg.AddressFilter = func(maddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{testMaddr}
+	}
+
+	d := newTestDHTWithConfig(t, cfg)
+
+	fillRoutingTable(t, d)
+
+	key := []byte("random-key")
+
+	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
+	require.True(t, ok)
+
+	p := newAddrInfo(t)
+	require.True(t, len(p.Addrs) > 0, "need addr info with at least one address")
+
+	// add to addresses peerstore
+	d.host.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
+
+	// write to datastore
+	dsKey := newDatastoreKey(namespaceProviders, string(key), string(p.ID))
+	rec := expiryRecord{expiry: time.Now()}
+	err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	require.NoError(t, err)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  key,
+	}
+
+	res, err := d.handleGetProviders(ctx, newPeerID(t), req)
+	require.NoError(t, err)
+
+	require.Len(t, res.ProviderPeers, 1)
+	maddrs := res.ProviderPeers[0].Addresses()
+	require.Len(t, maddrs, 1)
+	assert.True(t, maddrs[0].Equal(testMaddr))
 }

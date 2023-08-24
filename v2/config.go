@@ -8,6 +8,8 @@ import (
 	leveldb "github.com/ipfs/go-ds-leveldb"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
@@ -66,6 +68,8 @@ type (
 		ds.BatchingFeature
 		ds.TxnFeature
 	}
+
+	AddressFilter func([]ma.Multiaddr) []ma.Multiaddr
 )
 
 const (
@@ -146,6 +150,11 @@ type Config struct {
 	// receiving before closing/resetting it. The timeout gets reset every time
 	// we have successfully read a message from the stream.
 	TimeoutStreamIdle time.Duration
+
+	// AddressFilter is used to filter the addresses we put into the peer store and
+	// also fetch from the peer store and serve to other peers. It is mainly
+	// used to filter out private addresses.
+	AddressFilter AddressFilter
 }
 
 // DefaultConfig returns a configuration struct that can be used as-is to
@@ -163,6 +172,7 @@ func DefaultConfig() *Config {
 		Datastore:         nil,
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		TimeoutStreamIdle: time.Minute, // MAGIC
+		AddressFilter:     AddrFilterPrivate,
 	}
 }
 
@@ -234,5 +244,22 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.AddressFilter == nil {
+		return fmt.Errorf("address filter must not be nil - use AddrFilterIdentity to disable filtering")
+	}
+
 	return nil
+}
+
+// AddrFilterIdentity is an [AddressFilter] that does not apply any filtering
+// and just returns that passed-in multi addresses without modification.
+func AddrFilterIdentity(maddrs []ma.Multiaddr) []ma.Multiaddr {
+	return maddrs
+}
+
+// AddrFilterPrivate filters out any multiaddresses that are private. It
+// evaluates the [manet.IsPublicAddr] on each multiaddress, and if it returns
+// true, the multiaddress will be in the result set.
+func AddrFilterPrivate(maddrs []ma.Multiaddr) []ma.Multiaddr {
+	return ma.FilterAddrs(maddrs, manet.IsPublicAddr)
 }

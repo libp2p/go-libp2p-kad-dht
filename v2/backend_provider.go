@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -57,9 +56,9 @@ type ProvidersBackend struct {
 	gcSkip sync.Map
 
 	// gcActive indicates whether the garbage collection loop is running
-	gcActive atomic.Bool
-	gcCancel context.CancelFunc
-	gcDone   chan struct{}
+	gcCancelMu sync.RWMutex
+	gcCancel   context.CancelFunc
+	gcDone     chan struct{}
 }
 
 var _ Backend = (*ProvidersBackend)(nil)
@@ -232,45 +231,53 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 // The garbage collection loop can only be started a single time. Use
 // [StopGarbageCollection] to stop the garbage collection loop.
 func (p *ProvidersBackend) StartGarbageCollection() {
-	if p.gcActive.Swap(true) {
+	p.gcCancelMu.Lock()
+	if p.gcCancel != nil {
 		p.log.Info("Provider backend's garbage collection is already running")
+		p.gcCancelMu.Unlock()
 		return
 	}
+	defer p.gcCancelMu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.gcCancel = cancel
-	defer close(p.gcDone)
+	p.gcDone = make(chan struct{})
 
 	p.log.Info("Provider backend's started garbage collection schedule")
 
-	ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
-	defer ticker.Stop()
+	go func() {
+		defer close(p.gcDone)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.collectGarbage(ctx)
+		ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				p.collectGarbage(ctx)
+			}
 		}
-	}
+	}()
 }
 
 // StopGarbageCollection stops the garbage collection loop started with
 // [StartGarbageCollection]. If garbage collection is not running, this method
 // is a no-op.
 func (p *ProvidersBackend) StopGarbageCollection() {
-	if !p.gcActive.Load() {
+	p.gcCancelMu.Lock()
+	if p.gcCancel == nil {
+		p.log.Info("Provider backend's garbage collection isn't running")
+		p.gcCancelMu.Unlock()
 		return
 	}
+	defer p.gcCancelMu.Unlock()
 
 	p.gcCancel()
 	<-p.gcDone
-
+	p.gcDone = nil
 	p.gcCancel = nil
-	p.gcDone = make(chan struct{})
-
-	p.gcActive.Store(false)
 	p.log.Info("Provider backend's garbage collection stopped")
 }
 
@@ -314,10 +321,11 @@ func (p *ProvidersBackend) collectGarbage(ctx context.Context) {
 		}
 
 		rec := expiryRecord{}
+		now := p.cfg.clk.Now()
 		if err = rec.UnmarshalBinary(e.Value); err != nil {
 			p.log.LogAttrs(ctx, slog.LevelWarn, "Garbage collection provider record unmarshalling failed", slog.String("key", e.Key), slog.String("err", err.Error()))
 			p.delete(ctx, ds.RawKey(e.Key))
-		} else if time.Now().Sub(rec.expiry) <= p.cfg.ProvideValidity {
+		} else if now.Sub(rec.expiry) <= p.cfg.ProvideValidity {
 			continue
 		}
 

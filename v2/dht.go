@@ -218,3 +218,14 @@ func (d *DHT) setClientMode() {
 		}
 	}
 }
+
+// logErr is a helper method that uses the slogger of the DHT and writes a
+// warning log line with the given message alongside the error. If the error
+// is nil, this method is a no-op.
+func (d *DHT) logErr(err error, msg string) {
+	if err == nil {
+		return
+	}
+
+	d.log.Warn(msg, "err", err.Error())
+}

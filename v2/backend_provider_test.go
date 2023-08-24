@@ -17,8 +17,7 @@ import (
 
 var devnull = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-func TestProvidersBackend_GarbageCollection(t *testing.T) {
-	// construct host, datastore, mock clock and provider backend
+func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBackend {
 	h, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 
@@ -35,15 +34,19 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 		}
 	})
 
-	// configure mock clock
+	b, err := NewBackendProvider(h.Peerstore(), dstore, cfg)
+	require.NoError(t, err)
+
+	return b
+}
+
+func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	mockClock := clock.NewMock()
 	cfg := DefaultProviderBackendConfig()
 	cfg.clk = mockClock
 	cfg.Logger = devnull
 
-	// init backend
-	b, err := NewBackendProvider(h.Peerstore(), dstore, cfg)
-	require.NoError(t, err)
+	b := newBackendProvider(t, cfg)
 
 	// start the garbage collection process
 	b.StartGarbageCollection()
@@ -55,11 +58,11 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	// write to datastore
 	dsKey := newDatastoreKey(namespaceProviders, "random-key", string(p.ID))
 	rec := expiryRecord{expiry: mockClock.Now()}
-	err = b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	err := b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
 	// write to peerstore
-	h.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
+	b.addrBook.AddAddrs(p.ID, p.Addrs, time.Hour)
 
 	// advance clock half the gc time and check if record is still there
 	mockClock.Add(cfg.ProvideValidity / 2)
@@ -87,27 +90,10 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 }
 
 func TestProvidersBackend_GarbageCollection_lifecycle_thread_safe(t *testing.T) {
-	h, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
-
-	dstore, err := InMemoryDatastore()
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		if err = dstore.Close(); err != nil {
-			t.Logf("closing datastore: %s", err)
-		}
-
-		if err = h.Close(); err != nil {
-			t.Logf("closing host: %s", err)
-		}
-	})
-
 	cfg := DefaultProviderBackendConfig()
 	cfg.Logger = devnull
 
-	b, err := NewBackendProvider(h.Peerstore(), dstore, cfg)
-	require.NoError(t, err)
+	b := newBackendProvider(t, cfg)
 
 	var wg sync.WaitGroup
 	wg.Add(1)

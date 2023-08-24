@@ -82,9 +82,10 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		// 1. read message from stream
 		data, err := d.streamReadMsg(ctx, slogger, reader)
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
-		} else if data == nil {
-			return nil // nil error, nil data -> graceful end
 		}
 
 		// we have received a message, start the timer to
@@ -157,13 +158,8 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 
 	data, err := r.ReadMsg()
 	if err != nil {
-		// if the reader returns an end-of-file signal, exit gracefully
-		if errors.Is(err, io.EOF) {
-			return nil, nil
-		}
-
 		// log any other errors than stream resets
-		if err.Error() != "stream reset" {
+		if !errors.Is(err, network.ErrReset) {
 			slogger.LogAttrs(ctx, slog.LevelDebug, "error reading message", slog.String("err", err.Error()))
 		}
 

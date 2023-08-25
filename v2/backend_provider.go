@@ -105,12 +105,12 @@ func DefaultProviderBackendConfig() *ProvidersBackendConfig {
 	return &ProvidersBackendConfig{
 		clk:             clock.New(),
 		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
-		AddressTTL:      24 * time.Hour,
-		BatchSize:       256,       // MAGIC
-		CacheSize:       256,       // MAGIC
-		GCInterval:      time.Hour, // MAGIC
+		AddressTTL:      24 * time.Hour, // MAGIC
+		BatchSize:       256,            // MAGIC
+		CacheSize:       256,            // MAGIC
+		GCInterval:      time.Hour,      // MAGIC
 		Logger:          slog.Default(),
-		AddressFilter:   AddrFilterIdentity,
+		AddressFilter:   AddrFilterIdentity, // verify alignment with [Config.AddressFilter]
 	}
 }
 

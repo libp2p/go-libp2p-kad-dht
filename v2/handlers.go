@@ -133,7 +133,8 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		resp.Record = rec
 		return resp, nil
 	}
-	// the returned value wasn't a record
+	// the returned value wasn't a record, which could be the case if the
+	// key was prefixed with "providers."
 
 	pset, ok := fetched.(*providerSet)
 	if ok {

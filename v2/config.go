@@ -113,12 +113,14 @@ type Config struct {
 	// BucketSize determines the number of closer peers to return
 	BucketSize int
 
-	// ProtocolID represents the DHT protocol we can query with and respond to.
+	// ProtocolID represents the DHT [protocol] we can query with and respond to.
+	//
+	// [protocol]: https://docs.libp2p.io/concepts/fundamentals/protocols/
 	ProtocolID protocol.ID
 
 	// RoutingTable holds a reference to the specific routing table
 	// implementation that this DHT should use. If this field is nil, the
-	// triert.TrieRT routing table will be used. This field will be nil
+	// [triert.TrieRT] routing table will be used. This field will be nil
 	// in the default configuration because a routing table requires information
 	// about the local node.
 	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
@@ -165,10 +167,10 @@ func DefaultConfig() *Config {
 	return &Config{
 		Mode:              ModeOptAutoClient,
 		Kademlia:          coord.DefaultConfig(),
-		BucketSize:        20,
+		BucketSize:        20, // MAGIC
 		ProtocolID:        ProtocolIPFS,
-		RoutingTable:      nil, // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
-		Backends:          map[string]Backend{},
+		RoutingTable:      nil,                  // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
+		Backends:          map[string]Backend{}, // if empty and [ProtocolIPFS] is used, it'll be populated with the ipns, pk and providers backends
 		Datastore:         nil,
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		TimeoutStreamIdle: time.Minute, // MAGIC

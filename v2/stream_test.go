@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -132,6 +133,31 @@ func TestDHT_handleStream_unknown_message_type(t *testing.T) {
 
 	err = trw.WriteMsg(req)
 	require.NoError(t, err)
+
+	_, err = trw.ReadMsg()
+	assert.ErrorIs(t, err, network.ErrReset)
+}
+
+func TestDHT_handleStream_supported_but_unregistered_message_type(t *testing.T) {
+	ctx := context.Background()
+	client, serverDHT := newPeerPair(t)
+
+	// unregister providers
+	delete(serverDHT.backends, namespaceProviders)
+
+	s, err := client.NewStream(ctx, serverDHT.host.ID(), serverDHT.cfg.ProtocolID)
+	require.NoError(t, err)
+
+	trw := newTestReadWriter(s)
+
+	req := &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  []byte(fmt.Sprintf("/%s/random-key", namespaceProviders)),
+	}
+
+	err = trw.WriteMsg(req)
+	require.NoError(t, err)
+
 	_, err = trw.ReadMsg()
 	assert.ErrorIs(t, err, network.ErrReset)
 }

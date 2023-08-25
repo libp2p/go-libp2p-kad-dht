@@ -1238,11 +1238,7 @@ func (dht *FullRT) FindProvidersAsync(ctx context.Context, key cid.Cid, count in
 		return peerOut
 	}
 
-	chSize := count
-	if count == 0 {
-		chSize = 1
-	}
-	peerOut := make(chan peer.AddrInfo, chSize)
+	peerOut := make(chan peer.AddrInfo)
 
 	keyMH := key.Hash()
 

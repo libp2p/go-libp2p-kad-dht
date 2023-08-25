@@ -103,6 +103,7 @@ func TestProvidersBackend_GarbageCollection_lifecycle_thread_safe(t *testing.T) 
 		}
 		wg.Done()
 	}()
+
 	wg.Add(1)
 	go func() {
 		for i := 0; i < 100; i++ {

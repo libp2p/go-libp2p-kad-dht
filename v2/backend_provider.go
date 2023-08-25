@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"path"
 	"strconv"
 	"strings"
@@ -59,7 +60,10 @@ type ProvidersBackend struct {
 	gcDone     chan struct{}
 }
 
-var _ Backend = (*ProvidersBackend)(nil)
+var (
+	_ Backend   = (*ProvidersBackend)(nil)
+	_ io.Closer = (*ProvidersBackend)(nil)
+)
 
 // ProvidersBackendConfig is used to construct a [ProvidersBackend]. Use
 // [DefaultProviderBackendConfig] to get a default configuration struct and then
@@ -222,6 +226,13 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 	}
 
 	return out, nil
+}
+
+// Close is here to implement the [io.Closer] interface. This will get called
+// when the [DHT] "shuts down"/closes.
+func (p *ProvidersBackend) Close() error {
+	p.StopGarbageCollection()
+	return nil
 }
 
 // StartGarbageCollection starts the garbage collection loop. The garbage

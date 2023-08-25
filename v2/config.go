@@ -133,6 +133,9 @@ type Config struct {
 	// record. If this map stays empty, it will be populated with the default
 	// IPNS ([NewBackendIPNS]), PublicKey ([NewBackendPublicKey]), and
 	// Providers ([NewBackendProvider]) backends.
+	//
+	// Backends that implement the [io.Closer] interface will get closed when
+	// the DHT is closed.
 	Backends map[string]Backend
 
 	// Datastore will be used to construct the default backends. If this is nil,
@@ -264,4 +267,11 @@ func AddrFilterIdentity(maddrs []ma.Multiaddr) []ma.Multiaddr {
 // true, the multiaddress will be in the result set.
 func AddrFilterPrivate(maddrs []ma.Multiaddr) []ma.Multiaddr {
 	return ma.FilterAddrs(maddrs, manet.IsPublicAddr)
+}
+
+// AddrFilterPublic filters out any multiaddresses that are public. It
+// evaluates the [manet.IsIPLoopback] on each multiaddress, and if it returns
+// true, the multiaddress will be in the result set.
+func AddrFilterPublic(maddrs []ma.Multiaddr) []ma.Multiaddr {
+	return ma.FilterAddrs(maddrs, func(maddr ma.Multiaddr) bool { return !manet.IsIPLoopback(maddr) })
 }

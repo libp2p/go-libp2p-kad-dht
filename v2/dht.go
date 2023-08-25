@@ -2,6 +2,7 @@ package dht
 
 import (
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/iand/zikade/kademlia"
@@ -143,7 +144,33 @@ func (d *DHT) Close() error {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
 	}
 
-	// TODO clean up backends
+	for ns, b := range d.backends {
+		closer, ok := b.(io.Closer)
+		if !ok {
+			continue
+		}
+
+		if err := closer.Close(); err != nil {
+			d.log.Warn("failed closing backend", "namespace", ns, "err", err.Error())
+		}
+	}
+
+	// TODO: improve the following.
+	// If the protocol is the IPFS kademlia protocol
+	// and the user didn't provide a datastore implementation, we have initialized
+	// an in-memory datastore and assigned it to all backends. In the following
+	// we check if the conditions are met that we have initialized the datastore
+	// and the get hold of a reference to that datastore by looking in our
+	// backends map and casting one to one of our known providers.
+	if d.cfg.ProtocolID == ProtocolIPFS && d.cfg.Datastore == nil {
+		if b, found := d.backends[namespaceProviders]; found {
+			if pbe, ok := b.(*ProvidersBackend); ok {
+				if err := pbe.datastore.Close(); err != nil {
+					d.log.Warn("failed closing in memory datastore", "err", err.Error())
+				}
+			}
+		}
+	}
 
 	// kill all active streams using the DHT protocol.
 	for _, c := range d.host.Network().Conns() {

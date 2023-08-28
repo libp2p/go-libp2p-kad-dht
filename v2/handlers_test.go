@@ -1,7 +1,9 @@
 package dht
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -736,6 +738,122 @@ func TestDHT_handlePutValue_unknown_backend(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 	assert.ErrorContains(t, err, "unsupported record type")
+}
+
+func TestDHT_handlePutValue_moved_from_v1_bad_proto_message(t *testing.T) {
+	// Test moved from v1 to v2 - original name TestBadProtoMessages in dht_test.go
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := newTestDHT(t)
+
+	nilrec := new(pb.Message)
+	if _, err := d.handlePutValue(ctx, "testpeer", nilrec); err == nil {
+		t.Fatal("should have errored on nil record")
+	}
+}
+
+// atomicPutValidator moved from v1 to v2 - in support for [TestDHT_handlePutValue_atomic_operation]
+type atomicPutValidator struct{}
+
+var _ record.Validator = (*atomicPutValidator)(nil)
+
+func (v atomicPutValidator) Validate(key string, value []byte) error {
+	if bytes.Equal(value, []byte("expired")) {
+		return errors.New("expired")
+	}
+	return nil
+}
+
+// selects the entry with the 'highest' last byte
+func (atomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
+	index := -1
+	max := uint8(0)
+	for i, b := range bs {
+		if bytes.Equal(b, []byte("valid")) {
+			if index == -1 {
+				index = i
+			}
+			continue
+		}
+
+		str := string(b)
+		n := str[len(str)-1]
+		if n > max {
+			max = n
+			index = i
+		}
+
+	}
+	if index == -1 {
+		return -1, errors.New("no rec found")
+	}
+	return index, nil
+}
+
+func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
+	// Test moved from v1 to v2 - original name TestAtomicPut in dht_test.go
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ds, err := InMemoryDatastore()
+	require.NoError(t, err)
+
+	recBackend := &RecordBackend{
+		cfg:       DefaultRecordBackendConfig(),
+		log:       devnull,
+		namespace: "test",
+		datastore: ds,
+		validator: atomicPutValidator{},
+	}
+
+	d := newTestDHT(t)
+
+	d.backends[recBackend.namespace] = recBackend
+
+	// fnc to put a record
+	key := "/test/testkey"
+	putRecord := func(value []byte) error {
+		rec := record.MakePutRecord(key, value)
+		msg := &pb.Message{
+			Type:   pb.Message_PUT_VALUE,
+			Key:    rec.Key,
+			Record: rec,
+		}
+		_, err := d.handlePutValue(ctx, "testpeer", msg)
+		return err
+	}
+
+	// put a valid record
+	if err := putRecord([]byte("valid")); err != nil {
+		t.Fatal("should not have errored on a valid record")
+	}
+
+	// simultaneous puts for old & new values
+	values := [][]byte{[]byte("newer1"), []byte("newer7"), []byte("newer3"), []byte("newer5")}
+	var wg sync.WaitGroup
+	for _, v := range values {
+		wg.Add(1)
+		go func(v []byte) {
+			defer wg.Done()
+			_ = putRecord(v) // we expect some of these to fail
+		}(v)
+	}
+	wg.Wait()
+
+	// get should return the newest value
+	pmes := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  []byte(key),
+	}
+	msg, err := d.handleGetValue(ctx, "testpeer", pmes)
+	if err != nil {
+		t.Fatalf("should not have errored on final get, but got %+v", err)
+	}
+	if string(msg.GetRecord().Value) != "newer7" {
+		t.Fatalf("Expected 'newer7' got '%s'", string(msg.GetRecord().Value))
+	}
 }
 
 func BenchmarkDHT_handleGetValue(b *testing.B) {

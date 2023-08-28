@@ -6,6 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/exp/slog"
+
+	"github.com/iand/zikade/core"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/plprobelab/go-kademlia/key"
+
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
@@ -23,7 +29,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 	ctx, span := tracer.Start(ctx, "DHT.FindPeer")
 	defer span.End()
 
-	// First check locally. If are or were recently connected to the peer,
+	// First check locally. If we are or were recently connected to the peer,
 	// return the addresses from our peerstore unless the information doesn't
 	// contain any.
 	switch d.host.Network().Connectedness(id) {
@@ -36,9 +42,27 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		// we're
 	}
 
-	// TODO reach out to Zikade
+	target := nodeID(id)
 
-	panic("implement me")
+	var foundNode core.Node[key.Key256, ma.Multiaddr]
+	fn := func(ctx context.Context, node core.Node[key.Key256, ma.Multiaddr], stats core.QueryStats) error {
+		slog.Info("visiting node", "id", node.ID())
+		if key.Equal(node.ID().Key(), target.Key()) {
+			foundNode = node
+			return core.SkipRemaining
+		}
+		return nil
+	}
+
+	_, err := core.Query[key.Key256, ma.Multiaddr](ctx, d.kad, target.Key(), fn)
+	if err != nil {
+		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
+	}
+
+	return peer.AddrInfo{
+		ID:    peer.ID(foundNode.ID().(nodeID)),
+		Addrs: foundNode.Addresses(),
+	}, nil
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {

@@ -110,7 +110,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	d.kad, err = kademlia.NewDht[key.Key256, ma.Multiaddr](nid, d, d.rt, nil)
+	d.kad, err = kademlia.NewDht[key.Key256, ma.Multiaddr](nid, &Router{host: h}, d.rt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}

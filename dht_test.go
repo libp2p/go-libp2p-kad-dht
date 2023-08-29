@@ -596,12 +596,11 @@ func TestProvideAddressFilter(t *testing.T) {
 	connect(t, ctx, dhts[0], dhts[1])
 	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	done := make(chan struct{})
 	impl := net.NewMessageSenderImpl(dhts[0].host, dhts[0].protocols)
 	tms := &testMessageSender{
 		sendMessage: func(ctx context.Context, p peer.ID, pmes *pb.Message) error {
-			defer wg.Done()
+			defer close(done)
 			assert.Equal(t, pmes.Type, pb.Message_ADD_PROVIDER)
 			assert.Len(t, pmes.ProviderPeers[0].Addrs, 1)
 			assert.True(t, pmes.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
@@ -623,7 +622,11 @@ func TestProvideAddressFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wg.Wait()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
 }
 
 type testProviderManager struct {
@@ -658,11 +661,10 @@ func TestHandleAddProviderAddressFilter(t *testing.T) {
 		return []ma.Multiaddr{testMaddr}
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	done := make(chan struct{})
 	d.providerStore = &testProviderManager{
 		addProvider: func(ctx context.Context, key []byte, prov peer.AddrInfo) error {
-			defer wg.Done()
+			defer close(done)
 			assert.True(t, prov.Addrs[0].Equal(testMaddr))
 			return nil
 		},
@@ -684,7 +686,11 @@ func TestHandleAddProviderAddressFilter(t *testing.T) {
 	_, err := d.handleAddProvider(ctx, provider.self, pmes)
 	require.NoError(t, err)
 
-	wg.Wait()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
 }
 
 func TestLocalProvides(t *testing.T) {

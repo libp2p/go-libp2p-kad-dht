@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -561,10 +563,128 @@ func TestProvides(t *testing.T) {
 			if prov.ID != dhts[3].self {
 				t.Fatal("Got back wrong provider")
 			}
+			if len(prov.Addrs) == 0 {
+				t.Fatal("Got no addresses back")
+			}
 		case <-ctxT.Done():
 			t.Fatal("Did not get a provider back.")
 		}
 	}
+}
+
+type testMessageSender struct {
+	sendRequest func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error)
+	sendMessage func(ctx context.Context, p peer.ID, pmes *pb.Message) error
+}
+
+var _ pb.MessageSender = (*testMessageSender)(nil)
+
+func (t testMessageSender) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+	return t.sendRequest(ctx, p, pmes)
+}
+
+func (t testMessageSender) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+	return t.sendMessage(ctx, p, pmes)
+}
+
+func TestProvideAddressFilter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhts := setupDHTS(t, ctx, 2)
+
+	connect(t, ctx, dhts[0], dhts[1])
+	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	impl := net.NewMessageSenderImpl(dhts[0].host, dhts[0].protocols)
+	tms := &testMessageSender{
+		sendMessage: func(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+			defer wg.Done()
+			assert.Equal(t, pmes.Type, pb.Message_ADD_PROVIDER)
+			assert.Len(t, pmes.ProviderPeers[0].Addrs, 1)
+			assert.True(t, pmes.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
+			return impl.SendMessage(ctx, p, pmes)
+		},
+		sendRequest: func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+			return impl.SendRequest(ctx, p, pmes)
+		},
+	}
+	pm, err := pb.NewProtocolMessenger(tms)
+	require.NoError(t, err)
+
+	dhts[0].protoMessenger = pm
+	dhts[0].addrFilter = func(multiaddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{testMaddr}
+	}
+
+	if err := dhts[0].Provide(ctx, testCaseCids[0], true); err != nil {
+		t.Fatal(err)
+	}
+
+	wg.Wait()
+}
+
+type testProviderManager struct {
+	addProvider  func(ctx context.Context, key []byte, prov peer.AddrInfo) error
+	getProviders func(ctx context.Context, key []byte) ([]peer.AddrInfo, error)
+	close        func() error
+}
+
+var _ providers.ProviderStore = (*testProviderManager)(nil)
+
+func (t *testProviderManager) AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error {
+	return t.addProvider(ctx, key, prov)
+}
+
+func (t *testProviderManager) GetProviders(ctx context.Context, key []byte) ([]peer.AddrInfo, error) {
+	return t.getProviders(ctx, key)
+}
+
+func (t *testProviderManager) Close() error {
+	return t.close()
+}
+
+func TestHandleAddProviderAddressFilter(t *testing.T) {
+	ctx := context.Background()
+
+	d := setupDHT(ctx, t, false)
+	provider := setupDHT(ctx, t, false)
+
+	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
+
+	d.addrFilter = func(multiaddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{testMaddr}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	d.providerStore = &testProviderManager{
+		addProvider: func(ctx context.Context, key []byte, prov peer.AddrInfo) error {
+			defer wg.Done()
+			assert.True(t, prov.Addrs[0].Equal(testMaddr))
+			return nil
+		},
+		close: func() error { return nil },
+	}
+
+	pmes := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("test-key"),
+		ProviderPeers: pb.RawPeerInfosToPBPeers([]peer.AddrInfo{{
+			ID: provider.self,
+			Addrs: []ma.Multiaddr{
+				ma.StringCast("/ip4/55.55.55.55/tcp/5555"),
+				ma.StringCast("/ip4/66.66.66.66/tcp/6666"),
+			},
+		}}),
+	}
+
+	_, err := d.handleAddProvider(ctx, provider.self, pmes)
+	require.NoError(t, err)
+
+	wg.Wait()
 }
 
 func TestLocalProvides(t *testing.T) {
@@ -630,7 +750,7 @@ func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPe
 		rtlen := dht.routingTable.Size()
 		totalPeers += rtlen
 		if minPeers > 0 && rtlen < minPeers {
-			//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+			// t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
 			return false
 		}
 	}
@@ -1568,9 +1688,7 @@ func TestProvideDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			var (
-				optsA, optsB []Option
-			)
+			var optsA, optsB []Option
 			optsA = append(optsA, ProtocolPrefix("/provMaybeDisabled"))
 			optsB = append(optsB, ProtocolPrefix("/provMaybeDisabled"))
 
@@ -1995,8 +2113,10 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	// convert the bootstrap addresses to a p2p address
 	bootstrapAddrs := make([]peer.AddrInfo, nBootStraps)
 	for i := 0; i < nBootStraps; i++ {
-		b := peer.AddrInfo{ID: bootstrappers[i].self,
-			Addrs: bootstrappers[i].host.Addrs()}
+		b := peer.AddrInfo{
+			ID:    bootstrappers[i].self,
+			Addrs: bootstrappers[i].host.Addrs(),
+		}
 		bootstrapAddrs[i] = b
 	}
 

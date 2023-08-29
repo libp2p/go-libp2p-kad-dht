@@ -1,11 +1,11 @@
-PB = $(wildcard *.proto)
-GO = $(PB:.proto=.pb.go)
+all: clone reset
+	protoc --go_out=./ --go_opt=Mgithub.com/libp2p/go-libp2p-record/pb/record.proto=github.com/libp2p/go-libp2p-record/pb ./dht.proto
 
-all: $(GO)
+clone:
+	git clone --depth=1 git@github.com:libp2p/go-libp2p-record.git github.com/libp2p/go-libp2p-record || true
 
-%.pb.go: %.proto
-		protoc --proto_path=$(GOPATH)/src:. --gogofast_out=. $<
+reset:
+	rm dht.pb.go
 
 clean:
-		rm -f *.pb.go
-		rm -f *.go
+	rm -rf github.com

@@ -17,6 +17,7 @@ import (
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"golang.org/x/exp/slog"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
@@ -77,6 +78,8 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		return fmt.Errorf("set initial stream deadline: %w", err)
 	}
 
+	// not using pbio because it doesn't support a pooled reader that optimizes
+	// memory allocations.
 	reader := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 	for {
 		// 1. read message from stream
@@ -187,7 +190,7 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 	defer span.End()
 
 	var req pb.Message
-	if err := req.Unmarshal(data); err != nil {
+	if err := proto.Unmarshal(data, &req); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("err", err.Error()))
 
 		_ = stats.RecordWithTags(ctx,

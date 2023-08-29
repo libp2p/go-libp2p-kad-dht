@@ -97,7 +97,7 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 		return nil, fmt.Errorf("read message: %w", err)
 	}
 	protoResp := pb.Message{}
-	if err = protoResp.Unmarshal(data); err != nil {
+	if err = proto.Unmarshal(data, &protoResp); err != nil {
 		return nil, err
 	}
 

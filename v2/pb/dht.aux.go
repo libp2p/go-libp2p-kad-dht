@@ -1,6 +1,7 @@
 package dht_pb
 
 import (
+	"bytes"
 	"fmt"
 
 	mh "github.com/multiformats/go-multihash"
@@ -14,9 +15,9 @@ import (
 )
 
 // FromAddrInfo constructs a Message_Peer from the given peer.AddrInfo
-func FromAddrInfo(p peer.AddrInfo) Message_Peer {
-	mp := Message_Peer{
-		Id:    byteString(p.ID),
+func FromAddrInfo(p peer.AddrInfo) *Message_Peer {
+	mp := &Message_Peer{
+		Id:    []byte(p.ID),
 		Addrs: make([][]byte, len(p.Addrs)),
 	}
 
@@ -30,9 +31,8 @@ func FromAddrInfo(p peer.AddrInfo) Message_Peer {
 // ContainsCloserPeer returns true if the provided peer ID is among the
 // list of closer peers contained in this message.
 func (m *Message) ContainsCloserPeer(pid peer.ID) bool {
-	b := byteString(pid)
 	for _, cp := range m.CloserPeers {
-		if cp.Id.Equal(&b) {
+		if bytes.Equal(cp.Id, []byte(pid)) {
 			return true
 		}
 	}
@@ -83,7 +83,7 @@ func (m *Message) CloserNodes() []kad.NodeInfo[key.Key256, ma.Multiaddr] {
 	return ParsePeers(closerPeers)
 }
 
-func PBPeerToPeerInfo(pbp Message_Peer) (*AddrInfo, error) {
+func PBPeerToPeerInfo(pbp *Message_Peer) (*AddrInfo, error) {
 	addrs := make([]ma.Multiaddr, 0, len(pbp.Addrs))
 	for _, a := range pbp.Addrs {
 		addr, err := ma.NewMultiaddrBytes(a)
@@ -101,7 +101,7 @@ func PBPeerToPeerInfo(pbp Message_Peer) (*AddrInfo, error) {
 	}), nil
 }
 
-func ParsePeers(pbps []Message_Peer) []kad.NodeInfo[key.Key256, ma.Multiaddr] {
+func ParsePeers(pbps []*Message_Peer) []kad.NodeInfo[key.Key256, ma.Multiaddr] {
 	peers := make([]kad.NodeInfo[key.Key256, ma.Multiaddr], 0, len(pbps))
 	for _, p := range pbps {
 		pi, err := PBPeerToPeerInfo(p)

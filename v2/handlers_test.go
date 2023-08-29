@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/ipfs/boxo/ipns"
 	"github.com/ipfs/boxo/path"
 	ds "github.com/ipfs/go-datastore"
@@ -1172,7 +1173,7 @@ func newAddrInfo(t testing.TB) peer.AddrInfo {
 }
 
 func newAddProviderRequest(key []byte, addrInfos ...peer.AddrInfo) *pb.Message {
-	providerPeers := make([]pb.Message_Peer, len(addrInfos))
+	providerPeers := make([]*pb.Message_Peer, len(addrInfos))
 	for i, addrInfo := range addrInfos {
 		providerPeers[i] = pb.FromAddrInfo(addrInfo)
 	}
@@ -1311,7 +1312,7 @@ func TestDHT_handleAddProvider_empty_provider_peers(t *testing.T) {
 	// construct request
 	req := newAddProviderRequest([]byte("random-key"))
 
-	req.ProviderPeers = make([]pb.Message_Peer, 0) // overwrite
+	req.ProviderPeers = make([]*pb.Message_Peer, 0) // overwrite
 
 	// do the request
 	_, err := d.handleAddProvider(ctx, newPeerID(t), req)

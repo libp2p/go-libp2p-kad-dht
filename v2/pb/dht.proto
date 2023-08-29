@@ -1,17 +1,17 @@
-// In order to re-generate the golang packages for `Message` you will need...
-// 1. Protobuf binary (tested with protoc 3.0.0). - https://github.com/gogo/protobuf/releases
-// 2. Gogo Protobuf (tested with gogo 0.3). - https://github.com/gogo/protobuf
-// 3. To have cloned `libp2p/go-libp2p-{record,kad-dht}` under the same directory.
-// Now from `libp2p/go-libp2p-kad-dht/pb` you can run...
-// `protoc --gogo_out=. --proto_path=../../go-libp2p-record/pb/ --proto_path=./ dht.proto`
-
 syntax = "proto3";
 package dht.pb;
 
-import "github.com/libp2p/go-libp2p-record/pb/record.proto";
-import "github.com/gogo/protobuf/gogoproto/gogo.proto";
+option go_package = "./;dht_pb";
 
+import "github.com/libp2p/go-libp2p-record/pb/record.proto";
+
+// Message is the top-level envelope for exchanging
+// information with the DHT protocol.
 message Message {
+
+	// MessageType represents the type of RPC being called. Based on the message
+	// type different fields of this message will be populated. The response
+	// of a message with a certain type will have the same type.
 	enum MessageType {
 		PUT_VALUE = 0;
 		GET_VALUE = 1;
@@ -38,7 +38,7 @@ message Message {
 
 	message Peer {
 		// ID of a given peer.
-		bytes id = 1 [(gogoproto.customtype) = "byteString", (gogoproto.nullable) = false];
+		bytes id = 1;
 
 		// multiaddrs for a given peer
 		repeated bytes addrs = 2;
@@ -52,7 +52,7 @@ message Message {
 
 	// defines what coral cluster level this query/response belongs to.
 	// in case we want to implement coral's cluster rings in the future.
-	int32 clusterLevelRaw = 10;
+	int32 cluster_level_raw = 10 [deprecated = true];
 
 	// Used to specify the key associated with this message.
 	// PUT_VALUE, GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
@@ -64,9 +64,9 @@ message Message {
 
 	// Used to return peers closer to a key in a query
 	// GET_VALUE, GET_PROVIDERS, FIND_NODE
-	repeated Peer closerPeers = 8 [(gogoproto.nullable) = false];
+	repeated Peer closer_peers = 8;
 
 	// Used to return Providers
 	// GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
-	repeated Peer providerPeers = 9 [(gogoproto.nullable) = false];
+	repeated Peer provider_peers = 9;
 }

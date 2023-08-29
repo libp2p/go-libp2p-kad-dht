@@ -14,6 +14,7 @@ import (
 	"github.com/libp2p/go-msgio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 type testReadWriter struct {
@@ -35,12 +36,11 @@ func (trw testReadWriter) ReadMsg() (*pb.Message, error) {
 	}
 
 	resp := &pb.Message{}
-	err = resp.Unmarshal(msg)
-	return resp, err
+	return resp, proto.Unmarshal(msg, resp)
 }
 
 func (trw testReadWriter) WriteMsg(msg *pb.Message) error {
-	data, err := msg.Marshal()
+	data, err := proto.Marshal(msg)
 	if err != nil {
 		return err
 	}

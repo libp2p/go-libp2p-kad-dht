@@ -12,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/ipfs/boxo/ipns"
 	"github.com/ipfs/boxo/path"
 	ds "github.com/ipfs/go-datastore"
@@ -26,6 +24,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 var rng = rand.New(rand.NewSource(1337))

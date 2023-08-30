@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
@@ -187,7 +189,7 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 	defer span.End()
 
 	var req pb.Message
-	if err := req.Unmarshal(data); err != nil {
+	if err := proto.Unmarshal(data, &req); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("err", err.Error()))
 
 		_ = stats.RecordWithTags(ctx,

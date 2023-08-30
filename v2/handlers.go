@@ -13,7 +13,8 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 
-	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // handleFindPeer handles FIND_NODE requests from remote peers.
@@ -36,12 +37,12 @@ func (d *DHT) handleFindPeer(ctx context.Context, remote peer.ID, req *pb.Messag
 
 	// if the remote is asking for us, short-circuit and return us only
 	if target == d.host.ID() {
-		resp.CloserPeers = []pb.Message_Peer{pb.FromAddrInfo(pstore.PeerInfo(d.host.ID()))}
+		resp.CloserPeers = []*pb.Message_Peer{pb.FromAddrInfo(pstore.PeerInfo(d.host.ID()))}
 		return resp, nil
 	}
 
 	// gather closer peers that we know
-	resp.CloserPeers = d.closerPeers(ctx, remote, nodeID(target).Key())
+	resp.CloserPeers = d.closerPeers(ctx, remote, kadt.PeerID(target).Key())
 
 	// if we happen to know the target peers addresses (e.g., although we are
 	// far away in the keyspace), we add the peer to the result set. This means
@@ -138,7 +139,7 @@ func (d *DHT) handleGetValue(ctx context.Context, remote peer.ID, req *pb.Messag
 
 	pset, ok := fetched.(*providerSet)
 	if ok {
-		resp.ProviderPeers = make([]pb.Message_Peer, len(pset.providers))
+		resp.ProviderPeers = make([]*pb.Message_Peer, len(pset.providers))
 		for i, p := range pset.providers {
 			resp.ProviderPeers[i] = pb.FromAddrInfo(p)
 		}
@@ -213,7 +214,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("expected *providerSet value type, got: %T", pset)
 	}
 
-	pbProviders := make([]pb.Message_Peer, len(pset.providers))
+	pbProviders := make([]*pb.Message_Peer, len(pset.providers))
 	for i, p := range pset.providers {
 		pbProviders[i] = pb.FromAddrInfo(p)
 	}
@@ -230,7 +231,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 
 // closerPeers returns the closest peers to the given target key this host knows
 // about. It doesn't return 1) itself 2) the peer that asked for closer peers.
-func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256) []pb.Message_Peer {
+func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256) []*pb.Message_Peer {
 	ctx, span := tracer.Start(ctx, "DHT.closerPeers")
 	defer span.End()
 
@@ -240,9 +241,9 @@ func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256
 	}
 
 	// pre-allocated the result set slice.
-	filtered := make([]pb.Message_Peer, 0, len(peers))
+	filtered := make([]*pb.Message_Peer, 0, len(peers))
 	for _, p := range peers {
-		pid := peer.ID(p.(nodeID)) // TODO: type cast
+		pid := peer.ID(p.(kadt.PeerID)) // TODO: type cast
 
 		// check for own peer ID
 		if pid == d.host.ID() {

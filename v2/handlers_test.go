@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/ipfs/boxo/ipns"
 	"github.com/ipfs/boxo/path"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p"
-	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -25,6 +25,9 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 var rng = rand.New(rand.NewSource(1337))
@@ -81,7 +84,7 @@ func fillRoutingTable(t testing.TB, d *DHT) {
 		pid := newPeerID(t)
 
 		// add peer to routing table
-		d.rt.AddNode(nodeID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// craft network address for peer
 		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
@@ -122,7 +125,7 @@ func BenchmarkDHT_handleFindPeer(b *testing.B) {
 		pid := newPeerID(b)
 
 		// add peer to routing table
-		d.rt.AddNode(nodeID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// keep track of peer
 		peers = append(peers, pid)
@@ -174,7 +177,7 @@ func TestDHT_handleFindPeer_happy_path(t *testing.T) {
 		// closer peers. This means we can't assert for exactly 20 closer peers
 		// below.
 		if i > 0 {
-			d.rt.AddNode(nodeID(pid))
+			d.rt.AddNode(kadt.PeerID(pid))
 		}
 
 		// keep track of peer
@@ -208,7 +211,7 @@ func TestDHT_handleFindPeer_self_in_routing_table(t *testing.T) {
 	// a case that shouldn't happen
 	d := newTestDHT(t)
 
-	d.rt.AddNode(nodeID(d.host.ID()))
+	d.rt.AddNode(kadt.PeerID(d.host.ID()))
 
 	req := &pb.Message{
 		Type: pb.Message_FIND_NODE,
@@ -253,7 +256,7 @@ func TestDHT_handleFindPeer_unknown_addresses_but_in_routing_table(t *testing.T)
 		pid := newPeerID(t)
 
 		// add peer to routing table
-		d.rt.AddNode(nodeID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// keep track of peer
 		peers[i] = pid
@@ -322,7 +325,7 @@ func TestDHT_handleFindPeer_request_for_self(t *testing.T) {
 		pid := newPeerID(t)
 
 		// add peer to routing table
-		d.rt.AddNode(nodeID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// keep track of peer
 		peers[i] = pid
@@ -378,7 +381,7 @@ func TestDHT_handleFindPeer_request_for_known_but_far_peer(t *testing.T) {
 		// don't add first peer to routing table -> the one we're asking for
 		// don't add second peer -> the one that's requesting
 		if i > 1 {
-			d.rt.AddNode(nodeID(pid))
+			d.rt.AddNode(kadt.PeerID(pid))
 		}
 	}
 
@@ -1172,7 +1175,7 @@ func newAddrInfo(t testing.TB) peer.AddrInfo {
 }
 
 func newAddProviderRequest(key []byte, addrInfos ...peer.AddrInfo) *pb.Message {
-	providerPeers := make([]pb.Message_Peer, len(addrInfos))
+	providerPeers := make([]*pb.Message_Peer, len(addrInfos))
 	for i, addrInfo := range addrInfos {
 		providerPeers[i] = pb.FromAddrInfo(addrInfo)
 	}
@@ -1311,7 +1314,7 @@ func TestDHT_handleAddProvider_empty_provider_peers(t *testing.T) {
 	// construct request
 	req := newAddProviderRequest([]byte("random-key"))
 
-	req.ProviderPeers = make([]pb.Message_Peer, 0) // overwrite
+	req.ProviderPeers = make([]*pb.Message_Peer, 0) // overwrite
 
 	// do the request
 	_, err := d.handleAddProvider(ctx, newPeerID(t), req)

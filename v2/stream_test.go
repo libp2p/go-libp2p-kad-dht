@@ -6,14 +6,17 @@ import (
 	"runtime"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/libp2p/go-libp2p"
-	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 type testReadWriter struct {
@@ -35,12 +38,12 @@ func (trw testReadWriter) ReadMsg() (*pb.Message, error) {
 	}
 
 	resp := &pb.Message{}
-	err = resp.Unmarshal(msg)
+	err = proto.Unmarshal(msg, resp)
 	return resp, err
 }
 
 func (trw testReadWriter) WriteMsg(msg *pb.Message) error {
-	data, err := msg.Marshal()
+	data, err := proto.Marshal(msg)
 	if err != nil {
 		return err
 	}

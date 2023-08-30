@@ -11,12 +11,14 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 var _ kademlia.Router[key.Key256, ma.Multiaddr] = (*DHT)(nil)
 
 func (d *DHT) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma.Multiaddr], protoID address.ProtocolID, req kad.Request[key.Key256, ma.Multiaddr]) (kad.Response[key.Key256, ma.Multiaddr], error) {
-	s, err := d.host.NewStream(ctx, peer.ID(to.ID().(nodeID)), d.cfg.ProtocolID)
+	s, err := d.host.NewStream(ctx, peer.ID(to.ID().(kadt.PeerID)), d.cfg.ProtocolID)
 	if err != nil {
 		return nil, fmt.Errorf("new stream: %w", err)
 	}

@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"sync"
@@ -14,6 +15,8 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -67,7 +70,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		log:  cfg.Logger,
 	}
 
-	nid := nodeID(d.host.ID())
+	nid := kadt.PeerID(d.host.ID())
 
 	// Use the configured routing table if it was provided
 	if cfg.RoutingTable != nil {
@@ -254,4 +257,9 @@ func (d *DHT) logErr(err error, msg string) {
 	}
 
 	d.log.Warn(msg, "err", err.Error())
+}
+
+func newSHA256Key(data []byte) key.Key256 {
+	b := sha256.Sum256(data)
+	return key.NewKey256(b[:])
 }

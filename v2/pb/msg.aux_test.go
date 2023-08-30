@@ -1,4 +1,4 @@
-package dht_pb
+package pb
 
 import (
 	"testing"

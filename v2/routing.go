@@ -6,23 +6,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
-	"golang.org/x/exp/slog"
-
 	"github.com/iand/zikade/core"
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/key"
-
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 )
 
 var _ routing.Routing = (*DHT)(nil)

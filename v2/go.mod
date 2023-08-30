@@ -16,7 +16,6 @@ require (
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/multiformats/go-base32 v0.1.0
 	github.com/multiformats/go-multiaddr v0.11.0
-	github.com/multiformats/go-multihash v0.2.3
 	github.com/plprobelab/go-kademlia v0.0.0-20230823114513-9b9e606066c9
 	github.com/stretchr/testify v1.8.4
 	go.opencensus.io v0.24.0
@@ -80,6 +79,7 @@ require (
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
 	github.com/multiformats/go-multicodec v0.9.0 // indirect
+	github.com/multiformats/go-multihash v0.2.3 // indirect
 	github.com/multiformats/go-multistream v0.4.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
@@ -117,3 +117,5 @@ require (
 )
 
 replace github.com/ipfs/go-datastore v0.6.0 => github.com/dennis-tra/go-datastore v0.0.0-20230823171431-12ac85aaa42a
+
+replace github.com/iand/zikade v0.0.0-20230824143824-d11f2132b4fb => github.com/dennis-tra/zikade v0.0.0-20230830153809-e6af3ad31acd

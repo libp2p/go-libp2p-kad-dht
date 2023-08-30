@@ -65,7 +65,19 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 		return nil, fmt.Errorf("aaah ProtoKadMessage")
 	}
 
-	p := peer.ID(to.ID().(nodeID))
+	var p peer.ID
+	nid, ok := to.ID().(nodeID)
+	if !ok {
+		ai, ok := to.(*pb.AddrInfo)
+		if !ok {
+			naddr := to.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
+			p = naddr.ID().(*pb.PeerID).ID
+		} else {
+			p = ai.AddrInfo.ID
+		}
+	} else {
+		p = peer.ID(nid)
+	}
 
 	if len(r.host.Peerstore().Addrs(p)) == 0 {
 		return nil, fmt.Errorf("aaah ProtoKadMessage")
@@ -111,8 +123,19 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 }
 
 func (r *Router) AddNodeInfo(ctx context.Context, info kad.NodeInfo[key.Key256, ma.Multiaddr], ttl time.Duration) error {
-	p := peer.ID(info.ID().(nodeID))
-
+	var p peer.ID
+	nid, ok := info.ID().(nodeID)
+	if !ok {
+		ai, ok := info.(*pb.AddrInfo)
+		if !ok {
+			naddr := info.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
+			p = naddr.ID().(*pb.PeerID).ID
+		} else {
+			p = ai.AddrInfo.ID
+		}
+	} else {
+		p = peer.ID(nid)
+	}
 	ai := peer.AddrInfo{
 		ID:    p,
 		Addrs: info.Addresses(),

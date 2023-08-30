@@ -54,7 +54,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return nil
 	}
 
-	_, err := core.Query[key.Key256, ma.Multiaddr](ctx, d.kad, target.Key(), fn)
+	_, err := d.kad.Query(ctx, target.Key(), fn)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}

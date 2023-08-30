@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
@@ -35,10 +36,14 @@ func TestRouter(t *testing.T) {
 	target, err := peer.Decode("12D3KooWGWcyxn3JfihYiu2HspbE5XHzfgZiLwihVCeyXQQU8yC1")
 	require.NoError(t, err)
 
+	// Error -> delay between AddNodes and added to routing table
 	err = d.kad.AddNodes(ctx, []kad.NodeInfo[key.Key256, multiaddr.Multiaddr]{
 		nodeInfo{info: friendInfo},
 	})
 	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	d.rt.AddNode(nodeID(friendInfo.ID))
 
 	targetInfo, err := d.FindPeer(ctx, target)
 	require.NoError(t, err)

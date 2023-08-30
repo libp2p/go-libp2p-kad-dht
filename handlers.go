@@ -321,7 +321,16 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	if err != nil {
 		return nil, err
 	}
-	resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), providers)
+
+	filtered := make([]peer.AddrInfo, len(providers))
+	for i, provider := range providers {
+		filtered[i] = peer.AddrInfo{
+			ID:    provider.ID,
+			Addrs: dht.filterAddrs(provider.Addrs),
+		}
+	}
+
+	resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), filtered)
 
 	// Also send closer peers.
 	closer := dht.betterPeersToQuery(pmes, p, dht.bucketSize)

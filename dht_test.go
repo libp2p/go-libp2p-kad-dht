@@ -729,6 +729,47 @@ func TestLocalProvides(t *testing.T) {
 	}
 }
 
+func TestAddressFilterProvide(t *testing.T) {
+	// t.Skip("skipping test to debug another")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
+
+	d := setupDHT(ctx, t, false)
+	provider := setupDHT(ctx, t, false)
+
+	d.addrFilter = func(maddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{
+			testMaddr,
+		}
+	}
+
+	_, err := d.handleAddProvider(ctx, provider.self, &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("random-key"),
+		ProviderPeers: pb.PeerInfosToPBPeers(provider.host.Network(), []peer.AddrInfo{{
+			ID:    provider.self,
+			Addrs: provider.host.Addrs(),
+		}}),
+	})
+	require.NoError(t, err)
+
+	// because of the identify protocol we add all
+	// addresses to the peerstore, although the addresses
+	// will be filtered in the above handleAddProvider call
+	d.peerstore.AddAddrs(provider.self, provider.host.Addrs(), time.Hour)
+
+	resp, err := d.handleGetProviders(ctx, d.self, &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  []byte("random-key"),
+	})
+	require.NoError(t, err)
+
+	assert.True(t, resp.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
+	assert.Len(t, resp.ProviderPeers[0].Addresses(), 1)
+}
+
 // if minPeers or avgPeers is 0, dont test for it.
 func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int, timeout time.Duration) {
 	// test "well-formed-ness" (>= minPeers peers in every routing table)

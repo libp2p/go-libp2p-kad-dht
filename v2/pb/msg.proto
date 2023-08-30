@@ -1,7 +1,7 @@
 syntax = "proto3";
 package dht.pb;
 
-option go_package = "./;dht_pb";
+option go_package = "./;dht";
 
 import "github.com/libp2p/go-libp2p-record/pb/record.proto";
 

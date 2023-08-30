@@ -2,16 +2,17 @@
 // versions:
 // 	protoc-gen-go v1.30.0
 // 	protoc        v3.21.12
-// source: dht.proto
+// source: msg.proto
 
-package dht_pb
+package pb
 
 import (
+	reflect "reflect"
+	sync "sync"
+
 	pb "github.com/libp2p/go-libp2p-record/pb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (
@@ -66,11 +67,11 @@ func (x Message_MessageType) String() string {
 }
 
 func (Message_MessageType) Descriptor() protoreflect.EnumDescriptor {
-	return file_dht_proto_enumTypes[0].Descriptor()
+	return file_msg_proto_enumTypes[0].Descriptor()
 }
 
 func (Message_MessageType) Type() protoreflect.EnumType {
-	return &file_dht_proto_enumTypes[0]
+	return &file_msg_proto_enumTypes[0]
 }
 
 func (x Message_MessageType) Number() protoreflect.EnumNumber {
@@ -79,7 +80,7 @@ func (x Message_MessageType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Message_MessageType.Descriptor instead.
 func (Message_MessageType) EnumDescriptor() ([]byte, []int) {
-	return file_dht_proto_rawDescGZIP(), []int{0, 0}
+	return file_msg_proto_rawDescGZIP(), []int{0, 0}
 }
 
 type Message_ConnectionType int32
@@ -123,11 +124,11 @@ func (x Message_ConnectionType) String() string {
 }
 
 func (Message_ConnectionType) Descriptor() protoreflect.EnumDescriptor {
-	return file_dht_proto_enumTypes[1].Descriptor()
+	return file_msg_proto_enumTypes[1].Descriptor()
 }
 
 func (Message_ConnectionType) Type() protoreflect.EnumType {
-	return &file_dht_proto_enumTypes[1]
+	return &file_msg_proto_enumTypes[1]
 }
 
 func (x Message_ConnectionType) Number() protoreflect.EnumNumber {
@@ -136,7 +137,7 @@ func (x Message_ConnectionType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Message_ConnectionType.Descriptor instead.
 func (Message_ConnectionType) EnumDescriptor() ([]byte, []int) {
-	return file_dht_proto_rawDescGZIP(), []int{0, 1}
+	return file_msg_proto_rawDescGZIP(), []int{0, 1}
 }
 
 // Message is the top-level envelope for exchanging
@@ -151,7 +152,7 @@ type Message struct {
 	// defines what coral cluster level this query/response belongs to.
 	// in case we want to implement coral's cluster rings in the future.
 	//
-	// Deprecated: Marked as deprecated in dht.proto.
+	// Deprecated: Marked as deprecated in msg.proto.
 	ClusterLevelRaw int32 `protobuf:"varint,10,opt,name=cluster_level_raw,json=clusterLevelRaw,proto3" json:"cluster_level_raw,omitempty"`
 	// Used to specify the key associated with this message.
 	// PUT_VALUE, GET_VALUE, ADD_PROVIDER, GET_PROVIDERS
@@ -170,7 +171,7 @@ type Message struct {
 func (x *Message) Reset() {
 	*x = Message{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dht_proto_msgTypes[0]
+		mi := &file_msg_proto_msgTypes[0]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -183,7 +184,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_dht_proto_msgTypes[0]
+	mi := &file_msg_proto_msgTypes[0]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -196,7 +197,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_dht_proto_rawDescGZIP(), []int{0}
+	return file_msg_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Message) GetType() Message_MessageType {
@@ -206,7 +207,7 @@ func (x *Message) GetType() Message_MessageType {
 	return Message_PUT_VALUE
 }
 
-// Deprecated: Marked as deprecated in dht.proto.
+// Deprecated: Marked as deprecated in msg.proto.
 func (x *Message) GetClusterLevelRaw() int32 {
 	if x != nil {
 		return x.ClusterLevelRaw
@@ -258,7 +259,7 @@ type Message_Peer struct {
 func (x *Message_Peer) Reset() {
 	*x = Message_Peer{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_dht_proto_msgTypes[1]
+		mi := &file_msg_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -271,7 +272,7 @@ func (x *Message_Peer) String() string {
 func (*Message_Peer) ProtoMessage() {}
 
 func (x *Message_Peer) ProtoReflect() protoreflect.Message {
-	mi := &file_dht_proto_msgTypes[1]
+	mi := &file_msg_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -284,7 +285,7 @@ func (x *Message_Peer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message_Peer.ProtoReflect.Descriptor instead.
 func (*Message_Peer) Descriptor() ([]byte, []int) {
-	return file_dht_proto_rawDescGZIP(), []int{0, 0}
+	return file_msg_proto_rawDescGZIP(), []int{0, 0}
 }
 
 func (x *Message_Peer) GetId() []byte {
@@ -308,10 +309,10 @@ func (x *Message_Peer) GetConnection() Message_ConnectionType {
 	return Message_NOT_CONNECTED
 }
 
-var File_dht_proto protoreflect.FileDescriptor
+var File_msg_proto protoreflect.FileDescriptor
 
-var file_dht_proto_rawDesc = []byte{
-	0x0a, 0x09, 0x64, 0x68, 0x74, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x06, 0x64, 0x68, 0x74,
+var file_msg_proto_rawDesc = []byte{
+	0x0a, 0x09, 0x6d, 0x73, 0x67, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x06, 0x64, 0x68, 0x74,
 	0x2e, 0x70, 0x62, 0x1a, 0x32, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f,
 	0x6c, 0x69, 0x62, 0x70, 0x32, 0x70, 0x2f, 0x67, 0x6f, 0x2d, 0x6c, 0x69, 0x62, 0x70, 0x32, 0x70,
 	0x2d, 0x72, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x2f, 0x70, 0x62, 0x2f, 0x72, 0x65, 0x63, 0x6f, 0x72,
@@ -352,32 +353,35 @@ var file_dht_proto_rawDesc = []byte{
 	0x54, 0x45, 0x44, 0x10, 0x00, 0x12, 0x0d, 0x0a, 0x09, 0x43, 0x4f, 0x4e, 0x4e, 0x45, 0x43, 0x54,
 	0x45, 0x44, 0x10, 0x01, 0x12, 0x0f, 0x0a, 0x0b, 0x43, 0x41, 0x4e, 0x5f, 0x43, 0x4f, 0x4e, 0x4e,
 	0x45, 0x43, 0x54, 0x10, 0x02, 0x12, 0x12, 0x0a, 0x0e, 0x43, 0x41, 0x4e, 0x4e, 0x4f, 0x54, 0x5f,
-	0x43, 0x4f, 0x4e, 0x4e, 0x45, 0x43, 0x54, 0x10, 0x03, 0x42, 0x0b, 0x5a, 0x09, 0x2e, 0x2f, 0x3b,
-	0x64, 0x68, 0x74, 0x5f, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x43, 0x4f, 0x4e, 0x4e, 0x45, 0x43, 0x54, 0x10, 0x03, 0x42, 0x08, 0x5a, 0x06, 0x2e, 0x2f, 0x3b,
+	0x64, 0x68, 0x74, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
-	file_dht_proto_rawDescOnce sync.Once
-	file_dht_proto_rawDescData = file_dht_proto_rawDesc
+	file_msg_proto_rawDescOnce sync.Once
+	file_msg_proto_rawDescData = file_msg_proto_rawDesc
 )
 
-func file_dht_proto_rawDescGZIP() []byte {
-	file_dht_proto_rawDescOnce.Do(func() {
-		file_dht_proto_rawDescData = protoimpl.X.CompressGZIP(file_dht_proto_rawDescData)
+func file_msg_proto_rawDescGZIP() []byte {
+	file_msg_proto_rawDescOnce.Do(func() {
+		file_msg_proto_rawDescData = protoimpl.X.CompressGZIP(file_msg_proto_rawDescData)
 	})
-	return file_dht_proto_rawDescData
+	return file_msg_proto_rawDescData
 }
 
-var file_dht_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_dht_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_dht_proto_goTypes = []interface{}{
-	(Message_MessageType)(0),    // 0: dht.pb.Message.MessageType
-	(Message_ConnectionType)(0), // 1: dht.pb.Message.ConnectionType
-	(*Message)(nil),             // 2: dht.pb.Message
-	(*Message_Peer)(nil),        // 3: dht.pb.Message.Peer
-	(*pb.Record)(nil),           // 4: record.pb.Record
-}
-var file_dht_proto_depIdxs = []int32{
+var (
+	file_msg_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+	file_msg_proto_msgTypes  = make([]protoimpl.MessageInfo, 2)
+	file_msg_proto_goTypes   = []interface{}{
+		(Message_MessageType)(0),    // 0: dht.pb.Message.MessageType
+		(Message_ConnectionType)(0), // 1: dht.pb.Message.ConnectionType
+		(*Message)(nil),             // 2: dht.pb.Message
+		(*Message_Peer)(nil),        // 3: dht.pb.Message.Peer
+		(*pb.Record)(nil),           // 4: record.pb.Record
+	}
+)
+
+var file_msg_proto_depIdxs = []int32{
 	0, // 0: dht.pb.Message.type:type_name -> dht.pb.Message.MessageType
 	4, // 1: dht.pb.Message.record:type_name -> record.pb.Record
 	3, // 2: dht.pb.Message.closer_peers:type_name -> dht.pb.Message.Peer
@@ -390,13 +394,13 @@ var file_dht_proto_depIdxs = []int32{
 	0, // [0:5] is the sub-list for field type_name
 }
 
-func init() { file_dht_proto_init() }
-func file_dht_proto_init() {
-	if File_dht_proto != nil {
+func init() { file_msg_proto_init() }
+func file_msg_proto_init() {
+	if File_msg_proto != nil {
 		return
 	}
 	if !protoimpl.UnsafeEnabled {
-		file_dht_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
+		file_msg_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*Message); i {
 			case 0:
 				return &v.state
@@ -408,7 +412,7 @@ func file_dht_proto_init() {
 				return nil
 			}
 		}
-		file_dht_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+		file_msg_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*Message_Peer); i {
 			case 0:
 				return &v.state
@@ -425,19 +429,19 @@ func file_dht_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_dht_proto_rawDesc,
+			RawDescriptor: file_msg_proto_rawDesc,
 			NumEnums:      2,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_dht_proto_goTypes,
-		DependencyIndexes: file_dht_proto_depIdxs,
-		EnumInfos:         file_dht_proto_enumTypes,
-		MessageInfos:      file_dht_proto_msgTypes,
+		GoTypes:           file_msg_proto_goTypes,
+		DependencyIndexes: file_msg_proto_depIdxs,
+		EnumInfos:         file_msg_proto_enumTypes,
+		MessageInfos:      file_msg_proto_msgTypes,
 	}.Build()
-	File_dht_proto = out.File
-	file_dht_proto_rawDesc = nil
-	file_dht_proto_goTypes = nil
-	file_dht_proto_depIdxs = nil
+	File_msg_proto = out.File
+	file_msg_proto_rawDesc = nil
+	file_msg_proto_goTypes = nil
+	file_msg_proto_depIdxs = nil
 }

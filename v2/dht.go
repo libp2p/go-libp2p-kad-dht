@@ -1,12 +1,14 @@
 package dht
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"sync"
 
 	"github.com/iand/zikade/kademlia"
 	"github.com/ipfs/go-datastore/trace"
+	kadt "github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -67,7 +69,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		log:  cfg.Logger,
 	}
 
-	nid := nodeID(d.host.ID())
+	nid := kadt.PeerID(d.host.ID())
 
 	// Use the configured routing table if it was provided
 	if cfg.RoutingTable != nil {
@@ -254,4 +256,10 @@ func (d *DHT) logErr(err error, msg string) {
 	}
 
 	d.log.Warn(msg, "err", err.Error())
+}
+
+// newSHA256Key SHA256 hashes the given bytes and returns a new 256-bit key.
+func newSHA256Key(data []byte) key.Key256 {
+	h := sha256.Sum256(data)
+	return key.NewKey256(h[:])
 }

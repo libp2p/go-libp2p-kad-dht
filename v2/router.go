@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-msgio"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+
+	"github.com/libp2p/go-msgio"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
@@ -66,15 +68,10 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 	}
 
 	var p peer.ID
-	nid, ok := to.ID().(nodeID)
+	nid, ok := to.ID().(kadt.PeerID)
 	if !ok {
-		ai, ok := to.(*pb.AddrInfo)
-		if !ok {
-			naddr := to.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
-			p = naddr.ID().(*pb.PeerID).ID
-		} else {
-			p = ai.AddrInfo.ID
-		}
+		naddr := to.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
+		p = peer.ID(naddr.ID().(kadt.PeerID))
 	} else {
 		p = peer.ID(nid)
 	}
@@ -114,8 +111,8 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 	}
 
 	for _, info := range protoResp.CloserPeersAddrInfos() {
-		_ = r.AddNodeInfo(ctx, nodeInfo{
-			info: info,
+		_ = r.AddNodeInfo(ctx, kadt.AddrInfo{
+			Info: info,
 		}, time.Hour)
 	}
 
@@ -124,15 +121,10 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 
 func (r *Router) AddNodeInfo(ctx context.Context, info kad.NodeInfo[key.Key256, ma.Multiaddr], ttl time.Duration) error {
 	var p peer.ID
-	nid, ok := info.ID().(nodeID)
+	nid, ok := info.ID().(kadt.PeerID)
 	if !ok {
-		ai, ok := info.(*pb.AddrInfo)
-		if !ok {
-			naddr := info.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
-			p = naddr.ID().(*pb.PeerID).ID
-		} else {
-			p = ai.AddrInfo.ID
-		}
+		naddr := info.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
+		p = peer.ID(naddr.ID().(kadt.PeerID))
 	} else {
 		p = peer.ID(nid)
 	}
@@ -151,8 +143,8 @@ func (r *Router) AddNodeInfo(ctx context.Context, info kad.NodeInfo[key.Key256, 
 }
 
 func (r *Router) GetNodeInfo(ctx context.Context, id kad.NodeID[key.Key256]) (kad.NodeInfo[key.Key256, ma.Multiaddr], error) {
-	// TODO implement me
-	panic("implement me")
+	pid := peer.ID(id.(kadt.PeerID))
+	return kadt.AddrInfo{Info: r.host.Peerstore().PeerInfo(pid)}, nil
 }
 
 func (r *Router) GetClosestNodes(ctx context.Context, to kad.NodeInfo[key.Key256, ma.Multiaddr], target key.Key256) ([]kad.NodeInfo[key.Key256, ma.Multiaddr], error) {

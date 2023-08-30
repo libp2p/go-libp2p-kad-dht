@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"golang.org/x/exp/slog"
 
 	"github.com/iand/zikade/core"
@@ -42,7 +44,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		// we're
 	}
 
-	target := nodeID(id)
+	target := kadt.PeerID(id)
 
 	var foundNode core.Node[key.Key256, ma.Multiaddr]
 	fn := func(ctx context.Context, node core.Node[key.Key256, ma.Multiaddr], stats core.QueryStats) error {
@@ -59,8 +61,12 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
 
+	if foundNode == nil {
+		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
+	}
+
 	return peer.AddrInfo{
-		ID:    peer.ID(foundNode.ID().(nodeID)),
+		ID:    peer.ID(foundNode.ID().(kadt.PeerID)),
 		Addrs: foundNode.Addresses(),
 	}, nil
 }

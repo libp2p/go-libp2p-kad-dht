@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	kadt "github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -15,7 +13,8 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 
-	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // handleFindPeer handles FIND_NODE requests from remote peers.

@@ -8,7 +8,6 @@ import (
 
 	"github.com/iand/zikade/kademlia"
 	"github.com/ipfs/go-datastore/trace"
-	kadt "github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -16,6 +15,8 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.

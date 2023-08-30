@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/ipfs/boxo/ipns"
 	"github.com/ipfs/boxo/path"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -25,7 +25,9 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 var rng = rand.New(rand.NewSource(1337))

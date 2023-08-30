@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // this file contains auxiliary methods to augment the protobuf generated types.

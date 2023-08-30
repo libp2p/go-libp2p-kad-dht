@@ -16,13 +16,14 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/autobatch"
 	dsq "github.com/ipfs/go-datastore/query"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/multiformats/go-base32"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
 )
 
 // ProvidersBackend implements the [Backend] interface and handles provider

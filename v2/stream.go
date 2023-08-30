@@ -20,7 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
-	pb "github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // streamHandler is the function that's registered with the libp2p host for

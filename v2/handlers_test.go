@@ -675,10 +675,10 @@ func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) 
 
 	dsKey := newDatastoreKey(namespaceIPNS, string(remote)) // string(remote) is the key suffix
 
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
+	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
+	require.NoError(t, err)
 
-	err := rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-record"))
+	err = rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-record"))
 	require.NoError(t, err)
 
 	// put the correct record through handler
@@ -912,8 +912,8 @@ func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
 
 	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
+	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
+	require.NoError(t, err)
 
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)
@@ -969,13 +969,13 @@ func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 
 	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
 		t.Run(ns, func(t *testing.T) {
-			rbe, ok := d.backends[ns].(*RecordBackend)
-			require.True(t, ok)
+			rbe, err := typedBackend[*RecordBackend](d, ns)
+			require.NoError(t, err)
 
 			key := []byte(fmt.Sprintf("/%s/record-key", ns))
 
 			dsKey := newDatastoreKey(ns, "record-key")
-			err := rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-data"))
+			err = rbe.datastore.Put(context.Background(), dsKey, []byte("corrupt-data"))
 			require.NoError(t, err)
 
 			req := &pb.Message{
@@ -1009,8 +1009,8 @@ func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
 
 	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
 
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
+	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
+	require.NoError(t, err)
 
 	dsKey := newDatastoreKey(namespaceIPNS, string(remote))
 
@@ -1047,8 +1047,8 @@ func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 
 	fillRoutingTable(t, d)
 
-	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
-	require.True(t, ok)
+	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
+	require.NoError(t, err)
 
 	remote, priv := newIdentity(t)
 
@@ -1133,13 +1133,13 @@ func TestDHT_handleGetValue_supports_providers(t *testing.T) {
 	// add to addresses peerstore
 	d.host.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
 
-	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
-	require.True(t, ok)
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
+	require.NoError(t, err)
 
 	// write to datastore
 	dsKey := newDatastoreKey(namespaceProviders, string(key), string(p.ID))
 	rec := expiryRecord{expiry: time.Now()}
-	err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	err = be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
 	req := &pb.Message{
@@ -1230,8 +1230,8 @@ func TestDHT_handleAddProvider_happy_path(t *testing.T) {
 	assert.Equal(t, addrs[0], addrInfo.Addrs[0])
 
 	// check if the record was store in the datastore
-	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
-	require.True(t, ok)
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
+	require.NoError(t, err)
 
 	dsKey := newDatastoreKey(be.namespace, string(key), string(addrInfo.ID))
 
@@ -1405,8 +1405,8 @@ func TestDHT_handleGetProviders_happy_path(t *testing.T) {
 
 	key := []byte("random-key")
 
-	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
-	require.True(t, ok)
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
+	require.NoError(t, err)
 
 	providers := []peer.AddrInfo{
 		newAddrInfo(t),
@@ -1457,8 +1457,8 @@ func TestDHT_handleGetProviders_do_not_return_expired_records(t *testing.T) {
 	key := []byte("random-key")
 
 	// check if the record was store in the datastore
-	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
-	require.True(t, ok)
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
+	require.NoError(t, err)
 
 	provider1 := newAddrInfo(t)
 	provider2 := newAddrInfo(t)
@@ -1469,7 +1469,7 @@ func TestDHT_handleGetProviders_do_not_return_expired_records(t *testing.T) {
 	// write valid record
 	dsKey := newDatastoreKey(namespaceProviders, string(key), string(provider1.ID))
 	rec := expiryRecord{expiry: time.Now()}
-	err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	err = be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
 	// write expired record
@@ -1515,8 +1515,8 @@ func TestDHT_handleGetProviders_only_serve_filtered_addresses(t *testing.T) {
 
 	key := []byte("random-key")
 
-	be, ok := d.backends[namespaceProviders].(*ProvidersBackend)
-	require.True(t, ok)
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
+	require.NoError(t, err)
 
 	p := newAddrInfo(t)
 	require.True(t, len(p.Addrs) > 0, "need addr info with at least one address")
@@ -1527,7 +1527,7 @@ func TestDHT_handleGetProviders_only_serve_filtered_addresses(t *testing.T) {
 	// write to datastore
 	dsKey := newDatastoreKey(namespaceProviders, string(key), string(p.ID))
 	rec := expiryRecord{expiry: time.Now()}
-	err := be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	err = be.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
 	req := &pb.Message{

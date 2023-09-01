@@ -1,7 +1,7 @@
 // Package kadt contains the kademlia types for interacting with go-kademlia.
-// It would be nicer to have these types in the top-level DHT package, however
-// we also need these types in, e.g., the dht_pb package to let the Message
-// type conform to certain interfaces.
+// It would be nicer to have these types in the top-level DHT package; however,
+// we also need these types in, e.g., the pb package to let the
+// [pb.Message] type conform to certain interfaces.
 package kadt
 
 import (

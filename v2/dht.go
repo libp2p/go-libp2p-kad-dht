@@ -112,6 +112,14 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		}
 	}
 
+	// wrap all backends with tracing
+	for ns, backend := range d.backends {
+		d.backends[ns] = &tracedBackend{
+			namespace: ns,
+			backend:   backend,
+		}
+	}
+
 	// instantiate a new Kademlia DHT coordinator.
 	d.kad, err = kademlia.NewDht[key.Key256, ma.Multiaddr](nid, &Router{host: h}, d.rt, nil)
 	if err != nil {
@@ -166,11 +174,9 @@ func (d *DHT) Close() error {
 	// and the get hold of a reference to that datastore by looking in our
 	// backends map and casting one to one of our known providers.
 	if d.cfg.ProtocolID == ProtocolIPFS && d.cfg.Datastore == nil {
-		if b, found := d.backends[namespaceProviders]; found {
-			if pbe, ok := b.(*ProvidersBackend); ok {
-				if err := pbe.datastore.Close(); err != nil {
-					d.log.Warn("failed closing in memory datastore", "err", err.Error())
-				}
+		if pbe, err := typedBackend[*ProvidersBackend](d, namespaceProviders); err == nil {
+			if err := pbe.datastore.Close(); err != nil {
+				d.log.Warn("failed closing in memory datastore", "err", err.Error())
 			}
 		}
 	}
@@ -259,8 +265,46 @@ func (d *DHT) logErr(err error, msg string) {
 	d.log.Warn(msg, "err", err.Error())
 }
 
-// newSHA256Key SHA256 hashes the given bytes and returns a new 256-bit key.
+// newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by
+// SHA256 hashing the given bytes and wrapping them in a [key.Key256].
 func newSHA256Key(data []byte) key.Key256 {
 	h := sha256.Sum256(data)
 	return key.NewKey256(h[:])
+}
+
+// typedBackend returns the backend at the given namespace. It is casted to the
+// provided type. If the namespace doesn't exist or the type cast failed, this
+// function returns an error. Can't be a method on [DHT] because of the generic
+// type constraint [0].
+//
+// This method is only used in tests and the [DHT.Close] method. It would be
+// great if we wouldn't need this method.
+//
+// [0]: https://github.com/golang/go/issues/49085
+func typedBackend[T Backend](d *DHT, namespace string) (T, error) {
+	// check if backend was registered
+	be, found := d.backends[namespace]
+	if !found {
+		return *new(T), fmt.Errorf("backend for namespace %s not found", namespace)
+	}
+
+	// try to cast to the desired type
+	cbe, ok := be.(T) // casted backend
+	if !ok {
+		// that didn't work... check if the desired backend was wrapped
+		// into a traced backend
+		tbe, ok := be.(*tracedBackend)
+		if !ok {
+			return *new(T), fmt.Errorf("backend at namespace is no traced backend nor %T", *new(T))
+		}
+
+		cbe, ok := tbe.backend.(T)
+		if !ok {
+			return *new(T), fmt.Errorf("traced backend doesn't contain %T", *new(T))
+		}
+
+		return cbe, nil
+	}
+
+	return cbe, nil
 }

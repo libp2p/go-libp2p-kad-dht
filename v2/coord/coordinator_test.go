@@ -142,7 +142,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	self := nodes[0].NodeInfo.ID
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
-		log.Fatalf("unexpected error creating dht: %v", err)
+		log.Fatalf("unexpected error creating coordinator: %v", err)
 	}
 
 	buffer := make(chan RoutingNotification, 5)

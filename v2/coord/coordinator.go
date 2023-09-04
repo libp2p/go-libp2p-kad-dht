@@ -117,7 +117,7 @@ func DefaultConfig() *CoordinatorConfig {
 		QueryTimeout:       5 * time.Minute,
 		RequestConcurrency: 3,
 		RequestTimeout:     time.Minute,
-		Logger:             slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
+		Logger:             slog.New(zapslog.NewHandler(logging.Logger("coord").Desugar().Core())),
 	}
 }
 

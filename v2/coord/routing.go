@@ -1,21 +1,24 @@
-package kademlia
+package coord
 
 import (
 	"context"
 	"fmt"
 	"sync"
 
-	"github.com/plprobelab/go-kademlia/kad"
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/plprobelab/go-kademlia/util"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
-type RoutingBehaviour[K kad.Key[K], A kad.Address[A]] struct {
+type RoutingBehaviour struct {
 	// self is the node id of the system the dht is running on
-	self kad.NodeID[K]
+	self peer.ID
 	// bootstrap is the bootstrap state machine, responsible for bootstrapping the routing table
 	bootstrap SM[routing.BootstrapEvent, routing.BootstrapState]
 
@@ -32,8 +35,8 @@ type RoutingBehaviour[K kad.Key[K], A kad.Address[A]] struct {
 	logger *slog.Logger
 }
 
-func NewRoutingBehaviour[K kad.Key[K], A kad.Address[A]](self kad.NodeID[K], bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger) *RoutingBehaviour[K, A] {
-	r := &RoutingBehaviour[K, A]{
+func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger) *RoutingBehaviour {
+	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,
 		include:   include,
@@ -44,7 +47,7 @@ func NewRoutingBehaviour[K kad.Key[K], A kad.Address[A]](self kad.NodeID[K], boo
 	return r
 }
 
-func (r *RoutingBehaviour[K, A]) Notify(ctx context.Context, ev DhtEvent) {
+func (r *RoutingBehaviour) Notify(ctx context.Context, ev DhtEvent) {
 	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.Notify")
 	defer span.End()
 
@@ -54,16 +57,16 @@ func (r *RoutingBehaviour[K, A]) Notify(ctx context.Context, ev DhtEvent) {
 }
 
 // notify must only be called while r.pendingMu is held
-func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
+func (r *RoutingBehaviour) notify(ctx context.Context, ev DhtEvent) {
 	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.notify")
 	defer span.End()
 	switch ev := ev.(type) {
-	case *EventDhtStartBootstrap[K, A]:
+	case *EventDhtStartBootstrap:
 		span.SetAttributes(attribute.String("event", "EventDhtStartBootstrap"))
-		cmd := &routing.EventBootstrapStart[K, A]{
+		cmd := &routing.EventBootstrapStart[key.Key256, ma.Multiaddr]{
 			ProtocolID:        ev.ProtocolID,
 			Message:           ev.Message,
-			KnownClosestNodes: ev.SeedNodes,
+			KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
 		}
 		// attempt to advance the bootstrap
 		next, ok := r.advanceBootstrap(ctx, cmd)
@@ -71,14 +74,14 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 			r.pending = append(r.pending, next)
 		}
 
-	case *EventDhtAddNodeInfo[K, A]:
+	case *EventDhtAddNodeInfo:
 		span.SetAttributes(attribute.String("event", "EventDhtAddNodeInfo"))
 		// Ignore self
-		if key.Equal(ev.NodeInfo.ID().Key(), r.self.Key()) {
+		if ev.NodeInfo.ID == r.self {
 			break
 		}
-		cmd := &routing.EventIncludeAddCandidate[K, A]{
-			NodeInfo: ev.NodeInfo,
+		cmd := &routing.EventIncludeAddCandidate[key.Key256, ma.Multiaddr]{
+			NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
 		}
 		// attempt to advance the include
 		next, ok := r.advanceInclude(ctx, cmd)
@@ -86,9 +89,9 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 			r.pending = append(r.pending, next)
 		}
 
-	case *EventRoutingUpdated[K, A]:
+	case *EventRoutingUpdated:
 		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"))
-		cmd := &routing.EventProbeAdd[K]{
+		cmd := &routing.EventProbeAdd[key.Key256]{
 			NodeID: ev.NodeInfo.ID(),
 		}
 		// attempt to advance the probe state machine
@@ -97,19 +100,19 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 			r.pending = append(r.pending, next)
 		}
 
-	case *EventGetClosestNodesSuccess[K, A]:
-		span.SetAttributes(attribute.String("event", "EventGetClosestNodesFailure"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", string(ev.To.ID().String())))
+	case *EventGetCloserNodesSuccess:
+		span.SetAttributes(attribute.String("event", "EventGetClosestNodesFailure"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", ev.To.String()))
 		switch ev.QueryID {
 		case "bootstrap":
-			for _, info := range ev.ClosestNodes {
+			for _, info := range ev.CloserNodes {
 				// TODO: do this after advancing bootstrap
-				r.pending = append(r.pending, &EventDhtAddNodeInfo[K, A]{
+				r.pending = append(r.pending, &EventDhtAddNodeInfo{
 					NodeInfo: info,
 				})
 			}
-			cmd := &routing.EventBootstrapMessageResponse[K, A]{
-				NodeID:   ev.To.ID(),
-				Response: ClosestNodesFakeResponse(ev.Target, ev.ClosestNodes),
+			cmd := &routing.EventBootstrapMessageResponse[key.Key256, ma.Multiaddr]{
+				NodeID:   kadt.PeerID(ev.To.ID),
+				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 			}
 			// attempt to advance the bootstrap
 			next, ok := r.advanceBootstrap(ctx, cmd)
@@ -118,9 +121,9 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 			}
 
 		case "include":
-			cmd := &routing.EventIncludeMessageResponse[K, A]{
-				NodeInfo: ev.To,
-				Response: ClosestNodesFakeResponse(ev.Target, ev.ClosestNodes),
+			cmd := &routing.EventIncludeMessageResponse[key.Key256, ma.Multiaddr]{
+				NodeInfo: kadt.AddrInfo{Info: ev.To},
+				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 			}
 			// attempt to advance the include
 			next, ok := r.advanceInclude(ctx, cmd)
@@ -129,9 +132,9 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 			}
 
 		case "probe":
-			cmd := &routing.EventProbeMessageResponse[K, A]{
-				NodeInfo: ev.To,
-				Response: ClosestNodesFakeResponse(ev.Target, ev.ClosestNodes),
+			cmd := &routing.EventProbeMessageResponse[key.Key256, ma.Multiaddr]{
+				NodeInfo: kadt.AddrInfo{Info: ev.To},
+				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 			}
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
@@ -142,13 +145,13 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 		default:
 			panic(fmt.Sprintf("unexpected query id: %s", ev.QueryID))
 		}
-	case *EventGetClosestNodesFailure[K, A]:
-		span.SetAttributes(attribute.String("event", "EventGetClosestNodesFailure"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", string(ev.To.ID().String())))
+	case *EventGetCloserNodesFailure:
+		span.SetAttributes(attribute.String("event", "EventGetClosestNodesFailure"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", ev.To.String()))
 		span.RecordError(ev.Err)
 		switch ev.QueryID {
 		case "bootstrap":
-			cmd := &routing.EventBootstrapMessageFailure[K]{
-				NodeID: ev.To.ID(),
+			cmd := &routing.EventBootstrapMessageFailure[key.Key256]{
+				NodeID: kadt.PeerID(ev.To.ID),
 				Error:  ev.Err,
 			}
 			// attempt to advance the bootstrap
@@ -157,8 +160,8 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 				r.pending = append(r.pending, next)
 			}
 		case "include":
-			cmd := &routing.EventIncludeMessageFailure[K, A]{
-				NodeInfo: ev.To,
+			cmd := &routing.EventIncludeMessageFailure[key.Key256, ma.Multiaddr]{
+				NodeInfo: kadt.AddrInfo{Info: ev.To},
 				Error:    ev.Err,
 			}
 			// attempt to advance the include state machine
@@ -167,8 +170,8 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 				r.pending = append(r.pending, next)
 			}
 		case "probe":
-			cmd := &routing.EventProbeMessageFailure[K, A]{
-				NodeInfo: ev.To,
+			cmd := &routing.EventProbeMessageFailure[key.Key256, ma.Multiaddr]{
+				NodeInfo: kadt.AddrInfo{Info: ev.To},
 				Error:    ev.Err,
 			}
 			// attempt to advance the probe state machine
@@ -192,11 +195,11 @@ func (r *RoutingBehaviour[K, A]) notify(ctx context.Context, ev DhtEvent) {
 	}
 }
 
-func (r *RoutingBehaviour[K, A]) Ready() <-chan struct{} {
+func (r *RoutingBehaviour) Ready() <-chan struct{} {
 	return r.ready
 }
 
-func (r *RoutingBehaviour[K, A]) Perform(ctx context.Context) (DhtEvent, bool) {
+func (r *RoutingBehaviour) Perform(ctx context.Context) (DhtEvent, bool) {
 	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.Perform")
 	defer span.End()
 
@@ -243,16 +246,16 @@ func (r *RoutingBehaviour[K, A]) Perform(ctx context.Context) (DhtEvent, bool) {
 	}
 }
 
-func (r *RoutingBehaviour[K, A]) advanceBootstrap(ctx context.Context, ev routing.BootstrapEvent) (DhtEvent, bool) {
+func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.BootstrapEvent) (DhtEvent, bool) {
 	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.advanceBootstrap")
 	defer span.End()
 	bstate := r.bootstrap.Advance(ctx, ev)
 	switch st := bstate.(type) {
 
-	case *routing.StateBootstrapMessage[K, A]:
-		return &EventOutboundGetClosestNodes[K, A]{
+	case *routing.StateBootstrapMessage[key.Key256, ma.Multiaddr]:
+		return &EventOutboundGetClosestNodes{
 			QueryID: "bootstrap",
-			To:      NewNodeAddr[K, A](st.NodeID, nil),
+			To:      NodeIDToAddrInfo(st.NodeID),
 			Target:  st.Message.Target(),
 			Notify:  r,
 		}, true
@@ -272,30 +275,30 @@ func (r *RoutingBehaviour[K, A]) advanceBootstrap(ctx context.Context, ev routin
 	return nil, false
 }
 
-func (r *RoutingBehaviour[K, A]) advanceInclude(ctx context.Context, ev routing.IncludeEvent) (DhtEvent, bool) {
+func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.IncludeEvent) (DhtEvent, bool) {
 	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.advanceInclude")
 	defer span.End()
 	istate := r.include.Advance(ctx, ev)
 	switch st := istate.(type) {
-	case *routing.StateIncludeFindNodeMessage[K, A]:
+	case *routing.StateIncludeFindNodeMessage[key.Key256, ma.Multiaddr]:
 		// include wants to send a find node message to a node
-		return &EventOutboundGetClosestNodes[K, A]{
+		return &EventOutboundGetClosestNodes{
 			QueryID: "include",
-			To:      st.NodeInfo,
+			To:      NodeInfoToAddrInfo(st.NodeInfo),
 			Target:  st.NodeInfo.ID().Key(),
 			Notify:  r,
 		}, true
 
-	case *routing.StateIncludeRoutingUpdated[K, A]:
+	case *routing.StateIncludeRoutingUpdated[key.Key256, ma.Multiaddr]:
 		// a node has been included in the routing table
 
 		// notify other routing state machines that there is a new node in the routing table
-		r.notify(ctx, &EventRoutingUpdated[K, A]{
+		r.notify(ctx, &EventRoutingUpdated{
 			NodeInfo: st.NodeInfo,
 		})
 
 		// return the event to notify outwards too
-		return &EventRoutingUpdated[K, A]{
+		return &EventRoutingUpdated{
 			NodeInfo: st.NodeInfo,
 		}, true
 	case *routing.StateIncludeWaitingAtCapacity:
@@ -313,24 +316,24 @@ func (r *RoutingBehaviour[K, A]) advanceInclude(ctx context.Context, ev routing.
 	return nil, false
 }
 
-func (r *RoutingBehaviour[K, A]) advanceProbe(ctx context.Context, ev routing.ProbeEvent) (DhtEvent, bool) {
+func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEvent) (DhtEvent, bool) {
 	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.advanceProbe")
 	defer span.End()
 	st := r.probe.Advance(ctx, ev)
 	switch st := st.(type) {
-	case *routing.StateProbeConnectivityCheck[K]:
+	case *routing.StateProbeConnectivityCheck[key.Key256]:
 		// include wants to send a find node message to a node
-		return &EventOutboundGetClosestNodes[K, A]{
+		return &EventOutboundGetClosestNodes{
 			QueryID: "probe",
-			To:      unaddressedNodeInfo[K, A]{NodeID: st.NodeID},
+			To:      NodeIDToAddrInfo(st.NodeID),
 			Target:  st.NodeID.Key(),
 			Notify:  r,
 		}, true
-	case *routing.StateProbeNodeFailure[K]:
+	case *routing.StateProbeNodeFailure[key.Key256]:
 		// a node has failed a connectivity check been removed from the routing table and the probe list
 		// add the node to the inclusion list for a second chance
-		r.notify(ctx, &EventDhtAddNodeInfo[K, A]{
-			NodeInfo: unaddressedNodeInfo[K, A]{NodeID: st.NodeID},
+		r.notify(ctx, &EventDhtAddNodeInfo{
+			NodeInfo: NodeIDToAddrInfo(st.NodeID),
 		})
 	case *routing.StateProbeWaitingAtCapacity:
 		// the probe state machine is waiting for responses for checks and the maximum number of concurrent checks has been reached.
@@ -347,10 +350,3 @@ func (r *RoutingBehaviour[K, A]) advanceProbe(ctx context.Context, ev routing.Pr
 
 	return nil, false
 }
-
-type unaddressedNodeInfo[K kad.Key[K], A kad.Address[A]] struct {
-	NodeID kad.NodeID[K]
-}
-
-func (u unaddressedNodeInfo[K, A]) ID() kad.NodeID[K] { return u.NodeID }
-func (u unaddressedNodeInfo[K, A]) Addresses() []A    { return nil }

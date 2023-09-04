@@ -5,53 +5,55 @@ import (
 	"fmt"
 
 	"github.com/benbjohnson/clock"
-
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/routing"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
-type Node[K kad.Key[K], A kad.Address[A]] struct {
-	NodeInfo     kad.NodeInfo[K, A]
-	Router       *Router[K, A]
-	RoutingTable routing.RoutingTableCpl[K, kad.NodeID[K]]
+type Node struct {
+	NodeInfo     peer.AddrInfo
+	Router       *Router
+	RoutingTable routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
 }
 
-type Topology[K kad.Key[K], A kad.Address[A]] struct {
+type Topology struct {
 	clk       *clock.Mock
 	links     map[string]Link
-	nodes     []*Node[K, A]
-	nodeIndex map[string]*Node[K, A]
-	routers   map[string]*Router[K, A]
+	nodes     []*Node
+	nodeIndex map[peer.ID]*Node
+	routers   map[peer.ID]*Router
 }
 
-func NewTopology[K kad.Key[K], A kad.Address[A]](clk *clock.Mock) *Topology[K, A] {
-	return &Topology[K, A]{
+func INewTopology(clk *clock.Mock) *Topology {
+	return &Topology{
 		clk:       clk,
 		links:     make(map[string]Link),
-		nodeIndex: make(map[string]*Node[K, A]),
-		routers:   make(map[string]*Router[K, A]),
+		nodeIndex: make(map[peer.ID]*Node),
+		routers:   make(map[peer.ID]*Router),
 	}
 }
 
-func (t *Topology[K, A]) Nodes() []*Node[K, A] {
+func (t *Topology) Nodes() []*Node {
 	return t.nodes
 }
 
-func (t *Topology[K, A]) ConnectNodes(a *Node[K, A], b *Node[K, A]) {
+func (t *Topology) ConnectNodes(a *Node, b *Node) {
 	t.ConnectNodesWithRoute(a, b, &DefaultLink{})
 }
 
-func (t *Topology[K, A]) ConnectNodesWithRoute(a *Node[K, A], b *Node[K, A], l Link) {
-	akey := key.HexString(a.NodeInfo.ID().Key())
+func (t *Topology) ConnectNodesWithRoute(a *Node, b *Node, l Link) {
+	akey := a.NodeInfo.ID
 	if _, exists := t.nodeIndex[akey]; !exists {
 		t.nodeIndex[akey] = a
 		t.nodes = append(t.nodes, a)
 		t.routers[akey] = a.Router
 	}
 
-	bkey := key.HexString(b.NodeInfo.ID().Key())
+	bkey := b.NodeInfo.ID
 	if _, exists := t.nodeIndex[bkey]; !exists {
 		t.nodeIndex[bkey] = b
 		t.nodes = append(t.nodes, b)
@@ -66,11 +68,8 @@ func (t *Topology[K, A]) ConnectNodesWithRoute(a *Node[K, A], b *Node[K, A], l L
 	t.links[btoa] = l
 }
 
-func (t *Topology[K, A]) findRoute(ctx context.Context, from kad.NodeID[K], to kad.NodeID[K]) (Link, error) {
-	fkey := key.HexString(from.Key())
-	tkey := key.HexString(to.Key())
-
-	key := fmt.Sprintf("%s->%s", fkey, tkey)
+func (t *Topology) findRoute(ctx context.Context, from peer.ID, to peer.ID) (Link, error) {
+	key := fmt.Sprintf("%s->%s", from, to)
 
 	route, ok := t.links[key]
 	if !ok {
@@ -80,12 +79,11 @@ func (t *Topology[K, A]) findRoute(ctx context.Context, from kad.NodeID[K], to k
 	return route, nil
 }
 
-func (t *Topology[K, A]) Dial(ctx context.Context, from kad.NodeID[K], to kad.NodeID[K]) (kad.NodeInfo[K, A], error) {
-	if key.Equal(from.Key(), to.Key()) {
-		tkey := key.HexString(to.Key())
-		node, ok := t.nodeIndex[tkey]
+func (t *Topology) Dial(ctx context.Context, from peer.ID, to peer.ID) (peer.AddrInfo, error) {
+	if from == to {
+		node, ok := t.nodeIndex[to]
 		if !ok {
-			return nil, fmt.Errorf("unknown node")
+			return peer.AddrInfo{}, fmt.Errorf("unknown node")
 		}
 
 		return node.NodeInfo, nil
@@ -93,7 +91,7 @@ func (t *Topology[K, A]) Dial(ctx context.Context, from kad.NodeID[K], to kad.No
 
 	route, err := t.findRoute(ctx, from, to)
 	if err != nil {
-		return nil, fmt.Errorf("find route: %w", err)
+		return peer.AddrInfo{}, fmt.Errorf("find route: %w", err)
 	}
 
 	latency := route.DialLatency()
@@ -102,22 +100,20 @@ func (t *Topology[K, A]) Dial(ctx context.Context, from kad.NodeID[K], to kad.No
 	}
 
 	if err := route.DialErr(); err != nil {
-		return nil, err
+		return peer.AddrInfo{}, err
 	}
 
-	tkey := key.HexString(to.Key())
-	node, ok := t.nodeIndex[tkey]
+	node, ok := t.nodeIndex[to]
 	if !ok {
-		return nil, fmt.Errorf("unknown node")
+		return peer.AddrInfo{}, fmt.Errorf("unknown node")
 	}
 
 	return node.NodeInfo, nil
 }
 
-func (t *Topology[K, A]) RouteMessage(ctx context.Context, from kad.NodeID[K], to kad.NodeID[K], protoID address.ProtocolID, req kad.Request[K, A]) (kad.Response[K, A], error) {
-	if key.Equal(from.Key(), to.Key()) {
-		tkey := key.HexString(to.Key())
-		node, ok := t.nodeIndex[tkey]
+func (t *Topology) RouteMessage(ctx context.Context, from peer.ID, to peer.ID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
+	if from == to {
+		node, ok := t.nodeIndex[to]
 		if !ok {
 			return nil, fmt.Errorf("unknown node")
 		}
@@ -135,8 +131,7 @@ func (t *Topology[K, A]) RouteMessage(ctx context.Context, from kad.NodeID[K], t
 		t.clk.Sleep(latency)
 	}
 
-	tkey := key.HexString(to.Key())
-	node, ok := t.nodeIndex[tkey]
+	node, ok := t.nodeIndex[to]
 	if !ok {
 		return nil, fmt.Errorf("no route to node")
 	}

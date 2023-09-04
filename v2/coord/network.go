@@ -1,22 +1,26 @@
-package kademlia
+package coord
 
 import (
 	"context"
 	"fmt"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/query"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
-type NetworkBehaviour[K kad.Key[K], A kad.Address[A]] struct {
+type NetworkBehaviour struct {
 	// rtr is the message router used to send messages
-	rtr Router[K, A]
+	rtr Router
 
 	nodeHandlersMu sync.Mutex
-	nodeHandlers   map[string]*NodeHandler[K, A] // TODO: garbage collect node handlers
+	nodeHandlers   map[peer.ID]*NodeHandler // TODO: garbage collect node handlers
 
 	pendingMu sync.Mutex
 	pending   []DhtEvent
@@ -25,10 +29,10 @@ type NetworkBehaviour[K kad.Key[K], A kad.Address[A]] struct {
 	logger *slog.Logger
 }
 
-func NewNetworkBehaviour[K kad.Key[K], A kad.Address[A]](rtr Router[K, A], logger *slog.Logger) *NetworkBehaviour[K, A] {
-	b := &NetworkBehaviour[K, A]{
+func NewNetworkBehaviour(rtr Router, logger *slog.Logger) *NetworkBehaviour {
+	b := &NetworkBehaviour{
 		rtr:          rtr,
-		nodeHandlers: make(map[string]*NodeHandler[K, A]),
+		nodeHandlers: make(map[peer.ID]*NodeHandler),
 		ready:        make(chan struct{}, 1),
 		logger:       logger,
 	}
@@ -36,18 +40,17 @@ func NewNetworkBehaviour[K kad.Key[K], A kad.Address[A]](rtr Router[K, A], logge
 	return b
 }
 
-func (b *NetworkBehaviour[K, A]) Notify(ctx context.Context, ev DhtEvent) {
+func (b *NetworkBehaviour) Notify(ctx context.Context, ev DhtEvent) {
 	b.pendingMu.Lock()
 	defer b.pendingMu.Unlock()
 
 	switch ev := ev.(type) {
-	case *EventOutboundGetClosestNodes[K, A]:
-		nodeKey := key.HexString(ev.To.ID().Key())
+	case *EventOutboundGetClosestNodes:
 		b.nodeHandlersMu.Lock()
-		nh, ok := b.nodeHandlers[nodeKey]
+		nh, ok := b.nodeHandlers[ev.To.ID]
 		if !ok {
 			nh = NewNodeHandler(ev.To, b.rtr, b.logger)
-			b.nodeHandlers[nodeKey] = nh
+			b.nodeHandlers[ev.To.ID] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
@@ -63,11 +66,11 @@ func (b *NetworkBehaviour[K, A]) Notify(ctx context.Context, ev DhtEvent) {
 	}
 }
 
-func (b *NetworkBehaviour[K, A]) Ready() <-chan struct{} {
+func (b *NetworkBehaviour) Ready() <-chan struct{} {
 	return b.ready
 }
 
-func (b *NetworkBehaviour[K, A]) Perform(ctx context.Context) (DhtEvent, bool) {
+func (b *NetworkBehaviour) Perform(ctx context.Context) (DhtEvent, bool) {
 	// No inbound work can be done until Perform is complete
 	b.pendingMu.Lock()
 	defer b.pendingMu.Unlock()
@@ -89,31 +92,30 @@ func (b *NetworkBehaviour[K, A]) Perform(ctx context.Context) (DhtEvent, bool) {
 	return nil, false
 }
 
-func (b *NetworkBehaviour[K, A]) getNodeHandler(ctx context.Context, id kad.NodeID[K]) (*NodeHandler[K, A], error) {
-	nodeKey := key.HexString(id.Key())
+func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id peer.ID) (*NodeHandler, error) {
 	b.nodeHandlersMu.Lock()
-	nh, ok := b.nodeHandlers[nodeKey]
+	nh, ok := b.nodeHandlers[id]
 	if !ok || len(nh.Addresses()) == 0 {
 		info, err := b.rtr.GetNodeInfo(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 		nh = NewNodeHandler(info, b.rtr, b.logger)
-		b.nodeHandlers[nodeKey] = nh
+		b.nodeHandlers[id] = nh
 	}
 	b.nodeHandlersMu.Unlock()
 	return nh, nil
 }
 
-type NodeHandler[K kad.Key[K], A kad.Address[A]] struct {
-	self   kad.NodeInfo[K, A]
-	rtr    Router[K, A]
+type NodeHandler struct {
+	self   peer.AddrInfo
+	rtr    Router
 	queue  *WorkQueue[NodeHandlerRequest]
 	logger *slog.Logger
 }
 
-func NewNodeHandler[K kad.Key[K], A kad.Address[A]](self kad.NodeInfo[K, A], rtr Router[K, A], logger *slog.Logger) *NodeHandler[K, A] {
-	h := &NodeHandler[K, A]{
+func NewNodeHandler(self peer.AddrInfo, rtr Router, logger *slog.Logger) *NodeHandler {
+	h := &NodeHandler{
 		self:   self,
 		rtr:    rtr,
 		logger: logger,
@@ -124,19 +126,19 @@ func NewNodeHandler[K kad.Key[K], A kad.Address[A]](self kad.NodeInfo[K, A], rtr
 	return h
 }
 
-func (h *NodeHandler[K, A]) Notify(ctx context.Context, ev NodeHandlerRequest) {
+func (h *NodeHandler) Notify(ctx context.Context, ev NodeHandlerRequest) {
 	h.queue.Enqueue(ctx, ev)
 }
 
-func (h *NodeHandler[K, A]) send(ctx context.Context, ev NodeHandlerRequest) bool {
+func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 	switch cmd := ev.(type) {
-	case *EventOutboundGetClosestNodes[K, A]:
+	case *EventOutboundGetClosestNodes:
 		if cmd.Notify == nil {
 			break
 		}
 		nodes, err := h.rtr.GetClosestNodes(ctx, h.self, cmd.Target)
 		if err != nil {
-			cmd.Notify.Notify(ctx, &EventGetClosestNodesFailure[K, A]{
+			cmd.Notify.Notify(ctx, &EventGetCloserNodesFailure{
 				QueryID: cmd.QueryID,
 				To:      h.self,
 				Target:  cmd.Target,
@@ -145,11 +147,11 @@ func (h *NodeHandler[K, A]) send(ctx context.Context, ev NodeHandlerRequest) boo
 			return false
 		}
 
-		cmd.Notify.Notify(ctx, &EventGetClosestNodesSuccess[K, A]{
-			QueryID:      cmd.QueryID,
-			To:           h.self,
-			Target:       cmd.Target,
-			ClosestNodes: nodes,
+		cmd.Notify.Notify(ctx, &EventGetCloserNodesSuccess{
+			QueryID:     cmd.QueryID,
+			To:          h.self,
+			Target:      cmd.Target,
+			CloserNodes: nodes,
 		})
 	default:
 		panic(fmt.Sprintf("unexpected command type: %T", cmd))
@@ -158,24 +160,24 @@ func (h *NodeHandler[K, A]) send(ctx context.Context, ev NodeHandlerRequest) boo
 	return false
 }
 
-func (h *NodeHandler[K, A]) ID() kad.NodeID[K] {
-	return h.self.ID()
+func (h *NodeHandler) ID() peer.ID {
+	return h.self.ID
 }
 
-func (h *NodeHandler[K, A]) Addresses() []A {
-	return h.self.Addresses()
+func (h *NodeHandler) Addresses() []ma.Multiaddr {
+	return h.self.Addrs
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
-func (h *NodeHandler[K, A]) GetClosestNodes(ctx context.Context, k K, n int) ([]Node[K, A], error) {
+func (h *NodeHandler) GetClosestNodes(ctx context.Context, k key.Key256, n int) ([]Node, error) {
 	w := NewWaiter[DhtEvent]()
 
-	ev := &EventOutboundGetClosestNodes[K, A]{
-		QueryID:  query.QueryID(key.HexString(k)),
-		To:       h.self,
-		Target:   k,
-		Notify: w,
+	ev := &EventOutboundGetClosestNodes{
+		QueryID: query.QueryID(key.HexString(k)),
+		To:      h.self,
+		Target:  k,
+		Notify:  w,
 	}
 
 	h.queue.Enqueue(ctx, ev)
@@ -186,9 +188,9 @@ func (h *NodeHandler[K, A]) GetClosestNodes(ctx context.Context, k K, n int) ([]
 	case we := <-w.Chan():
 
 		switch res := we.Event.(type) {
-		case *EventGetClosestNodesSuccess[K, A]:
-			nodes := make([]Node[K, A], 0, len(res.ClosestNodes))
-			for _, info := range res.ClosestNodes {
+		case *EventGetCloserNodesSuccess:
+			nodes := make([]Node, 0, len(res.CloserNodes))
+			for _, info := range res.CloserNodes {
 				// TODO use a global registry of node handlers
 				nodes = append(nodes, NewNodeHandler(info, h.rtr, h.logger))
 				n--
@@ -198,7 +200,7 @@ func (h *NodeHandler[K, A]) GetClosestNodes(ctx context.Context, k K, n int) ([]
 			}
 			return nodes, nil
 
-		case *EventGetClosestNodesFailure[K, A]:
+		case *EventGetCloserNodesFailure:
 			return nil, res.Err
 		default:
 			panic(fmt.Sprintf("unexpected node handler event: %T", ev))
@@ -208,56 +210,41 @@ func (h *NodeHandler[K, A]) GetClosestNodes(ctx context.Context, k K, n int) ([]
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (h *NodeHandler[K, A]) GetValue(ctx context.Context, key K) (Value[K], error) {
+func (h *NodeHandler) GetValue(ctx context.Context, key key.Key256) (Value, error) {
 	panic("not implemented")
 }
 
 // PutValue requests that the node stores a value to be associated with the supplied key.
 // If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
-func (h *NodeHandler[K, A]) PutValue(ctx context.Context, r Value[K], q int) error {
+func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-type NodeAddr[K kad.Key[K], A kad.Address[A]] struct {
-	id        kad.NodeID[K]
-	addresses []A
-}
+func CloserNodesResponse(k key.Key256, nodes []peer.AddrInfo) kad.Response[key.Key256, ma.Multiaddr] {
+	infos := make([]kad.NodeInfo[key.Key256, ma.Multiaddr], len(nodes))
+	for i := range nodes {
+		infos[i] = kadt.AddrInfo{Info: nodes[i]}
+	}
 
-func NewNodeAddr[K kad.Key[K], A kad.Address[A]](id kad.NodeID[K], addresses []A) *NodeAddr[K, A] {
-	return &NodeAddr[K, A]{
-		id:        id,
-		addresses: addresses,
+	return &fakeMessage{
+		key:   k,
+		infos: infos,
 	}
 }
 
-func (n *NodeAddr[K, A]) ID() kad.NodeID[K] {
-	return n.id
+type fakeMessage struct {
+	key   key.Key256
+	infos []kad.NodeInfo[key.Key256, ma.Multiaddr]
 }
 
-func (n *NodeAddr[K, A]) Addresses() []A {
-	return n.addresses
-}
-
-func ClosestNodesFakeResponse[K kad.Key[K], A kad.Address[A]](key K, nodes []kad.NodeInfo[K, A]) kad.Response[K, A] {
-	return &fakeMessage[K, A]{
-		key:   key,
-		nodes: nodes,
-	}
-}
-
-type fakeMessage[K kad.Key[K], A kad.Address[A]] struct {
-	key   K
-	nodes []kad.NodeInfo[K, A]
-}
-
-func (r fakeMessage[K, A]) Target() K {
+func (r fakeMessage) Target() key.Key256 {
 	return r.key
 }
 
-func (r fakeMessage[K, A]) CloserNodes() []kad.NodeInfo[K, A] {
-	return r.nodes
+func (r fakeMessage) CloserNodes() []kad.NodeInfo[key.Key256, ma.Multiaddr] {
+	return r.infos
 }
 
-func (r fakeMessage[K, A]) EmptyResponse() kad.Response[K, A] {
-	return &fakeMessage[K, A]{}
+func (r fakeMessage) EmptyResponse() kad.Response[key.Key256, ma.Multiaddr] {
+	return &fakeMessage{}
 }

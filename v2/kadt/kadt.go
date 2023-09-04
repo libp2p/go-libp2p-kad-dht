@@ -53,6 +53,11 @@ func (ai AddrInfo) ID() kad.NodeID[key.Key256] {
 	return PeerID(ai.Info.ID)
 }
 
+// ID returns the peer ID of this peer's information struct as a PeerID
+func (ai AddrInfo) PeerID() PeerID {
+	return PeerID(ai.Info.ID)
+}
+
 // Addresses returns all Multiaddresses of this peer.
 func (ai AddrInfo) Addresses() []ma.Multiaddr {
 	addrs := make([]ma.Multiaddr, len(ai.Info.Addrs))

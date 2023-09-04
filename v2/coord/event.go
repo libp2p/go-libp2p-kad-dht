@@ -1,7 +1,10 @@
-package kademlia
+package coord
 
 import (
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
+	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
 )
@@ -30,36 +33,36 @@ type RoutingNotification interface {
 	routingNotificationEvent()
 }
 
-type EventDhtStartBootstrap[K kad.Key[K], A kad.Address[A]] struct {
+type EventDhtStartBootstrap struct {
 	ProtocolID address.ProtocolID
-	Message    kad.Request[K, A]
-	SeedNodes  []kad.NodeID[K]
+	Message    kad.Request[key.Key256, ma.Multiaddr]
+	SeedNodes  []peer.ID // TODO: peer.AddrInfo
 }
 
-func (EventDhtStartBootstrap[K, A]) dhtEvent()   {}
-func (EventDhtStartBootstrap[K, A]) dhtCommand() {}
+func (EventDhtStartBootstrap) dhtEvent()   {}
+func (EventDhtStartBootstrap) dhtCommand() {}
 
-type EventOutboundGetClosestNodes[K kad.Key[K], A kad.Address[A]] struct {
+type EventOutboundGetClosestNodes struct {
 	QueryID query.QueryID
-	To      kad.NodeInfo[K, A]
-	Target  K
+	To      peer.AddrInfo
+	Target  key.Key256
 	Notify  Notify[DhtEvent]
 }
 
-func (EventOutboundGetClosestNodes[K, A]) dhtEvent()           {}
-func (EventOutboundGetClosestNodes[K, A]) nodeHandlerRequest() {}
+func (EventOutboundGetClosestNodes) dhtEvent()           {}
+func (EventOutboundGetClosestNodes) nodeHandlerRequest() {}
 
-type EventStartQuery[K kad.Key[K], A kad.Address[A]] struct {
+type EventStartQuery struct {
 	QueryID           query.QueryID
-	Target            K
+	Target            key.Key256
 	ProtocolID        address.ProtocolID
-	Message           kad.Request[K, A]
-	KnownClosestNodes []kad.NodeID[K]
+	Message           kad.Request[key.Key256, ma.Multiaddr]
+	KnownClosestNodes []peer.ID
 	Notify            NotifyCloser[DhtEvent]
 }
 
-func (EventStartQuery[K, A]) dhtEvent()   {}
-func (EventStartQuery[K, A]) dhtCommand() {}
+func (EventStartQuery) dhtEvent()   {}
+func (EventStartQuery) dhtCommand() {}
 
 type EventStopQuery struct {
 	QueryID query.QueryID
@@ -68,43 +71,43 @@ type EventStopQuery struct {
 func (EventStopQuery) dhtEvent()   {}
 func (EventStopQuery) dhtCommand() {}
 
-type EventDhtAddNodeInfo[K kad.Key[K], A kad.Address[A]] struct {
-	NodeInfo kad.NodeInfo[K, A]
+type EventDhtAddNodeInfo struct {
+	NodeInfo peer.AddrInfo
 }
 
-func (EventDhtAddNodeInfo[K, A]) dhtEvent()   {}
-func (EventDhtAddNodeInfo[K, A]) dhtCommand() {}
+func (EventDhtAddNodeInfo) dhtEvent()   {}
+func (EventDhtAddNodeInfo) dhtCommand() {}
 
-type EventGetClosestNodesSuccess[K kad.Key[K], A kad.Address[A]] struct {
-	QueryID      query.QueryID
-	To           kad.NodeInfo[K, A]
-	Target       K
-	ClosestNodes []kad.NodeInfo[K, A]
+type EventGetCloserNodesSuccess struct {
+	QueryID     query.QueryID
+	To          peer.AddrInfo
+	Target      key.Key256
+	CloserNodes []peer.AddrInfo
 }
 
-func (EventGetClosestNodesSuccess[K, A]) dhtEvent()            {}
-func (EventGetClosestNodesSuccess[K, A]) nodeHandlerResponse() {}
+func (EventGetCloserNodesSuccess) dhtEvent()            {}
+func (EventGetCloserNodesSuccess) nodeHandlerResponse() {}
 
-type EventGetClosestNodesFailure[K kad.Key[K], A kad.Address[A]] struct {
+type EventGetCloserNodesFailure struct {
 	QueryID query.QueryID
-	To      kad.NodeInfo[K, A]
-	Target  K
+	To      peer.AddrInfo
+	Target  key.Key256
 	Err     error
 }
 
-func (EventGetClosestNodesFailure[K, A]) dhtEvent()            {}
-func (EventGetClosestNodesFailure[K, A]) nodeHandlerResponse() {}
+func (EventGetCloserNodesFailure) dhtEvent()            {}
+func (EventGetCloserNodesFailure) nodeHandlerResponse() {}
 
 // EventQueryProgressed is emitted by the dht when a query has received a
 // response from a node.
-type EventQueryProgressed[K kad.Key[K], A kad.Address[A]] struct {
+type EventQueryProgressed struct {
 	QueryID  query.QueryID
-	NodeID   kad.NodeID[K]
-	Response kad.Response[K, A]
+	NodeID   peer.ID
+	Response kad.Response[key.Key256, ma.Multiaddr]
 	Stats    query.QueryStats
 }
 
-func (*EventQueryProgressed[K, A]) dhtEvent() {}
+func (*EventQueryProgressed) dhtEvent() {}
 
 // EventQueryFinished is emitted by the dht when a query has finished, either through
 // running to completion or by being canceled.
@@ -116,12 +119,12 @@ type EventQueryFinished struct {
 func (*EventQueryFinished) dhtEvent() {}
 
 // EventRoutingUpdated is emitted by the dht when a new node has been verified and added to the routing table.
-type EventRoutingUpdated[K kad.Key[K], A kad.Address[A]] struct {
-	NodeInfo kad.NodeInfo[K, A]
+type EventRoutingUpdated struct {
+	NodeInfo kad.NodeInfo[key.Key256, ma.Multiaddr]
 }
 
-func (*EventRoutingUpdated[K, A]) dhtEvent()                 {}
-func (*EventRoutingUpdated[K, A]) routingNotificationEvent() {}
+func (*EventRoutingUpdated) dhtEvent()                 {}
+func (*EventRoutingUpdated) routingNotificationEvent() {}
 
 // EventBootstrapFinished is emitted by the dht when a bootstrap has finished, either through
 // running to completion or by being canceled.

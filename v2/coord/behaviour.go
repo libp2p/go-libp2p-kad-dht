@@ -1,4 +1,4 @@
-package kademlia
+package coord
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package kademlia
+package coord
 
 import (
 	"context"
@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
-
-	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 const peerstoreTTL = 10 * time.Minute
@@ -92,7 +91,8 @@ func TestExhaustiveQuery(t *testing.T) {
 	defer cancel()
 
 	clk := clock.NewMock()
-	_, nodes := nettest.LinearTopology(4, clk)
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
 	ccfg := DefaultConfig()
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
@@ -100,16 +100,16 @@ func TestExhaustiveQuery(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := nodes[0].NodeInfo.ID()
-	c, err := NewDht[key.Key8, kadtest.StrAddr](self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
+	self := nodes[0].NodeInfo.ID
+	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
-	target := nodes[3].NodeInfo.ID().Key()
+	target := kadt.PeerID(nodes[3].NodeInfo.ID).Key()
 
 	visited := make(map[string]int)
 
 	// Record the nodes as they are visited
-	qfn := func(ctx context.Context, node Node[key.Key8, kadtest.StrAddr], stats QueryStats) error {
+	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
 		visited[node.ID().String()]++
 		return nil
 	}
@@ -119,9 +119,9 @@ func TestExhaustiveQuery(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 3, len(visited))
-	require.Contains(t, visited, nodes[1].NodeInfo.ID().String())
-	require.Contains(t, visited, nodes[2].NodeInfo.ID().String())
-	require.Contains(t, visited, nodes[3].NodeInfo.ID().String())
+	require.Contains(t, visited, nodes[1].NodeInfo.ID.String())
+	require.Contains(t, visited, nodes[2].NodeInfo.ID.String())
+	require.Contains(t, visited, nodes[3].NodeInfo.ID.String())
 }
 
 func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
@@ -129,7 +129,8 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	defer cancel()
 
 	clk := clock.NewMock()
-	_, nodes := nettest.LinearTopology(4, clk)
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
 
 	ccfg := DefaultConfig()
 	ccfg.Clock = clk
@@ -138,8 +139,8 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := nodes[0].NodeInfo.ID()
-	c, err := NewDht[key.Key8, kadtest.StrAddr](self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
+	self := nodes[0].NodeInfo.ID
+	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
 	}
@@ -156,34 +157,34 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 		}
 	}()
 
-	qfn := func(ctx context.Context, node Node[key.Key8, kadtest.StrAddr], stats QueryStats) error {
+	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
 		return nil
 	}
 
 	// Run a query to find the value
-	target := nodes[3].NodeInfo.ID().Key()
+	target := kadt.PeerID(nodes[3].NodeInfo.ID).Key()
 	_, err = c.Query(ctx, target, qfn)
 	require.NoError(t, err)
 
 	// the query run by the dht should have received a response from nodes[1] with closer nodes
 	// nodes[0] and nodes[2] which should trigger a routing table update since nodes[2] was
 	// not in the dht's routing table.
-	ev, err := expectEventType(t, ctx, buffer, &EventRoutingUpdated[key.Key8, kadtest.StrAddr]{})
+	ev, err := expectEventType(t, ctx, buffer, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
-	tev := ev.(*EventRoutingUpdated[key.Key8, kadtest.StrAddr])
-	require.Equal(t, nodes[2].NodeInfo.ID(), tev.NodeInfo.ID())
+	tev := ev.(*EventRoutingUpdated)
+	require.Equal(t, nodes[2].NodeInfo.ID, NodeIDToPeerID(tev.NodeInfo.ID()))
 
 	// no EventRoutingUpdated is sent for the self node
 
 	// the query continues and should have received a response from nodes[2] with closer nodes
 	// nodes[1] and nodes[3] which should trigger a routing table update since nodes[3] was
 	// not in the dht's routing table.
-	ev, err = expectEventType(t, ctx, buffer, &EventRoutingUpdated[key.Key8, kadtest.StrAddr]{})
+	ev, err = expectEventType(t, ctx, buffer, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
-	tev = ev.(*EventRoutingUpdated[key.Key8, kadtest.StrAddr])
-	require.Equal(t, nodes[3].NodeInfo.ID(), tev.NodeInfo.ID())
+	tev = ev.(*EventRoutingUpdated)
+	require.Equal(t, nodes[3].NodeInfo.ID, NodeIDToPeerID(tev.NodeInfo.ID()))
 }
 
 func TestBootstrap(t *testing.T) {
@@ -191,14 +192,15 @@ func TestBootstrap(t *testing.T) {
 	defer cancel()
 
 	clk := clock.NewMock()
-	_, nodes := nettest.LinearTopology(4, clk)
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
 
 	ccfg := DefaultConfig()
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
-	self := nodes[0].NodeInfo.ID()
-	d, err := NewDht[key.Key8, kadtest.StrAddr](self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
+	self := nodes[0].NodeInfo.ID
+	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
 	}
@@ -215,8 +217,8 @@ func TestBootstrap(t *testing.T) {
 		}
 	}()
 
-	seeds := []kad.NodeID[key.Key8]{
-		nodes[1].NodeInfo.ID(),
+	seeds := []peer.ID{
+		nodes[1].NodeInfo.ID,
 	}
 	err = d.Bootstrap(ctx, seeds)
 	require.NoError(t, err)
@@ -232,15 +234,15 @@ func TestBootstrap(t *testing.T) {
 	require.Equal(t, 0, tevf.Stats.Failure)
 
 	// DHT should now have node1 in its routing table
-	_, err = d.GetNode(ctx, nodes[1].NodeInfo.ID())
+	_, err = d.GetNode(ctx, nodes[1].NodeInfo.ID)
 	require.NoError(t, err)
 
 	// DHT should now have node2 in its routing table
-	_, err = d.GetNode(ctx, nodes[2].NodeInfo.ID())
+	_, err = d.GetNode(ctx, nodes[2].NodeInfo.ID)
 	require.NoError(t, err)
 
 	// DHT should now have node3 in its routing table
-	_, err = d.GetNode(ctx, nodes[3].NodeInfo.ID())
+	_, err = d.GetNode(ctx, nodes[3].NodeInfo.ID)
 	require.NoError(t, err)
 }
 
@@ -249,7 +251,8 @@ func TestIncludeNode(t *testing.T) {
 	defer cancel()
 
 	clk := clock.NewMock()
-	_, nodes := nettest.LinearTopology(4, clk)
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
 
 	ccfg := DefaultConfig()
 	ccfg.Clock = clk
@@ -257,30 +260,30 @@ func TestIncludeNode(t *testing.T) {
 
 	candidate := nodes[len(nodes)-1].NodeInfo // not in nodes[0] routing table
 
-	self := nodes[0].NodeInfo.ID()
-	d, err := NewDht[key.Key8, kadtest.StrAddr](self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
+	self := nodes[0].NodeInfo.ID
+	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
 	}
 
 	// the routing table should not contain the node yet
-	_, err = d.GetNode(ctx, candidate.ID())
+	_, err = d.GetNode(ctx, candidate.ID)
 	require.ErrorIs(t, err, ErrNodeNotFound)
 
 	events := d.RoutingNotifications()
 
 	// inject a new node into the dht's includeEvents queue
-	err = d.AddNodes(ctx, []kad.NodeInfo[key.Key8, kadtest.StrAddr]{candidate})
+	err = d.AddNodes(ctx, []peer.AddrInfo{candidate})
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
-	ev, err := expectEventType(t, ctx, events, &EventRoutingUpdated[key.Key8, kadtest.StrAddr]{})
+	ev, err := expectEventType(t, ctx, events, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
-	tev := ev.(*EventRoutingUpdated[key.Key8, kadtest.StrAddr])
-	require.Equal(t, candidate.ID(), tev.NodeInfo.ID())
+	tev := ev.(*EventRoutingUpdated)
+	require.Equal(t, candidate.ID, NodeIDToPeerID(tev.NodeInfo.ID()))
 
 	// the routing table should not contain the node yet
-	_, err = d.GetNode(ctx, candidate.ID())
+	_, err = d.GetNode(ctx, candidate.ID)
 	require.NoError(t, err)
 }

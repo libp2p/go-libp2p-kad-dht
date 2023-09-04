@@ -6,22 +6,22 @@ import (
 	"sync/atomic"
 )
 
-type Notify[C DhtEvent] interface {
+type Notify[C BehaviourEvent] interface {
 	Notify(ctx context.Context, ev C)
 }
 
-type NotifyCloser[C DhtEvent] interface {
+type NotifyCloser[C BehaviourEvent] interface {
 	Notify[C]
 	Close()
 }
 
-type NotifyFunc[C DhtEvent] func(ctx context.Context, ev C)
+type NotifyFunc[C BehaviourEvent] func(ctx context.Context, ev C)
 
 func (f NotifyFunc[C]) Notify(ctx context.Context, ev C) {
 	f(ctx, ev)
 }
 
-type Behaviour[I DhtEvent, O DhtEvent] interface {
+type Behaviour[I BehaviourEvent, O BehaviourEvent] interface {
 	// Ready returns a channel that signals when the behaviour is ready to perform work.
 	Ready() <-chan struct{}
 
@@ -39,20 +39,20 @@ type SM[E any, S any] interface {
 	Advance(context.Context, E) S
 }
 
-type WorkQueueFunc[E DhtEvent] func(context.Context, E) bool
+type WorkQueueFunc[E BehaviourEvent] func(context.Context, E) bool
 
 // WorkQueue is buffered queue of work to be performed.
 // The queue automatically drains the queue sequentially by calling a
 // WorkQueueFunc for each work item, passing the original context
 // and event.
-type WorkQueue[E DhtEvent] struct {
+type WorkQueue[E BehaviourEvent] struct {
 	pending chan pendingEvent[E]
 	fn      WorkQueueFunc[E]
 	done    atomic.Bool
 	once    sync.Once
 }
 
-func NewWorkQueue[E DhtEvent](fn WorkQueueFunc[E]) *WorkQueue[E] {
+func NewWorkQueue[E BehaviourEvent](fn WorkQueueFunc[E]) *WorkQueue[E] {
 	w := &WorkQueue[E]{
 		pending: make(chan pendingEvent[E], 16),
 		fn:      fn,
@@ -102,21 +102,21 @@ func (w *WorkQueue[E]) Enqueue(ctx context.Context, cmd E) error {
 
 // A Waiter is a Notifiee whose Notify method forwards the
 // notified event to a channel which a client can wait on.
-type Waiter[E DhtEvent] struct {
+type Waiter[E BehaviourEvent] struct {
 	pending chan WaiterEvent[E]
 	done    atomic.Bool
 }
 
-var _ Notify[DhtEvent] = (*Waiter[DhtEvent])(nil)
+var _ Notify[BehaviourEvent] = (*Waiter[BehaviourEvent])(nil)
 
-func NewWaiter[E DhtEvent]() *Waiter[E] {
+func NewWaiter[E BehaviourEvent]() *Waiter[E] {
 	w := &Waiter[E]{
 		pending: make(chan WaiterEvent[E], 16),
 	}
 	return w
 }
 
-type WaiterEvent[E DhtEvent] struct {
+type WaiterEvent[E BehaviourEvent] struct {
 	Ctx   context.Context
 	Event E
 }

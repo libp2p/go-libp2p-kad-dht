@@ -7,34 +7,33 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/query"
 	"github.com/plprobelab/go-kademlia/util"
 	"golang.org/x/exp/slog"
 )
 
 type PooledQueryBehaviour struct {
-	pool    *query.Pool[key.Key256, ma.Multiaddr]
-	waiters map[query.QueryID]NotifyCloser[DhtEvent]
+	pool    *query.Pool[KadKey, ma.Multiaddr]
+	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
-	pending   []DhtEvent
+	pending   []BehaviourEvent
 	ready     chan struct{}
 
 	logger *slog.Logger
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[key.Key256, ma.Multiaddr], logger *slog.Logger) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(pool *query.Pool[KadKey, ma.Multiaddr], logger *slog.Logger) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
-		waiters: make(map[query.QueryID]NotifyCloser[DhtEvent]),
+		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
 		logger:  logger,
 	}
 	return h
 }
 
-func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev DhtEvent) {
+func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	ctx, span := util.StartSpan(ctx, "PooledQueryBehaviour.Notify")
 	defer span.End()
 
@@ -44,7 +43,7 @@ func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev DhtEvent) {
 	var cmd query.PoolEvent
 	switch ev := ev.(type) {
 	case *EventStartQuery:
-		cmd = &query.EventPoolAddQuery[key.Key256, ma.Multiaddr]{
+		cmd = &query.EventPoolAddQuery[KadKey, ma.Multiaddr]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
 			ProtocolID:        ev.ProtocolID,
@@ -63,7 +62,7 @@ func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev DhtEvent) {
 	case *EventGetCloserNodesSuccess:
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
-			r.pending = append(r.pending, &EventDhtAddNodeInfo{
+			r.pending = append(r.pending, &EventAddAddrInfo{
 				NodeInfo: info,
 			})
 		}
@@ -76,13 +75,13 @@ func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev DhtEvent) {
 				// Stats:    stats,
 			})
 		}
-		cmd = &query.EventPoolMessageResponse[key.Key256, ma.Multiaddr]{
+		cmd = &query.EventPoolMessageResponse[KadKey, ma.Multiaddr]{
 			NodeID:   kadt.PeerID(ev.To.ID),
 			QueryID:  ev.QueryID,
 			Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
-		cmd = &query.EventPoolMessageFailure[key.Key256]{
+		cmd = &query.EventPoolMessageFailure[KadKey]{
 			NodeID:  kadt.PeerID(ev.To.ID),
 			QueryID: ev.QueryID,
 			Error:   ev.Err,
@@ -108,7 +107,7 @@ func (r *PooledQueryBehaviour) Ready() <-chan struct{} {
 	return r.ready
 }
 
-func (r *PooledQueryBehaviour) Perform(ctx context.Context) (DhtEvent, bool) {
+func (r *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	ctx, span := util.StartSpan(ctx, "PooledQueryBehaviour.Perform")
 	defer span.End()
 
@@ -119,7 +118,7 @@ func (r *PooledQueryBehaviour) Perform(ctx context.Context) (DhtEvent, bool) {
 	for {
 		// drain queued events first.
 		if len(r.pending) > 0 {
-			var ev DhtEvent
+			var ev BehaviourEvent
 			ev, r.pending = r.pending[0], r.pending[1:]
 
 			if len(r.pending) > 0 {
@@ -143,14 +142,14 @@ func (r *PooledQueryBehaviour) Perform(ctx context.Context) (DhtEvent, bool) {
 	}
 }
 
-func (r *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (DhtEvent, bool) {
+func (r *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (BehaviourEvent, bool) {
 	ctx, span := util.StartSpan(ctx, "PooledQueryBehaviour.advancePool")
 	defer span.End()
 
 	pstate := r.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {
-	case *query.StatePoolQueryMessage[key.Key256, ma.Multiaddr]:
-		return &EventOutboundGetClosestNodes{
+	case *query.StatePoolQueryMessage[KadKey, ma.Multiaddr]:
+		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
 			To:      NodeIDToAddrInfo(st.NodeID),
 			Target:  st.Message.Target(),

@@ -12,7 +12,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
 	"github.com/plprobelab/go-kademlia/routing"
@@ -24,16 +23,15 @@ import (
 )
 
 // A Coordinator coordinates the state machines that comprise a Kademlia DHT
-// It is only one possible configuration of the DHT components, others are possible.
 type Coordinator struct {
-	// self is the node id of the system the dht is running on
+	// self is the peer id of the system the dht is running on
 	self peer.ID
 
 	// cfg is a copy of the optional configuration supplied to the dht
-	cfg Config
+	cfg CoordinatorConfig
 
 	// rt is the routing table used to look up nodes by distance
-	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+	rt kad.RoutingTable[KadKey, kad.NodeID[KadKey]]
 
 	// rtr is the message router used to send messages
 	rtr Router
@@ -44,15 +42,15 @@ type Coordinator struct {
 	networkBehaviour *NetworkBehaviour
 
 	// routingBehaviour is the behaviour responsible for maintaining the routing table
-	routingBehaviour Behaviour[DhtEvent, DhtEvent]
+	routingBehaviour Behaviour[BehaviourEvent, BehaviourEvent]
 
 	// queryBehaviour is the behaviour responsible for running user-submitted queries
-	queryBehaviour Behaviour[DhtEvent, DhtEvent]
+	queryBehaviour Behaviour[BehaviourEvent, BehaviourEvent]
 }
 
 const DefaultChanqueueCapacity = 1024
 
-type Config struct {
+type CoordinatorConfig struct {
 	PeerstoreTTL time.Duration // duration for which a peer is kept in the peerstore
 
 	Clock clock.Clock // a clock that may replaced by a mock when testing
@@ -67,52 +65,52 @@ type Config struct {
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
-func (cfg *Config) Validate() error {
+func (cfg *CoordinatorConfig) Validate() error {
 	if cfg.Clock == nil {
 		return &kaderr.ConfigurationError{
-			Component: "DhtConfig",
+			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
 		}
 	}
 
 	if cfg.QueryConcurrency < 1 {
 		return &kaderr.ConfigurationError{
-			Component: "DhtConfig",
+			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("query concurrency must be greater than zero"),
 		}
 	}
 	if cfg.QueryTimeout < 1 {
 		return &kaderr.ConfigurationError{
-			Component: "DhtConfig",
+			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("query timeout must be greater than zero"),
 		}
 	}
 
 	if cfg.RequestConcurrency < 1 {
 		return &kaderr.ConfigurationError{
-			Component: "DhtConfig",
+			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("request concurrency must be greater than zero"),
 		}
 	}
 
 	if cfg.RequestTimeout < 1 {
 		return &kaderr.ConfigurationError{
-			Component: "DhtConfig",
+			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("request timeout must be greater than zero"),
 		}
 	}
 
 	if cfg.Logger == nil {
 		return &kaderr.ConfigurationError{
-			Component: "DhtConfig",
+			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("logger must not be nil"),
 		}
 	}
 	return nil
 }
 
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() *CoordinatorConfig {
+	return &CoordinatorConfig{
 		Clock:              clock.New(), // use standard time
 		PeerstoreTTL:       10 * time.Minute,
 		QueryConcurrency:   3,
@@ -123,7 +121,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]], cfg *Config) (*Coordinator, error) {
+func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey, kad.NodeID[KadKey]], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -137,19 +135,19 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[key.Key
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[key.Key256, ma.Multiaddr](kadt.PeerID(self), qpCfg)
+	qp, err := query.NewPool[KadKey, ma.Multiaddr](kadt.PeerID(self), qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
 	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger)
 
-	bootstrapCfg := routing.DefaultBootstrapConfig[key.Key256, ma.Multiaddr]()
+	bootstrapCfg := routing.DefaultBootstrapConfig[KadKey, ma.Multiaddr]()
 	bootstrapCfg.Clock = cfg.Clock
 	bootstrapCfg.Timeout = cfg.QueryTimeout
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[key.Key256, ma.Multiaddr](kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap[KadKey, ma.Multiaddr](kadt.PeerID(self), bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -163,7 +161,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[key.Key
 	// includeCfg.Concurrency = cfg.IncludeConcurrency
 	// includeCfg.Timeout = cfg.IncludeTimeout
 
-	include, err := routing.NewInclude[key.Key256, ma.Multiaddr](rt, includeCfg)
+	include, err := routing.NewInclude[KadKey, ma.Multiaddr](rt, includeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("include: %w", err)
 	}
@@ -174,7 +172,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[key.Key
 
 	// TODO: expose config
 	// probeCfg.Concurrency = cfg.ProbeConcurrency
-	probe, err := routing.NewProbe[key.Key256, ma.Multiaddr](rt, probeCfg)
+	probe, err := routing.NewProbe[KadKey, ma.Multiaddr](rt, probeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("probe: %w", err)
 	}
@@ -222,7 +220,7 @@ func (d *Coordinator) eventLoop() {
 	ctx := context.Background()
 
 	for {
-		var ev DhtEvent
+		var ev BehaviourEvent
 		var ok bool
 		select {
 		case <-d.networkBehaviour.Ready():
@@ -234,25 +232,21 @@ func (d *Coordinator) eventLoop() {
 		}
 
 		if ok {
-			d.dispatchDhtNotice(ctx, ev)
+			d.dispatchEvent(ctx, ev)
 		}
 	}
 }
 
-func (c *Coordinator) dispatchDhtNotice(ctx context.Context, ev DhtEvent) {
-	ctx, span := util.StartSpan(ctx, "Coordinator.dispatchDhtNotice")
+func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
+	ctx, span := util.StartSpan(ctx, "Coordinator.dispatchEvent")
 	defer span.End()
 
 	switch ev := ev.(type) {
-	case *EventDhtStartBootstrap:
-		c.routingBehaviour.Notify(ctx, ev)
-	case *EventOutboundGetClosestNodes:
+	case NetworkCommand:
 		c.networkBehaviour.Notify(ctx, ev)
-	case *EventStartQuery:
+	case QueryCommand:
 		c.queryBehaviour.Notify(ctx, ev)
-	case *EventStopQuery:
-		c.queryBehaviour.Notify(ctx, ev)
-	case *EventDhtAddNodeInfo:
+	case RoutingCommand:
 		c.routingBehaviour.Notify(ctx, ev)
 	case RoutingNotification:
 		select {
@@ -260,6 +254,8 @@ func (c *Coordinator) dispatchDhtNotice(ctx context.Context, ev DhtEvent) {
 		case c.routingNotifications <- ev:
 		default:
 		}
+	default:
+		panic(fmt.Sprintf("unexpected event: %T", ev))
 	}
 }
 
@@ -278,7 +274,7 @@ func (d *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
-func (d *Coordinator) GetClosestNodes(ctx context.Context, k key.Key256, n int) ([]Node, error) {
+func (d *Coordinator) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]Node, error) {
 	closest := d.rt.NearestNodes(k, n)
 	nodes := make([]Node, 0, len(closest))
 	for _, id := range closest {
@@ -293,7 +289,7 @@ func (d *Coordinator) GetClosestNodes(ctx context.Context, k key.Key256, n int) 
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (d *Coordinator) GetValue(ctx context.Context, k key.Key256) (Value, error) {
+func (d *Coordinator) GetValue(ctx context.Context, k KadKey) (Value, error) {
 	panic("not implemented")
 }
 
@@ -304,7 +300,7 @@ func (d *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
 }
 
 // Query traverses the DHT calling fn for each node visited.
-func (d *Coordinator) Query(ctx context.Context, target key.Key256, fn QueryFunc) (QueryStats, error) {
+func (d *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (QueryStats, error) {
 	ctx, span := util.StartSpan(ctx, "Coordinator.Query")
 	defer span.End()
 
@@ -321,7 +317,7 @@ func (d *Coordinator) Query(ctx context.Context, target key.Key256, fn QueryFunc
 		seedIDs = append(seedIDs, s.ID())
 	}
 
-	waiter := NewWaiter[DhtEvent]()
+	waiter := NewWaiter[BehaviourEvent]()
 	queryID := query.QueryID("foo")
 
 	cmd := &EventStartQuery{
@@ -397,7 +393,7 @@ func (d *Coordinator) AddNodes(ctx context.Context, infos []peer.AddrInfo) error
 			continue
 		}
 
-		d.routingBehaviour.Notify(ctx, &EventDhtAddNodeInfo{
+		d.routingBehaviour.Notify(ctx, &EventAddAddrInfo{
 			NodeInfo: info,
 		})
 
@@ -410,7 +406,7 @@ func (d *Coordinator) AddNodes(ctx context.Context, infos []peer.AddrInfo) error
 func (d *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 	ctx, span := util.StartSpan(ctx, "Coordinator.Bootstrap")
 	defer span.End()
-	d.routingBehaviour.Notify(ctx, &EventDhtStartBootstrap{
+	d.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		// Bootstrap state machine uses the message
 		Message:   &fakeMessage{key: kadt.PeerID(d.self).Key()},
 		SeedNodes: seeds,

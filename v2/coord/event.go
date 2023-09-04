@@ -4,133 +4,146 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
 )
 
-type DhtEvent interface {
-	dhtEvent()
+type BehaviourEvent interface {
+	behaviourEvent()
 }
 
-type DhtCommand interface {
-	DhtEvent
-	dhtCommand()
+// RoutingCommand is a type of [BehaviourEvent] that instructs a [RoutingBehaviour] to perform an action.
+type RoutingCommand interface {
+	BehaviourEvent
+	routingCommand()
+}
+
+// NetworkCommand is a type of [BehaviourEvent] that instructs a [NetworkBehaviour] to perform an action.
+type NetworkCommand interface {
+	BehaviourEvent
+	networkCommand()
+}
+
+// QueryCommand is a type of [BehaviourEvent] that instructs a [QueryBehaviour] to perform an action.
+type QueryCommand interface {
+	BehaviourEvent
+	queryCommand()
 }
 
 type NodeHandlerRequest interface {
-	DhtEvent
+	BehaviourEvent
 	nodeHandlerRequest()
 }
 
 type NodeHandlerResponse interface {
-	DhtEvent
+	BehaviourEvent
 	nodeHandlerResponse()
 }
 
 type RoutingNotification interface {
-	DhtEvent
-	routingNotificationEvent()
+	BehaviourEvent
+	routingNotification()
 }
 
-type EventDhtStartBootstrap struct {
+type EventStartBootstrap struct {
 	ProtocolID address.ProtocolID
-	Message    kad.Request[key.Key256, ma.Multiaddr]
+	Message    kad.Request[KadKey, ma.Multiaddr]
 	SeedNodes  []peer.ID // TODO: peer.AddrInfo
 }
 
-func (EventDhtStartBootstrap) dhtEvent()   {}
-func (EventDhtStartBootstrap) dhtCommand() {}
+func (*EventStartBootstrap) behaviourEvent() {}
+func (*EventStartBootstrap) routingCommand() {}
 
-type EventOutboundGetClosestNodes struct {
+type EventOutboundGetCloserNodes struct {
 	QueryID query.QueryID
 	To      peer.AddrInfo
-	Target  key.Key256
-	Notify  Notify[DhtEvent]
+	Target  KadKey
+	Notify  Notify[BehaviourEvent]
 }
 
-func (EventOutboundGetClosestNodes) dhtEvent()           {}
-func (EventOutboundGetClosestNodes) nodeHandlerRequest() {}
+func (*EventOutboundGetCloserNodes) behaviourEvent()     {}
+func (*EventOutboundGetCloserNodes) nodeHandlerRequest() {}
+func (*EventOutboundGetCloserNodes) networkCommand()     {}
 
 type EventStartQuery struct {
 	QueryID           query.QueryID
-	Target            key.Key256
+	Target            KadKey
 	ProtocolID        address.ProtocolID
-	Message           kad.Request[key.Key256, ma.Multiaddr]
+	Message           kad.Request[KadKey, ma.Multiaddr]
 	KnownClosestNodes []peer.ID
-	Notify            NotifyCloser[DhtEvent]
+	Notify            NotifyCloser[BehaviourEvent]
 }
 
-func (EventStartQuery) dhtEvent()   {}
-func (EventStartQuery) dhtCommand() {}
+func (*EventStartQuery) behaviourEvent() {}
+func (*EventStartQuery) queryCommand()   {}
 
 type EventStopQuery struct {
 	QueryID query.QueryID
 }
 
-func (EventStopQuery) dhtEvent()   {}
-func (EventStopQuery) dhtCommand() {}
+func (*EventStopQuery) behaviourEvent() {}
+func (*EventStopQuery) queryCommand()   {}
 
-type EventDhtAddNodeInfo struct {
+type EventAddAddrInfo struct {
 	NodeInfo peer.AddrInfo
 }
 
-func (EventDhtAddNodeInfo) dhtEvent()   {}
-func (EventDhtAddNodeInfo) dhtCommand() {}
+func (*EventAddAddrInfo) behaviourEvent() {}
+func (*EventAddAddrInfo) routingCommand() {}
 
 type EventGetCloserNodesSuccess struct {
 	QueryID     query.QueryID
 	To          peer.AddrInfo
-	Target      key.Key256
+	Target      KadKey
 	CloserNodes []peer.AddrInfo
 }
 
-func (EventGetCloserNodesSuccess) dhtEvent()            {}
-func (EventGetCloserNodesSuccess) nodeHandlerResponse() {}
+func (*EventGetCloserNodesSuccess) behaviourEvent()      {}
+func (*EventGetCloserNodesSuccess) nodeHandlerResponse() {}
 
 type EventGetCloserNodesFailure struct {
 	QueryID query.QueryID
 	To      peer.AddrInfo
-	Target  key.Key256
+	Target  KadKey
 	Err     error
 }
 
-func (EventGetCloserNodesFailure) dhtEvent()            {}
-func (EventGetCloserNodesFailure) nodeHandlerResponse() {}
+func (*EventGetCloserNodesFailure) behaviourEvent()      {}
+func (*EventGetCloserNodesFailure) nodeHandlerResponse() {}
 
-// EventQueryProgressed is emitted by the dht when a query has received a
+// EventQueryProgressed is emitted by the coordinator when a query has received a
 // response from a node.
 type EventQueryProgressed struct {
 	QueryID  query.QueryID
 	NodeID   peer.ID
-	Response kad.Response[key.Key256, ma.Multiaddr]
+	Response kad.Response[KadKey, ma.Multiaddr]
 	Stats    query.QueryStats
 }
 
-func (*EventQueryProgressed) dhtEvent() {}
+func (*EventQueryProgressed) behaviourEvent() {}
 
-// EventQueryFinished is emitted by the dht when a query has finished, either through
+// EventQueryFinished is emitted by the coordinator when a query has finished, either through
 // running to completion or by being canceled.
 type EventQueryFinished struct {
 	QueryID query.QueryID
 	Stats   query.QueryStats
 }
 
-func (*EventQueryFinished) dhtEvent() {}
+func (*EventQueryFinished) behaviourEvent() {}
 
-// EventRoutingUpdated is emitted by the dht when a new node has been verified and added to the routing table.
+// EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {
-	NodeInfo kad.NodeInfo[key.Key256, ma.Multiaddr]
+	NodeInfo kad.NodeInfo[KadKey, ma.Multiaddr]
 }
 
-func (*EventRoutingUpdated) dhtEvent()                 {}
-func (*EventRoutingUpdated) routingNotificationEvent() {}
+func (*EventRoutingUpdated) behaviourEvent()      {}
+func (*EventRoutingUpdated) routingNotification() {}
 
-// EventBootstrapFinished is emitted by the dht when a bootstrap has finished, either through
+// EventBootstrapFinished is emitted by the coordinator when a bootstrap has finished, either through
 // running to completion or by being canceled.
 type EventBootstrapFinished struct {
 	Stats query.QueryStats
 }
 
-func (*EventBootstrapFinished) dhtEvent()                 {}
-func (*EventBootstrapFinished) routingNotificationEvent() {}
+func (*EventBootstrapFinished) behaviourEvent()      {}
+func (*EventBootstrapFinished) routingNotification() {}

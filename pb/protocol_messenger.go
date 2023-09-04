@@ -169,8 +169,16 @@ func (pm *ProtocolMessenger) GetClosestPeers(ctx context.Context, p peer.ID, id 
 	return peers, nil
 }
 
-// PutProvider asks a peer to store that we are a provider for the given key.
-func (pm *ProtocolMessenger) PutProvider(ctx context.Context, p peer.ID, key multihash.Multihash, host host.Host) (err error) {
+// PutProvider is deprecated please use [ProtocolMessenger.PutProviderAddrs].
+func (pm *ProtocolMessenger) PutProvider(ctx context.Context, p peer.ID, key multihash.Multihash, h host.Host) error {
+	return pm.PutProviderAddrs(ctx, p, key, peer.AddrInfo{
+		ID:    h.ID(),
+		Addrs: h.Addrs(),
+	})
+}
+
+// PutProviderAddrs asks a peer to store that we are a provider for the given key.
+func (pm *ProtocolMessenger) PutProviderAddrs(ctx context.Context, p peer.ID, key multihash.Multihash, self peer.AddrInfo) (err error) {
 	ctx, span := internal.StartSpan(ctx, "ProtocolMessenger.PutProvider")
 	defer span.End()
 	if span.IsRecording() {
@@ -182,19 +190,14 @@ func (pm *ProtocolMessenger) PutProvider(ctx context.Context, p peer.ID, key mul
 		}()
 	}
 
-	pi := peer.AddrInfo{
-		ID:    host.ID(),
-		Addrs: host.Addrs(),
-	}
-
 	// TODO: We may want to limit the type of addresses in our provider records
 	// For example, in a WAN-only DHT prohibit sharing non-WAN addresses (e.g. 192.168.0.100)
-	if len(pi.Addrs) < 1 {
+	if len(self.Addrs) < 1 {
 		return fmt.Errorf("no known addresses for self, cannot put provider")
 	}
 
 	pmes := NewMessage(Message_ADD_PROVIDER, key, 0)
-	pmes.ProviderPeers = RawPeerInfosToPBPeers([]peer.AddrInfo{pi})
+	pmes.ProviderPeers = RawPeerInfosToPBPeers([]peer.AddrInfo{self})
 
 	return pm.m.SendMessage(ctx, p, pmes)
 }

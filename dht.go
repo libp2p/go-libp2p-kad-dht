@@ -925,8 +925,12 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 	if p == dht.self || dht.host.Network().Connectedness(p) == network.Connected {
 		return
 	}
-	if dht.addrFilter != nil {
-		addrs = dht.addrFilter(addrs)
+	dht.peerstore.AddAddrs(p, dht.filterAddrs(addrs), ttl)
+}
+
+func (dht *IpfsDHT) filterAddrs(addrs []ma.Multiaddr) []ma.Multiaddr {
+	if f := dht.addrFilter; f != nil {
+		return f(addrs)
 	}
-	dht.peerstore.AddAddrs(p, addrs, ttl)
+	return addrs
 }

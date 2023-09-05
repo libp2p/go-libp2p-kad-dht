@@ -13,6 +13,7 @@ import (
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/plprobelab/go-kademlia/routing/triert"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap/exp/zapslog"
@@ -123,7 +124,7 @@ type Config struct {
 	// [triert.TrieRT] routing table will be used. This field will be nil
 	// in the default configuration because a routing table requires information
 	// about the local node.
-	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+	RoutingTable routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
 
 	// The Backends field holds a map of key namespaces to their corresponding
 	// backend implementation. For example, if we received an IPNS record, the
@@ -184,7 +185,7 @@ func DefaultConfig() *Config {
 // DefaultRoutingTable returns a triert.TrieRT routing table. This routing table
 // cannot be initialized in [DefaultConfig] because it requires information
 // about the local peer.
-func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]], error) {
+func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]], error) {
 	rtCfg := triert.DefaultConfig[key.Key256, kad.NodeID[key.Key256]]()
 	rt, err := triert.New[key.Key256, kad.NodeID[key.Key256]](nodeID, rtCfg)
 	if err != nil {

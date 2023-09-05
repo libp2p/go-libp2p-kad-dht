@@ -5,7 +5,6 @@ go 1.20
 require (
 	github.com/benbjohnson/clock v1.3.5
 	github.com/hashicorp/golang-lru/v2 v2.0.5
-	github.com/iand/zikade v0.0.0-20230824143824-d11f2132b4fb
 	github.com/ipfs/boxo v0.12.0
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-datastore v0.6.0
@@ -117,5 +116,3 @@ require (
 )
 
 replace github.com/ipfs/go-datastore v0.6.0 => github.com/dennis-tra/go-datastore v0.0.0-20230823171431-12ac85aaa42a
-
-replace github.com/iand/zikade v0.0.0-20230824143824-d11f2132b4fb => github.com/dennis-tra/zikade v0.0.0-20230830153809-e6af3ad31acd

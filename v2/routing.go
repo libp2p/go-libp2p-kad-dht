@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/iand/zikade/core"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -15,8 +16,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
@@ -43,12 +42,12 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 
 	target := kadt.PeerID(id)
 
-	var foundNode core.Node[key.Key256, ma.Multiaddr]
-	fn := func(ctx context.Context, node core.Node[key.Key256, ma.Multiaddr], stats core.QueryStats) error {
+	var foundNode coord.Node
+	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
 		slog.Info("visiting node", "id", node.ID())
-		if key.Equal(node.ID().Key(), target.Key()) {
+		if node.ID() == id {
 			foundNode = node
-			return core.SkipRemaining
+			return coord.SkipRemaining
 		}
 		return nil
 	}
@@ -63,7 +62,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 	}
 
 	return peer.AddrInfo{
-		ID:    peer.ID(foundNode.ID().(kadt.PeerID)),
+		ID:    foundNode.ID(),
 		Addrs: foundNode.Addresses(),
 	}, nil
 }

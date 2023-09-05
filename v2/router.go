@@ -5,21 +5,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/iand/zikade/kademlia"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
 	"github.com/libp2p/go-msgio/pbio"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
@@ -27,7 +25,7 @@ type Router struct {
 	host host.Host
 }
 
-var _ kademlia.Router[key.Key256, ma.Multiaddr] = (*Router)(nil)
+var _ coord.Router = (*Router)(nil)
 
 func WriteMsg(s network.Stream, msg protoreflect.ProtoMessage) error {
 	w := pbio.NewDelimitedWriter(s)
@@ -53,26 +51,13 @@ type ProtoKadResponseMessage[K kad.Key[K], A kad.Address[A]] interface {
 	kad.Response[K, A]
 }
 
-func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma.Multiaddr], protoID address.ProtocolID, req kad.Request[key.Key256, ma.Multiaddr]) (kad.Response[key.Key256, ma.Multiaddr], error) {
+func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
 	if err := r.AddNodeInfo(ctx, to, time.Hour); err != nil {
 		return nil, fmt.Errorf("add node info: %w", err)
 	}
 
-	protoReq, ok := req.(ProtoKadMessage)
-	if !ok {
-		return nil, fmt.Errorf("aaah ProtoKadMessage")
-	}
-
-	var p peer.ID
-	nid, ok := to.ID().(kadt.PeerID)
-	if !ok {
-		naddr := to.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
-		p = peer.ID(naddr.ID().(kadt.PeerID))
-	} else {
-		p = peer.ID(nid)
-	}
-
-	if len(r.host.Peerstore().Addrs(p)) == 0 {
+	// TODO: what to do with addresses in peer.AddrInfo?
+	if len(r.host.Peerstore().Addrs(to.ID)) == 0 {
 		return nil, fmt.Errorf("aaah ProtoKadMessage")
 	}
 
@@ -83,7 +68,7 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 	var err error
 
 	var s network.Stream
-	s, err = r.host.NewStream(ctx, p, protocol.ID(protoID))
+	s, err = r.host.NewStream(ctx, to.ID, protocol.ID(protoID))
 	if err != nil {
 		return nil, fmt.Errorf("stream creation: %w", err)
 	}
@@ -92,7 +77,7 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 	w := pbio.NewDelimitedWriter(s)
 	reader := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 
-	err = w.WriteMsg(protoReq)
+	err = w.WriteMsg(req)
 	if err != nil {
 		return nil, fmt.Errorf("write message: %w", err)
 	}
@@ -107,48 +92,33 @@ func (r *Router) SendMessage(ctx context.Context, to kad.NodeInfo[key.Key256, ma
 	}
 
 	for _, info := range protoResp.CloserPeersAddrInfos() {
-		_ = r.AddNodeInfo(ctx, kadt.AddrInfo{
-			Info: info,
-		}, time.Hour)
+		_ = r.AddNodeInfo(ctx, info, time.Hour)
 	}
 
 	return &protoResp, err
 }
 
-func (r *Router) AddNodeInfo(ctx context.Context, info kad.NodeInfo[key.Key256, ma.Multiaddr], ttl time.Duration) error {
-	var p peer.ID
-	nid, ok := info.ID().(kadt.PeerID)
-	if !ok {
-		naddr := info.(*kademlia.NodeAddr[key.Key256, ma.Multiaddr])
-		p = peer.ID(naddr.ID().(kadt.PeerID))
-	} else {
-		p = peer.ID(nid)
-	}
-	ai := peer.AddrInfo{
-		ID:    p,
-		Addrs: info.Addresses(),
-	}
-
+func (r *Router) AddNodeInfo(ctx context.Context, ai peer.AddrInfo, ttl time.Duration) error {
 	// Don't add addresses for self or our connected peers. We have better ones.
-	if ai.ID == r.host.ID() ||
-		r.host.Network().Connectedness(ai.ID) == network.Connected {
+	if ai.ID == r.host.ID() || r.host.Network().Connectedness(ai.ID) == network.Connected {
 		return nil
 	}
+
 	r.host.Peerstore().AddAddrs(ai.ID, ai.Addrs, ttl)
 	return nil
 }
 
-func (r *Router) GetNodeInfo(ctx context.Context, id kad.NodeID[key.Key256]) (kad.NodeInfo[key.Key256, ma.Multiaddr], error) {
-	pid := peer.ID(id.(kadt.PeerID))
-	return kadt.AddrInfo{Info: r.host.Peerstore().PeerInfo(pid)}, nil
+func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
+	return r.host.Peerstore().PeerInfo(id), nil
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to kad.NodeInfo[key.Key256, ma.Multiaddr], target key.Key256) ([]kad.NodeInfo[key.Key256, ma.Multiaddr], error) {
+func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target key.Key256) ([]peer.AddrInfo, error) {
 	resp, err := r.SendMessage(ctx, to, address.ProtocolID(ProtocolIPFS), FindKeyRequest(target))
 	if err != nil {
 		return nil, err
 	}
-	return resp.CloserNodes(), nil
+
+	return resp.CloserPeersAddrInfos(), nil
 }
 
 func FindKeyRequest(k key.Key256) *pb.Message {

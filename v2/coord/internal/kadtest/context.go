@@ -26,5 +26,6 @@ func CtxShort(t *testing.T) (context.Context, context.CancelFunc) {
 			deadline = goal
 		}
 	}
+
 	return context.WithDeadline(context.Background(), deadline)
 }

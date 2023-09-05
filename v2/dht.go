@@ -6,16 +6,16 @@ import (
 	"io"
 	"sync"
 
-	"github.com/iand/zikade/kademlia"
 	"github.com/ipfs/go-datastore/trace"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-kademlia/routing"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -35,11 +35,11 @@ type DHT struct {
 	mode   mode
 
 	// kad is a reference to the go-kademlia coordinator
-	kad *kademlia.Dht[key.Key256, ma.Multiaddr]
+	kad *coord.Coordinator
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+	rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
 
 	// backends
 	backends map[string]Backend
@@ -121,7 +121,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	d.kad, err = kademlia.NewDht[key.Key256, ma.Multiaddr](nid, &Router{host: h}, d.rt, nil)
+	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}

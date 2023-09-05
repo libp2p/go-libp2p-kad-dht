@@ -12,6 +12,8 @@ import (
 	"github.com/plprobelab/go-kademlia/network/address"
 )
 
+// KadKey is a type alias for the type of key that's used with this DHT
+// implementation.
 type KadKey = key.Key256
 
 // Value is a value that may be stored in the DHT.
@@ -20,19 +22,21 @@ type Value interface {
 	MarshalBinary() ([]byte, error)
 }
 
-// Node represent a remote node, a participant in the DHT.
+// Node represents the local or a remote node participating in the DHT.
 type Node interface {
+	// ID returns the peer ID identifying this node.
 	ID() peer.ID
 
 	// Addresses returns the network addresses associated with the given node.
 	Addresses() []ma.Multiaddr
 
-	// GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
-	// The node may return fewer nodes than requested.
+	// GetClosestNodes requests the n closest nodes to the key from the node's
+	// local routing table. The node may return fewer nodes than requested.
 	GetClosestNodes(ctx context.Context, key KadKey, n int) ([]Node, error)
 
-	// GetValue requests that the node return any value associated with the supplied key.
-	// If the node does not have a value for the key it returns ErrValueNotFound.
+	// GetValue requests that the node return any value associated with the
+	// supplied key. If the node does not have a value for the key it returns
+	// ErrValueNotFound.
 	GetValue(ctx context.Context, key KadKey) (Value, error)
 
 	// PutValue requests that the node stores a value to be associated with the supplied key.

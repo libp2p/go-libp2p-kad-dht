@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -19,6 +16,9 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 var _ routing.Routing = (*DHT)(nil)
@@ -183,5 +183,15 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	_, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
-	panic("implement me")
+	slog.Info("Bootstrapping...")
+	for _, addrInfo := range DefaultBootstrapPeers() {
+		if err := d.host.Connect(ctx, addrInfo); err != nil {
+			d.log.Info("Failed to connect to peer", "err", err.Error())
+		} else {
+			d.log.Info("Connected to bootstrap peer", "peerID", addrInfo.ID.String())
+			d.rt.AddNode(kadt.PeerID(addrInfo.ID))
+		}
+	}
+
+	return nil
 }

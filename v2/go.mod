@@ -16,8 +16,12 @@ require (
 	github.com/multiformats/go-base32 v0.1.0
 	github.com/multiformats/go-multiaddr v0.11.0
 	github.com/plprobelab/go-kademlia v0.0.0-20230901130940-286ab4ceca60
+	github.com/prometheus/client_golang v1.16.0
 	github.com/stretchr/testify v1.8.4
+	github.com/urfave/cli/v2 v2.25.7
 	go.opentelemetry.io/otel v1.17.0
+	go.opentelemetry.io/otel/exporters/jaeger v1.16.0
+	go.opentelemetry.io/otel/exporters/prometheus v0.40.0
 	go.opentelemetry.io/otel/metric v1.17.0
 	go.opentelemetry.io/otel/sdk v1.17.0
 	go.opentelemetry.io/otel/sdk/metric v0.40.0
@@ -32,6 +36,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
@@ -90,7 +95,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/polydawn/refmt v0.89.0 // indirect
-	github.com/prometheus/client_golang v1.16.0 // indirect
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
 	github.com/prometheus/procfs v0.11.0 // indirect
@@ -99,8 +103,10 @@ require (
 	github.com/quic-go/quic-go v0.37.6 // indirect
 	github.com/quic-go/webtransport-go v0.5.3 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/syndtr/goleveldb v1.0.0 // indirect
+	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.20.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

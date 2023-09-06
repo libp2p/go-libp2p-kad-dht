@@ -12,8 +12,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -173,7 +173,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	require.NoError(t, err)
 
 	tev := ev.(*EventRoutingUpdated)
-	require.Equal(t, nodes[2].NodeInfo.ID, NodeIDToPeerID(tev.NodeInfo.ID()))
+	require.Equal(t, nodes[2].NodeInfo.ID, tev.NodeInfo.ID)
 
 	// no EventRoutingUpdated is sent for the self node
 
@@ -184,7 +184,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	require.NoError(t, err)
 
 	tev = ev.(*EventRoutingUpdated)
-	require.Equal(t, nodes[3].NodeInfo.ID, NodeIDToPeerID(tev.NodeInfo.ID()))
+	require.Equal(t, nodes[3].NodeInfo.ID, tev.NodeInfo.ID)
 }
 
 func TestBootstrap(t *testing.T) {
@@ -273,7 +273,7 @@ func TestIncludeNode(t *testing.T) {
 	events := d.RoutingNotifications()
 
 	// inject a new node into the dht's includeEvents queue
-	err = d.AddNodes(ctx, []peer.AddrInfo{candidate})
+	err = d.AddNodes(ctx, []peer.AddrInfo{candidate}, time.Minute)
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
@@ -281,9 +281,9 @@ func TestIncludeNode(t *testing.T) {
 	require.NoError(t, err)
 
 	tev := ev.(*EventRoutingUpdated)
-	require.Equal(t, candidate.ID, NodeIDToPeerID(tev.NodeInfo.ID()))
+	require.Equal(t, candidate.ID, tev.NodeInfo.ID)
 
-	// the routing table should not contain the node yet
+	// the routing table should now contain the node
 	_, err = d.GetNode(ctx, candidate.ID)
 	require.NoError(t, err)
 }

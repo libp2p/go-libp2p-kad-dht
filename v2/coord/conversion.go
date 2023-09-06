@@ -27,6 +27,11 @@ func NodeIDToAddrInfo(id kad.NodeID[KadKey]) peer.AddrInfo {
 	}
 }
 
+// AddrInfoToNodeID converts a peer.AddrInfo to a kad.NodeID.
+func AddrInfoToNodeID(ai peer.AddrInfo) kad.NodeID[KadKey] {
+	return kadt.PeerID(ai.ID)
+}
+
 // SliceOfNodeInfoToSliceOfAddrInfo converts a kad.NodeInfo to a peer.AddrInfo.
 // This function will panic if any info.ID() does not return a kadt.PeerID
 func SliceOfNodeInfoToSliceOfAddrInfo(infos []kad.NodeInfo[KadKey, ma.Multiaddr]) []peer.AddrInfo {

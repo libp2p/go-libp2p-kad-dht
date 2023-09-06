@@ -80,6 +80,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		if ev.NodeInfo.ID == r.self {
 			break
 		}
+		// TODO: apply ttl
 		cmd := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
 			NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
 		}
@@ -92,7 +93,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventRoutingUpdated:
 		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"))
 		cmd := &routing.EventProbeAdd[KadKey]{
-			NodeID: ev.NodeInfo.ID(),
+			NodeID: AddrInfoToNodeID(ev.NodeInfo),
 		}
 		// attempt to advance the probe state machine
 		next, ok := r.advanceProbe(ctx, cmd)
@@ -294,12 +295,12 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 
 		// notify other routing state machines that there is a new node in the routing table
 		r.notify(ctx, &EventRoutingUpdated{
-			NodeInfo: st.NodeInfo,
+			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
 		})
 
 		// return the event to notify outwards too
 		return &EventRoutingUpdated{
-			NodeInfo: st.NodeInfo,
+			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
 		}, true
 	case *routing.StateIncludeWaitingAtCapacity:
 		// nothing to do except wait for message response or timeout

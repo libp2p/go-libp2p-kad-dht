@@ -63,7 +63,7 @@ func newPeerPair(t testing.TB) (host.Host, *DHT) {
 	cfg.Mode = ModeOptServer
 	serverDHT, err := New(server, cfg)
 
-	fillRoutingTable(t, serverDHT)
+	fillRoutingTable(t, serverDHT, 250)
 
 	t.Cleanup(func() {
 		if err = serverDHT.Close(); err != nil {

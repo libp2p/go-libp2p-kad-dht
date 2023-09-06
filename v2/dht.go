@@ -1,15 +1,18 @@
 package dht
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/ipfs/go-datastore/trace"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing"
@@ -59,8 +62,9 @@ type DHT struct {
 func New(h host.Host, cfg *Config) (*DHT, error) {
 	var err error
 
-	// check if the configuration is valid
-	if err = cfg.Validate(); err != nil {
+	if cfg == nil {
+		cfg = DefaultConfig()
+	} else if err = cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate DHT config: %w", err)
 	}
 
@@ -153,6 +157,10 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 func (d *DHT) Close() error {
 	if err := d.sub.Close(); err != nil {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
+	}
+
+	if err := d.kad.Close(); err != nil {
+		d.log.With("err", err).Debug("failed closing coordinator")
 	}
 
 	for ns, b := range d.backends {
@@ -263,6 +271,12 @@ func (d *DHT) logErr(err error, msg string) {
 	}
 
 	d.log.Warn(msg, "err", err.Error())
+}
+
+// AddAddresses suggests peers and their associated addresses to be added to the routing table.
+// Addresses will be added to the peerstore with the supplied time to live.
+func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
+	return d.kad.AddNodes(ctx, ais, ttl)
 }
 
 // newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by

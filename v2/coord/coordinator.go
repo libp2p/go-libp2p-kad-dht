@@ -27,6 +27,9 @@ type Coordinator struct {
 	// self is the peer id of the system the dht is running on
 	self peer.ID
 
+	// cancel is used to cancel all running goroutines when the coordinator is cleaning up
+	cancel context.CancelFunc
+
 	// cfg is a copy of the optional configuration supplied to the dht
 	cfg CoordinatorConfig
 
@@ -47,8 +50,6 @@ type Coordinator struct {
 	// queryBehaviour is the behaviour responsible for running user-submitted queries
 	queryBehaviour Behaviour[BehaviourEvent, BehaviourEvent]
 }
-
-const DefaultChanqueueCapacity = 1024
 
 type CoordinatorConfig struct {
 	PeerstoreTTL time.Duration // duration for which a peer is kept in the peerstore
@@ -111,7 +112,7 @@ func (cfg *CoordinatorConfig) Validate() error {
 
 func DefaultConfig() *CoordinatorConfig {
 	return &CoordinatorConfig{
-		Clock:              clock.New(), // use standard time
+		Clock:              clock.New(),
 		PeerstoreTTL:       10 * time.Minute,
 		QueryConcurrency:   3,
 		QueryTimeout:       5 * time.Minute,
@@ -181,21 +182,30 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	d := &Coordinator{
-		self: self,
-		cfg:  *cfg,
-		rtr:  rtr,
-		rt:   rt,
+		self:   self,
+		cfg:    *cfg,
+		rtr:    rtr,
+		rt:     rt,
+		cancel: cancel,
 
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
 		queryBehaviour:   queryBehaviour,
 
-		routingNotifications: make(chan RoutingNotification, 20),
+		routingNotifications: make(chan RoutingNotification, 20), // buffered mainly to allow tests to read the channel after running an operation
 	}
-	go d.eventLoop()
+	go d.eventLoop(ctx)
 
 	return d, nil
+}
+
+// Close cleans up all resources associated with this Coordinator.
+func (d *Coordinator) Close() error {
+	d.cancel()
+	return nil
 }
 
 func (d *Coordinator) ID() peer.ID {
@@ -216,13 +226,16 @@ func (d *Coordinator) RoutingNotifications() <-chan RoutingNotification {
 	return d.routingNotifications
 }
 
-func (d *Coordinator) eventLoop() {
-	ctx := context.Background()
-
+func (d *Coordinator) eventLoop(ctx context.Context) {
+	ctx, span := util.StartSpan(ctx, "Coordinator.eventLoop")
+	defer span.End()
 	for {
 		var ev BehaviourEvent
 		var ok bool
 		select {
+		case <-ctx.Done():
+			// coordinator is closing
+			return
 		case <-d.networkBehaviour.Ready():
 			ev, ok = d.networkBehaviour.Perform(ctx)
 		case <-d.routingBehaviour.Ready():
@@ -384,17 +397,20 @@ func (d *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (Q
 // AddNodes suggests new DHT nodes and their associated addresses to be added to the routing table.
 // If the routing table is updated as a result of this operation an EventRoutingUpdated notification
 // is emitted on the routing notification channel.
-func (d *Coordinator) AddNodes(ctx context.Context, infos []peer.AddrInfo) error {
+func (d *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
 	ctx, span := util.StartSpan(ctx, "Coordinator.AddNodes")
 	defer span.End()
-	for _, info := range infos {
-		if info.ID == d.self {
+	for _, ai := range ais {
+		if ai.ID == d.self {
 			// skip self
 			continue
 		}
 
+		// TODO: apply address filter
+
 		d.routingBehaviour.Notify(ctx, &EventAddAddrInfo{
-			NodeInfo: info,
+			NodeInfo: ai,
+			TTL:      ttl,
 		})
 
 	}

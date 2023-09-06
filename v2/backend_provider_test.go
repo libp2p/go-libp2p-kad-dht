@@ -42,7 +42,9 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 
 func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	mockClock := clock.NewMock()
-	cfg := DefaultProviderBackendConfig()
+	cfg, err := DefaultProviderBackendConfig()
+	require.NoError(t, err)
+
 	cfg.clk = mockClock
 	cfg.Logger = devnull
 
@@ -58,7 +60,7 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	// write to datastore
 	dsKey := newDatastoreKey(namespaceProviders, "random-key", string(p.ID))
 	rec := expiryRecord{expiry: mockClock.Now()}
-	err := b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	err = b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
 	// write to peerstore
@@ -90,7 +92,9 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 }
 
 func TestProvidersBackend_GarbageCollection_lifecycle_thread_safe(t *testing.T) {
-	cfg := DefaultProviderBackendConfig()
+	cfg, err := DefaultProviderBackendConfig()
+	require.NoError(t, err)
+
 	cfg.Logger = devnull
 
 	b := newBackendProvider(t, cfg)

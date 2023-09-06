@@ -10,6 +10,8 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type RecordBackend struct {
@@ -25,13 +27,20 @@ var _ Backend = (*RecordBackend)(nil)
 type RecordBackendConfig struct {
 	MaxRecordAge time.Duration
 	Logger       *slog.Logger
+	Tele         *tele.Telemetry
 }
 
-func DefaultRecordBackendConfig() *RecordBackendConfig {
+func DefaultRecordBackendConfig() (*RecordBackendConfig, error) {
+	telemetry, err := tele.New(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new telemetry: %w", err)
+	}
+
 	return &RecordBackendConfig{
 		Logger:       slog.Default(),
+		Tele:         telemetry,
 		MaxRecordAge: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
-	}
+	}, nil
 }
 
 func (r *RecordBackend) Store(ctx context.Context, key string, value any) (any, error) {
@@ -128,7 +137,7 @@ func (r *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 // If unmarshalling or validation fails, this function (alongside an error) also
 // returns true because the existing record should be replaced.
 func (r *RecordBackend) shouldReplaceExistingRecord(ctx context.Context, txn ds.Read, dsKey ds.Key, value []byte) (bool, error) {
-	ctx, span := tracer.Start(ctx, "DHT.shouldReplaceExistingRecord")
+	ctx, span := r.cfg.Tele.Tracer.Start(ctx, "RecordBackend.shouldReplaceExistingRecord")
 	defer span.End()
 
 	existingBytes, err := txn.Get(ctx, dsKey)

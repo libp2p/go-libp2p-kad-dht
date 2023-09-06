@@ -16,6 +16,8 @@ import (
 	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/plprobelab/go-kademlia/routing/triert"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 )
@@ -35,9 +37,6 @@ const (
 	// of the above record types.
 	ProtocolFilecoin protocol.ID = "/fil/kad/testnetnet/kad/1.0.0"
 )
-
-// tracer is an open telemetry tracing instance
-var tracer = otel.Tracer("go-libp2p-kad-dht")
 
 type (
 	// ModeOpt describes in which mode this [DHT] process should operate in.
@@ -161,6 +160,12 @@ type Config struct {
 	// also fetch from the peer store and serve to other peers. It is mainly
 	// used to filter out private addresses.
 	AddressFilter AddressFilter
+
+	// MeterProvider .
+	MeterProvider metric.MeterProvider
+
+	// TracerProvider .
+	TracerProvider trace.TracerProvider
 }
 
 // DefaultConfig returns a configuration struct that can be used as-is to
@@ -179,6 +184,8 @@ func DefaultConfig() *Config {
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		TimeoutStreamIdle: time.Minute, // MAGIC
 		AddressFilter:     AddrFilterPrivate,
+		MeterProvider:     otel.GetMeterProvider(),
+		TracerProvider:    otel.GetTracerProvider(),
 	}
 }
 
@@ -252,6 +259,14 @@ func (c *Config) Validate() error {
 
 	if c.AddressFilter == nil {
 		return fmt.Errorf("address filter must not be nil - use AddrFilterIdentity to disable filtering")
+	}
+
+	if c.MeterProvider == nil {
+		return fmt.Errorf("opentelemetry meter provider must not be nil")
+	}
+
+	if c.TracerProvider == nil {
+		return fmt.Errorf("opentelemetry tracer provider must not be nil")
 	}
 
 	return nil

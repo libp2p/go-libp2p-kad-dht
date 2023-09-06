@@ -24,7 +24,7 @@ import (
 var _ routing.Routing = (*DHT)(nil)
 
 func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
-	ctx, span := tracer.Start(ctx, "DHT.FindPeer")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.FindPeer")
 	defer span.End()
 
 	// First check locally. If we are or were recently connected to the peer,
@@ -68,7 +68,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
-	ctx, span := tracer.Start(ctx, "DHT.Provide", otel.WithAttributes(attribute.String("cid", c.String())))
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Provide", otel.WithAttributes(attribute.String("cid", c.String())))
 	defer span.End()
 
 	// verify if this DHT supports provider records by checking if a "providers"
@@ -99,7 +99,7 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
-	ctx, span := tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
 	// verify if this DHT supports provider records by checking if a "providers"
@@ -116,7 +116,7 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 }
 
 func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...routing.Option) error {
-	ctx, span := tracer.Start(ctx, "DHT.PutValue")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
 
 	ns, path, err := record.SplitKey(key)
@@ -142,7 +142,7 @@ func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...
 }
 
 func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option) ([]byte, error) {
-	ctx, span := tracer.Start(ctx, "DHT.GetValue")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
 	defer span.End()
 
 	ns, path, err := record.SplitKey(key)
@@ -173,14 +173,14 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 }
 
 func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Option) (<-chan []byte, error) {
-	ctx, span := tracer.Start(ctx, "DHT.SearchValue")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
 	defer span.End()
 
 	panic("implement me")
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {
-	ctx, span := tracer.Start(ctx, "DHT.Bootstrap")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
 	panic("implement me")

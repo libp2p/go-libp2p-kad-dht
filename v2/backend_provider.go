@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,11 +18,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/multiformats/go-base32"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // ProvidersBackend implements the [Backend] interface and handles provider
@@ -95,6 +94,10 @@ type ProvidersBackendConfig struct {
 	// Logger is the logger to use
 	Logger *slog.Logger
 
+	// Tele holds a reference to the telemetry struct to capture metrics and
+	// traces.
+	Tele *tele.Telemetry
+
 	// AddressFilter is a filter function that any addresses that we attempt to
 	// store or fetch from the peerstore's address book need to pass through.
 	// If you're manually configuring this backend, make sure to align the
@@ -106,7 +109,12 @@ type ProvidersBackendConfig struct {
 // configuration. Use this as a starting point and modify it. If a nil
 // configuration is passed to [NewBackendProvider], this default configuration
 // here is used.
-func DefaultProviderBackendConfig() *ProvidersBackendConfig {
+func DefaultProviderBackendConfig() (*ProvidersBackendConfig, error) {
+	telemetry, err := tele.New(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new telemetry: %w", err)
+	}
+
 	return &ProvidersBackendConfig{
 		clk:             clock.New(),
 		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
@@ -115,8 +123,9 @@ func DefaultProviderBackendConfig() *ProvidersBackendConfig {
 		CacheSize:       256,            // MAGIC
 		GCInterval:      time.Hour,      // MAGIC
 		Logger:          slog.Default(),
+		Tele:            telemetry,
 		AddressFilter:   AddrFilterIdentity, // verify alignment with [Config.AddressFilter]
-	}
+	}, nil
 }
 
 // Store implements the [Backend] interface. In the case of a [ProvidersBackend]
@@ -346,13 +355,11 @@ func (p *ProvidersBackend) collectGarbage(ctx context.Context) {
 
 // trackCacheQuery updates the prometheus metrics about cache hit/miss performance
 func (p *ProvidersBackend) trackCacheQuery(ctx context.Context, hit bool) {
-	_ = stats.RecordWithTags(ctx,
-		[]tag.Mutator{
-			tag.Upsert(metrics.KeyCacheHit, strconv.FormatBool(hit)),
-			tag.Upsert(metrics.KeyRecordType, "provider"),
-		},
-		metrics.LRUCache.M(1),
+	set := tele.FromContext(ctx,
+		attribute.Bool(tele.AttrKeyCacheHit, hit),
+		attribute.String(tele.AttrKeyRecordType, "provider"),
 	)
+	p.cfg.Tele.LRUCache.Add(ctx, 1, metric.WithAttributeSet(set))
 }
 
 // delete is a convenience method to delete the record at the given datastore

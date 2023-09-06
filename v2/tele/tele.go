@@ -29,6 +29,9 @@ var (
 // Initialize this struct with [New] or [NewWithGlobalProviders]. Make sure
 // to also register the [MeterProviderOpts] with your custom or the global
 // [metric.MeterProvider].
+//
+// To see the documentation for each metric below, check out [New] and the
+// metric.WithDescription() calls when initializing each metric.
 type Telemetry struct {
 	Tracer                 trace.Tracer
 	ReceivedMessages       metric.Int64Counter
@@ -198,6 +201,8 @@ func AttrKey(val string) attribute.KeyValue {
 	return attribute.String("key", val)
 }
 
+// WithAttributes is a function that attaches the provided attributes to the
+// given context. The given attributes will overwrite any already existing ones.
 func WithAttributes(ctx context.Context, attrs ...attribute.KeyValue) context.Context {
 	set := attribute.NewSet(attrs...)
 	val := ctx.Value(attrsCtxKey)
@@ -210,6 +215,10 @@ func WithAttributes(ctx context.Context, attrs ...attribute.KeyValue) context.Co
 	return context.WithValue(ctx, attrsCtxKey, set)
 }
 
+// FromContext returns the attributes that were previously associated with the
+// given context via [WithAttributes] plus any attributes that are also passed
+// into this function. The given attributes will take precedence over any
+// attributes stored in the context.
 func FromContext(ctx context.Context, attrs ...attribute.KeyValue) attribute.Set {
 	val := ctx.Value(attrsCtxKey)
 	if val == nil {

@@ -18,7 +18,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/multiformats/go-base32"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 
@@ -356,8 +355,8 @@ func (p *ProvidersBackend) collectGarbage(ctx context.Context) {
 // trackCacheQuery updates the prometheus metrics about cache hit/miss performance
 func (p *ProvidersBackend) trackCacheQuery(ctx context.Context, hit bool) {
 	set := tele.FromContext(ctx,
-		attribute.Bool(tele.AttrKeyCacheHit, hit),
-		attribute.String(tele.AttrKeyRecordType, "provider"),
+		tele.AttrCacheHit(hit),
+		tele.AttrRecordType("provider"),
 	)
 	p.cfg.Tele.LRUCache.Add(ctx, 1, metric.WithAttributeSet(set))
 }

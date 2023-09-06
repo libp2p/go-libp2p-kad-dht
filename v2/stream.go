@@ -24,20 +24,22 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-func (d *DHT) commonTelemetryAttributes() []attribute.KeyValue {
-	return []attribute.KeyValue{
-		attribute.String(tele.AttrKeyPeerID, d.host.ID().String()),
-		attribute.String(tele.AttrKeyInstanceID, fmt.Sprintf("%p", d)),
-	}
-}
-
 // streamHandler is the function that's registered with the libp2p host for
 // the DHT protocol ID. It sets up metrics and the resource manager scope. It
 // actually starts handling the stream and depending on the outcome resets or
 // closes it.
 func (d *DHT) streamHandler(s network.Stream) {
-	ctx, span := d.tele.Tracer.Start(context.Background(), "DHT.streamHandler", trace.WithAttributes(d.commonTelemetryAttributes()...))
+	attrs := []attribute.KeyValue{
+		tele.AttrPeerID(d.host.ID().String()),
+		tele.AttrInstanceID(fmt.Sprintf("%p", d)),
+	}
+
+	// start stream handler span
+	ctx, span := d.tele.Tracer.Start(context.Background(), "DHT.streamHandler", trace.WithAttributes(attrs...))
 	defer span.End()
+
+	// attach attribute to context to make them available to metrics below
+	ctx = tele.WithAttributes(ctx, attrs...)
 
 	if err := s.Scope().SetService(ServiceName); err != nil {
 		d.log.LogAttrs(ctx, slog.LevelWarn, "error attaching stream to DHT service", slog.String("err", err.Error()))
@@ -77,8 +79,6 @@ func (d *DHT) streamHandler(s network.Stream) {
 func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.handleNewStream")
 	defer span.End()
-
-	ctx = tele.WithAttributes(ctx, d.commonTelemetryAttributes()...)
 
 	// init structured logger that always contains the remote peers PeerID
 	slogger := d.log.With(slog.String("from", s.Conn().RemotePeer().String()))
@@ -120,8 +120,8 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		}
 
 		ctx = tele.WithAttributes(ctx,
-			attribute.String(tele.AttrKeyMessageType, req.GetType().String()),
-			attribute.String(tele.AttrKeyKey, base64.StdEncoding.EncodeToString(req.GetKey())),
+			tele.AttrMessageType(req.GetType().String()),
+			tele.AttrKey(base64.StdEncoding.EncodeToString(req.GetKey())),
 		)
 
 		// extend metrics context and slogger with message information.
@@ -181,7 +181,7 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 
 		// record any potential partial message we have received
 		if len(data) > 0 {
-			mattrs := metric.WithAttributeSet(tele.FromContext(ctx, attribute.String(tele.AttrKeyMessageType, "UNKNOWN")))
+			mattrs := metric.WithAttributeSet(tele.FromContext(ctx, tele.AttrMessageType("UNKNOWN")))
 			d.tele.ReceivedMessages.Add(ctx, 1, mattrs)
 			d.tele.ReceivedMessageErrors.Add(ctx, 1, mattrs)
 			d.tele.ReceivedBytes.Record(ctx, int64(len(data)), mattrs)
@@ -204,7 +204,7 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 	if err := proto.Unmarshal(data, &req); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("err", err.Error()))
 
-		mattrs := metric.WithAttributeSet(tele.FromContext(ctx, attribute.String(tele.AttrKeyMessageType, "UNKNOWN")))
+		mattrs := metric.WithAttributeSet(tele.FromContext(ctx, tele.AttrMessageType("UNKNOWN")))
 		d.tele.ReceivedMessageErrors.Add(ctx, 1, mattrs)
 		d.tele.ReceivedBytes.Record(ctx, int64(len(data)), mattrs)
 

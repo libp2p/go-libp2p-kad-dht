@@ -8,7 +8,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/query"
-	"github.com/plprobelab/go-kademlia/util"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 )
 
@@ -21,24 +21,26 @@ type PooledQueryBehaviour struct {
 	ready     chan struct{}
 
 	logger *slog.Logger
+	tracer trace.Tracer
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[KadKey, ma.Multiaddr], logger *slog.Logger) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(pool *query.Pool[KadKey, ma.Multiaddr], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
 		logger:  logger,
+		tracer:  tracer,
 	}
 	return h
 }
 
-func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := util.StartSpan(ctx, "PooledQueryBehaviour.Notify")
+func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
+	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.Notify")
 	defer span.End()
 
-	r.pendingMu.Lock()
-	defer r.pendingMu.Unlock()
+	p.pendingMu.Lock()
+	defer p.pendingMu.Unlock()
 
 	var cmd query.PoolEvent
 	switch ev := ev.(type) {
@@ -51,7 +53,7 @@ func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 			KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.KnownClosestNodes),
 		}
 		if ev.Notify != nil {
-			r.waiters[ev.QueryID] = ev.Notify
+			p.waiters[ev.QueryID] = ev.Notify
 		}
 
 	case *EventStopQuery:
@@ -62,11 +64,11 @@ func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventGetCloserNodesSuccess:
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
-			r.pending = append(r.pending, &EventAddAddrInfo{
+			p.pending = append(p.pending, &EventAddAddrInfo{
 				NodeInfo: info,
 			})
 		}
-		waiter, ok := r.waiters[ev.QueryID]
+		waiter, ok := p.waiters[ev.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventQueryProgressed{
 				NodeID:   ev.To.ID,
@@ -91,39 +93,39 @@ func (r *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	}
 
 	// attempt to advance the query pool
-	ev, ok := r.advancePool(ctx, cmd)
+	ev, ok := p.advancePool(ctx, cmd)
 	if ok {
-		r.pending = append(r.pending, ev)
+		p.pending = append(p.pending, ev)
 	}
-	if len(r.pending) > 0 {
+	if len(p.pending) > 0 {
 		select {
-		case r.ready <- struct{}{}:
+		case p.ready <- struct{}{}:
 		default:
 		}
 	}
 }
 
-func (r *PooledQueryBehaviour) Ready() <-chan struct{} {
-	return r.ready
+func (p *PooledQueryBehaviour) Ready() <-chan struct{} {
+	return p.ready
 }
 
-func (r *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
-	ctx, span := util.StartSpan(ctx, "PooledQueryBehaviour.Perform")
+func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
+	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.Perform")
 	defer span.End()
 
 	// No inbound work can be done until Perform is complete
-	r.pendingMu.Lock()
-	defer r.pendingMu.Unlock()
+	p.pendingMu.Lock()
+	defer p.pendingMu.Unlock()
 
 	for {
 		// drain queued events first.
-		if len(r.pending) > 0 {
+		if len(p.pending) > 0 {
 			var ev BehaviourEvent
-			ev, r.pending = r.pending[0], r.pending[1:]
+			ev, p.pending = p.pending[0], p.pending[1:]
 
-			if len(r.pending) > 0 {
+			if len(p.pending) > 0 {
 				select {
-				case r.ready <- struct{}{}:
+				case p.ready <- struct{}{}:
 				default:
 				}
 			}
@@ -131,36 +133,36 @@ func (r *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 		}
 
 		// attempt to advance the query pool
-		ev, ok := r.advancePool(ctx, &query.EventPoolPoll{})
+		ev, ok := p.advancePool(ctx, &query.EventPoolPoll{})
 		if ok {
 			return ev, true
 		}
 
-		if len(r.pending) == 0 {
+		if len(p.pending) == 0 {
 			return nil, false
 		}
 	}
 }
 
-func (r *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (BehaviourEvent, bool) {
-	ctx, span := util.StartSpan(ctx, "PooledQueryBehaviour.advancePool")
+func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (BehaviourEvent, bool) {
+	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.advancePool")
 	defer span.End()
 
-	pstate := r.pool.Advance(ctx, ev)
+	pstate := p.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {
 	case *query.StatePoolQueryMessage[KadKey, ma.Multiaddr]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
 			To:      NodeIDToAddrInfo(st.NodeID),
 			Target:  st.Message.Target(),
-			Notify:  r,
+			Notify:  p,
 		}, true
 	case *query.StatePoolWaitingAtCapacity:
 		// nothing to do except wait for message response or timeout
 	case *query.StatePoolWaitingWithCapacity:
 		// nothing to do except wait for message response or timeout
 	case *query.StatePoolQueryFinished:
-		waiter, ok := r.waiters[st.QueryID]
+		waiter, ok := p.waiters[st.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventQueryFinished{
 				QueryID: st.QueryID,

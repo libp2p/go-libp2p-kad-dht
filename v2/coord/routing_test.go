@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -35,7 +37,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	req := &pb.Message{
 		Type: pb.Message_FIND_NODE,
@@ -74,7 +76,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("bootstrap"),
@@ -108,7 +110,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -144,7 +146,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventAddAddrInfo{
 		NodeInfo: nodes[2].NodeInfo,
@@ -175,7 +177,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("include"),
@@ -210,7 +212,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -255,7 +257,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	// ensure bootstrap is always idle
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default())
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	// a new node to be included
 	candidate := nodes[len(nodes)-1].NodeInfo

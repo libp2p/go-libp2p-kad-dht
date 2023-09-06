@@ -94,4 +94,10 @@ func TestConfig_Validate(t *testing.T) {
 		cfg.TracerProvider = nil
 		assert.Error(t, cfg.Validate())
 	})
+
+	t.Run("nil clock", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Clock = nil
+		assert.Error(t, cfg.Validate())
+	})
 }

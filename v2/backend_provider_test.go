@@ -66,22 +66,22 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	// write to peerstore
 	b.addrBook.AddAddrs(p.ID, p.Addrs, time.Hour)
 
-	// advance clock half the gc time and check if record is still there
+	// advance clock half the validity time and check if record is still there
 	mockClock.Add(cfg.ProvideValidity / 2)
 
 	// sync autobatching datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey(namespaceProviders))
+	err = b.datastore.Sync(ctx, ds.NewKey(""))
 	require.NoError(t, err)
 
 	// we expect the record to still be there after half the ProvideValidity
 	_, err = b.datastore.Get(ctx, dsKey)
 	require.NoError(t, err)
 
-	// advance clock another gc time and check if record was GC'd now
+	// advance clock another time and check if the record was GC'd now
 	mockClock.Add(cfg.ProvideValidity + cfg.GCInterval)
 
 	// sync autobatching datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey(namespaceProviders))
+	err = b.datastore.Sync(ctx, ds.NewKey(""))
 	require.NoError(t, err)
 
 	// we expect the record to be GC'd now

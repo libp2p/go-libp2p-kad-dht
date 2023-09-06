@@ -229,9 +229,7 @@ func TestBootstrap(t *testing.T) {
 
 	self := nodes[0].NodeInfo.ID
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
-	if err != nil {
-		log.Fatalf("unexpected error creating dht: %v", err)
-	}
+	require.NoError(t, err)
 
 	buffer := make(chan RoutingNotification, 5)
 	go func() {
@@ -245,9 +243,7 @@ func TestBootstrap(t *testing.T) {
 		}
 	}()
 
-	seeds := []peer.ID{
-		nodes[1].NodeInfo.ID,
-	}
+	seeds := []peer.ID{nodes[1].NodeInfo.ID}
 	err = d.Bootstrap(ctx, seeds)
 	require.NoError(t, err)
 

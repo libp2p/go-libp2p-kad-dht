@@ -110,6 +110,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		pbeCfg.Logger = cfg.Logger
 		pbeCfg.AddressFilter = cfg.AddressFilter
 		pbeCfg.Tele = d.tele
+		pbeCfg.clk = d.cfg.Clock
 
 		pbe, err := NewBackendProvider(h.Peerstore(), dstore, pbeCfg)
 		if err != nil {
@@ -122,6 +123,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		}
 		rbeCfg.Logger = cfg.Logger
 		rbeCfg.Tele = d.tele
+		rbeCfg.clk = d.cfg.Clock
 
 		ipnsBe, err := NewBackendIPNS(dstore, h.Peerstore(), rbeCfg)
 		if err != nil {

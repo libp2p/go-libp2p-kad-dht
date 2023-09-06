@@ -14,11 +14,13 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 var _ routing.Routing = (*DHT)(nil)
@@ -180,17 +182,21 @@ func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Optio
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
 	slog.Info("Bootstrapping...")
 	for _, addrInfo := range DefaultBootstrapPeers() {
+		_, loopSpan := d.tele.Tracer.Start(ctx, "DHT.BootstrapConnect", otel.WithAttributes(tele.AttrPeerID(addrInfo.ID.String())))
 		if err := d.host.Connect(ctx, addrInfo); err != nil {
 			d.log.Info("Failed to connect to peer", "err", err.Error())
+			loopSpan.RecordError(err)
+			loopSpan.SetStatus(codes.Error, err.Error())
 		} else {
 			d.log.Info("Connected to bootstrap peer", "peerID", addrInfo.ID.String())
 			d.rt.AddNode(kadt.PeerID(addrInfo.ID))
 		}
+		loopSpan.End()
 	}
 
 	return nil

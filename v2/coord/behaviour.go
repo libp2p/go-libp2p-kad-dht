@@ -6,18 +6,20 @@ import (
 	"sync/atomic"
 )
 
-type Notify[C BehaviourEvent] interface {
-	Notify(ctx context.Context, ev C)
+// Notify is the interface that a components to implement to be notified of
+// [BehaviourEvent]'s.
+type Notify[E BehaviourEvent] interface {
+	Notify(ctx context.Context, ev E)
 }
 
-type NotifyCloser[C BehaviourEvent] interface {
-	Notify[C]
+type NotifyCloser[E BehaviourEvent] interface {
+	Notify[E]
 	Close()
 }
 
-type NotifyFunc[C BehaviourEvent] func(ctx context.Context, ev C)
+type NotifyFunc[E BehaviourEvent] func(ctx context.Context, ev E)
 
-func (f NotifyFunc[C]) Notify(ctx context.Context, ev C) {
+func (f NotifyFunc[E]) Notify(ctx context.Context, ev E) {
 	f(ctx, ev)
 }
 

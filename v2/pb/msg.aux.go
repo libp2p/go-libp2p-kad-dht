@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"

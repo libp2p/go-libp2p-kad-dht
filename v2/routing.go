@@ -99,7 +99,7 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
+	_, span := d.tele.Tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
 	// verify if this DHT supports provider records by checking if a "providers"
@@ -173,14 +173,14 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 }
 
 func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Option) (<-chan []byte, error) {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
+	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
 	defer span.End()
 
 	panic("implement me")
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
+	_, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
 	panic("implement me")

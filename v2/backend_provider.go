@@ -109,7 +109,7 @@ type ProvidersBackendConfig struct {
 // configuration is passed to [NewBackendProvider], this default configuration
 // here is used.
 func DefaultProviderBackendConfig() (*ProvidersBackendConfig, error) {
-	telemetry, err := tele.New(nil, nil)
+	telemetry, err := tele.NewWithGlobalProviders()
 	if err != nil {
 		return nil, fmt.Errorf("new telemetry: %w", err)
 	}

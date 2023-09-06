@@ -140,17 +140,32 @@ func New(meterProvider metric.MeterProvider, tracerProvider trace.TracerProvider
 	return t, nil
 }
 
-// Keys
-const (
-	AttrKeyCacheHit    = "hit"
-	AttrKeyRecordType  = "record_type" // currently only used for the provider backend LRU cache
-	AttrKeyMessageType = "message_type"
-	AttrKeyPeerID      = "peer_id"
-	AttrKeyKey         = "key"
-	// AttrKeyInstanceID identifies a dht instance by the pointer address.
-	// Useful for differentiating between different dhts that have the same peer id.
-	AttrKeyInstanceID = "instance_id"
-)
+// AttrInstanceID identifies a dht instance by the pointer address.
+// Useful for differentiating between different DHTs that have the same peer id.
+func AttrInstanceID(instanceID string) attribute.KeyValue {
+	return attribute.String("instance_id", instanceID)
+}
+
+func AttrPeerID(pid string) attribute.KeyValue {
+	return attribute.String("peer_id", pid)
+}
+
+func AttrCacheHit(hit bool) attribute.KeyValue {
+	return attribute.Bool("hit", hit)
+}
+
+// AttrRecordType is currently only used for the provider backend LRU cache
+func AttrRecordType(val string) attribute.KeyValue {
+	return attribute.String("record_type", val)
+}
+
+func AttrMessageType(val string) attribute.KeyValue {
+	return attribute.String("message_type", val)
+}
+
+func AttrKey(val string) attribute.KeyValue {
+	return attribute.String("key", val)
+}
 
 func WithAttributes(ctx context.Context, attrs ...attribute.KeyValue) context.Context {
 	set := attribute.NewSet(attrs...)

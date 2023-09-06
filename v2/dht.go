@@ -17,6 +17,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -52,6 +53,9 @@ type DHT struct {
 	// these events in networkEventsSubscription and consumes them
 	// asynchronously in consumeNetworkEvents.
 	sub event.Subscription
+
+	// tele holds a reference to a telemetry struct
+	tele *tele.Telemetry
 }
 
 // New constructs a new [DHT] for the given underlying host and with the given
@@ -79,6 +83,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		return nil, fmt.Errorf("new trie routing table: %w", err)
 	}
 
+	// initialize a new telemetry struct
+	d.tele, err = tele.New(cfg.MeterProvider, cfg.TracerProvider)
+	if err != nil {
+		return nil, fmt.Errorf("init telemetry: %w", err)
+	}
+
 	if len(cfg.Backends) != 0 {
 		d.backends = cfg.Backends
 	} else if cfg.ProtocolID == ProtocolIPFS {
@@ -91,33 +101,48 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		}
 
 		// wrap datastore in open telemetry tracing
-		dstore = trace.New(dstore, tracer)
+		dstore = trace.New(dstore, d.tele.Tracer)
 
-		pbeCfg := DefaultProviderBackendConfig()
+		pbeCfg, err := DefaultProviderBackendConfig()
+		if err != nil {
+			return nil, fmt.Errorf("default provider config: %w", err)
+		}
 		pbeCfg.Logger = cfg.Logger
 		pbeCfg.AddressFilter = cfg.AddressFilter
+		pbeCfg.Tele = d.tele
 
 		pbe, err := NewBackendProvider(h.Peerstore(), dstore, pbeCfg)
 		if err != nil {
 			return nil, fmt.Errorf("new provider backend: %w", err)
 		}
 
-		rbeCfg := DefaultRecordBackendConfig()
+		rbeCfg, err := DefaultRecordBackendConfig()
+		if err != nil {
+			return nil, fmt.Errorf("default provider config: %w", err)
+		}
 		rbeCfg.Logger = cfg.Logger
+		rbeCfg.Tele = d.tele
+
+		ipnsBe, err := NewBackendIPNS(dstore, h.Peerstore(), rbeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("new ipns backend: %w", err)
+		}
+
+		pkBe, err := NewBackendPublicKey(dstore, rbeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("new public key backend: %w", err)
+		}
 
 		d.backends = map[string]Backend{
-			"ipns":      NewBackendIPNS(dstore, h.Peerstore(), rbeCfg),
-			"pk":        NewBackendPublicKey(dstore, rbeCfg),
+			"ipns":      ipnsBe,
+			"pk":        pkBe,
 			"providers": pbe,
 		}
 	}
 
 	// wrap all backends with tracing
-	for ns, backend := range d.backends {
-		d.backends[ns] = &tracedBackend{
-			namespace: ns,
-			backend:   backend,
-		}
+	for ns, be := range d.backends {
+		d.backends[ns] = traceWrapBackend(ns, be, d.tele.Tracer)
 	}
 
 	// instantiate a new Kademlia DHT coordinator.

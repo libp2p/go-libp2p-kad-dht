@@ -234,7 +234,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 // closerPeers returns the closest peers to the given target key this host knows
 // about. It doesn't return 1) itself 2) the peer that asked for closer peers.
 func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256) []*pb.Message_Peer {
-	ctx, span := tracer.Start(ctx, "DHT.closerPeers", otel.WithAttributes(attribute.String("remote", remote.String()), attribute.String("target", target.HexString())))
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.closerPeers", otel.WithAttributes(attribute.String("remote", remote.String()), attribute.String("target", target.HexString())))
 	defer span.End()
 
 	peers := d.rt.NearestNodes(target, d.cfg.BucketSize)

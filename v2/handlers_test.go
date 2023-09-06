@@ -803,8 +803,11 @@ func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
 	ds, err := InMemoryDatastore()
 	require.NoError(t, err)
 
+	cfg, err := DefaultRecordBackendConfig()
+	require.NoError(t, err)
+
 	recBackend := &RecordBackend{
-		cfg:       DefaultRecordBackendConfig(),
+		cfg:       cfg,
 		log:       devnull,
 		namespace: "test",
 		datastore: ds,

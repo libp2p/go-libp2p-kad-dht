@@ -5,25 +5,27 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	otel "go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type tracedBackend struct {
 	namespace string
 	backend   Backend
+	tracer    trace.Tracer
 }
 
 var _ Backend = (*tracedBackend)(nil)
 
-func traceWrapBackend(namespace string, backend Backend) Backend {
+func traceWrapBackend(namespace string, backend Backend, tracer trace.Tracer) Backend {
 	return &tracedBackend{
 		namespace: namespace,
 		backend:   backend,
+		tracer:    tracer,
 	}
 }
 
 func (t tracedBackend) Store(ctx context.Context, key string, value any) (any, error) {
-	ctx, span := tracer.Start(ctx, "Store", otel.WithAttributes(attribute.String("backend", t.namespace), attribute.String("key", key)))
+	ctx, span := t.tracer.Start(ctx, "Store", trace.WithAttributes(attribute.String("backend", t.namespace), attribute.String("key", key)))
 	defer span.End()
 
 	result, err := t.backend.Store(ctx, key, value)
@@ -36,7 +38,7 @@ func (t tracedBackend) Store(ctx context.Context, key string, value any) (any, e
 }
 
 func (t tracedBackend) Fetch(ctx context.Context, key string) (any, error) {
-	ctx, span := tracer.Start(ctx, "Fetch", otel.WithAttributes(attribute.String("backend", t.namespace), attribute.String("key", key)))
+	ctx, span := t.tracer.Start(ctx, "Fetch", trace.WithAttributes(attribute.String("backend", t.namespace), attribute.String("key", key)))
 	defer span.End()
 
 	result, err := t.backend.Fetch(ctx, key)

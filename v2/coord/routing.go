@@ -8,8 +8,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/routing"
-	"github.com/plprobelab/go-kademlia/util"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -33,9 +33,10 @@ type RoutingBehaviour struct {
 	ready     chan struct{}
 
 	logger *slog.Logger
+	tracer trace.Tracer
 }
 
-func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger) *RoutingBehaviour {
+func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
 	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,
@@ -43,12 +44,13 @@ func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, rout
 		probe:     probe,
 		ready:     make(chan struct{}, 1),
 		logger:    logger,
+		tracer:    tracer,
 	}
 	return r
 }
 
 func (r *RoutingBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.Notify")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.Notify")
 	defer span.End()
 
 	r.pendingMu.Lock()
@@ -58,7 +60,7 @@ func (r *RoutingBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 
 // notify must only be called while r.pendingMu is held
 func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.notify")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.notify")
 	defer span.End()
 	switch ev := ev.(type) {
 	case *EventStartBootstrap:
@@ -201,7 +203,7 @@ func (r *RoutingBehaviour) Ready() <-chan struct{} {
 }
 
 func (r *RoutingBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
-	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.Perform")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.Perform")
 	defer span.End()
 
 	// No inbound work can be done until Perform is complete
@@ -248,7 +250,7 @@ func (r *RoutingBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 }
 
 func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.BootstrapEvent) (BehaviourEvent, bool) {
-	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.advanceBootstrap")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceBootstrap")
 	defer span.End()
 	bstate := r.bootstrap.Advance(ctx, ev)
 	switch st := bstate.(type) {
@@ -277,7 +279,7 @@ func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.Boot
 }
 
 func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.IncludeEvent) (BehaviourEvent, bool) {
-	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.advanceInclude")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceInclude")
 	defer span.End()
 	istate := r.include.Advance(ctx, ev)
 	switch st := istate.(type) {
@@ -318,7 +320,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 }
 
 func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEvent) (BehaviourEvent, bool) {
-	ctx, span := util.StartSpan(ctx, "RoutingBehaviour.advanceProbe")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceProbe")
 	defer span.End()
 	st := r.probe.Advance(ctx, ev)
 	switch st := st.(type) {

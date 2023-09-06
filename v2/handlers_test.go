@@ -104,7 +104,7 @@ func TestMessage_noKey(t *testing.T) {
 		pb.Message_ADD_PROVIDER,
 		pb.Message_GET_PROVIDERS,
 	} {
-		t.Run(fmt.Sprintf("%s", typ), func(t *testing.T) {
+		t.Run(typ.String(), func(t *testing.T) {
 			msg := &pb.Message{Type: typ} // no key
 			_, err := d.handleMsg(context.Background(), peer.ID(""), msg)
 			if err == nil {
@@ -803,8 +803,11 @@ func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
 	ds, err := InMemoryDatastore()
 	require.NoError(t, err)
 
+	cfg, err := DefaultRecordBackendConfig()
+	require.NoError(t, err)
+
 	recBackend := &RecordBackend{
-		cfg:       DefaultRecordBackendConfig(),
+		cfg:       cfg,
 		log:       devnull,
 		namespace: "test",
 		datastore: ds,

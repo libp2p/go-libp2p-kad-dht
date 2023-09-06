@@ -82,4 +82,22 @@ func TestConfig_Validate(t *testing.T) {
 		cfg.AddressFilter = nil
 		assert.Error(t, cfg.Validate())
 	})
+
+	t.Run("nil meter provider", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.MeterProvider = nil
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("nil tracer provider", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.TracerProvider = nil
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("nil clock", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Clock = nil
+		assert.Error(t, cfg.Validate())
+	})
 }

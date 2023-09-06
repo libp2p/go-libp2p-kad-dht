@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/boxo/ipns"
@@ -60,9 +61,11 @@ type Backend interface {
 // store and fetch IPNS records from the given datastore. The stored and
 // returned records must be of type [*recpb.Record]. The cfg parameter can be
 // nil, in which case the [DefaultRecordBackendConfig] will be used.
-func NewBackendIPNS(ds ds.TxnDatastore, kb peerstore.KeyBook, cfg *RecordBackendConfig) *RecordBackend {
+func NewBackendIPNS(ds ds.TxnDatastore, kb peerstore.KeyBook, cfg *RecordBackendConfig) (be *RecordBackend, err error) {
 	if cfg == nil {
-		cfg = DefaultRecordBackendConfig()
+		if cfg, err = DefaultRecordBackendConfig(); err != nil {
+			return nil, fmt.Errorf("default ipns backend config: %w", err)
+		}
 	}
 
 	return &RecordBackend{
@@ -71,16 +74,18 @@ func NewBackendIPNS(ds ds.TxnDatastore, kb peerstore.KeyBook, cfg *RecordBackend
 		namespace: namespaceIPNS,
 		datastore: ds,
 		validator: ipns.Validator{KeyBook: kb},
-	}
+	}, nil
 }
 
 // NewBackendPublicKey initializes a new backend for the "pk" namespace that can
 // store and fetch public key records from the given datastore. The stored and
 // returned records must be of type [*recpb.Record]. The cfg parameter can be
 // nil, in which case the [DefaultRecordBackendConfig] will be used.
-func NewBackendPublicKey(ds ds.TxnDatastore, cfg *RecordBackendConfig) *RecordBackend {
+func NewBackendPublicKey(ds ds.TxnDatastore, cfg *RecordBackendConfig) (be *RecordBackend, err error) {
 	if cfg == nil {
-		cfg = DefaultRecordBackendConfig()
+		if cfg, err = DefaultRecordBackendConfig(); err != nil {
+			return nil, fmt.Errorf("default public key backend config: %w", err)
+		}
 	}
 
 	return &RecordBackend{
@@ -89,7 +94,7 @@ func NewBackendPublicKey(ds ds.TxnDatastore, cfg *RecordBackendConfig) *RecordBa
 		namespace: namespacePublicKey,
 		datastore: ds,
 		validator: record.PublicKeyValidator{},
-	}
+	}, nil
 }
 
 // NewBackendProvider initializes a new backend for the "providers" namespace
@@ -98,9 +103,11 @@ func NewBackendPublicKey(ds ds.TxnDatastore, cfg *RecordBackendConfig) *RecordBa
 // The values returned from [ProvidersBackend.Fetch] will be of type
 // [*providerSet] (unexported). The cfg parameter can be nil, in which case the
 // [DefaultProviderBackendConfig] will be used.
-func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Batching, cfg *ProvidersBackendConfig) (*ProvidersBackend, error) {
+func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Batching, cfg *ProvidersBackendConfig) (be *ProvidersBackend, err error) {
 	if cfg == nil {
-		cfg = DefaultProviderBackendConfig()
+		if cfg, err = DefaultProviderBackendConfig(); err != nil {
+			return nil, fmt.Errorf("default provider backend config: %w", err)
+		}
 	}
 
 	cache, err := lru.New[string, providerSet](cfg.CacheSize)

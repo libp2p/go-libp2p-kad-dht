@@ -8,19 +8,19 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
-	"github.com/libp2p/go-msgio/protoio"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
+	"github.com/libp2p/go-msgio/pbio"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // streamHandler is the function that's registered with the libp2p host for
@@ -28,20 +28,29 @@ import (
 // actually starts handling the stream and depending on the outcome resets or
 // closes it.
 func (d *DHT) streamHandler(s network.Stream) {
-	ctx, _ := tag.New(context.Background(),
-		tag.Upsert(metrics.KeyPeerID, d.host.ID().String()),
-		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", d)),
-	)
+	attrs := []attribute.KeyValue{
+		tele.AttrPeerID(d.host.ID().String()),
+		tele.AttrInstanceID(fmt.Sprintf("%p", d)),
+	}
+
+	// start stream handler span
+	ctx, span := d.tele.Tracer.Start(context.Background(), "DHT.streamHandler", trace.WithAttributes(attrs...))
+	defer span.End()
+
+	// attach attribute to context to make them available to metrics below
+	ctx = tele.WithAttributes(ctx, attrs...)
 
 	if err := s.Scope().SetService(ServiceName); err != nil {
 		d.log.LogAttrs(ctx, slog.LevelWarn, "error attaching stream to DHT service", slog.String("err", err.Error()))
 		d.logErr(s.Reset(), "failed to reset stream")
+		span.RecordError(err)
 		return
 	}
 
 	if err := d.handleNewStream(ctx, s); err != nil {
 		// If we exited with an error, let the remote peer know.
 		d.logErr(s.Reset(), "failed to reset stream")
+		span.RecordError(err)
 	} else {
 		// If we exited without an error, close gracefully.
 		d.logErr(s.Close(), "failed to close stream")
@@ -67,14 +76,14 @@ func (d *DHT) streamHandler(s network.Stream) {
 // it will return nil indicating the end of the stream or all messages have been
 // processed correctly.
 func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
-	ctx, span := tracer.Start(ctx, "DHT.handleNewStream")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.handleNewStream")
 	defer span.End()
 
 	// init structured logger that always contains the remote peers PeerID
 	slogger := d.log.With(slog.String("from", s.Conn().RemotePeer().String()))
 
 	// reset the stream after it was idle for too long
-	if err := s.SetDeadline(time.Now().Add(d.cfg.TimeoutStreamIdle)); err != nil {
+	if err := s.SetDeadline(d.cfg.Clock.Now().Add(d.cfg.TimeoutStreamIdle)); err != nil {
 		return fmt.Errorf("set initial stream deadline: %w", err)
 	}
 
@@ -93,7 +102,7 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 
 		// we have received a message, start the timer to
 		// track inbound request latency
-		startTime := time.Now()
+		startTime := d.cfg.Clock.Now()
 
 		// 2. unmarshal message into something usable
 		req, err := d.streamUnmarshalMsg(ctx, slogger, data)
@@ -105,34 +114,37 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		reader.ReleaseMsg(data)
 
 		// reset stream deadline
-		if err = s.SetDeadline(time.Now().Add(d.cfg.TimeoutStreamIdle)); err != nil {
+		if err = s.SetDeadline(d.cfg.Clock.Now().Add(d.cfg.TimeoutStreamIdle)); err != nil {
 			return fmt.Errorf("reset stream deadline: %w", err)
 		}
+
+		ctx = tele.WithAttributes(ctx,
+			tele.AttrMessageType(req.GetType().String()),
+			tele.AttrKey(base64.StdEncoding.EncodeToString(req.GetKey())),
+		)
 
 		// extend metrics context and slogger with message information.
 		// ctx must be overwritten because in the next iteration metrics.KeyMessageType
 		// would already exist and tag.New would return an error.
-		ctx, _ := tag.New(ctx, tag.Upsert(metrics.KeyMessageType, req.GetType().String()))
 		slogger = slogger.With(
 			slog.String("type", req.GetType().String()),
 			slog.String("key", base64.StdEncoding.EncodeToString(req.GetKey())),
 		)
 
 		// track message metrics
-		stats.Record(ctx,
-			metrics.ReceivedMessages.M(1),
-			metrics.ReceivedBytes.M(int64(len(data))),
-		)
+		mattrs := metric.WithAttributeSet(tele.FromContext(ctx))
+		d.tele.ReceivedMessages.Add(ctx, 1, mattrs)
+		d.tele.ReceivedBytes.Record(ctx, int64(len(data)), mattrs)
 
 		// 3. handle the message and gather response
 		slogger.LogAttrs(ctx, slog.LevelDebug, "handling message")
 		resp, err := d.handleMsg(ctx, s.Conn().RemotePeer(), req)
 		if err != nil {
-			slogger.LogAttrs(ctx, slog.LevelDebug, "error handling message", slog.Duration("time", time.Since(startTime)), slog.String("error", err.Error()))
-			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
+			slogger.LogAttrs(ctx, slog.LevelDebug, "error handling message", slog.Duration("time", d.cfg.Clock.Since(startTime)), slog.String("error", err.Error()))
+			d.tele.ReceivedMessageErrors.Add(ctx, 1, mattrs)
 			return err
 		}
-		slogger.LogAttrs(ctx, slog.LevelDebug, "handled message", slog.Duration("time", time.Since(startTime)))
+		slogger.LogAttrs(ctx, slog.LevelDebug, "handled message", slog.Duration("time", d.cfg.Clock.Since(startTime)))
 
 		// if the handler didn't return a response, continue reading the stream
 		if resp == nil {
@@ -146,9 +158,9 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		}
 
 		// final logging, metrics tracking
-		latency := time.Since(startTime)
+		latency := d.cfg.Clock.Since(startTime)
 		slogger.LogAttrs(ctx, slog.LevelDebug, "responded to message", slog.Duration("time", latency))
-		stats.Record(ctx, metrics.InboundRequestLatency.M(float64(latency.Milliseconds())))
+		d.tele.InboundRequestLatency.Record(ctx, float64(latency.Milliseconds()), mattrs)
 	}
 }
 
@@ -156,7 +168,7 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 // corresponding bytes. If an error occurs it, logs it, and updates the metrics.
 // If the bytes are empty and the error is nil, the remote peer returned
 func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.Reader) ([]byte, error) {
-	ctx, span := tracer.Start(ctx, "DHT.streamReadMsg")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.streamReadMsg")
 	defer span.End()
 
 	data, err := r.ReadMsg()
@@ -168,12 +180,10 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 
 		// record any potential partial message we have received
 		if len(data) > 0 {
-			_ = stats.RecordWithTags(ctx,
-				[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
-				metrics.ReceivedMessages.M(1),
-				metrics.ReceivedMessageErrors.M(1),
-				metrics.ReceivedBytes.M(int64(len(data))),
-			)
+			mattrs := metric.WithAttributeSet(tele.FromContext(ctx, tele.AttrMessageType("UNKNOWN")))
+			d.tele.ReceivedMessages.Add(ctx, 1, mattrs)
+			d.tele.ReceivedMessageErrors.Add(ctx, 1, mattrs)
+			d.tele.ReceivedBytes.Record(ctx, int64(len(data)), mattrs)
 		}
 
 		return nil, err
@@ -186,19 +196,16 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 // protobuf message. If an error occurs, it will be logged and the metrics will
 // be updated.
 func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data []byte) (*pb.Message, error) {
-	ctx, span := tracer.Start(ctx, "DHT.streamUnmarshalMsg")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.streamUnmarshalMsg")
 	defer span.End()
 
 	var req pb.Message
 	if err := proto.Unmarshal(data, &req); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error unmarshalling message", slog.String("err", err.Error()))
 
-		_ = stats.RecordWithTags(ctx,
-			[]tag.Mutator{tag.Upsert(metrics.KeyMessageType, "UNKNOWN")},
-			metrics.ReceivedMessages.M(1),
-			metrics.ReceivedMessageErrors.M(1),
-			metrics.ReceivedBytes.M(int64(len(data))),
-		)
+		mattrs := metric.WithAttributeSet(tele.FromContext(ctx, tele.AttrMessageType("UNKNOWN")))
+		d.tele.ReceivedMessageErrors.Add(ctx, 1, mattrs)
+		d.tele.ReceivedBytes.Record(ctx, int64(len(data)), mattrs)
 
 		return nil, err
 	}
@@ -209,7 +216,7 @@ func (d *DHT) streamUnmarshalMsg(ctx context.Context, slogger *slog.Logger, data
 // handleMsg handles the give protobuf message based on its type from the
 // given remote peer.
 func (d *DHT) handleMsg(ctx context.Context, remote peer.ID, req *pb.Message) (*pb.Message, error) {
-	ctx, span := tracer.Start(ctx, "DHT.handle_"+req.GetType().String())
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.handle_"+req.GetType().String(), trace.WithAttributes(attribute.String("remote_id", remote.String())))
 	defer span.End()
 
 	switch req.GetType() {
@@ -233,12 +240,13 @@ func (d *DHT) handleMsg(ctx context.Context, remote peer.ID, req *pb.Message) (*
 // streamWriteMsg sends the given message over the stream and handles traces
 // and telemetry.
 func (d *DHT) streamWriteMsg(ctx context.Context, slogger *slog.Logger, s network.Stream, msg *pb.Message) error {
-	ctx, span := tracer.Start(ctx, "DHT.streamWriteMsg")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.streamWriteMsg")
 	defer span.End()
 
 	if err := writeMsg(s, msg); err != nil {
 		slogger.LogAttrs(ctx, slog.LevelDebug, "error writing response", slog.String("err", err.Error()))
-		stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
+		mattrs := metric.WithAttributeSet(tele.FromContext(ctx))
+		d.tele.ReceivedMessageErrors.Add(ctx, 1, mattrs)
 		return err
 	}
 
@@ -250,7 +258,7 @@ func (d *DHT) streamWriteMsg(ctx context.Context, slogger *slog.Logger, s networ
 // packet for every single write.
 type bufferedDelimitedWriter struct {
 	*bufio.Writer
-	protoio.WriteCloser
+	pbio.WriteCloser
 }
 
 var writerPool = sync.Pool{
@@ -258,7 +266,7 @@ var writerPool = sync.Pool{
 		w := bufio.NewWriter(nil)
 		return &bufferedDelimitedWriter{
 			Writer:      w,
-			WriteCloser: protoio.NewDelimitedWriter(w),
+			WriteCloser: pbio.NewDelimitedWriter(w),
 		}
 	},
 }

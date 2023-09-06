@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type RecordBackend struct {
@@ -23,15 +26,24 @@ type RecordBackend struct {
 var _ Backend = (*RecordBackend)(nil)
 
 type RecordBackendConfig struct {
+	clk          clock.Clock
 	MaxRecordAge time.Duration
 	Logger       *slog.Logger
+	Tele         *tele.Telemetry
 }
 
-func DefaultRecordBackendConfig() *RecordBackendConfig {
-	return &RecordBackendConfig{
-		Logger:       slog.Default(),
-		MaxRecordAge: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
+func DefaultRecordBackendConfig() (*RecordBackendConfig, error) {
+	telemetry, err := tele.NewWithGlobalProviders()
+	if err != nil {
+		return nil, fmt.Errorf("new telemetry: %w", err)
 	}
+
+	return &RecordBackendConfig{
+		clk:          clock.New(),
+		Logger:       slog.Default(),
+		Tele:         telemetry,
+		MaxRecordAge: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
+	}, nil
 }
 
 func (r *RecordBackend) Store(ctx context.Context, key string, value any) (any, error) {
@@ -59,7 +71,7 @@ func (r *RecordBackend) Store(ctx context.Context, key string, value any) (any, 
 	}
 
 	// avoid storing arbitrary data, so overwrite that field
-	rec.TimeReceived = time.Now().UTC().Format(time.RFC3339Nano)
+	rec.TimeReceived = r.cfg.clk.Now().UTC().Format(time.RFC3339Nano)
 
 	data, err := rec.Marshal()
 	if err != nil {
@@ -101,7 +113,7 @@ func (r *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 
 	// validate that we don't serve stale records.
 	receivedAt, err := time.Parse(time.RFC3339Nano, rec.GetTimeReceived())
-	if err != nil || time.Since(receivedAt) > r.cfg.MaxRecordAge {
+	if err != nil || r.cfg.clk.Since(receivedAt) > r.cfg.MaxRecordAge {
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
@@ -128,7 +140,7 @@ func (r *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 // If unmarshalling or validation fails, this function (alongside an error) also
 // returns true because the existing record should be replaced.
 func (r *RecordBackend) shouldReplaceExistingRecord(ctx context.Context, txn ds.Read, dsKey ds.Key, value []byte) (bool, error) {
-	ctx, span := tracer.Start(ctx, "DHT.shouldReplaceExistingRecord")
+	ctx, span := r.cfg.Tele.Tracer.Start(ctx, "RecordBackend.shouldReplaceExistingRecord")
 	defer span.End()
 
 	existingBytes, err := txn.Get(ctx, dsKey)

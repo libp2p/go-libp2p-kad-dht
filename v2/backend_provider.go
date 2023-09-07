@@ -13,7 +13,6 @@ import (
 	"github.com/benbjohnson/clock"
 	lru "github.com/hashicorp/golang-lru/v2"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/autobatch"
 	dsq "github.com/ipfs/go-datastore/query"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
@@ -46,8 +45,9 @@ type ProvidersBackend struct {
 	// fetch peer multiaddresses from (we don't save them in the datastore).
 	addrBook peerstore.AddrBook
 
-	// datastore is where we save the peer IDs providing a certain multihash
-	datastore *autobatch.Datastore
+	// datastore is where we save the peer IDs providing a certain multihash.
+	// The datastore must be thread-safe.
+	datastore ds.Datastore
 
 	// gcSkip is a sync map that marks records as to-be-skipped by the garbage
 	// collection process. TODO: this is a sub-optimal pattern.
@@ -80,9 +80,6 @@ type ProvidersBackendConfig struct {
 	// prevents the necessity for a second look for the multiaddresses on the
 	// requesting peers' side.
 	AddressTTL time.Duration
-
-	// BatchSize specifies how many provider record writes should be batched
-	BatchSize int
 
 	// CacheSize specifies the LRU cache size
 	CacheSize int
@@ -118,7 +115,6 @@ func DefaultProviderBackendConfig() (*ProvidersBackendConfig, error) {
 		clk:             clock.New(),
 		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		AddressTTL:      24 * time.Hour, // MAGIC
-		BatchSize:       256,            // MAGIC
 		CacheSize:       256,            // MAGIC
 		GCInterval:      time.Hour,      // MAGIC
 		Logger:          slog.Default(),

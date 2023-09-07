@@ -9,7 +9,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
-	syncds "github.com/ipfs/go-datastore/sync"
 	"github.com/libp2p/go-libp2p"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,7 +34,7 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 		}
 	})
 
-	b, err := NewBackendProvider(h.Peerstore(), syncds.MutexWrap(dstore), cfg)
+	b, err := NewBackendProvider(h.Peerstore(), dstore, cfg)
 	require.NoError(t, err)
 
 	return b

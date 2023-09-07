@@ -7,7 +7,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/boxo/ipns"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/autobatch"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 )
@@ -121,7 +120,7 @@ func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Batching, cfg *Pro
 		cache:     cache,
 		namespace: namespaceProviders,
 		addrBook:  pstore,
-		datastore: autobatch.NewAutoBatching(dstore, cfg.BatchSize),
+		datastore: dstore,
 	}
 
 	return p, nil

@@ -149,6 +149,8 @@ type Config struct {
 	// construct them individually and register them with the above Backends
 	// map. Note that if you configure the DHT to use [ProtocolIPFS] it is
 	// required to register backends for the ipns, pk, and providers namespaces.
+	//
+	// This datastore must be thread-safe.
 	Datastore Datastore
 
 	// Logger can be used to configure a custom structured logger instance.

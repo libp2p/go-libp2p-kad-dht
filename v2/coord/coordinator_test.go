@@ -74,8 +74,8 @@ func (w *notificationWatcher) Expect(ctx context.Context, expected RoutingNotifi
 	}
 }
 
-// tracingTelemetry may be used to create a Telemetry that traces a test
-func tracingTelemetry(t *testing.T) *tele.Telemetry {
+// TracingTelemetry may be used to create a Telemetry that traces a test
+func TracingTelemetry(t *testing.T) *tele.Telemetry {
 	telemetry, err := tele.New(otel.GetMeterProvider(), kadtest.JaegerTracerProvider(t))
 	if err != nil {
 		t.Fatalf("unexpected error creating telemetry: %v", err)

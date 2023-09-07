@@ -77,7 +77,7 @@ func (b *NetworkBehaviour) Ready() <-chan struct{} {
 }
 
 func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
-	ctx, span := b.tracer.Start(ctx, "NetworkBehaviour.Perform")
+	_, span := b.tracer.Start(ctx, "NetworkBehaviour.Perform")
 	defer span.End()
 	// No inbound work can be done until Perform is complete
 	b.pendingMu.Lock()

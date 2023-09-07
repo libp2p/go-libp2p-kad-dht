@@ -28,7 +28,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
-	"go.opentelemetry.io/otel/trace2"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2"
@@ -47,7 +46,7 @@ type Config struct {
 }
 
 func (c Config) String() string {
-	data, _ := json.MarshalIndent(c, "", "  ")
+	data, _ := json.Marshal(c)
 	return string(data)
 }
 
@@ -147,7 +146,7 @@ func main() {
 
 func daemonAction(cCtx *cli.Context) error {
 	slog.Info("Starting musa daemon process with configuration:")
-	fmt.Println(cfg.String())
+	slog.Debug(cfg.String())
 
 	meterProvider, err := newMeterProvider()
 	if err != nil {

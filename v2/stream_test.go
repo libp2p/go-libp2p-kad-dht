@@ -38,8 +38,7 @@ func (trw testReadWriter) ReadMsg() (*pb.Message, error) {
 	}
 
 	resp := &pb.Message{}
-	err = proto.Unmarshal(msg, resp)
-	return resp, err
+	return resp, proto.Unmarshal(msg, resp)
 }
 
 func (trw testReadWriter) WriteMsg(msg *pb.Message) error {
@@ -64,7 +63,7 @@ func newPeerPair(t testing.TB) (host.Host, *DHT) {
 	cfg.Mode = ModeOptServer
 	serverDHT, err := New(server, cfg)
 
-	fillRoutingTable(t, serverDHT)
+	fillRoutingTable(t, serverDHT, 250)
 
 	t.Cleanup(func() {
 		if err = serverDHT.Close(); err != nil {

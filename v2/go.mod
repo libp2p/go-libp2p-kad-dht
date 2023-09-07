@@ -5,10 +5,9 @@ go 1.20
 require (
 	github.com/benbjohnson/clock v1.3.5
 	github.com/hashicorp/golang-lru/v2 v2.0.5
-	github.com/iand/zikade v0.0.0-20230824143824-d11f2132b4fb
 	github.com/ipfs/boxo v0.12.0
 	github.com/ipfs/go-cid v0.4.1
-	github.com/ipfs/go-datastore v0.6.0
+	github.com/ipfs/go-datastore v0.6.1-0.20230901172804-1caa2449ed7c
 	github.com/ipfs/go-ds-leveldb v0.5.0
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p v0.30.0
@@ -16,10 +15,13 @@ require (
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/multiformats/go-base32 v0.1.0
 	github.com/multiformats/go-multiaddr v0.11.0
-	github.com/plprobelab/go-kademlia v0.0.0-20230823114513-9b9e606066c9
+	github.com/plprobelab/go-kademlia v0.0.0-20230901130940-286ab4ceca60
 	github.com/stretchr/testify v1.8.4
-	go.opencensus.io v0.24.0
 	go.opentelemetry.io/otel v1.17.0
+	go.opentelemetry.io/otel/exporters/jaeger v1.16.0
+	go.opentelemetry.io/otel/metric v1.17.0
+	go.opentelemetry.io/otel/sdk v1.17.0
+	go.opentelemetry.io/otel/sdk/metric v0.40.0
 	go.opentelemetry.io/otel/trace v1.17.0
 	go.uber.org/zap/exp v0.1.0
 	golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63
@@ -100,7 +102,6 @@ require (
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/syndtr/goleveldb v1.0.0 // indirect
-	go.opentelemetry.io/otel/metric v1.17.0 // indirect
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.20.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -115,5 +116,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
-
-replace github.com/ipfs/go-datastore v0.6.0 => github.com/dennis-tra/go-datastore v0.0.0-20230823171431-12ac85aaa42a

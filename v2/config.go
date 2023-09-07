@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
 	leveldb "github.com/ipfs/go-ds-leveldb"
 	logging "github.com/ipfs/go-log/v2"
@@ -13,8 +14,11 @@ import (
 	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/plprobelab/go-kademlia/routing/triert"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 )
@@ -34,9 +38,6 @@ const (
 	// of the above record types.
 	ProtocolFilecoin protocol.ID = "/fil/kad/testnetnet/kad/1.0.0"
 )
-
-// tracer is an open telemetry tracing instance
-var tracer = otel.Tracer("go-libp2p-kad-dht")
 
 type (
 	// ModeOpt describes in which mode this [DHT] process should operate in.
@@ -103,6 +104,9 @@ const (
 // to build up your own configuration struct. The [DHT] constructor [New] uses the
 // below method [*Config.Validate] to test for violations of configuration invariants.
 type Config struct {
+	// Clock
+	Clock clock.Clock
+
 	// Mode defines if the DHT should operate as a server or client or switch
 	// between both automatically (see ModeOpt).
 	Mode ModeOpt
@@ -123,7 +127,7 @@ type Config struct {
 	// [triert.TrieRT] routing table will be used. This field will be nil
 	// in the default configuration because a routing table requires information
 	// about the local node.
-	RoutingTable kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+	RoutingTable routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
 
 	// The Backends field holds a map of key namespaces to their corresponding
 	// backend implementation. For example, if we received an IPNS record, the
@@ -145,6 +149,8 @@ type Config struct {
 	// construct them individually and register them with the above Backends
 	// map. Note that if you configure the DHT to use [ProtocolIPFS] it is
 	// required to register backends for the ipns, pk, and providers namespaces.
+	//
+	// This datastore must be thread-safe.
 	Datastore Datastore
 
 	// Logger can be used to configure a custom structured logger instance.
@@ -160,6 +166,12 @@ type Config struct {
 	// also fetch from the peer store and serve to other peers. It is mainly
 	// used to filter out private addresses.
 	AddressFilter AddressFilter
+
+	// MeterProvider .
+	MeterProvider metric.MeterProvider
+
+	// TracerProvider .
+	TracerProvider trace.TracerProvider
 }
 
 // DefaultConfig returns a configuration struct that can be used as-is to
@@ -168,6 +180,7 @@ type Config struct {
 // fields come from separate top-level methods prefixed with Default.
 func DefaultConfig() *Config {
 	return &Config{
+		Clock:             clock.New(),
 		Mode:              ModeOptAutoClient,
 		Kademlia:          coord.DefaultConfig(),
 		BucketSize:        20, // MAGIC
@@ -178,13 +191,15 @@ func DefaultConfig() *Config {
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		TimeoutStreamIdle: time.Minute, // MAGIC
 		AddressFilter:     AddrFilterPrivate,
+		MeterProvider:     otel.GetMeterProvider(),
+		TracerProvider:    otel.GetTracerProvider(),
 	}
 }
 
 // DefaultRoutingTable returns a triert.TrieRT routing table. This routing table
 // cannot be initialized in [DefaultConfig] because it requires information
 // about the local peer.
-func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]], error) {
+func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]], error) {
 	rtCfg := triert.DefaultConfig[key.Key256, kad.NodeID[key.Key256]]()
 	rt, err := triert.New[key.Key256, kad.NodeID[key.Key256]](nodeID, rtCfg)
 	if err != nil {
@@ -202,6 +217,10 @@ func InMemoryDatastore() (Datastore, error) {
 // an error if any configuration issue was detected and nil if this is
 // a valid configuration.
 func (c *Config) Validate() error {
+	if c.Clock == nil {
+		return fmt.Errorf("clock must not be nil")
+	}
+
 	switch c.Mode {
 	case ModeOptClient:
 	case ModeOptServer:
@@ -251,6 +270,14 @@ func (c *Config) Validate() error {
 
 	if c.AddressFilter == nil {
 		return fmt.Errorf("address filter must not be nil - use AddrFilterIdentity to disable filtering")
+	}
+
+	if c.MeterProvider == nil {
+		return fmt.Errorf("opentelemetry meter provider must not be nil")
+	}
+
+	if c.TracerProvider == nil {
+		return fmt.Errorf("opentelemetry tracer provider must not be nil")
 	}
 
 	return nil

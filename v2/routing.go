@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -15,15 +18,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 )
 
 var _ routing.Routing = (*DHT)(nil)
 
 func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
-	ctx, span := tracer.Start(ctx, "DHT.FindPeer")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.FindPeer")
 	defer span.End()
 
-	// First check locally. If are or were recently connected to the peer,
+	// First check locally. If we are or were recently connected to the peer,
 	// return the addresses from our peerstore unless the information doesn't
 	// contain any.
 	switch d.host.Network().Connectedness(id) {
@@ -36,13 +40,35 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		// we're
 	}
 
-	// TODO reach out to Zikade
+	target := kadt.PeerID(id)
 
-	panic("implement me")
+	var foundNode coord.Node
+	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
+		slog.Info("visiting node", "id", node.ID())
+		if node.ID() == id {
+			foundNode = node
+			return coord.ErrSkipRemaining
+		}
+		return nil
+	}
+
+	_, err := d.kad.Query(ctx, target.Key(), fn)
+	if err != nil {
+		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
+	}
+
+	if foundNode == nil {
+		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
+	}
+
+	return peer.AddrInfo{
+		ID:    foundNode.ID(),
+		Addrs: foundNode.Addresses(),
+	}, nil
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
-	ctx, span := tracer.Start(ctx, "DHT.Provide", otel.WithAttributes(attribute.String("cid", c.String())))
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Provide", otel.WithAttributes(attribute.String("cid", c.String())))
 	defer span.End()
 
 	// verify if this DHT supports provider records by checking if a "providers"
@@ -73,7 +99,7 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
-	ctx, span := tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
+	_, span := d.tele.Tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
 	// verify if this DHT supports provider records by checking if a "providers"
@@ -90,7 +116,7 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 }
 
 func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...routing.Option) error {
-	ctx, span := tracer.Start(ctx, "DHT.PutValue")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
 
 	ns, path, err := record.SplitKey(key)
@@ -116,7 +142,7 @@ func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...
 }
 
 func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option) ([]byte, error) {
-	ctx, span := tracer.Start(ctx, "DHT.GetValue")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
 	defer span.End()
 
 	ns, path, err := record.SplitKey(key)
@@ -147,14 +173,14 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 }
 
 func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Option) (<-chan []byte, error) {
-	ctx, span := tracer.Start(ctx, "DHT.SearchValue")
+	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
 	defer span.End()
 
 	panic("implement me")
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {
-	ctx, span := tracer.Start(ctx, "DHT.Bootstrap")
+	_, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
 	panic("implement me")

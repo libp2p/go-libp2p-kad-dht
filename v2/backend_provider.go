@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,16 +13,14 @@ import (
 	"github.com/benbjohnson/clock"
 	lru "github.com/hashicorp/golang-lru/v2"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/autobatch"
 	dsq "github.com/ipfs/go-datastore/query"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/multiformats/go-base32"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // ProvidersBackend implements the [Backend] interface and handles provider
@@ -48,8 +45,9 @@ type ProvidersBackend struct {
 	// fetch peer multiaddresses from (we don't save them in the datastore).
 	addrBook peerstore.AddrBook
 
-	// datastore is where we save the peer IDs providing a certain multihash
-	datastore *autobatch.Datastore
+	// datastore is where we save the peer IDs providing a certain multihash.
+	// The datastore must be thread-safe.
+	datastore ds.Datastore
 
 	// gcSkip is a sync map that marks records as to-be-skipped by the garbage
 	// collection process. TODO: this is a sub-optimal pattern.
@@ -83,9 +81,6 @@ type ProvidersBackendConfig struct {
 	// requesting peers' side.
 	AddressTTL time.Duration
 
-	// BatchSize specifies how many provider record writes should be batched
-	BatchSize int
-
 	// CacheSize specifies the LRU cache size
 	CacheSize int
 
@@ -94,6 +89,10 @@ type ProvidersBackendConfig struct {
 
 	// Logger is the logger to use
 	Logger *slog.Logger
+
+	// Tele holds a reference to the telemetry struct to capture metrics and
+	// traces.
+	Tele *tele.Telemetry
 
 	// AddressFilter is a filter function that any addresses that we attempt to
 	// store or fetch from the peerstore's address book need to pass through.
@@ -106,17 +105,22 @@ type ProvidersBackendConfig struct {
 // configuration. Use this as a starting point and modify it. If a nil
 // configuration is passed to [NewBackendProvider], this default configuration
 // here is used.
-func DefaultProviderBackendConfig() *ProvidersBackendConfig {
+func DefaultProviderBackendConfig() (*ProvidersBackendConfig, error) {
+	telemetry, err := tele.NewWithGlobalProviders()
+	if err != nil {
+		return nil, fmt.Errorf("new telemetry: %w", err)
+	}
+
 	return &ProvidersBackendConfig{
 		clk:             clock.New(),
 		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		AddressTTL:      24 * time.Hour, // MAGIC
-		BatchSize:       256,            // MAGIC
 		CacheSize:       256,            // MAGIC
 		GCInterval:      time.Hour,      // MAGIC
 		Logger:          slog.Default(),
+		Tele:            telemetry,
 		AddressFilter:   AddrFilterIdentity, // verify alignment with [Config.AddressFilter]
-	}
+	}, nil
 }
 
 // Store implements the [Backend] interface. In the case of a [ProvidersBackend]
@@ -346,13 +350,11 @@ func (p *ProvidersBackend) collectGarbage(ctx context.Context) {
 
 // trackCacheQuery updates the prometheus metrics about cache hit/miss performance
 func (p *ProvidersBackend) trackCacheQuery(ctx context.Context, hit bool) {
-	_ = stats.RecordWithTags(ctx,
-		[]tag.Mutator{
-			tag.Upsert(metrics.KeyCacheHit, strconv.FormatBool(hit)),
-			tag.Upsert(metrics.KeyRecordType, "provider"),
-		},
-		metrics.LRUCache.M(1),
+	set := tele.FromContext(ctx,
+		tele.AttrCacheHit(hit),
+		tele.AttrRecordType("provider"),
 	)
+	p.cfg.Tele.LRUCache.Add(ctx, 1, metric.WithAttributeSet(set))
 }
 
 // delete is a convenience method to delete the record at the given datastore

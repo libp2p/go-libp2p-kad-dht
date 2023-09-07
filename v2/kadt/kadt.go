@@ -13,23 +13,23 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 )
 
-// PeerID is a type alias for peer.ID that implements the kad.NodeID interface.
-// This means we can use PeerID for any operation that interfaces with
-// go-kademlia.
+// PeerID is a type alias for [peer.ID] that implements the [kad.NodeID]
+// interface. This means we can use PeerID for any operation that interfaces
+// with go-kademlia.
 type PeerID peer.ID
 
 // assertion that PeerID implements the kad.NodeID interface
 var _ kad.NodeID[key.Key256] = PeerID("")
 
-// Key returns the Kademlia key of PeerID. The amino DHT operates on SHA256
-// hashes of, in this case, peer.IDs. This means this Key method takes
-// the peer.ID, hashes it and constructs a 256-bit key.
+// Key returns the Kademlia [key.Key256] of PeerID. The amino DHT operates on
+// SHA256 hashes of, in this case, peer.IDs. This means this Key method takes
+// the [peer.ID], hashes it and constructs a 256-bit key.
 func (p PeerID) Key() key.Key256 {
 	h := sha256.Sum256([]byte(p))
 	return key.NewKey256(h[:])
 }
 
-// String calls String on the underlying peer.ID and returns a string like
+// String calls String on the underlying [peer.ID] and returns a string like
 // QmFoo or 12D3KooBar.
 func (p PeerID) String() string {
 	return peer.ID(p).String()
@@ -45,11 +45,16 @@ type AddrInfo struct {
 	Info peer.AddrInfo
 }
 
-// assertion that AddrInfo implements the kad.NodeInfo interface
+// assertion that AddrInfo implements the [kad.NodeInfo] interface
 var _ kad.NodeInfo[key.Key256, ma.Multiaddr] = (*AddrInfo)(nil)
 
-// ID returns the kad.NodeID of this peer's information struct.
+// ID returns the [kad.NodeID] of this peer's information struct.
 func (ai AddrInfo) ID() kad.NodeID[key.Key256] {
+	return PeerID(ai.Info.ID)
+}
+
+// PeerID returns the peer ID of this peer's information struct as a PeerID.
+func (ai AddrInfo) PeerID() PeerID {
 	return PeerID(ai.Info.ID)
 }
 

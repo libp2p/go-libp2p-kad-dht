@@ -13,3 +13,6 @@
 # records are IPFS specific
 /records.go @libp2p/kubo-maintainers @guillaumemichel
 /records_test.go @libp2p/kubo-maintainers @guillaumemichel
+
+
+/v2/ @dennis-tra @iand

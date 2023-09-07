@@ -1,22 +1,26 @@
 package dht
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
-	"github.com/iand/zikade/kademlia"
 	"github.com/ipfs/go-datastore/trace"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
-	ma "github.com/multiformats/go-multiaddr"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-kademlia/routing"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -35,11 +39,11 @@ type DHT struct {
 	mode   mode
 
 	// kad is a reference to the go-kademlia coordinator
-	kad *kademlia.Dht[key.Key256, ma.Multiaddr]
+	kad *coord.Coordinator
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt kad.RoutingTable[key.Key256, kad.NodeID[key.Key256]]
+	rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
 
 	// backends
 	backends map[string]Backend
@@ -52,6 +56,9 @@ type DHT struct {
 	// these events in networkEventsSubscription and consumes them
 	// asynchronously in consumeNetworkEvents.
 	sub event.Subscription
+
+	// tele holds a reference to a telemetry struct
+	tele *tele.Telemetry
 }
 
 // New constructs a new [DHT] for the given underlying host and with the given
@@ -59,8 +66,9 @@ type DHT struct {
 func New(h host.Host, cfg *Config) (*DHT, error) {
 	var err error
 
-	// check if the configuration is valid
-	if err = cfg.Validate(); err != nil {
+	if cfg == nil {
+		cfg = DefaultConfig()
+	} else if err = cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate DHT config: %w", err)
 	}
 
@@ -79,6 +87,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		return nil, fmt.Errorf("new trie routing table: %w", err)
 	}
 
+	// initialize a new telemetry struct
+	d.tele, err = tele.New(cfg.MeterProvider, cfg.TracerProvider)
+	if err != nil {
+		return nil, fmt.Errorf("init telemetry: %w", err)
+	}
+
 	if len(cfg.Backends) != 0 {
 		d.backends = cfg.Backends
 	} else if cfg.ProtocolID == ProtocolIPFS {
@@ -91,37 +105,60 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		}
 
 		// wrap datastore in open telemetry tracing
-		dstore = trace.New(dstore, tracer)
+		dstore = trace.New(dstore, d.tele.Tracer)
 
-		pbeCfg := DefaultProviderBackendConfig()
+		pbeCfg, err := DefaultProviderBackendConfig()
+		if err != nil {
+			return nil, fmt.Errorf("default provider config: %w", err)
+		}
 		pbeCfg.Logger = cfg.Logger
 		pbeCfg.AddressFilter = cfg.AddressFilter
+		pbeCfg.Tele = d.tele
+		pbeCfg.clk = d.cfg.Clock
 
 		pbe, err := NewBackendProvider(h.Peerstore(), dstore, pbeCfg)
 		if err != nil {
 			return nil, fmt.Errorf("new provider backend: %w", err)
 		}
 
-		rbeCfg := DefaultRecordBackendConfig()
+		rbeCfg, err := DefaultRecordBackendConfig()
+		if err != nil {
+			return nil, fmt.Errorf("default provider config: %w", err)
+		}
 		rbeCfg.Logger = cfg.Logger
+		rbeCfg.Tele = d.tele
+		rbeCfg.clk = d.cfg.Clock
+
+		ipnsBe, err := NewBackendIPNS(dstore, h.Peerstore(), rbeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("new ipns backend: %w", err)
+		}
+
+		pkBe, err := NewBackendPublicKey(dstore, rbeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("new public key backend: %w", err)
+		}
 
 		d.backends = map[string]Backend{
-			"ipns":      NewBackendIPNS(dstore, h.Peerstore(), rbeCfg),
-			"pk":        NewBackendPublicKey(dstore, rbeCfg),
+			"ipns":      ipnsBe,
+			"pk":        pkBe,
 			"providers": pbe,
 		}
 	}
 
 	// wrap all backends with tracing
-	for ns, backend := range d.backends {
-		d.backends[ns] = &tracedBackend{
-			namespace: ns,
-			backend:   backend,
-		}
+	for ns, be := range d.backends {
+		d.backends[ns] = traceWrapBackend(ns, be, d.tele.Tracer)
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	d.kad, err = kademlia.NewDht[key.Key256, ma.Multiaddr](nid, d, d.rt, nil)
+	coordCfg, err := coord.DefaultCoordinatorConfig()
+	if err != nil {
+		return nil, fmt.Errorf("new coordinator config: %w", err)
+	}
+	coordCfg.Tele = d.tele
+
+	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -153,6 +190,10 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 func (d *DHT) Close() error {
 	if err := d.sub.Close(); err != nil {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
+	}
+
+	if err := d.kad.Close(); err != nil {
+		d.log.With("err", err).Debug("failed closing coordinator")
 	}
 
 	for ns, b := range d.backends {
@@ -265,11 +306,20 @@ func (d *DHT) logErr(err error, msg string) {
 	d.log.Warn(msg, "err", err.Error())
 }
 
+// AddAddresses suggests peers and their associated addresses to be added to the routing table.
+// Addresses will be added to the peerstore with the supplied time to live.
+func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
+	defer span.End()
+
+	return d.kad.AddNodes(ctx, ais, ttl)
+}
+
 // newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by
 // SHA256 hashing the given bytes and wrapping them in a [key.Key256].
 func newSHA256Key(data []byte) key.Key256 {
-	b := sha256.Sum256(data)
-	return key.NewKey256(b[:])
+	h := sha256.Sum256(data)
+	return key.NewKey256(h[:])
 }
 
 // typedBackend returns the backend at the given namespace. It is casted to the

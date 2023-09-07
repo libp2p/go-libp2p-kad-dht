@@ -42,7 +42,9 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 
 func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	mockClock := clock.NewMock()
-	cfg := DefaultProviderBackendConfig()
+	cfg, err := DefaultProviderBackendConfig()
+	require.NoError(t, err)
+
 	cfg.clk = mockClock
 	cfg.Logger = devnull
 
@@ -58,28 +60,28 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	// write to datastore
 	dsKey := newDatastoreKey(namespaceProviders, "random-key", string(p.ID))
 	rec := expiryRecord{expiry: mockClock.Now()}
-	err := b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
+	err = b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
 	// write to peerstore
 	b.addrBook.AddAddrs(p.ID, p.Addrs, time.Hour)
 
-	// advance clock half the gc time and check if record is still there
+	// advance clock half the validity time and check if record is still there
 	mockClock.Add(cfg.ProvideValidity / 2)
 
 	// sync autobatching datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey(namespaceProviders))
+	err = b.datastore.Sync(ctx, ds.NewKey(""))
 	require.NoError(t, err)
 
 	// we expect the record to still be there after half the ProvideValidity
 	_, err = b.datastore.Get(ctx, dsKey)
 	require.NoError(t, err)
 
-	// advance clock another gc time and check if record was GC'd now
+	// advance clock another time and check if the record was GC'd now
 	mockClock.Add(cfg.ProvideValidity + cfg.GCInterval)
 
 	// sync autobatching datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey(namespaceProviders))
+	err = b.datastore.Sync(ctx, ds.NewKey(""))
 	require.NoError(t, err)
 
 	// we expect the record to be GC'd now
@@ -90,7 +92,9 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 }
 
 func TestProvidersBackend_GarbageCollection_lifecycle_thread_safe(t *testing.T) {
-	cfg := DefaultProviderBackendConfig()
+	cfg, err := DefaultProviderBackendConfig()
+	require.NoError(t, err)
+
 	cfg.Logger = devnull
 
 	b := newBackendProvider(t, cfg)

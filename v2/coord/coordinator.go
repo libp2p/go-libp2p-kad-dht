@@ -118,7 +118,7 @@ func (cfg *CoordinatorConfig) Validate() error {
 		}
 	}
 
-	return nil;
+	return nil
 }
 
 func DefaultCoordinatorConfig() (*CoordinatorConfig, error) {

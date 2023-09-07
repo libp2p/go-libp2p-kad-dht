@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )

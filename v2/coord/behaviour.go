@@ -56,7 +56,7 @@ type WorkQueue[E BehaviourEvent] struct {
 
 func NewWorkQueue[E BehaviourEvent](fn WorkQueueFunc[E]) *WorkQueue[E] {
 	w := &WorkQueue[E]{
-		pending: make(chan pendingEvent[E], 16),
+		pending: make(chan pendingEvent[E], 1),
 		fn:      fn,
 	}
 	return w
@@ -113,7 +113,7 @@ var _ Notify[BehaviourEvent] = (*Waiter[BehaviourEvent])(nil)
 
 func NewWaiter[E BehaviourEvent]() *Waiter[E] {
 	w := &Waiter[E]{
-		pending: make(chan WaiterEvent[E], 16),
+		pending: make(chan WaiterEvent[E], 1),
 	}
 	return w
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/query"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -27,20 +28,25 @@ type NetworkBehaviour struct {
 	ready     chan struct{}
 
 	logger *slog.Logger
+	tracer trace.Tracer
 }
 
-func NewNetworkBehaviour(rtr Router, logger *slog.Logger) *NetworkBehaviour {
+func NewNetworkBehaviour(rtr Router, logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
 	b := &NetworkBehaviour{
 		rtr:          rtr,
 		nodeHandlers: make(map[peer.ID]*NodeHandler),
 		ready:        make(chan struct{}, 1),
 		logger:       logger,
+		tracer:       tracer,
 	}
 
 	return b
 }
 
 func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
+	ctx, span := b.tracer.Start(ctx, "NetworkBehaviour.Notify")
+	defer span.End()
+
 	b.pendingMu.Lock()
 	defer b.pendingMu.Unlock()
 
@@ -49,7 +55,7 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		b.nodeHandlersMu.Lock()
 		nh, ok := b.nodeHandlers[ev.To.ID]
 		if !ok {
-			nh = NewNodeHandler(ev.To, b.rtr, b.logger)
+			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
 			b.nodeHandlers[ev.To.ID] = nh
 		}
 		b.nodeHandlersMu.Unlock()
@@ -71,6 +77,8 @@ func (b *NetworkBehaviour) Ready() <-chan struct{} {
 }
 
 func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
+	_, span := b.tracer.Start(ctx, "NetworkBehaviour.Perform")
+	defer span.End()
 	// No inbound work can be done until Perform is complete
 	b.pendingMu.Lock()
 	defer b.pendingMu.Unlock()
@@ -100,7 +108,7 @@ func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id peer.ID) (*Nod
 		if err != nil {
 			return nil, err
 		}
-		nh = NewNodeHandler(info, b.rtr, b.logger)
+		nh = NewNodeHandler(info, b.rtr, b.logger, b.tracer)
 		b.nodeHandlers[id] = nh
 	}
 	b.nodeHandlersMu.Unlock()
@@ -112,13 +120,15 @@ type NodeHandler struct {
 	rtr    Router
 	queue  *WorkQueue[NodeHandlerRequest]
 	logger *slog.Logger
+	tracer trace.Tracer
 }
 
-func NewNodeHandler(self peer.AddrInfo, rtr Router, logger *slog.Logger) *NodeHandler {
+func NewNodeHandler(self peer.AddrInfo, rtr Router, logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
 	h := &NodeHandler{
 		self:   self,
 		rtr:    rtr,
 		logger: logger,
+		tracer: tracer,
 	}
 
 	h.queue = NewWorkQueue(h.send)
@@ -127,6 +137,8 @@ func NewNodeHandler(self peer.AddrInfo, rtr Router, logger *slog.Logger) *NodeHa
 }
 
 func (h *NodeHandler) Notify(ctx context.Context, ev NodeHandlerRequest) {
+	ctx, span := h.tracer.Start(ctx, "NodeHandler.Notify")
+	defer span.End()
 	h.queue.Enqueue(ctx, ev)
 }
 
@@ -142,7 +154,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 				QueryID: cmd.QueryID,
 				To:      h.self,
 				Target:  cmd.Target,
-				Err:     fmt.Errorf("send: %w", err),
+				Err:     fmt.Errorf("NodeHandler: %w", err),
 			})
 			return false
 		}
@@ -171,6 +183,8 @@ func (h *NodeHandler) Addresses() []ma.Multiaddr {
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
 func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]Node, error) {
+	ctx, span := h.tracer.Start(ctx, "NodeHandler.GetClosestNodes")
+	defer span.End()
 	w := NewWaiter[BehaviourEvent]()
 
 	ev := &EventOutboundGetCloserNodes{
@@ -192,7 +206,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]N
 			nodes := make([]Node, 0, len(res.CloserNodes))
 			for _, info := range res.CloserNodes {
 				// TODO use a global registry of node handlers
-				nodes = append(nodes, NewNodeHandler(info, h.rtr, h.logger))
+				nodes = append(nodes, NewNodeHandler(info, h.rtr, h.logger, h.tracer))
 				n--
 				if n == 0 {
 					break

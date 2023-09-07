@@ -113,7 +113,7 @@ func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, er
 }
 
 func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target key.Key256) ([]peer.AddrInfo, error) {
-	resp, err := r.SendMessage(ctx, to, address.ProtocolID(ProtocolIPFS), FindKeyRequest(target))
+	resp, err := r.SendMessage(ctx, to, address.ProtocolID(ProtocolAmino), FindKeyRequest(target))
 	if err != nil {
 		return nil, err
 	}

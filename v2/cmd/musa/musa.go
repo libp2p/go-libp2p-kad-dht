@@ -61,7 +61,7 @@ func (c Config) EnableTraceProvider() bool {
 var cfg = Config{
 	Host:       "127.0.0.1",
 	Port:       0,
-	ProtocolID: string(dht.ProtocolIPFS),
+	ProtocolID: string(dht.ProtocolAmino),
 	LogLevel:   int(slog.LevelInfo),
 }
 
@@ -169,7 +169,7 @@ func daemonAction(cCtx *cli.Context) error {
 	dhtConfig.MeterProvider = meterProvider
 	dhtConfig.TracerProvider = traceProvider
 
-	if dhtConfig.ProtocolID == dht.ProtocolIPFS {
+	if dhtConfig.ProtocolID == dht.ProtocolAmino {
 		dhtConfig.Datastore = datastore.NewNullDatastore()
 	}
 

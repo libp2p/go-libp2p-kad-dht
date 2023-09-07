@@ -27,11 +27,11 @@ import (
 const ServiceName = "libp2p.DHT"
 
 const (
-	// ProtocolIPFS is the protocol identifier for the main IPFS network. If the
-	// DHT is configured with this protocol, you must configure backends for
-	// IPNS, Public Key, and provider records (ipns, pk, and providers
+	// ProtocolAmino is the protocol identifier for the main Amino DHT network.
+	// If the DHT is configured with this protocol, you must configure backends
+	// for IPNS, Public Key, and provider records (ipns, pk, and providers
 	// namespaces). Configuration validation will fail if backends are missing.
-	ProtocolIPFS protocol.ID = "/ipfs/kad/1.0.0"
+	ProtocolAmino protocol.ID = "/ipfs/kad/1.0.0"
 
 	// ProtocolFilecoin is the protocol identifier for Filecoin mainnet. If this
 	// protocol is configured, the DHT won't automatically add support for any
@@ -147,7 +147,7 @@ type Config struct {
 	// backends.
 	// If you want to use individual datastores per backend, you will need to
 	// construct them individually and register them with the above Backends
-	// map. Note that if you configure the DHT to use [ProtocolIPFS] it is
+	// map. Note that if you configure the DHT to use [ProtocolAmino] it is
 	// required to register backends for the ipns, pk, and providers namespaces.
 	//
 	// This datastore must be thread-safe.
@@ -190,9 +190,9 @@ func DefaultConfig() *Config {
 		Mode:              ModeOptAutoClient,
 		Kademlia:          coord.DefaultConfig(),
 		BucketSize:        20, // MAGIC
-		ProtocolID:        ProtocolIPFS,
+		ProtocolID:        ProtocolAmino,
 		RoutingTable:      nil,                  // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
-		Backends:          map[string]Backend{}, // if empty and [ProtocolIPFS] is used, it'll be populated with the ipns, pk and providers backends
+		Backends:          map[string]Backend{}, // if empty and [ProtocolAmino] is used, it'll be populated with the ipns, pk and providers backends
 		Datastore:         nil,
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		TimeoutStreamIdle: time.Minute, // MAGIC
@@ -256,7 +256,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("stream idle timeout must be a positive duration")
 	}
 
-	if c.ProtocolID == ProtocolIPFS && len(c.Backends) != 0 {
+	if c.ProtocolID == ProtocolAmino && len(c.Backends) != 0 {
 		if len(c.Backends) != 3 {
 			return fmt.Errorf("ipfs protocol requires exactly three backends")
 		}

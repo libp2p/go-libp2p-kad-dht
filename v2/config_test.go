@@ -62,14 +62,14 @@ func TestConfig_Validate(t *testing.T) {
 		// we automatically populate the DHT backends for these record
 		// types.
 		cfg := DefaultConfig()
-		cfg.ProtocolID = ProtocolIPFS
+		cfg.ProtocolID = ProtocolAmino
 		cfg.Backends["another"] = &RecordBackend{}
 		assert.Error(t, cfg.Validate())
 	})
 
 	t.Run("additional backends for ipfs protocol", func(t *testing.T) {
 		cfg := DefaultConfig()
-		cfg.ProtocolID = ProtocolIPFS
+		cfg.ProtocolID = ProtocolAmino
 		cfg.Backends[namespaceProviders] = &RecordBackend{}
 		cfg.Backends[namespaceIPNS] = &RecordBackend{}
 		cfg.Backends[namespacePublicKey] = &RecordBackend{}

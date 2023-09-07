@@ -8,10 +8,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// tracedBackend wraps a [Backend] in calls to open telemetry tracing
+// directives. In [New] all backends configured in [Config] or automatically
+// configured if none are given will be wrapped with this tracedBackend.
 type tracedBackend struct {
-	namespace string
-	backend   Backend
-	tracer    trace.Tracer
+	namespace string       // the namespace the backend operates in. Used as a tracing attribute.
+	backend   Backend      // the [Backend] to be traced
+	tracer    trace.Tracer // the tracer to be used
 }
 
 var _ Backend = (*tracedBackend)(nil)
@@ -24,8 +27,10 @@ func traceWrapBackend(namespace string, backend Backend, tracer trace.Tracer) Ba
 	}
 }
 
-func (t tracedBackend) Store(ctx context.Context, key string, value any) (any, error) {
-	ctx, span := t.tracer.Start(ctx, "Store", trace.WithAttributes(attribute.String("backend", t.namespace), attribute.String("key", key)))
+// Store implements the [Backend] interface, forwards the call to the wrapped
+// backend and manages the trace span.
+func (t *tracedBackend) Store(ctx context.Context, key string, value any) (any, error) {
+	ctx, span := t.tracer.Start(ctx, "Store", t.traceAttributes(key))
 	defer span.End()
 
 	result, err := t.backend.Store(ctx, key, value)
@@ -37,8 +42,10 @@ func (t tracedBackend) Store(ctx context.Context, key string, value any) (any, e
 	return result, err
 }
 
-func (t tracedBackend) Fetch(ctx context.Context, key string) (any, error) {
-	ctx, span := t.tracer.Start(ctx, "Fetch", trace.WithAttributes(attribute.String("backend", t.namespace), attribute.String("key", key)))
+// Fetch implements the [Backend] interface, forwards the call to the wrapped
+// backend and manages the trace span.
+func (t *tracedBackend) Fetch(ctx context.Context, key string) (any, error) {
+	ctx, span := t.tracer.Start(ctx, "Fetch", t.traceAttributes(key))
 	defer span.End()
 
 	result, err := t.backend.Fetch(ctx, key)
@@ -48,4 +55,9 @@ func (t tracedBackend) Fetch(ctx context.Context, key string) (any, error) {
 	}
 
 	return result, err
+}
+
+// traceAttributes is a helper to build the trace attributes.
+func (t *tracedBackend) traceAttributes(key string) trace.SpanStartEventOption {
+	return trace.WithAttributes(attribute.String("namespace", t.namespace), attribute.String("key", key))
 }

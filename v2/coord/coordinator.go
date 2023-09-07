@@ -388,12 +388,12 @@ func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (Q
 				}
 
 				err = fn(ctx, nh, lastStats)
-				if errors.Is(err, SkipRemaining) {
+				if errors.Is(err, ErrSkipRemaining) {
 					// done
 					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
 					return lastStats, nil
 				}
-				if errors.Is(err, SkipNode) {
+				if errors.Is(err, ErrSkipNode) {
 					// TODO: don't add closer nodes from this node
 					break
 				}

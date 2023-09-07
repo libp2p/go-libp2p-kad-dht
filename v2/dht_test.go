@@ -96,7 +96,6 @@ func TestAddAddresses(t *testing.T) {
 	defer cancel()
 
 	localCfg := DefaultConfig()
-	localCfg.TracerProvider = kadtest.JaegerTracerProvider(t)
 
 	local := newClientDht(t, localCfg)
 

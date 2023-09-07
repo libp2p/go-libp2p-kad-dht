@@ -5,34 +5,83 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 const peerstoreTTL = 10 * time.Minute
 
-// expectEventType selects on the event channel until an event of the expected type is sent.
-func expectEventType(t *testing.T, ctx context.Context, events <-chan RoutingNotification, expected RoutingNotification) (RoutingNotification, error) {
+type notificationWatcher struct {
+	mu       sync.Mutex
+	buffered []RoutingNotification
+	signal   chan struct{}
+}
+
+func (w *notificationWatcher) Watch(t *testing.T, ctx context.Context, ch <-chan RoutingNotification) {
 	t.Helper()
+	w.signal = make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-ch:
+				w.mu.Lock()
+				t.Logf("buffered routing notification: %T\n", ev)
+				w.buffered = append(w.buffered, ev)
+				select {
+				case w.signal <- struct{}{}:
+				default:
+				}
+				w.mu.Unlock()
+
+			}
+		}
+	}()
+}
+
+func (w *notificationWatcher) Expect(ctx context.Context, expected RoutingNotification) (RoutingNotification, error) {
 	for {
-		select {
-		case ev := <-events:
-			t.Logf("saw event: %T\n", ev)
+		// look in buffered events
+		w.mu.Lock()
+		for i, ev := range w.buffered {
 			if reflect.TypeOf(ev) == reflect.TypeOf(expected) {
+				// remove first from buffer and return it
+				w.buffered = w.buffered[:i+copy(w.buffered[i:], w.buffered[i+1:])]
+				w.mu.Unlock()
 				return ev, nil
 			}
+		}
+		w.mu.Unlock()
+
+		// wait to be signaled that there is a new event
+		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("test deadline exceeded while waiting for event %T", expected)
+		case <-w.signal:
 		}
 	}
+}
+
+// tracingTelemetry may be used to create a Telemetry that traces a test
+func tracingTelemetry(t *testing.T) *tele.Telemetry {
+	telemetry, err := tele.New(otel.GetMeterProvider(), kadtest.JaegerTracerProvider(t))
+	if err != nil {
+		t.Fatalf("unexpected error creating telemetry: %v", err)
+	}
+
+	return telemetry
 }
 
 func TestConfigValidate(t *testing.T) {
@@ -171,17 +220,8 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
 	}
 
-	buffer := make(chan RoutingNotification, 5)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev := <-c.RoutingNotifications():
-				buffer <- ev
-			}
-		}
-	}()
+	w := new(notificationWatcher)
+	w.Watch(t, ctx, c.RoutingNotifications())
 
 	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
 		return nil
@@ -195,22 +235,29 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	// the query run by the dht should have received a response from nodes[1] with closer nodes
 	// nodes[0] and nodes[2] which should trigger a routing table update since nodes[2] was
 	// not in the dht's routing table.
-	ev, err := expectEventType(t, ctx, buffer, &EventRoutingUpdated{})
-	require.NoError(t, err)
-
-	tev := ev.(*EventRoutingUpdated)
-	require.Equal(t, nodes[2].NodeInfo.ID, tev.NodeInfo.ID)
+	// the query then continues and should have received a response from nodes[2] with closer nodes
+	// nodes[1] and nodes[3] which should trigger a routing table update since nodes[3] was
+	// not in the dht's routing table.
 
 	// no EventRoutingUpdated is sent for the self node
 
-	// the query continues and should have received a response from nodes[2] with closer nodes
-	// nodes[1] and nodes[3] which should trigger a routing table update since nodes[3] was
-	// not in the dht's routing table.
-	ev, err = expectEventType(t, ctx, buffer, &EventRoutingUpdated{})
-	require.NoError(t, err)
+	// However the order in which these events are emitted may vary depending on timing.
 
-	tev = ev.(*EventRoutingUpdated)
-	require.Equal(t, nodes[3].NodeInfo.ID, tev.NodeInfo.ID)
+	ev1, err := w.Expect(ctx, &EventRoutingUpdated{})
+	require.NoError(t, err)
+	tev1 := ev1.(*EventRoutingUpdated)
+
+	ev2, err := w.Expect(ctx, &EventRoutingUpdated{})
+	require.NoError(t, err)
+	tev2 := ev2.(*EventRoutingUpdated)
+
+	if tev1.NodeInfo.ID == nodes[2].NodeInfo.ID {
+		require.Equal(t, nodes[3].NodeInfo.ID, tev2.NodeInfo.ID)
+	} else if tev2.NodeInfo.ID == nodes[2].NodeInfo.ID {
+		require.Equal(t, nodes[3].NodeInfo.ID, tev1.NodeInfo.ID)
+	} else {
+		require.Failf(t, "did not see routing updated event for %s", nodes[2].NodeInfo.ID.String())
+	}
 }
 
 func TestBootstrap(t *testing.T) {
@@ -231,24 +278,15 @@ func TestBootstrap(t *testing.T) {
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
-	buffer := make(chan RoutingNotification, 5)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev := <-d.RoutingNotifications():
-				buffer <- ev
-			}
-		}
-	}()
+	w := new(notificationWatcher)
+	w.Watch(t, ctx, d.RoutingNotifications())
 
 	seeds := []peer.ID{nodes[1].NodeInfo.ID}
 	err = d.Bootstrap(ctx, seeds)
 	require.NoError(t, err)
 
 	// the query run by the dht should have completed
-	ev, err := expectEventType(t, ctx, buffer, &EventBootstrapFinished{})
+	ev, err := w.Expect(ctx, &EventBootstrapFinished{})
 	require.NoError(t, err)
 
 	require.IsType(t, &EventBootstrapFinished{}, ev)
@@ -257,15 +295,21 @@ func TestBootstrap(t *testing.T) {
 	require.Equal(t, 3, tevf.Stats.Success)
 	require.Equal(t, 0, tevf.Stats.Failure)
 
-	// DHT should now have node1 in its routing table
+	_, err = w.Expect(ctx, &EventRoutingUpdated{})
+	require.NoError(t, err)
+
+	_, err = w.Expect(ctx, &EventRoutingUpdated{})
+	require.NoError(t, err)
+
+	// coordinator will have node1 in its routing table
 	_, err = d.GetNode(ctx, nodes[1].NodeInfo.ID)
 	require.NoError(t, err)
 
-	// DHT should now have node2 in its routing table
+	// coordinator should now have node2 in its routing table
 	_, err = d.GetNode(ctx, nodes[2].NodeInfo.ID)
 	require.NoError(t, err)
 
-	// DHT should now have node3 in its routing table
+	// coordinator should now have node3 in its routing table
 	_, err = d.GetNode(ctx, nodes[3].NodeInfo.ID)
 	require.NoError(t, err)
 }
@@ -296,14 +340,15 @@ func TestIncludeNode(t *testing.T) {
 	_, err = d.GetNode(ctx, candidate.ID)
 	require.ErrorIs(t, err, ErrNodeNotFound)
 
-	events := d.RoutingNotifications()
+	w := new(notificationWatcher)
+	w.Watch(t, ctx, d.RoutingNotifications())
 
 	// inject a new node into the dht's includeEvents queue
 	err = d.AddNodes(ctx, []peer.AddrInfo{candidate}, time.Minute)
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
-	ev, err := expectEventType(t, ctx, events, &EventRoutingUpdated{})
+	ev, err := w.Expect(ctx, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
 	tev := ev.(*EventRoutingUpdated)

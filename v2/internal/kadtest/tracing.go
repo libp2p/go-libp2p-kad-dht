@@ -1,6 +1,7 @@
 package kadtest
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -23,6 +24,10 @@ func JaegerTracerProvider(t *testing.T) *trace.TracerProvider {
 	}
 
 	tp := trace.NewTracerProvider(trace.WithBatcher(exp))
+
+	t.Cleanup(func() {
+		tp.Shutdown(context.Background())
+	})
 
 	return tp
 }

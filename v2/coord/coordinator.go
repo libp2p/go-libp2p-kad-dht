@@ -201,7 +201,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 
 	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, cfg.Logger, cfg.Tele.Tracer)
 
-	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger)
+	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, cfg.Tele.Tracer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -352,7 +352,7 @@ func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (Q
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := query.QueryID("foo")
+	queryID := query.QueryID("foo") // TODO: choose query ID
 
 	cmd := &EventStartQuery{
 		QueryID:           queryID,

@@ -314,7 +314,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 	case *routing.StateIncludeWaitingFull:
 		// nothing to do except wait for message response or timeout
 	case *routing.StateIncludeIdle:
-		// nothing to do except wait for message response or timeout
+		// nothing to do except wait for new nodes to be added to queue
 	default:
 		panic(fmt.Sprintf("unexpected include state: %T", st))
 	}

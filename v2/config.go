@@ -167,10 +167,16 @@ type Config struct {
 	// used to filter out private addresses.
 	AddressFilter AddressFilter
 
-	// MeterProvider .
+	// MeterProvider provides access to named Meter instances. It's used to,
+	// e.g., expose prometheus metrics. Check out the [opentelemetry docs]:
+	//
+	// [opentelemetry docs]: https://opentelemetry.io/docs/specs/otel/metrics/api/#meterprovider
 	MeterProvider metric.MeterProvider
 
-	// TracerProvider .
+	// TracerProvider provides Tracers that are used by instrumentation code to
+	// trace computational workflows. Check out the [opentelemetry docs]:
+	//
+	// [opentelemetry docs]: https://opentelemetry.io/docs/concepts/signals/traces/#tracer-provider
 	TracerProvider trace.TracerProvider
 }
 

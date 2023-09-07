@@ -152,7 +152,13 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, nil)
+	coordCfg, err := coord.DefaultCoordinatorConfig()
+	if err != nil {
+		return nil, fmt.Errorf("new coordinator config: %w", err)
+	}
+	coordCfg.Tele = d.tele
+
+	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -303,6 +309,9 @@ func (d *DHT) logErr(err error, msg string) {
 // AddAddresses suggests peers and their associated addresses to be added to the routing table.
 // Addresses will be added to the peerstore with the supplied time to live.
 func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
+	defer span.End()
+
 	return d.kad.AddNodes(ctx, ais, ttl)
 }
 

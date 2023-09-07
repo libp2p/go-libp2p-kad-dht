@@ -118,10 +118,10 @@ func (cfg *CoordinatorConfig) Validate() error {
 		}
 	}
 
-	return nil
+	return nil;
 }
 
-func DefaultConfig() (*CoordinatorConfig, error) {
+func DefaultCoordinatorConfig() (*CoordinatorConfig, error) {
 	telemetry, err := tele.NewWithGlobalProviders()
 	if err != nil {
 		return nil, fmt.Errorf("new telemetry: %w", err)
@@ -141,7 +141,7 @@ func DefaultConfig() (*CoordinatorConfig, error) {
 
 func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey, kad.NodeID[KadKey]], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
-		c, err := DefaultConfig()
+		c, err := DefaultCoordinatorConfig()
 		if err != nil {
 			return nil, fmt.Errorf("default config: %w", err)
 		}

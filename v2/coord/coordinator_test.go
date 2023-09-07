@@ -37,14 +37,14 @@ func expectEventType(t *testing.T, ctx context.Context, events <-chan RoutingNot
 
 func TestConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		require.NoError(t, cfg.Validate())
 	})
 
 	t.Run("clock is not nil", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.Clock = nil
@@ -52,7 +52,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("query concurrency positive", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.QueryConcurrency = 0
@@ -62,7 +62,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("query timeout positive", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.QueryTimeout = 0
@@ -72,7 +72,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request concurrency positive", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.RequestConcurrency = 0
@@ -82,7 +82,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request timeout positive", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.RequestTimeout = 0
@@ -92,7 +92,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("logger not nil", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.Logger = nil
@@ -100,7 +100,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("telemetry not nil", func(t *testing.T) {
-		cfg, err := DefaultConfig()
+		cfg, err := DefaultCoordinatorConfig()
 		require.NoError(t, err)
 
 		cfg.Tele = nil
@@ -115,7 +115,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
-	ccfg, err := DefaultConfig()
+	ccfg, err := DefaultCoordinatorConfig()
 	require.NoError(t, err)
 
 	ccfg.Clock = clk
@@ -156,7 +156,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultConfig()
+	ccfg, err := DefaultCoordinatorConfig()
 	require.NoError(t, err)
 
 	ccfg.Clock = clk
@@ -221,7 +221,7 @@ func TestBootstrap(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultConfig()
+	ccfg, err := DefaultCoordinatorConfig()
 	require.NoError(t, err)
 
 	ccfg.Clock = clk
@@ -278,7 +278,7 @@ func TestIncludeNode(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultConfig()
+	ccfg, err := DefaultCoordinatorConfig()
 	require.NoError(t, err)
 
 	ccfg.Clock = clk

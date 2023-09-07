@@ -95,19 +95,29 @@ func TestAddAddresses(t *testing.T) {
 	ctx, cancel := kadtest.CtxShort(t)
 	defer cancel()
 
-	local := newClientDht(t, nil)
+	localCfg := DefaultConfig()
+	localCfg.TracerProvider = kadtest.JaegerTracerProvider(t)
+
+	local := newClientDht(t, localCfg)
 
 	remote := newServerDht(t, nil)
 
-	// Populate and entries in remote's routing table so it responds to a connectivity check
+	// Populate entries in remote's routing table so it passes a connectivity check
 	fillRoutingTable(t, remote, 1)
 
-	// TODO: add method to DHT to return its address?
-	pstore := remote.host.Peerstore()
-	remoteAddrInfo := pstore.PeerInfo(remote.host.ID())
+	// local routing table should not contain the node
+	_, err := local.kad.GetNode(ctx, remote.host.ID())
+	require.ErrorIs(t, err, coord.ErrNodeNotFound)
+
+	remoteAddrInfo := peer.AddrInfo{
+		ID:    remote.host.ID(),
+		Addrs: remote.host.Addrs(),
+	}
+	require.NotEmpty(t, remoteAddrInfo.ID)
+	require.NotEmpty(t, remoteAddrInfo.Addrs)
 
 	// Add remote's addresss to the local dht
-	err := local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
+	err = local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table

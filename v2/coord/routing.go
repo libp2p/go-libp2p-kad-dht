@@ -281,9 +281,11 @@ func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.Boot
 func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.IncludeEvent) (BehaviourEvent, bool) {
 	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceInclude")
 	defer span.End()
+
 	istate := r.include.Advance(ctx, ev)
 	switch st := istate.(type) {
 	case *routing.StateIncludeFindNodeMessage[KadKey, ma.Multiaddr]:
+		span.SetAttributes(attribute.String("out_event", "EventOutboundGetCloserNodes"))
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{
 			QueryID: "include",
@@ -301,6 +303,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 		})
 
 		// return the event to notify outwards too
+		span.SetAttributes(attribute.String("out_event", "EventRoutingUpdated"))
 		return &EventRoutingUpdated{
 			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
 		}, true

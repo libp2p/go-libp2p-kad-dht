@@ -18,7 +18,6 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 var _ routing.Routing = (*DHT)(nil)
@@ -40,7 +39,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		// we're
 	}
 
-	target := kadt.PeerID(id)
+	target := coord.PeerID(id)
 
 	var foundNode coord.Node
 	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {

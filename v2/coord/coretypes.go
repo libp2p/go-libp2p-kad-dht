@@ -8,17 +8,12 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 )
 
-// KadKey is a type alias for the type of key that's used with this DHT
-// implementation.
-type KadKey = key.Key256
-
 // Value is a value that may be stored in the DHT.
 type Value interface {
-	Key() KadKey
+	Key() Key
 	MarshalBinary() ([]byte, error)
 }
 
@@ -32,12 +27,12 @@ type Node interface {
 
 	// GetClosestNodes requests the n closest nodes to the key from the node's
 	// local routing table. The node may return fewer nodes than requested.
-	GetClosestNodes(ctx context.Context, key KadKey, n int) ([]Node, error)
+	GetClosestNodes(ctx context.Context, key Key, n int) ([]Node, error)
 
 	// GetValue requests that the node return any value associated with the
 	// supplied key. If the node does not have a value for the key it returns
 	// ErrValueNotFound.
-	GetValue(ctx context.Context, key KadKey) (Value, error)
+	GetValue(ctx context.Context, key Key) (Value, error)
 
 	// PutValue requests that the node stores a value to be associated with the supplied key.
 	// If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
@@ -82,12 +77,12 @@ var (
 type Router interface {
 	// SendMessage attempts to send a request to another node. The Router will absorb the addresses in to into its
 	// internal nodestore. This method blocks until a response is received or an error is encountered.
-	SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error)
+	SendMessage(ctx context.Context, to peer.ID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error)
 
-	AddNodeInfo(ctx context.Context, info peer.AddrInfo, ttl time.Duration) error
-	GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, error)
+	AddNodeInfo(ctx context.Context, info peer.ID, ttl time.Duration) error
+	GetNodeInfo(ctx context.Context, id peer.ID) (peer.ID, error)
 
 	// GetClosestNodes attempts to send a request to another node asking it for nodes that it considers to be
 	// closest to the target key.
-	GetClosestNodes(ctx context.Context, to peer.AddrInfo, target KadKey) ([]peer.AddrInfo, error)
+	GetClosestNodes(ctx context.Context, to peer.ID, target Key) ([]peer.ID, error)
 }

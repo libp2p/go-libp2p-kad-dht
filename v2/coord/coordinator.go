@@ -20,7 +20,6 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
@@ -41,7 +40,7 @@ type Coordinator struct {
 	cfg CoordinatorConfig
 
 	// rt is the routing table used to look up nodes by distance
-	rt kad.RoutingTable[KadKey, kad.NodeID[KadKey]]
+	rt kad.RoutingTable[Key, PeerID]
 
 	// rtr is the message router used to send messages
 	rtr Router
@@ -144,7 +143,7 @@ func DefaultCoordinatorConfig() (*CoordinatorConfig, error) {
 	}, nil
 }
 
-func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey, kad.NodeID[KadKey]], cfg *CoordinatorConfig) (*Coordinator, error) {
+func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[Key, PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		c, err := DefaultCoordinatorConfig()
 		if err != nil {
@@ -162,19 +161,19 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[KadKey, ma.Multiaddr](kadt.PeerID(self), qpCfg)
+	qp, err := query.NewPool[Key, PeerID](PeerID(self), qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
 	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger, cfg.Tele.Tracer)
 
-	bootstrapCfg := routing.DefaultBootstrapConfig[KadKey, ma.Multiaddr]()
+	bootstrapCfg := routing.DefaultBootstrapConfig[Key, PeerID]()
 	bootstrapCfg.Clock = cfg.Clock
 	bootstrapCfg.Timeout = cfg.QueryTimeout
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[KadKey, ma.Multiaddr](kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap[Key, PeerID](PeerID(self), bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -188,7 +187,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 	// includeCfg.Concurrency = cfg.IncludeConcurrency
 	// includeCfg.Timeout = cfg.IncludeTimeout
 
-	include, err := routing.NewInclude[KadKey, ma.Multiaddr](rt, includeCfg)
+	include, err := routing.NewInclude[Key, PeerID](rt, includeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("include: %w", err)
 	}
@@ -199,7 +198,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 
 	// TODO: expose config
 	// probeCfg.Concurrency = cfg.ProbeConcurrency
-	probe, err := routing.NewProbe[KadKey, ma.Multiaddr](rt, probeCfg)
+	probe, err := routing.NewProbe[Key, PeerID](rt, probeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("probe: %w", err)
 	}
@@ -306,7 +305,7 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.
 // If the node isn't found in the table, it returns ErrNodeNotFound.
 func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
-	if _, exists := c.rt.GetNode(kadt.PeerID(id).Key()); !exists {
+	if _, exists := c.rt.GetNode(PeerID(id).Key()); !exists {
 		return nil, ErrNodeNotFound
 	}
 
@@ -318,11 +317,11 @@ func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
-func (c *Coordinator) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]Node, error) {
+func (c *Coordinator) GetClosestNodes(ctx context.Context, k Key, n int) ([]Node, error) {
 	closest := c.rt.NearestNodes(k, n)
 	nodes := make([]Node, 0, len(closest))
 	for _, id := range closest {
-		nh, err := c.networkBehaviour.getNodeHandler(ctx, NodeIDToPeerID(id))
+		nh, err := c.networkBehaviour.getNodeHandler(ctx, id.ID())
 		if err != nil {
 			return nil, err
 		}
@@ -333,7 +332,7 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]N
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (c *Coordinator) GetValue(ctx context.Context, k KadKey) (Value, error) {
+func (c *Coordinator) GetValue(ctx context.Context, k Key) (Value, error) {
 	panic("not implemented")
 }
 
@@ -344,7 +343,7 @@ func (c *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
 }
 
 // Query traverses the DHT calling fn for each node visited.
-func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (QueryStats, error) {
+func (c *Coordinator) Query(ctx context.Context, target Key, fn QueryFunc) (QueryStats, error) {
 	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 
@@ -453,7 +452,7 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 }
 
 // Bootstrap instructs the dht to begin bootstrapping the routing table.
-func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.AddrInfo) error {
+func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 	seedStrs := make([]string, len(seeds))
 	for i, seed := range seeds {
 		seedStrs[i] = seed.String()
@@ -464,7 +463,7 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.AddrInfo) erro
 
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		// Bootstrap state machine uses the message
-		Message:   &fakeMessage{key: kadt.PeerID(c.self).Key()},
+		Message:   &fakeMessage{key: PeerID(c.self).Key()},
 		SeedNodes: seeds,
 	})
 

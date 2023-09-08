@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
@@ -49,8 +48,8 @@ type RoutingNotification interface {
 
 type EventStartBootstrap struct {
 	ProtocolID address.ProtocolID
-	Message    kad.Request[KadKey, ma.Multiaddr]
-	SeedNodes  []peer.AddrInfo
+	Message    kad.Request[Key, PeerID]
+	SeedNodes  []PeerID
 }
 
 func (*EventStartBootstrap) behaviourEvent() {}
@@ -58,8 +57,8 @@ func (*EventStartBootstrap) routingCommand() {}
 
 type EventOutboundGetCloserNodes struct {
 	QueryID query.QueryID
-	To      peer.AddrInfo
-	Target  KadKey
+	To      PeerID
+	Target  Key
 	Notify  Notify[BehaviourEvent]
 }
 
@@ -69,10 +68,10 @@ func (*EventOutboundGetCloserNodes) networkCommand()     {}
 
 type EventStartQuery struct {
 	QueryID           query.QueryID
-	Target            KadKey
+	Target            Key
 	ProtocolID        address.ProtocolID
-	Message           kad.Request[KadKey, ma.Multiaddr]
-	KnownClosestNodes []peer.AddrInfo
+	Message           kad.Request[Key, PeerID]
+	KnownClosestNodes []peer.ID
 	Notify            NotifyCloser[BehaviourEvent]
 }
 
@@ -87,7 +86,7 @@ func (*EventStopQuery) behaviourEvent() {}
 func (*EventStopQuery) queryCommand()   {}
 
 type EventAddAddrInfo struct {
-	NodeInfo peer.AddrInfo
+	NodeInfo peer.ID
 	TTL      time.Duration
 }
 
@@ -96,9 +95,9 @@ func (*EventAddAddrInfo) routingCommand() {}
 
 type EventGetCloserNodesSuccess struct {
 	QueryID     query.QueryID
-	To          peer.AddrInfo
-	Target      KadKey
-	CloserNodes []peer.AddrInfo
+	To          peer.ID
+	Target      Key
+	CloserNodes []peer.ID
 }
 
 func (*EventGetCloserNodesSuccess) behaviourEvent()      {}
@@ -106,8 +105,8 @@ func (*EventGetCloserNodesSuccess) nodeHandlerResponse() {}
 
 type EventGetCloserNodesFailure struct {
 	QueryID query.QueryID
-	To      peer.AddrInfo
-	Target  KadKey
+	To      peer.ID
+	Target  Key
 	Err     error
 }
 
@@ -119,7 +118,7 @@ func (*EventGetCloserNodesFailure) nodeHandlerResponse() {}
 type EventQueryProgressed struct {
 	QueryID  query.QueryID
 	NodeID   peer.ID
-	Response kad.Response[KadKey, ma.Multiaddr]
+	Response kad.Response[Key, PeerID]
 	Stats    query.QueryStats
 }
 
@@ -136,7 +135,7 @@ func (*EventQueryFinished) behaviourEvent() {}
 
 // EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {
-	NodeInfo peer.AddrInfo
+	NodeInfo peer.ID
 }
 
 func (*EventRoutingUpdated) behaviourEvent()      {}

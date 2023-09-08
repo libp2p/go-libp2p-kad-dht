@@ -12,8 +12,6 @@ import (
 	"github.com/plprobelab/go-kademlia/query"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 type NetworkBehaviour struct {
@@ -53,10 +51,10 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventOutboundGetCloserNodes:
 		b.nodeHandlersMu.Lock()
-		nh, ok := b.nodeHandlers[ev.To.ID]
+		nh, ok := b.nodeHandlers[ev.To.ID()]
 		if !ok {
-			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
-			b.nodeHandlers[ev.To.ID] = nh
+			nh = NewNodeHandler(ev.To.ID(), b.rtr, b.logger, b.tracer)
+			b.nodeHandlers[ev.To.ID()] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
@@ -173,7 +171,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 }
 
 func (h *NodeHandler) ID() peer.ID {
-	return h.self.ID
+	return h.self
 }
 
 func (h *NodeHandler) Addresses() []ma.Multiaddr {
@@ -182,14 +180,14 @@ func (h *NodeHandler) Addresses() []ma.Multiaddr {
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
-func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]Node, error) {
+func (h *NodeHandler) GetClosestNodes(ctx context.Context, k Key, n int) ([]Node, error) {
 	ctx, span := h.tracer.Start(ctx, "NodeHandler.GetClosestNodes")
 	defer span.End()
 	w := NewWaiter[BehaviourEvent]()
 
 	ev := &EventOutboundGetCloserNodes{
 		QueryID: query.QueryID(key.HexString(k)),
-		To:      h.self,
+		To:      PeerID(h.self.ID),
 		Target:  k,
 		Notify:  w,
 	}
@@ -224,7 +222,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]N
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (h *NodeHandler) GetValue(ctx context.Context, key KadKey) (Value, error) {
+func (h *NodeHandler) GetValue(ctx context.Context, key Key) (Value, error) {
 	panic("not implemented")
 }
 
@@ -234,31 +232,31 @@ func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-func CloserNodesResponse(k KadKey, nodes []peer.AddrInfo) kad.Response[KadKey, ma.Multiaddr] {
-	infos := make([]kad.NodeInfo[KadKey, ma.Multiaddr], len(nodes))
+func CloserNodesResponse(k Key, nodes []peer.AddrInfo) kad.Response[Key, PeerID] {
+	peers := make([]PeerID, len(nodes))
 	for i := range nodes {
-		infos[i] = kadt.AddrInfo{Info: nodes[i]}
+		peers[i] = PeerID(nodes[i].ID)
 	}
 
 	return &fakeMessage{
 		key:   k,
-		infos: infos,
+		peers: peers,
 	}
 }
 
 type fakeMessage struct {
-	key   KadKey
-	infos []kad.NodeInfo[KadKey, ma.Multiaddr]
+	key   Key
+	peers []PeerID
 }
 
-func (r fakeMessage) Target() KadKey {
+func (r fakeMessage) Target() Key {
 	return r.key
 }
 
-func (r fakeMessage) CloserNodes() []kad.NodeInfo[KadKey, ma.Multiaddr] {
-	return r.infos
+func (r fakeMessage) CloserNodes() []PeerID {
+	return r.peers
 }
 
-func (r fakeMessage) EmptyResponse() kad.Response[KadKey, ma.Multiaddr] {
+func (r fakeMessage) EmptyResponse() kad.Response[Key, PeerID] {
 	return &fakeMessage{}
 }

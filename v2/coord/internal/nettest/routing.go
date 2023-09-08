@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -15,7 +17,6 @@ import (
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/network/endpoint"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
@@ -72,8 +73,8 @@ func NewRouter(self peer.ID, top *Topology) *Router {
 	}
 }
 
-func (r *Router) NodeID() kad.NodeID[key.Key256] {
-	return kadt.PeerID(r.self)
+func (r *Router) NodeID() kad.NodeID[coord.Key] {
+	return coord.PeerID(r.self)
 }
 
 func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
@@ -94,7 +95,7 @@ func (r *Router) HandleMessage(ctx context.Context, n peer.ID, protoID address.P
 	r.mu.Lock()
 	for _, n := range r.nodes {
 		// only include self if it was the target of the request
-		if n.NodeInfo.ID == r.self && !key.Equal(kadt.PeerID(n.NodeInfo.ID).Key(), req.Target()) {
+		if n.NodeInfo.ID == r.self && !key.Equal(coord.PeerID(n.NodeInfo.ID).Key(), req.Target()) {
 			continue
 		}
 		closer = append(closer, pb.FromAddrInfo(n.NodeInfo))
@@ -158,7 +159,7 @@ func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, er
 	return status.NodeInfo, nil
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target key.Key256) ([]peer.AddrInfo, error) {
+func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target coord.Key) ([]peer.AddrInfo, error) {
 	protoID := address.ProtocolID("/test/1.0.0")
 
 	req := &pb.Message{

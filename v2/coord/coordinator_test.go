@@ -16,7 +16,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
@@ -177,7 +176,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
-	target := kadt.PeerID(nodes[3].NodeInfo.ID).Key()
+	target := PeerID(nodes[3].NodeInfo.ID).Key()
 
 	visited := make(map[string]int)
 
@@ -228,7 +227,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	}
 
 	// Run a query to find the value
-	target := kadt.PeerID(nodes[3].NodeInfo.ID).Key()
+	target := PeerID(nodes[3].NodeInfo.ID).Key()
 	_, err = c.Query(ctx, target, qfn)
 	require.NoError(t, err)
 

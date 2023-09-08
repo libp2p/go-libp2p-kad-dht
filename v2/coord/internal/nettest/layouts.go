@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+
 	"github.com/benbjohnson/clock"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // LinearTopology creates a network topology consisting of n nodes peered in a linear chain.
@@ -38,7 +37,7 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 		nodes[i] = &Node{
 			NodeInfo:     ai,
 			Router:       NewRouter(ai.ID, top),
-			RoutingTable: simplert.New[key.Key256, kad.NodeID[key.Key256]](kadt.PeerID(ai.ID), 20),
+			RoutingTable: simplert.New[coord.Key, kad.NodeID[coord.Key]](coord.PeerID(ai.ID), 20),
 		}
 	}
 
@@ -53,11 +52,11 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 	for i := 0; i < len(nodes); i++ {
 		if i > 0 {
 			nodes[i].Router.AddNodeInfo(context.Background(), nodes[i-1].NodeInfo, 0)
-			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i-1].NodeInfo.ID))
+			nodes[i].RoutingTable.AddNode(coord.PeerID(nodes[i-1].NodeInfo.ID))
 		}
 		if i < len(nodes)-1 {
 			nodes[i].Router.AddNodeInfo(context.Background(), nodes[i+1].NodeInfo, 0)
-			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i+1].NodeInfo.ID))
+			nodes[i].RoutingTable.AddNode(coord.PeerID(nodes[i+1].NodeInfo.ID))
 		}
 	}
 

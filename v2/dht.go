@@ -19,7 +19,6 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
@@ -78,7 +77,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		log:  cfg.Logger,
 	}
 
-	nid := kadt.PeerID(d.host.ID())
+	nid := coord.PeerID(d.host.ID())
 
 	// Use the configured routing table if it was provided
 	if cfg.RoutingTable != nil {

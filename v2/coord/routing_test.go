@@ -9,7 +9,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
 	"github.com/plprobelab/go-kademlia/routing"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
@@ -53,7 +51,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the bootstrap state machine
-	expected := &routing.EventBootstrapStart[KadKey, ma.Multiaddr]{
+	expected := &routing.EventBootstrapStart[Key, PeerID]{
 		ProtocolID:        ev.ProtocolID,
 		Message:           ev.Message,
 		KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
@@ -81,16 +79,16 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("bootstrap"),
 		To:          nodes[1].NodeInfo,
-		Target:      kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
+		Target:      PeerID(nodes[0].NodeInfo.ID).Key(),
 		CloserNodes: []peer.AddrInfo{nodes[2].NodeInfo},
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageResponse[KadKey, ma.Multiaddr]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapMessageResponse[Key, PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[KadKey, ma.Multiaddr])
+	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[Key, PeerID])
 	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
 	require.Equal(t, ev.CloserNodes, SliceOfNodeInfoToSliceOfAddrInfo(rev.Response.CloserNodes()))
 }
@@ -116,16 +114,16 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	ev := &EventGetCloserNodesFailure{
 		QueryID: query.QueryID("bootstrap"),
 		To:      nodes[1].NodeInfo,
-		Target:  kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
+		Target:  PeerID(nodes[0].NodeInfo.ID).Key(),
 		Err:     failure,
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageFailure[KadKey]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapMessageFailure[Key]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[KadKey])
+	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[Key])
 	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
@@ -155,7 +153,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the include state machine
-	expected := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
+	expected := &routing.EventIncludeAddCandidate[Key, PeerID]{
 		NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
 	}
 	require.Equal(t, expected, include.Received)
@@ -182,16 +180,16 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("include"),
 		To:          nodes[1].NodeInfo,
-		Target:      kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
+		Target:      PeerID(nodes[0].NodeInfo.ID).Key(),
 		CloserNodes: []peer.AddrInfo{nodes[2].NodeInfo},
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageResponse[KadKey, ma.Multiaddr]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeMessageResponse[Key, PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageResponse[KadKey, ma.Multiaddr])
+	rev := include.Received.(*routing.EventIncludeMessageResponse[Key, PeerID])
 	require.Equal(t, nodes[1].NodeInfo, NodeInfoToAddrInfo(rev.NodeInfo))
 	require.Equal(t, ev.CloserNodes, SliceOfNodeInfoToSliceOfAddrInfo(rev.Response.CloserNodes()))
 }
@@ -218,16 +216,16 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	ev := &EventGetCloserNodesFailure{
 		QueryID: query.QueryID("include"),
 		To:      nodes[1].NodeInfo,
-		Target:  kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
+		Target:  PeerID(nodes[0].NodeInfo.ID).Key(),
 		Err:     failure,
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageFailure[KadKey, ma.Multiaddr]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeMessageFailure[Key, PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageFailure[KadKey, ma.Multiaddr])
+	rev := include.Received.(*routing.EventIncludeMessageFailure[Key, PeerID])
 	require.Equal(t, nodes[1].NodeInfo, NodeInfoToAddrInfo(rev.NodeInfo))
 	require.Equal(t, failure, rev.Error)
 }
@@ -245,13 +243,13 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 
 	includeCfg := routing.DefaultIncludeConfig()
 	includeCfg.Clock = clk
-	include, err := routing.NewInclude[KadKey, ma.Multiaddr](rt, includeCfg)
+	include, err := routing.NewInclude[Key, PeerID](rt, includeCfg)
 	require.NoError(t, err)
 
 	probeCfg := routing.DefaultProbeConfig()
 	probeCfg.Clock = clk
 	probeCfg.CheckInterval = 5 * time.Minute
-	probe, err := routing.NewProbe[KadKey, ma.Multiaddr](rt, probeCfg)
+	probe, err := routing.NewProbe[Key, PeerID](rt, probeCfg)
 	require.NoError(t, err)
 
 	// ensure bootstrap is always idle
@@ -263,7 +261,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	candidate := nodes[len(nodes)-1].NodeInfo
 
 	// the routing table should not contain the node yet
-	_, intable := rt.GetNode(kadt.PeerID(candidate.ID).Key())
+	_, intable := rt.GetNode(PeerID(candidate.ID).Key())
 	require.False(t, intable)
 
 	// notify that there is a new node to be included
@@ -292,7 +290,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	})
 
 	// the routing table should now contain the node
-	_, intable = rt.GetNode(kadt.PeerID(candidate.ID).Key())
+	_, intable = rt.GetNode(PeerID(candidate.ID).Key())
 	require.True(t, intable)
 
 	// routing update event should be emitted from the include state machine

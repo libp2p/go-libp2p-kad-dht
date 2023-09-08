@@ -92,8 +92,7 @@ func expectEventType(t *testing.T, ctx context.Context, events <-chan coord.Rout
 }
 
 func TestAddAddresses(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	localCfg := DefaultConfig()
 

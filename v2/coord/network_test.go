@@ -15,8 +15,7 @@ import (
 
 // TODO: this is just a basic is-it-working test that needs to be improved
 func TestGetClosestNodes(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)

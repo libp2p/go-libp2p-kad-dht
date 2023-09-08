@@ -23,8 +23,7 @@ import (
 )
 
 func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -62,8 +61,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 }
 
 func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -96,8 +94,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 }
 
 func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -131,8 +128,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 }
 
 func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -162,8 +158,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 }
 
 func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -197,8 +192,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 }
 
 func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -233,8 +227,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 }
 
 func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)

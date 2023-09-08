@@ -6,12 +6,11 @@ import (
 	"time"
 )
 
-// CtxShort returns a Context and a CancelFunc. The context will be
-// cancelled after 10 seconds or just before the test binary deadline (as
-// specified by the -timeout flag when running the test), whichever is
-// sooner. The CancelFunc may be called to cancel the context earlier than
-// the deadline.
-func CtxShort(t *testing.T) (context.Context, context.CancelFunc) {
+// CtxShort returns a Context for tests that are expected to complete quickly.
+// The context will be cancelled after 10 seconds or just before the test
+// binary deadline (as specified by the -timeout flag when running the test), whichever
+// is sooner.
+func CtxShort(t *testing.T) context.Context {
 	t.Helper()
 
 	timeout := 10 * time.Second
@@ -27,5 +26,7 @@ func CtxShort(t *testing.T) (context.Context, context.CancelFunc) {
 		}
 	}
 
-	return context.WithDeadline(context.Background(), deadline)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	t.Cleanup(cancel)
+	return ctx
 }

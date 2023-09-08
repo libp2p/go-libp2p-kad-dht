@@ -158,8 +158,7 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestExhaustiveQuery(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -198,8 +197,7 @@ func TestExhaustiveQuery(t *testing.T) {
 }
 
 func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -261,8 +259,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 }
 
 func TestBootstrap(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -315,8 +312,7 @@ func TestBootstrap(t *testing.T) {
 }
 
 func TestIncludeNode(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)

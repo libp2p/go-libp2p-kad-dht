@@ -32,6 +32,11 @@ type Coordinator struct {
 	// cancel is used to cancel all running goroutines when the coordinator is cleaning up
 	cancel context.CancelFunc
 
+	// done will be closed when the coordinator's eventLoop exits. Block-read
+	// from this channel to wait until resources of this coordinator were
+	// cleaned up
+	done chan struct{}
+
 	// cfg is a copy of the optional configuration supplied to the dht
 	cfg CoordinatorConfig
 
@@ -211,6 +216,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 		rtr:    rtr,
 		rt:     rt,
 		cancel: cancel,
+		done:   make(chan struct{}),
 
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
@@ -218,6 +224,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 
 		routingNotifications: make(chan RoutingNotification, 20), // buffered mainly to allow tests to read the channel after running an operation
 	}
+
 	go d.eventLoop(ctx)
 
 	return d, nil
@@ -226,6 +233,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 // Close cleans up all resources associated with this Coordinator.
 func (c *Coordinator) Close() error {
 	c.cancel()
+	<-c.done
 	return nil
 }
 
@@ -248,6 +256,8 @@ func (c *Coordinator) RoutingNotifications() <-chan RoutingNotification {
 }
 
 func (c *Coordinator) eventLoop(ctx context.Context) {
+	defer close(c.done)
+
 	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.eventLoop")
 	defer span.End()
 	for {
@@ -441,8 +451,14 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 
 // Bootstrap instructs the dht to begin bootstrapping the routing table.
 func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.Bootstrap")
+	seedStrs := make([]string, len(seeds))
+	for i, seed := range seeds {
+		seedStrs[i] = seed.String()
+	}
+
+	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.Bootstrap", trace.WithAttributes(attribute.StringSlice("peers", seedStrs)))
 	defer span.End()
+
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		// Bootstrap state machine uses the message
 		Message:   &fakeMessage{key: kadt.PeerID(c.self).Key()},

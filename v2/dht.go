@@ -93,56 +93,13 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		return nil, fmt.Errorf("init telemetry: %w", err)
 	}
 
+	// initialize backends
 	if len(cfg.Backends) != 0 {
 		d.backends = cfg.Backends
 	} else if cfg.ProtocolID == ProtocolAmino {
-
-		var dstore Datastore
-		if cfg.Datastore != nil {
-			dstore = cfg.Datastore
-		} else if dstore, err = InMemoryDatastore(); err != nil {
-			return nil, fmt.Errorf("new default datastore: %w", err)
-		}
-
-		// wrap datastore in open telemetry tracing
-		dstore = trace.New(dstore, d.tele.Tracer)
-
-		pbeCfg, err := DefaultProviderBackendConfig()
+		d.backends, err = d.initAminoBackends()
 		if err != nil {
-			return nil, fmt.Errorf("default provider config: %w", err)
-		}
-		pbeCfg.Logger = cfg.Logger
-		pbeCfg.AddressFilter = cfg.AddressFilter
-		pbeCfg.Tele = d.tele
-		pbeCfg.clk = d.cfg.Clock
-
-		pbe, err := NewBackendProvider(h.Peerstore(), dstore, pbeCfg)
-		if err != nil {
-			return nil, fmt.Errorf("new provider backend: %w", err)
-		}
-
-		rbeCfg, err := DefaultRecordBackendConfig()
-		if err != nil {
-			return nil, fmt.Errorf("default provider config: %w", err)
-		}
-		rbeCfg.Logger = cfg.Logger
-		rbeCfg.Tele = d.tele
-		rbeCfg.clk = d.cfg.Clock
-
-		ipnsBe, err := NewBackendIPNS(dstore, h.Peerstore(), rbeCfg)
-		if err != nil {
-			return nil, fmt.Errorf("new ipns backend: %w", err)
-		}
-
-		pkBe, err := NewBackendPublicKey(dstore, rbeCfg)
-		if err != nil {
-			return nil, fmt.Errorf("new public key backend: %w", err)
-		}
-
-		d.backends = map[string]Backend{
-			"ipns":      ipnsBe,
-			"pk":        pkBe,
-			"providers": pbe,
+			return nil, fmt.Errorf("init amino backends: %w", err)
 		}
 	}
 
@@ -184,6 +141,63 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	go d.consumeNetworkEvents(d.sub)
 
 	return d, nil
+}
+
+// initAminoBackends initializes the default backends for the Amino DHT. This
+// includes the ipns, public key, and providers backends. A [DHT] with these
+// backends will support these three record types.
+func (d *DHT) initAminoBackends() (map[string]Backend, error) {
+	var (
+		err    error
+		dstore Datastore
+	)
+
+	if d.cfg.Datastore != nil {
+		dstore = d.cfg.Datastore
+	} else if dstore, err = InMemoryDatastore(); err != nil {
+		return nil, fmt.Errorf("new default datastore: %w", err)
+	}
+
+	// wrap datastore in open telemetry tracing
+	dstore = trace.New(dstore, d.tele.Tracer)
+
+	pbeCfg, err := DefaultProviderBackendConfig()
+	if err != nil {
+		return nil, fmt.Errorf("default provider config: %w", err)
+	}
+	pbeCfg.Logger = d.cfg.Logger
+	pbeCfg.AddressFilter = d.cfg.AddressFilter
+	pbeCfg.Tele = d.tele
+	pbeCfg.clk = d.cfg.Clock
+
+	pbe, err := NewBackendProvider(d.host.Peerstore(), dstore, pbeCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new provider backend: %w", err)
+	}
+
+	rbeCfg, err := DefaultRecordBackendConfig()
+	if err != nil {
+		return nil, fmt.Errorf("default provider config: %w", err)
+	}
+	rbeCfg.Logger = d.cfg.Logger
+	rbeCfg.Tele = d.tele
+	rbeCfg.clk = d.cfg.Clock
+
+	ipnsBe, err := NewBackendIPNS(dstore, d.host.Peerstore(), rbeCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new ipns backend: %w", err)
+	}
+
+	pkBe, err := NewBackendPublicKey(dstore, rbeCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new public key backend: %w", err)
+	}
+
+	return map[string]Backend{
+		namespaceIPNS:      ipnsBe,
+		namespacePublicKey: pkBe,
+		namespaceProviders: pbe,
+	}, nil
 }
 
 // Close cleans up all resources associated with this DHT.

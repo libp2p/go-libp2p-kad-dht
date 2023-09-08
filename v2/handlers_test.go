@@ -12,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
+	"github.com/benbjohnson/clock"
 	"github.com/ipfs/boxo/ipns"
 	"github.com/ipfs/boxo/path"
 	ds "github.com/ipfs/go-datastore"
@@ -25,6 +24,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
@@ -56,6 +56,16 @@ func newTestDHTWithConfig(t testing.TB, cfg *Config) *DHT {
 	})
 
 	return d
+}
+
+func newTestMockClockDHT(t testing.TB) (*DHT, *clock.Mock) {
+	mockClock := clock.NewMock()
+	mockClock.Set(time.Now())
+
+	cfg := DefaultConfig()
+	cfg.Clock = mockClock
+
+	return newTestDHTWithConfig(t, cfg), mockClock
 }
 
 func newPeerID(t testing.TB) peer.ID {
@@ -430,12 +440,12 @@ func BenchmarkDHT_handlePing(b *testing.B) {
 	}
 }
 
-func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.Time, ttl time.Duration) *pb.Message {
+func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, now time.Time, ttl time.Duration) *pb.Message {
 	t.Helper()
 
 	testPath := path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
 
-	rec, err := ipns.NewRecord(priv, testPath, seq, eol, ttl)
+	rec, err := ipns.NewRecord(priv, testPath, seq, now.Add(ttl), ttl)
 	require.NoError(t, err)
 
 	remote, err := peer.IDFromPublicKey(priv.GetPublic())
@@ -451,7 +461,7 @@ func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.T
 		Record: &recpb.Record{
 			Key:          key,
 			Value:        data,
-			TimeReceived: time.Now().Format(time.RFC3339Nano),
+			TimeReceived: now.Format(time.RFC3339Nano),
 		},
 	}
 
@@ -459,7 +469,7 @@ func newPutIPNSRequest(t testing.TB, priv crypto.PrivKey, seq uint64, eol time.T
 }
 
 func BenchmarkDHT_handlePutValue_unique_peers(b *testing.B) {
-	d := newTestDHT(b)
+	d, mockClock := newTestMockClockDHT(b)
 
 	// build requests
 	peers := make([]peer.ID, b.N)
@@ -467,7 +477,7 @@ func BenchmarkDHT_handlePutValue_unique_peers(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		remote, priv := newIdentity(b)
 		peers[i] = remote
-		reqs[i] = newPutIPNSRequest(b, priv, uint64(i), time.Now().Add(time.Hour), time.Hour)
+		reqs[i] = newPutIPNSRequest(b, priv, uint64(i), mockClock.Now(), time.Hour)
 	}
 
 	ctx := context.Background()
@@ -483,13 +493,13 @@ func BenchmarkDHT_handlePutValue_unique_peers(b *testing.B) {
 }
 
 func BenchmarkDHT_handlePutValue_single_peer(b *testing.B) {
-	d := newTestDHT(b)
+	d, mockClock := newTestMockClockDHT(b)
 
 	// build requests
 	remote, priv := newIdentity(b)
 	reqs := make([]*pb.Message, b.N)
 	for i := 0; i < b.N; i++ {
-		reqs[i] = newPutIPNSRequest(b, priv, uint64(i), time.Now().Add(time.Hour), time.Hour)
+		reqs[i] = newPutIPNSRequest(b, priv, uint64(i), mockClock.Now(), time.Hour)
 	}
 
 	ctx := context.Background()
@@ -508,15 +518,18 @@ func TestDHT_handlePutValue_happy_path_ipns_record(t *testing.T) {
 	ctx := context.Background()
 
 	// init new DHT
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	// generate new identity for the peer that issues the request
 	remote, priv := newIdentity(t)
 
-	// expired record
-	req := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	// valid record
+	recordDeadline := time.Hour
+	req := newPutIPNSRequest(t, priv, 0, mockClock.Now(), recordDeadline)
 	ns, suffix, err := record.SplitKey(string(req.Key))
 	require.NoError(t, err)
+
+	mockClock.Add(recordDeadline / 2)
 
 	_, err = d.backends[ns].Fetch(ctx, suffix)
 	require.ErrorIs(t, err, ds.ErrNotFound)
@@ -595,12 +608,12 @@ func TestDHT_handlePutValue_bad_ipns_record(t *testing.T) {
 }
 
 func TestDHT_handlePutValue_worse_ipns_record_after_first_put(t *testing.T) {
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	remote, priv := newIdentity(t)
 
-	goodReq := newPutIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
-	worseReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	goodReq := newPutIPNSRequest(t, priv, 10, mockClock.Now(), time.Hour)
+	worseReq := newPutIPNSRequest(t, priv, 0, mockClock.Now(), time.Hour)
 
 	for i, req := range []*pb.Message{goodReq, worseReq} {
 		resp, err := d.handlePutValue(context.Background(), remote, req)
@@ -622,14 +635,14 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 	// sequence number was stored. If the handler didn't use transactions,
 	// this test fails.
 
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	remote, priv := newIdentity(t)
 
 	for i := 0; i < 100; i++ {
 
-		req1 := newPutIPNSRequest(t, priv, uint64(2*i), time.Now().Add(time.Hour), time.Hour)
-		req2 := newPutIPNSRequest(t, priv, uint64(2*i+1), time.Now().Add(time.Hour), time.Hour)
+		req1 := newPutIPNSRequest(t, priv, uint64(2*i), mockClock.Now(), time.Hour)
+		req2 := newPutIPNSRequest(t, priv, uint64(2*i+1), mockClock.Now(), time.Hour)
 
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -667,11 +680,11 @@ func TestDHT_handlePutValue_probe_race_condition(t *testing.T) {
 }
 
 func TestDHT_handlePutValue_overwrites_corrupt_stored_ipns_record(t *testing.T) {
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	remote, priv := newIdentity(t)
 
-	req := newPutIPNSRequest(t, priv, 10, time.Now().Add(time.Hour), time.Hour)
+	req := newPutIPNSRequest(t, priv, 10, mockClock.Now(), time.Hour)
 
 	dsKey := newDatastoreKey(namespaceIPNS, string(remote)) // string(remote) is the key suffix
 
@@ -863,7 +876,7 @@ func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
 }
 
 func BenchmarkDHT_handleGetValue(b *testing.B) {
-	d := newTestDHT(b)
+	d, mockClock := newTestMockClockDHT(b)
 
 	fillRoutingTable(b, d, 250)
 
@@ -876,7 +889,7 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		pid, priv := newIdentity(b)
 
-		putReq := newPutIPNSRequest(b, priv, 0, time.Now().Add(time.Hour), time.Hour)
+		putReq := newPutIPNSRequest(b, priv, 0, mockClock.Now(), time.Hour)
 
 		data, err := putReq.Record.Marshal()
 		require.NoError(b, err)
@@ -907,13 +920,13 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 }
 
 func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	fillRoutingTable(t, d, 250)
 
 	remote, priv := newIdentity(t)
 
-	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	putReq := newPutIPNSRequest(t, priv, 0, mockClock.Now(), time.Hour)
 
 	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
 	require.NoError(t, err)
@@ -1004,13 +1017,13 @@ func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 }
 
 func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	fillRoutingTable(t, d, 250)
 
 	remote, priv := newIdentity(t)
 
-	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(time.Hour), time.Hour)
+	putReq := newPutIPNSRequest(t, priv, 0, mockClock.Now(), time.Hour)
 
 	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
 	require.NoError(t, err)
@@ -1028,7 +1041,9 @@ func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
 		Key:  putReq.GetKey(),
 	}
 
-	rbe.cfg.MaxRecordAge = 0
+	// time passes
+	mockClock.Add(time.Minute)
+	rbe.cfg.MaxRecordAge = time.Minute / 2
 
 	resp, err := d.handleGetValue(context.Background(), remote, req)
 	require.NoError(t, err)
@@ -1046,7 +1061,7 @@ func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
 }
 
 func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
-	d := newTestDHT(t)
+	d, mockClock := newTestMockClockDHT(t)
 
 	fillRoutingTable(t, d, 250)
 
@@ -1056,7 +1071,7 @@ func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 	remote, priv := newIdentity(t)
 
 	// generate expired record (doesn't pass validation)
-	putReq := newPutIPNSRequest(t, priv, 0, time.Now().Add(-time.Hour), -time.Hour)
+	putReq := newPutIPNSRequest(t, priv, 0, mockClock.Now(), -time.Hour)
 
 	data, err := putReq.Record.Marshal()
 	require.NoError(t, err)

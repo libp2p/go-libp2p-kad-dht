@@ -19,10 +19,10 @@ import (
 // The topology is not a ring: nodes[0] only has nodes[1] in its table and nodes[n-1] only has nodes[n-2] in its table.
 // nodes[1] has nodes[0] and nodes[2] in its routing table.
 // If n > 2 then the first and last nodes will not have one another in their routing tables.
-func LinearTopology(n int, clk *clock.Mock) (*Topology, []*Node, error) {
+func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 	nodes := make([]*Node, n)
 
-	top := INewTopology(clk)
+	top := NewTopology(clk)
 	for i := range nodes {
 
 		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
@@ -38,7 +38,7 @@ func LinearTopology(n int, clk *clock.Mock) (*Topology, []*Node, error) {
 		nodes[i] = &Node{
 			NodeInfo:     ai,
 			Router:       NewRouter(ai.ID, top),
-			RoutingTable: simplert.New[key.Key256, kad.NodeID[key.Key256]](kadt.PeerID(ai.ID), 2),
+			RoutingTable: simplert.New[key.Key256, kad.NodeID[key.Key256]](kadt.PeerID(ai.ID), 20),
 		}
 	}
 

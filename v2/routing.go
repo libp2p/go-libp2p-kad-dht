@@ -49,7 +49,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		slog.Info("visiting node", "id", node.ID())
 		if node.ID() == id {
 			foundNode = node
-			return coord.SkipRemaining
+			return coord.ErrSkipRemaining
 		}
 		return nil
 	}

@@ -21,14 +21,14 @@ type Node struct {
 }
 
 type Topology struct {
-	clk       *clock.Mock
+	clk       clock.Clock
 	links     map[string]Link
 	nodes     []*Node
 	nodeIndex map[peer.ID]*Node
 	routers   map[peer.ID]*Router
 }
 
-func INewTopology(clk *clock.Mock) *Topology {
+func NewTopology(clk clock.Clock) *Topology {
 	return &Topology{
 		clk:       clk,
 		links:     make(map[string]Link),

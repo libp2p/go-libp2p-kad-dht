@@ -75,11 +75,11 @@ func newIdentity(t testing.TB) (peer.ID, crypto.PrivKey) {
 	return id, priv
 }
 
-func fillRoutingTable(t testing.TB, d *DHT) {
+// fillRoutingTable populates d's routing table and peerstore with n random peers and addresses
+func fillRoutingTable(t testing.TB, d *DHT, n int) {
 	t.Helper()
 
-	// 250 is a common number of peers to have in the routing table
-	for i := 0; i < 250; i++ {
+	for i := 0; i < n; i++ {
 		// generate peer ID
 		pid := newPeerID(t)
 
@@ -865,7 +865,7 @@ func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
 func BenchmarkDHT_handleGetValue(b *testing.B) {
 	d := newTestDHT(b)
 
-	fillRoutingTable(b, d)
+	fillRoutingTable(b, d, 250)
 
 	rbe, ok := d.backends[namespaceIPNS].(*RecordBackend)
 	require.True(b, ok)
@@ -909,7 +909,7 @@ func BenchmarkDHT_handleGetValue(b *testing.B) {
 func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	remote, priv := newIdentity(t)
 
@@ -944,7 +944,7 @@ func TestDHT_handleGetValue_happy_path_ipns_record(t *testing.T) {
 func TestDHT_handleGetValue_record_not_found(t *testing.T) {
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
 		t.Run(ns, func(t *testing.T) {
@@ -968,7 +968,7 @@ func TestDHT_handleGetValue_record_not_found(t *testing.T) {
 func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	for _, ns := range []string{namespaceIPNS, namespacePublicKey} {
 		t.Run(ns, func(t *testing.T) {
@@ -1006,7 +1006,7 @@ func TestDHT_handleGetValue_corrupt_record_in_datastore(t *testing.T) {
 func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	remote, priv := newIdentity(t)
 
@@ -1048,7 +1048,7 @@ func TestDHT_handleGetValue_ipns_max_age_exceeded_in_datastore(t *testing.T) {
 func TestDHT_handleGetValue_does_not_validate_stored_record(t *testing.T) {
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	rbe, err := typedBackend[*RecordBackend](d, namespaceIPNS)
 	require.NoError(t, err)
@@ -1131,7 +1131,7 @@ func TestDHT_handleGetValue_supports_providers(t *testing.T) {
 	p := newAddrInfo(t)
 	key := []byte("random-key")
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	// add to addresses peerstore
 	d.host.Peerstore().AddAddrs(p.ID, p.Addrs, time.Hour)
@@ -1358,7 +1358,7 @@ func BenchmarkDHT_handleGetProviders(b *testing.B) {
 	ctx := context.Background()
 	d := newTestDHT(b)
 
-	fillRoutingTable(b, d)
+	fillRoutingTable(b, d, 250)
 
 	be, ok := d.backends[namespaceIPNS].(*RecordBackend)
 	require.True(b, ok)
@@ -1404,7 +1404,7 @@ func TestDHT_handleGetProviders_happy_path(t *testing.T) {
 	ctx := context.Background()
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	key := []byte("random-key")
 
@@ -1455,7 +1455,7 @@ func TestDHT_handleGetProviders_do_not_return_expired_records(t *testing.T) {
 	ctx := context.Background()
 	d := newTestDHT(t)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	key := []byte("random-key")
 
@@ -1514,7 +1514,7 @@ func TestDHT_handleGetProviders_only_serve_filtered_addresses(t *testing.T) {
 
 	d := newTestDHTWithConfig(t, cfg)
 
-	fillRoutingTable(t, d)
+	fillRoutingTable(t, d, 250)
 
 	key := []byte("random-key")
 

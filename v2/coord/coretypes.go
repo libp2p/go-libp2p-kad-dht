@@ -70,11 +70,11 @@ type QueryStats struct {
 }
 
 var (
-	// SkipNode is used as a return value from a QueryFunc to indicate that the node is to be skipped.
-	SkipNode = errors.New("skip node") //nolint:all
+	// ErrSkipNode is used as a return value from a QueryFunc to indicate that the node is to be skipped.
+	ErrSkipNode = errors.New("skip node")
 
-	// SkipRemaining is used as a return value a QueryFunc to indicate that all remaining nodes are to be skipped.
-	SkipRemaining = errors.New("skip remaining nodes") //nolint:all
+	// ErrSkipRemaining is used as a return value a QueryFunc to indicate that all remaining nodes are to be skipped.
+	ErrSkipRemaining = errors.New("skip remaining nodes")
 )
 
 // Router its a work in progress

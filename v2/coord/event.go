@@ -1,6 +1,8 @@
 package coord
 
 import (
+	"time"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
@@ -86,6 +88,7 @@ func (*EventStopQuery) queryCommand()   {}
 
 type EventAddAddrInfo struct {
 	NodeInfo peer.AddrInfo
+	TTL      time.Duration
 }
 
 func (*EventAddAddrInfo) behaviourEvent() {}
@@ -133,7 +136,7 @@ func (*EventQueryFinished) behaviourEvent() {}
 
 // EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {
-	NodeInfo kad.NodeInfo[KadKey, ma.Multiaddr]
+	NodeInfo peer.AddrInfo
 }
 
 func (*EventRoutingUpdated) behaviourEvent()      {}

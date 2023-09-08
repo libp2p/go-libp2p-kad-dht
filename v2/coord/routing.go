@@ -82,6 +82,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		if ev.NodeInfo.ID == r.self {
 			break
 		}
+		// TODO: apply ttl
 		cmd := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
 			NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
 		}
@@ -94,7 +95,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventRoutingUpdated:
 		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"))
 		cmd := &routing.EventProbeAdd[KadKey]{
-			NodeID: ev.NodeInfo.ID(),
+			NodeID: AddrInfoToNodeID(ev.NodeInfo),
 		}
 		// attempt to advance the probe state machine
 		next, ok := r.advanceProbe(ctx, cmd)
@@ -280,9 +281,11 @@ func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.Boot
 func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.IncludeEvent) (BehaviourEvent, bool) {
 	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceInclude")
 	defer span.End()
+
 	istate := r.include.Advance(ctx, ev)
 	switch st := istate.(type) {
 	case *routing.StateIncludeFindNodeMessage[KadKey, ma.Multiaddr]:
+		span.SetAttributes(attribute.String("out_event", "EventOutboundGetCloserNodes"))
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{
 			QueryID: "include",
@@ -296,12 +299,13 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 
 		// notify other routing state machines that there is a new node in the routing table
 		r.notify(ctx, &EventRoutingUpdated{
-			NodeInfo: st.NodeInfo,
+			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
 		})
 
 		// return the event to notify outwards too
+		span.SetAttributes(attribute.String("out_event", "EventRoutingUpdated"))
 		return &EventRoutingUpdated{
-			NodeInfo: st.NodeInfo,
+			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
 		}, true
 	case *routing.StateIncludeWaitingAtCapacity:
 		// nothing to do except wait for message response or timeout
@@ -310,7 +314,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 	case *routing.StateIncludeWaitingFull:
 		// nothing to do except wait for message response or timeout
 	case *routing.StateIncludeIdle:
-		// nothing to do except wait for message response or timeout
+		// nothing to do except wait for new nodes to be added to queue
 	default:
 		panic(fmt.Sprintf("unexpected include state: %T", st))
 	}

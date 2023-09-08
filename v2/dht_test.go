@@ -1,10 +1,19 @@
 package dht
 
 import (
+	"context"
+	"fmt"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 )
 
 func TestNew(t *testing.T) {
@@ -64,4 +73,57 @@ func TestNew(t *testing.T) {
 			assert.Equal(t, want.mode, got.mode)
 		})
 	}
+}
+
+// expectEventType selects on the event channel until an event of the expected type is sent.
+func expectEventType(t *testing.T, ctx context.Context, events <-chan coord.RoutingNotification, expected coord.RoutingNotification) (coord.RoutingNotification, error) {
+	t.Helper()
+	for {
+		select {
+		case ev := <-events:
+			t.Logf("saw event: %T\n", ev)
+			if reflect.TypeOf(ev) == reflect.TypeOf(expected) {
+				return ev, nil
+			}
+		case <-ctx.Done():
+			return nil, fmt.Errorf("test deadline exceeded while waiting for event %T", expected)
+		}
+	}
+}
+
+func TestAddAddresses(t *testing.T) {
+	ctx, cancel := kadtest.CtxShort(t)
+	defer cancel()
+
+	localCfg := DefaultConfig()
+
+	local := newClientDht(t, localCfg)
+
+	remote := newServerDht(t, nil)
+
+	// Populate entries in remote's routing table so it passes a connectivity check
+	fillRoutingTable(t, remote, 1)
+
+	// local routing table should not contain the node
+	_, err := local.kad.GetNode(ctx, remote.host.ID())
+	require.ErrorIs(t, err, coord.ErrNodeNotFound)
+
+	remoteAddrInfo := peer.AddrInfo{
+		ID:    remote.host.ID(),
+		Addrs: remote.host.Addrs(),
+	}
+	require.NotEmpty(t, remoteAddrInfo.ID)
+	require.NotEmpty(t, remoteAddrInfo.Addrs)
+
+	// Add remote's addresss to the local dht
+	err = local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
+	require.NoError(t, err)
+
+	// the include state machine runs in the background and eventually should add the node to routing table
+	_, err = expectEventType(t, ctx, local.kad.RoutingNotifications(), &coord.EventRoutingUpdated{})
+	require.NoError(t, err)
+
+	// the routing table should now contain the node
+	_, err = local.kad.GetNode(ctx, remote.host.ID())
+	require.NoError(t, err)
 }

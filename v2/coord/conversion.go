@@ -46,6 +46,17 @@ func SliceOfNodeInfoToSliceOfAddrInfo(infos []kad.NodeInfo[KadKey, ma.Multiaddr]
 	return peers
 }
 
+// SliceOfAddrInfoToSliceOfNodeInfo converts a peer.AddrInfo to a kad.NodeInfo.
+func SliceOfAddrInfoToSliceOfNodeInfo(addrInfos []peer.AddrInfo) []kad.NodeInfo[KadKey, ma.Multiaddr] {
+	nodeInfos := make([]kad.NodeInfo[KadKey, ma.Multiaddr], len(addrInfos))
+	for i, addrInfo := range addrInfos {
+		nodeInfos[i] = kadt.AddrInfo{
+			Info: addrInfo,
+		}
+	}
+	return nodeInfos
+}
+
 // SliceOfPeerIDToSliceOfNodeID converts a slice peer.ID to a slice of kad.NodeID
 func SliceOfPeerIDToSliceOfNodeID(peers []peer.ID) []kad.NodeID[KadKey] {
 	nodes := make([]kad.NodeID[KadKey], len(peers))

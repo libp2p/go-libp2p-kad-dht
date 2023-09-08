@@ -55,6 +55,7 @@ func (r *RoutingBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 
 	r.pendingMu.Lock()
 	defer r.pendingMu.Unlock()
+
 	r.notify(ctx, ev)
 }
 
@@ -62,14 +63,16 @@ func (r *RoutingBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.notify")
 	defer span.End()
+
 	switch ev := ev.(type) {
 	case *EventStartBootstrap:
 		span.SetAttributes(attribute.String("event", "EventStartBootstrap"))
 		cmd := &routing.EventBootstrapStart[KadKey, ma.Multiaddr]{
 			ProtocolID:        ev.ProtocolID,
 			Message:           ev.Message,
-			KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
+			KnownClosestNodes: SliceOfAddrInfoToSliceOfNodeInfo(ev.SeedNodes),
 		}
+
 		// attempt to advance the bootstrap
 		next, ok := r.advanceBootstrap(ctx, cmd)
 		if ok {
@@ -114,7 +117,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				})
 			}
 			cmd := &routing.EventBootstrapMessageResponse[KadKey, ma.Multiaddr]{
-				NodeID:   kadt.PeerID(ev.To.ID),
+				Node:     kadt.AddrInfo{Info: ev.To},
 				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 			}
 			// attempt to advance the bootstrap
@@ -252,13 +255,13 @@ func (r *RoutingBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.BootstrapEvent) (BehaviourEvent, bool) {
 	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceBootstrap")
 	defer span.End()
+
 	bstate := r.bootstrap.Advance(ctx, ev)
 	switch st := bstate.(type) {
-
 	case *routing.StateBootstrapMessage[KadKey, ma.Multiaddr]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: "bootstrap",
-			To:      NodeIDToAddrInfo(st.NodeID),
+			To:      NodeInfoToAddrInfo(st.Node),
 			Target:  st.Message.Target(),
 			Notify:  r,
 		}, true

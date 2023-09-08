@@ -50,7 +50,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 			Target:            ev.Target,
 			ProtocolID:        ev.ProtocolID,
 			Message:           ev.Message,
-			KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.KnownClosestNodes),
+			KnownClosestNodes: SliceOfAddrInfoToSliceOfNodeInfo(ev.KnownClosestNodes),
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
@@ -78,7 +78,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 			})
 		}
 		cmd = &query.EventPoolMessageResponse[KadKey, ma.Multiaddr]{
-			NodeID:   kadt.PeerID(ev.To.ID),
+			Node:     kadt.AddrInfo{Info: ev.To},
 			QueryID:  ev.QueryID,
 			Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 		}
@@ -153,7 +153,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 	case *query.StatePoolQueryMessage[KadKey, ma.Multiaddr]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
-			To:      NodeIDToAddrInfo(st.NodeID),
+			To:      NodeInfoToAddrInfo(st.Node),
 			Target:  st.Message.Target(),
 			Notify:  p,
 		}, true

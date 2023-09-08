@@ -52,20 +52,14 @@ type ProtoKadResponseMessage[K kad.Key[K], A kad.Address[A]] interface {
 }
 
 func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
-	if err := r.AddNodeInfo(ctx, to, time.Hour); err != nil {
-		return nil, fmt.Errorf("add node info: %w", err)
-	}
-
-	// TODO: what to do with addresses in peer.AddrInfo?
-	if len(r.host.Peerstore().Addrs(to.ID)) == 0 {
-		return nil, fmt.Errorf("aaah ProtoKadMessage")
-	}
-
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 
 	var err error
+	if err = r.host.Connect(ctx, to); err != nil {
+		return nil, fmt.Errorf("connect to %s: %w", to.ID, err)
+	}
 
 	var s network.Stream
 	s, err = r.host.NewStream(ctx, to.ID, protocol.ID(protoID))
@@ -77,6 +71,7 @@ func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID addr
 	w := pbio.NewDelimitedWriter(s)
 	reader := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 
+	fmt.Println("SENDING")
 	err = w.WriteMsg(req)
 	if err != nil {
 		return nil, fmt.Errorf("write message: %w", err)

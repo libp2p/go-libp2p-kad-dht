@@ -356,9 +356,12 @@ func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (Q
 		return QueryStats{}, err
 	}
 
-	seedIDs := make([]peer.ID, 0, len(seeds))
+	seedIDs := make([]peer.AddrInfo, 0, len(seeds))
 	for _, s := range seeds {
-		seedIDs = append(seedIDs, s.ID())
+		seedIDs = append(seedIDs, peer.AddrInfo{
+			ID:    s.ID(),
+			Addrs: s.Addresses(),
+		})
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
@@ -450,7 +453,7 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 }
 
 // Bootstrap instructs the dht to begin bootstrapping the routing table.
-func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
+func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.AddrInfo) error {
 	seedStrs := make([]string, len(seeds))
 	for i, seed := range seeds {
 		seedStrs[i] = seed.String()

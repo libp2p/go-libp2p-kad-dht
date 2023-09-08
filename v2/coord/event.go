@@ -50,7 +50,7 @@ type RoutingNotification interface {
 type EventStartBootstrap struct {
 	ProtocolID address.ProtocolID
 	Message    kad.Request[KadKey, ma.Multiaddr]
-	SeedNodes  []peer.ID // TODO: peer.AddrInfo
+	SeedNodes  []peer.AddrInfo
 }
 
 func (*EventStartBootstrap) behaviourEvent() {}
@@ -72,7 +72,7 @@ type EventStartQuery struct {
 	Target            KadKey
 	ProtocolID        address.ProtocolID
 	Message           kad.Request[KadKey, ma.Multiaddr]
-	KnownClosestNodes []peer.ID
+	KnownClosestNodes []peer.AddrInfo
 	Notify            NotifyCloser[BehaviourEvent]
 }
 

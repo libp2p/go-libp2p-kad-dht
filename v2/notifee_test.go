@@ -2,11 +2,14 @@ package dht
 
 import (
 	"testing"
+	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDHT_consumeNetworkEvents_onEvtLocalReachabilityChanged(t *testing.T) {
@@ -64,4 +67,22 @@ func TestDHT_consumeNetworkEvents_onEvtLocalReachabilityChanged(t *testing.T) {
 
 		assert.Equal(t, modeServer, d.mode)
 	})
+}
+
+func TestDHT_consumeNetworkEvents_onEvtPeerIdentificationCompleted(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	d1 := newServerDht(t, nil)
+	d2 := newServerDht(t, nil)
+
+	// make sure d1 has the address of d2 in its peerstore
+	d1.host.Peerstore().AddAddrs(d2.host.ID(), d2.host.Addrs(), time.Minute)
+
+	// send the event
+	d1.onEvtPeerIdentificationCompleted(event.EvtPeerIdentificationCompleted{
+		Peer: d2.host.ID(),
+	})
+
+	_, err := expectRoutingUpdated(t, ctx, d1.kad.RoutingNotifications(), d2.host.ID())
+	require.NoError(t, err)
 }

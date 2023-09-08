@@ -86,6 +86,8 @@ type EventStopQuery struct {
 func (*EventStopQuery) behaviourEvent() {}
 func (*EventStopQuery) queryCommand()   {}
 
+// EventAddAddrInfo notifies the routing behaviour of a potential new peer or of additional addresses for
+// an existing peer.
 type EventAddAddrInfo struct {
 	NodeInfo peer.AddrInfo
 	TTL      time.Duration
@@ -94,9 +96,11 @@ type EventAddAddrInfo struct {
 func (*EventAddAddrInfo) behaviourEvent() {}
 func (*EventAddAddrInfo) routingCommand() {}
 
+// EventGetCloserNodesSuccess notifies a behaviour that a GetCloserNodes request, initiated by an
+// [EventOutboundGetCloserNodes] event has produced a successful response.
 type EventGetCloserNodesSuccess struct {
 	QueryID     query.QueryID
-	To          peer.AddrInfo
+	To          peer.AddrInfo // To is the peer address that the GetCloserNodes request was sent to.
 	Target      KadKey
 	CloserNodes []peer.AddrInfo
 }
@@ -104,9 +108,11 @@ type EventGetCloserNodesSuccess struct {
 func (*EventGetCloserNodesSuccess) behaviourEvent()      {}
 func (*EventGetCloserNodesSuccess) nodeHandlerResponse() {}
 
+// EventGetCloserNodesFailure notifies a behaviour that a GetCloserNodes request, initiated by an
+// [EventOutboundGetCloserNodes] event has failed to produce a valid response.
 type EventGetCloserNodesFailure struct {
 	QueryID query.QueryID
-	To      peer.AddrInfo
+	To      peer.AddrInfo // To is the peer address that the GetCloserNodes request was sent to.
 	Target  KadKey
 	Err     error
 }
@@ -142,6 +148,14 @@ type EventRoutingUpdated struct {
 func (*EventRoutingUpdated) behaviourEvent()      {}
 func (*EventRoutingUpdated) routingNotification() {}
 
+// EventRoutingRemoved is emitted by the coordinator when new node has been removed from the routing table.
+type EventRoutingRemoved struct {
+	NodeID peer.ID
+}
+
+func (*EventRoutingRemoved) behaviourEvent()      {}
+func (*EventRoutingRemoved) routingNotification() {}
+
 // EventBootstrapFinished is emitted by the coordinator when a bootstrap has finished, either through
 // running to completion or by being canceled.
 type EventBootstrapFinished struct {
@@ -150,3 +164,23 @@ type EventBootstrapFinished struct {
 
 func (*EventBootstrapFinished) behaviourEvent()      {}
 func (*EventBootstrapFinished) routingNotification() {}
+
+// EventNotifyConnectivity notifies a behaviour that a peer's connectivity and support for finding closer nodes
+// has been confirmed such as from a successful query response or an inbound query. This should not be used for
+// general connections to the host but only when it is confirmed that the peer responds to requests for closer
+// nodes.
+type EventNotifyConnectivity struct {
+	NodeInfo peer.AddrInfo
+}
+
+func (*EventNotifyConnectivity) behaviourEvent()      {}
+func (*EventNotifyConnectivity) routingNotification() {}
+
+// EventNotifyNonConnectivity notifies a behaviour that a peer does not have connectivity and/or does not support
+// finding closer nodes is known.
+type EventNotifyNonConnectivity struct {
+	NodeID peer.ID
+}
+
+func (*EventNotifyNonConnectivity) behaviourEvent() {}
+func (*EventNotifyNonConnectivity) routingCommand() {}

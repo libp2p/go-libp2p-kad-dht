@@ -93,7 +93,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		}
 
 	case *EventRoutingUpdated:
-		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"))
+		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"), attribute.String("nodeid", ev.NodeInfo.ID.String()))
 		cmd := &routing.EventProbeAdd[KadKey]{
 			NodeID: AddrInfoToNodeID(ev.NodeInfo),
 		}
@@ -186,6 +186,41 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		default:
 			panic(fmt.Sprintf("unexpected query id: %s", ev.QueryID))
 		}
+	case *EventNotifyConnectivity:
+		span.SetAttributes(attribute.String("event", "EventNotifyConnectivity"), attribute.String("nodeid", ev.NodeInfo.ID.String()))
+		// ignore self
+		if ev.NodeInfo.ID == r.self {
+			break
+		}
+		// tell the include state machine in case this is a new peer that could be added to the routing table
+		cmd := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
+			NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
+		}
+		next, ok := r.advanceInclude(ctx, cmd)
+		if ok {
+			r.pending = append(r.pending, next)
+		}
+
+		// tell the probe state machine in case there is are connectivity checks that could satisfied
+		cmdProbe := &routing.EventProbeNotifyConnectivity[KadKey]{
+			NodeID: kadt.PeerID(ev.NodeInfo.ID),
+		}
+		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
+		if ok {
+			r.pending = append(r.pending, nextProbe)
+		}
+	case *EventNotifyNonConnectivity:
+		span.SetAttributes(attribute.String("event", "EventNotifyConnectivity"), attribute.String("nodeid", ev.NodeID.String()))
+
+		// tell the probe state machine to remove the node from the routing table and probe list
+		cmdProbe := &routing.EventProbeRemove[KadKey]{
+			NodeID: kadt.PeerID(ev.NodeID),
+		}
+		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
+		if ok {
+			r.pending = append(r.pending, nextProbe)
+		}
+
 	default:
 		panic(fmt.Sprintf("unexpected dht event: %T", ev))
 	}
@@ -336,7 +371,13 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 			Notify:  r,
 		}, true
 	case *routing.StateProbeNodeFailure[KadKey]:
-		// a node has failed a connectivity check been removed from the routing table and the probe list
+		// a node has failed a connectivity check and been removed from the routing table and the probe list
+
+		// emit an EventRoutingRemoved event to notify clients that the node has been removed
+		r.pending = append(r.pending, &EventRoutingRemoved{
+			NodeID: NodeIDToPeerID(st.NodeID),
+		})
+
 		// add the node to the inclusion list for a second chance
 		r.notify(ctx, &EventAddAddrInfo{
 			NodeInfo: NodeIDToAddrInfo(st.NodeID),

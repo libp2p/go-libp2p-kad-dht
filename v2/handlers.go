@@ -25,6 +25,9 @@ func (d *DHT) handleFindPeer(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("handleFindPeer with empty key")
 	}
 
+	// tell the coordinator that this peer supports finding closer nodes
+	d.kad.NotifyConnectivity(ctx, remote)
+
 	// "parse" requested peer ID from the key field
 	target := peer.ID(req.GetKey())
 

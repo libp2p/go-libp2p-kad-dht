@@ -8,6 +8,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	leveldb "github.com/ipfs/go-ds-leveldb"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
@@ -117,6 +118,10 @@ type Config struct {
 	// BucketSize determines the number of closer peers to return
 	BucketSize int
 
+	// BootstrapPeers is the list of peers that should be used to bootstrap
+	// into the DHT network.
+	BootstrapPeers []peer.AddrInfo
+
 	// ProtocolID represents the DHT [protocol] we can query with and respond to.
 	//
 	// [protocol]: https://docs.libp2p.io/concepts/fundamentals/protocols/
@@ -190,6 +195,7 @@ func DefaultConfig() *Config {
 		Mode:              ModeOptAutoClient,
 		Kademlia:          coord.DefaultConfig(),
 		BucketSize:        20, // MAGIC
+		BootstrapPeers:    DefaultBootstrapPeers(),
 		ProtocolID:        ProtocolAmino,
 		RoutingTable:      nil,                  // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
 		Backends:          map[string]Backend{}, // if empty and [ProtocolAmino] is used, it'll be populated with the ipns, pk and providers backends
@@ -242,6 +248,14 @@ func (c *Config) Validate() error {
 
 	if err := c.Kademlia.Validate(); err != nil {
 		return fmt.Errorf("invalid kademlia configuration: %w", err)
+	}
+
+	if c.BucketSize == 0 {
+		return fmt.Errorf("bucket size must not be 0")
+	}
+
+	if len(c.BootstrapPeers) == 0 {
+		return fmt.Errorf("no bootstrap peer")
 	}
 
 	if c.ProtocolID == "" {

@@ -15,14 +15,14 @@ import (
 // this file contains auxiliary methods to augment the protobuf generated types.
 // It is used to let these types conform to interfaces or add convenience methods.
 
-var _ kad.Request[key.Key256, ma.Multiaddr] = (*Message)(nil)
+var _ kad.Request[kadt.Key, kadt.PeerID] = (*Message)(nil)
 
 func (m *Message) Target() key.Key256 {
 	b := sha256.Sum256(m.Key)
 	return key.NewKey256(b[:])
 }
 
-func (m *Message) EmptyResponse() kad.Response[key.Key256, ma.Multiaddr] {
+func (m *Message) EmptyResponse() kad.Response[kadt.Key, kadt.PeerID] {
 	return &Message{
 		Type: m.Type,
 		Key:  m.Key,
@@ -90,17 +90,14 @@ func (m *Message) CloserPeersAddrInfos() []peer.AddrInfo {
 	return addrInfos
 }
 
-func (m *Message) CloserNodes() []kad.NodeInfo[key.Key256, ma.Multiaddr] {
+func (m *Message) CloserNodes() []kadt.PeerID {
 	if m == nil {
 		return nil
 	}
 
-	infos := make([]kad.NodeInfo[key.Key256, ma.Multiaddr], 0, len(m.CloserPeers))
+	infos := make([]kadt.PeerID, 0, len(m.CloserPeers))
 	for _, p := range m.CloserPeers {
-		infos = append(infos, &kadt.AddrInfo{Info: peer.AddrInfo{
-			ID:    peer.ID(p.Id),
-			Addrs: p.Addresses(),
-		}})
+		infos = append(infos, kadt.PeerID(p.Id))
 	}
 
 	return infos

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
@@ -45,7 +45,7 @@ func (d *DHT) handleFindPeer(ctx context.Context, remote peer.ID, req *pb.Messag
 	}
 
 	// gather closer peers that we know
-	resp.CloserPeers = d.closerPeers(ctx, remote, coord.PeerID(target).Key())
+	resp.CloserPeers = d.closerPeers(ctx, remote, kadt.PeerID(target).Key())
 
 	// if we happen to know the target peers addresses (e.g., although we are
 	// far away in the keyspace), we add the peer to the result set. This means
@@ -246,7 +246,7 @@ func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256
 	// pre-allocated the result set slice.
 	filtered := make([]*pb.Message_Peer, 0, len(peers))
 	for _, p := range peers {
-		pid := peer.ID(p.(coord.PeerID)) // TODO: type cast
+		pid := p.ID()
 
 		// check for own peer ID
 		if pid == d.host.ID() {

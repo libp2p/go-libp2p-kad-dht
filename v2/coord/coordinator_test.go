@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
@@ -176,7 +178,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
-	target := PeerID(nodes[3].NodeInfo.ID).Key()
+	target := kadt.PeerID(nodes[3].NodeInfo.ID).Key()
 
 	visited := make(map[string]int)
 
@@ -227,7 +229,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	}
 
 	// Run a query to find the value
-	target := PeerID(nodes[3].NodeInfo.ID).Key()
+	target := kadt.PeerID(nodes[3].NodeInfo.ID).Key()
 	_, err = c.Query(ctx, target, qfn)
 	require.NoError(t, err)
 
@@ -250,10 +252,10 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	require.NoError(t, err)
 	tev2 := ev2.(*EventRoutingUpdated)
 
-	if tev1.NodeInfo.ID == nodes[2].NodeInfo.ID {
-		require.Equal(t, nodes[3].NodeInfo.ID, tev2.NodeInfo.ID)
-	} else if tev2.NodeInfo.ID == nodes[2].NodeInfo.ID {
-		require.Equal(t, nodes[3].NodeInfo.ID, tev1.NodeInfo.ID)
+	if tev1.NodeID.ID() == nodes[2].NodeInfo.ID {
+		require.Equal(t, nodes[3].NodeInfo.ID, tev2.NodeID.ID())
+	} else if tev2.NodeID.ID() == nodes[2].NodeInfo.ID {
+		require.Equal(t, nodes[3].NodeInfo.ID, tev1.NodeID.ID())
 	} else {
 		require.Failf(t, "did not see routing updated event for %s", nodes[2].NodeInfo.ID.String())
 	}
@@ -351,7 +353,7 @@ func TestIncludeNode(t *testing.T) {
 	require.NoError(t, err)
 
 	tev := ev.(*EventRoutingUpdated)
-	require.Equal(t, candidate.ID, tev.NodeInfo.ID)
+	require.Equal(t, candidate.ID, tev.NodeID.ID())
 
 	// the routing table should now contain the node
 	_, err = d.GetNode(ctx, candidate.ID)

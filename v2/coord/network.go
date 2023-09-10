@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/query"
@@ -53,7 +54,7 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		b.nodeHandlersMu.Lock()
 		nh, ok := b.nodeHandlers[ev.To.ID()]
 		if !ok {
-			nh = NewNodeHandler(ev.To.ID(), b.rtr, b.logger, b.tracer)
+			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
 			b.nodeHandlers[ev.To.ID()] = nh
 		}
 		b.nodeHandlersMu.Unlock()
@@ -98,30 +99,25 @@ func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	return nil, false
 }
 
-func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id peer.ID) (*NodeHandler, error) {
+func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (*NodeHandler, error) {
 	b.nodeHandlersMu.Lock()
-	nh, ok := b.nodeHandlers[id]
-	if !ok || len(nh.Addresses()) == 0 {
-		info, err := b.rtr.GetNodeInfo(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		nh = NewNodeHandler(info, b.rtr, b.logger, b.tracer)
-		b.nodeHandlers[id] = nh
+	nh, ok := b.nodeHandlers[id.ID()]
+	if !ok {
+		b.nodeHandlers[id.ID()] = NewNodeHandler(id, b.rtr, b.logger, b.tracer)
 	}
 	b.nodeHandlersMu.Unlock()
 	return nh, nil
 }
 
 type NodeHandler struct {
-	self   peer.AddrInfo
+	self   kadt.PeerID
 	rtr    Router
 	queue  *WorkQueue[NodeHandlerRequest]
 	logger *slog.Logger
 	tracer trace.Tracer
 }
 
-func NewNodeHandler(self peer.AddrInfo, rtr Router, logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
+func NewNodeHandler(self kadt.PeerID, rtr Router, logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
 	h := &NodeHandler{
 		self:   self,
 		rtr:    rtr,
@@ -146,7 +142,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 		if cmd.Notify == nil {
 			break
 		}
-		nodes, err := h.rtr.GetClosestNodes(ctx, h.self, cmd.Target)
+		nodes, err := h.rtr.GetClosestNodes(ctx, h.self.ID(), cmd.Target)
 		if err != nil {
 			cmd.Notify.Notify(ctx, &EventGetCloserNodesFailure{
 				QueryID: cmd.QueryID,
@@ -157,11 +153,16 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 			return false
 		}
 
+		peerIDs := make([]kadt.PeerID, len(nodes))
+		for i, node := range nodes {
+			peerIDs[i] = kadt.PeerID(node.ID)
+		}
+
 		cmd.Notify.Notify(ctx, &EventGetCloserNodesSuccess{
 			QueryID:     cmd.QueryID,
 			To:          h.self,
 			Target:      cmd.Target,
-			CloserNodes: nodes,
+			CloserNodes: peerIDs,
 		})
 	default:
 		panic(fmt.Sprintf("unexpected command type: %T", cmd))
@@ -171,23 +172,19 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 }
 
 func (h *NodeHandler) ID() peer.ID {
-	return h.self
-}
-
-func (h *NodeHandler) Addresses() []ma.Multiaddr {
-	return h.self.Addrs
+	return h.self.ID()
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
-func (h *NodeHandler) GetClosestNodes(ctx context.Context, k Key, n int) ([]Node, error) {
+func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
 	ctx, span := h.tracer.Start(ctx, "NodeHandler.GetClosestNodes")
 	defer span.End()
 	w := NewWaiter[BehaviourEvent]()
 
 	ev := &EventOutboundGetCloserNodes{
 		QueryID: query.QueryID(key.HexString(k)),
-		To:      PeerID(h.self.ID),
+		To:      kadt.PeerID(h.self.ID()),
 		Target:  k,
 		Notify:  w,
 	}
@@ -222,7 +219,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k Key, n int) ([]Node
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (h *NodeHandler) GetValue(ctx context.Context, key Key) (Value, error) {
+func (h *NodeHandler) GetValue(ctx context.Context, key kadt.Key) (Value, error) {
 	panic("not implemented")
 }
 
@@ -232,31 +229,26 @@ func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-func CloserNodesResponse(k Key, nodes []peer.AddrInfo) kad.Response[Key, PeerID] {
-	peers := make([]PeerID, len(nodes))
-	for i := range nodes {
-		peers[i] = PeerID(nodes[i].ID)
-	}
-
+func CloserNodesResponse(k kadt.Key, nodes []kadt.PeerID) kad.Response[kadt.Key, kadt.PeerID] {
 	return &fakeMessage{
 		key:   k,
-		peers: peers,
+		peers: nodes,
 	}
 }
 
 type fakeMessage struct {
-	key   Key
-	peers []PeerID
+	key   kadt.Key
+	peers []kadt.PeerID
 }
 
-func (r fakeMessage) Target() Key {
+func (r fakeMessage) Target() kadt.Key {
 	return r.key
 }
 
-func (r fakeMessage) CloserNodes() []PeerID {
+func (r fakeMessage) CloserNodes() []kadt.PeerID {
 	return r.peers
 }
 
-func (r fakeMessage) EmptyResponse() kad.Response[Key, PeerID] {
+func (r fakeMessage) EmptyResponse() kad.Response[kadt.Key, kadt.PeerID] {
 	return &fakeMessage{}
 }

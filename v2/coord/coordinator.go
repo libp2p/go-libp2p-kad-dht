@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/benbjohnson/clock"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
 	"github.com/plprobelab/go-kademlia/network/address"
@@ -40,7 +41,7 @@ type Coordinator struct {
 	cfg CoordinatorConfig
 
 	// rt is the routing table used to look up nodes by distance
-	rt kad.RoutingTable[Key, PeerID]
+	rt kad.RoutingTable[kadt.Key, kadt.PeerID]
 
 	// rtr is the message router used to send messages
 	rtr Router
@@ -143,7 +144,7 @@ func DefaultCoordinatorConfig() (*CoordinatorConfig, error) {
 	}, nil
 }
 
-func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[Key, PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
+func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		c, err := DefaultCoordinatorConfig()
 		if err != nil {
@@ -161,19 +162,19 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[Key, Pe
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[Key, PeerID](PeerID(self), qpCfg)
+	qp, err := query.NewPool[kadt.Key, kadt.PeerID](kadt.PeerID(self), qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
 	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger, cfg.Tele.Tracer)
 
-	bootstrapCfg := routing.DefaultBootstrapConfig[Key, PeerID]()
+	bootstrapCfg := routing.DefaultBootstrapConfig[kadt.Key, kadt.PeerID]()
 	bootstrapCfg.Clock = cfg.Clock
 	bootstrapCfg.Timeout = cfg.QueryTimeout
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[Key, PeerID](PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap[kadt.Key, kadt.PeerID](kadt.PeerID(self), bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -187,7 +188,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[Key, Pe
 	// includeCfg.Concurrency = cfg.IncludeConcurrency
 	// includeCfg.Timeout = cfg.IncludeTimeout
 
-	include, err := routing.NewInclude[Key, PeerID](rt, includeCfg)
+	include, err := routing.NewInclude[kadt.Key, kadt.PeerID](rt, includeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("include: %w", err)
 	}
@@ -198,7 +199,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[Key, Pe
 
 	// TODO: expose config
 	// probeCfg.Concurrency = cfg.ProbeConcurrency
-	probe, err := routing.NewProbe[Key, PeerID](rt, probeCfg)
+	probe, err := routing.NewProbe[kadt.Key, kadt.PeerID](rt, probeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("probe: %w", err)
 	}
@@ -238,15 +239,6 @@ func (c *Coordinator) Close() error {
 
 func (c *Coordinator) ID() peer.ID {
 	return c.self
-}
-
-func (c *Coordinator) Addresses() []ma.Multiaddr {
-	// TODO: return configured listen addresses
-	info, err := c.rtr.GetNodeInfo(context.TODO(), c.self)
-	if err != nil {
-		return nil
-	}
-	return info.Addrs
 }
 
 // RoutingNotifications returns a channel that may be read to be notified of routing updates
@@ -305,11 +297,11 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.
 // If the node isn't found in the table, it returns ErrNodeNotFound.
 func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
-	if _, exists := c.rt.GetNode(PeerID(id).Key()); !exists {
+	if _, exists := c.rt.GetNode(kadt.PeerID(id).Key()); !exists {
 		return nil, ErrNodeNotFound
 	}
 
-	nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
+	nh, err := c.networkBehaviour.getNodeHandler(ctx, kadt.PeerID(id))
 	if err != nil {
 		return nil, err
 	}
@@ -317,11 +309,11 @@ func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
-func (c *Coordinator) GetClosestNodes(ctx context.Context, k Key, n int) ([]Node, error) {
+func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
 	closest := c.rt.NearestNodes(k, n)
 	nodes := make([]Node, 0, len(closest))
 	for _, id := range closest {
-		nh, err := c.networkBehaviour.getNodeHandler(ctx, id.ID())
+		nh, err := c.networkBehaviour.getNodeHandler(ctx, kadt.PeerID(id.ID()))
 		if err != nil {
 			return nil, err
 		}
@@ -332,7 +324,7 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k Key, n int) ([]Node
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (c *Coordinator) GetValue(ctx context.Context, k Key) (Value, error) {
+func (c *Coordinator) GetValue(ctx context.Context, k kadt.Key) (Value, error) {
 	panic("not implemented")
 }
 
@@ -343,7 +335,7 @@ func (c *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
 }
 
 // Query traverses the DHT calling fn for each node visited.
-func (c *Coordinator) Query(ctx context.Context, target Key, fn QueryFunc) (QueryStats, error) {
+func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) (QueryStats, error) {
 	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 
@@ -355,12 +347,9 @@ func (c *Coordinator) Query(ctx context.Context, target Key, fn QueryFunc) (Quer
 		return QueryStats{}, err
 	}
 
-	seedIDs := make([]peer.AddrInfo, 0, len(seeds))
-	for _, s := range seeds {
-		seedIDs = append(seedIDs, peer.AddrInfo{
-			ID:    s.ID(),
-			Addrs: s.Addresses(),
-		})
+	seedIDs := make([]kadt.PeerID, 0, len(seeds))
+	for i, s := range seeds {
+		seedIDs[i] = kadt.PeerID(s.ID())
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
@@ -442,8 +431,8 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 		// TODO: apply address filter
 
 		c.routingBehaviour.Notify(ctx, &EventAddAddrInfo{
-			NodeInfo: ai,
-			TTL:      ttl,
+			NodeID: kadt.PeerID(ai.ID),
+			TTL:    ttl,
 		})
 
 	}
@@ -454,7 +443,9 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 // Bootstrap instructs the dht to begin bootstrapping the routing table.
 func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 	seedStrs := make([]string, len(seeds))
+	seedPeerIDs := make([]kadt.PeerID, len(seeds))
 	for i, seed := range seeds {
+		seedPeerIDs[i] = kadt.PeerID(seed)
 		seedStrs[i] = seed.String()
 	}
 
@@ -463,8 +454,8 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		// Bootstrap state machine uses the message
-		Message:   &fakeMessage{key: PeerID(c.self).Key()},
-		SeedNodes: seeds,
+		Message:   &fakeMessage{key: kadt.PeerID(c.self).Key()},
+		SeedNodes: seedPeerIDs,
 	})
 
 	return nil

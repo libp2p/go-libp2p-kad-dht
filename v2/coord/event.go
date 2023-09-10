@@ -3,7 +3,8 @@ package coord
 import (
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
@@ -48,8 +49,8 @@ type RoutingNotification interface {
 
 type EventStartBootstrap struct {
 	ProtocolID address.ProtocolID
-	Message    kad.Request[Key, PeerID]
-	SeedNodes  []PeerID
+	Message    kad.Request[kadt.Key, kadt.PeerID]
+	SeedNodes  []kadt.PeerID
 }
 
 func (*EventStartBootstrap) behaviourEvent() {}
@@ -57,8 +58,8 @@ func (*EventStartBootstrap) routingCommand() {}
 
 type EventOutboundGetCloserNodes struct {
 	QueryID query.QueryID
-	To      PeerID
-	Target  Key
+	To      kadt.PeerID
+	Target  kadt.Key
 	Notify  Notify[BehaviourEvent]
 }
 
@@ -68,10 +69,10 @@ func (*EventOutboundGetCloserNodes) networkCommand()     {}
 
 type EventStartQuery struct {
 	QueryID           query.QueryID
-	Target            Key
+	Target            kadt.Key
 	ProtocolID        address.ProtocolID
-	Message           kad.Request[Key, PeerID]
-	KnownClosestNodes []peer.ID
+	Message           kad.Request[kadt.Key, kadt.PeerID]
+	KnownClosestNodes []kadt.PeerID
 	Notify            NotifyCloser[BehaviourEvent]
 }
 
@@ -86,8 +87,8 @@ func (*EventStopQuery) behaviourEvent() {}
 func (*EventStopQuery) queryCommand()   {}
 
 type EventAddAddrInfo struct {
-	NodeInfo peer.ID
-	TTL      time.Duration
+	NodeID kadt.PeerID
+	TTL    time.Duration
 }
 
 func (*EventAddAddrInfo) behaviourEvent() {}
@@ -95,9 +96,9 @@ func (*EventAddAddrInfo) routingCommand() {}
 
 type EventGetCloserNodesSuccess struct {
 	QueryID     query.QueryID
-	To          peer.ID
-	Target      Key
-	CloserNodes []peer.ID
+	To          kadt.PeerID
+	Target      kadt.Key
+	CloserNodes []kadt.PeerID
 }
 
 func (*EventGetCloserNodesSuccess) behaviourEvent()      {}
@@ -105,8 +106,8 @@ func (*EventGetCloserNodesSuccess) nodeHandlerResponse() {}
 
 type EventGetCloserNodesFailure struct {
 	QueryID query.QueryID
-	To      peer.ID
-	Target  Key
+	To      kadt.PeerID
+	Target  kadt.Key
 	Err     error
 }
 
@@ -117,8 +118,8 @@ func (*EventGetCloserNodesFailure) nodeHandlerResponse() {}
 // response from a node.
 type EventQueryProgressed struct {
 	QueryID  query.QueryID
-	NodeID   peer.ID
-	Response kad.Response[Key, PeerID]
+	NodeID   kadt.PeerID
+	Response kad.Response[kadt.Key, kadt.PeerID]
 	Stats    query.QueryStats
 }
 
@@ -135,7 +136,7 @@ func (*EventQueryFinished) behaviourEvent() {}
 
 // EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {
-	NodeInfo peer.ID
+	NodeID kadt.PeerID
 }
 
 func (*EventRoutingUpdated) behaviourEvent()      {}

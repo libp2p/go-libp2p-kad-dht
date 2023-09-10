@@ -122,6 +122,4 @@ require (
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
 
-replace (
-	github.com/plprobelab/go-kademlia v0.0.0-20230901130940-286ab4ceca60 => ../../go-kademlia
-)
+replace github.com/plprobelab/go-kademlia v0.0.0-20230901130940-286ab4ceca60 => ../../go-kademlia

@@ -2,7 +2,7 @@
 // It would be nicer to have these types in the top-level DHT package; however,
 // we also need these types in, e.g., the pb package to let the
 // [pb.Message] type conform to certain interfaces.
-package coord
+package kadt
 
 import (
 	"crypto/sha256"

@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"go.opentelemetry.io/otel"
 
 	"github.com/benbjohnson/clock"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
 	"github.com/plprobelab/go-kademlia/routing"
@@ -45,16 +46,16 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	ev := &EventStartBootstrap{
 		ProtocolID: address.ProtocolID("test"),
 		Message:    req,
-		SeedNodes:  []peer.ID{nodes[1].NodeInfo.ID},
+		SeedNodes:  []kadt.PeerID{kadt.PeerID(nodes[1].NodeInfo.ID)},
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the bootstrap state machine
-	expected := &routing.EventBootstrapStart[Key, PeerID]{
+	expected := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
 		ProtocolID:        ev.ProtocolID,
 		Message:           ev.Message,
-		KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
+		KnownClosestNodes: ev.SeedNodes,
 	}
 	require.Equal(t, expected, bootstrap.Received)
 }
@@ -78,19 +79,19 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("bootstrap"),
-		To:          nodes[1].NodeInfo,
-		Target:      PeerID(nodes[0].NodeInfo.ID).Key(),
-		CloserNodes: []peer.AddrInfo{nodes[2].NodeInfo},
+		To:          kadt.PeerID(nodes[1].NodeInfo.ID),
+		Target:      kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
+		CloserNodes: []kadt.PeerID{kadt.PeerID(nodes[2].NodeInfo.ID)},
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageResponse[Key, PeerID]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapMessageResponse[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[Key, PeerID])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
-	require.Equal(t, ev.CloserNodes, SliceOfNodeInfoToSliceOfAddrInfo(rev.Response.CloserNodes()))
+	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID)
+	require.Equal(t, ev.CloserNodes, rev.Response.CloserNodes())
 }
 
 func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
@@ -113,18 +114,18 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
 		QueryID: query.QueryID("bootstrap"),
-		To:      nodes[1].NodeInfo,
-		Target:  PeerID(nodes[0].NodeInfo.ID).Key(),
+		To:      kadt.PeerID(nodes[1].NodeInfo.ID),
+		Target:  kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
 		Err:     failure,
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageFailure[Key]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapMessageFailure[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[Key])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
+	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID)
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -147,14 +148,14 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventAddAddrInfo{
-		NodeInfo: nodes[2].NodeInfo,
+		NodeID: kadt.PeerID(nodes[2].NodeInfo.ID),
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the include state machine
-	expected := &routing.EventIncludeAddCandidate[Key, PeerID]{
-		NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
+	expected := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
+		NodeID: ev.NodeID,
 	}
 	require.Equal(t, expected, include.Received)
 }
@@ -179,19 +180,19 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("include"),
-		To:          nodes[1].NodeInfo,
-		Target:      PeerID(nodes[0].NodeInfo.ID).Key(),
-		CloserNodes: []peer.AddrInfo{nodes[2].NodeInfo},
+		To:          kadt.PeerID(nodes[1].NodeInfo.ID),
+		Target:      kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
+		CloserNodes: []kadt.PeerID{kadt.PeerID(nodes[2].NodeInfo.ID)},
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageResponse[Key, PeerID]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeMessageResponse[kadt.Key, kadt.PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageResponse[Key, PeerID])
-	require.Equal(t, nodes[1].NodeInfo, NodeInfoToAddrInfo(rev.NodeInfo))
-	require.Equal(t, ev.CloserNodes, SliceOfNodeInfoToSliceOfAddrInfo(rev.Response.CloserNodes()))
+	rev := include.Received.(*routing.EventIncludeMessageResponse[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo, rev.NodeID)
+	require.Equal(t, ev.CloserNodes, rev.Response.CloserNodes())
 }
 
 func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
@@ -215,18 +216,18 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
 		QueryID: query.QueryID("include"),
-		To:      nodes[1].NodeInfo,
-		Target:  PeerID(nodes[0].NodeInfo.ID).Key(),
+		To:      kadt.PeerID(nodes[1].NodeInfo.ID),
+		Target:  kadt.PeerID(nodes[0].NodeInfo.ID).Key(),
 		Err:     failure,
 	}
 
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageFailure[Key, PeerID]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeMessageFailure[kadt.Key, kadt.PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageFailure[Key, PeerID])
-	require.Equal(t, nodes[1].NodeInfo, NodeInfoToAddrInfo(rev.NodeInfo))
+	rev := include.Received.(*routing.EventIncludeMessageFailure[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo, rev.NodeID)
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -243,13 +244,13 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 
 	includeCfg := routing.DefaultIncludeConfig()
 	includeCfg.Clock = clk
-	include, err := routing.NewInclude[Key, PeerID](rt, includeCfg)
+	include, err := routing.NewInclude[kadt.Key, kadt.PeerID](rt, includeCfg)
 	require.NoError(t, err)
 
 	probeCfg := routing.DefaultProbeConfig()
 	probeCfg.Clock = clk
 	probeCfg.CheckInterval = 5 * time.Minute
-	probe, err := routing.NewProbe[Key, PeerID](rt, probeCfg)
+	probe, err := routing.NewProbe[kadt.Key, kadt.PeerID](rt, probeCfg)
 	require.NoError(t, err)
 
 	// ensure bootstrap is always idle
@@ -261,12 +262,12 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	candidate := nodes[len(nodes)-1].NodeInfo
 
 	// the routing table should not contain the node yet
-	_, intable := rt.GetNode(PeerID(candidate.ID).Key())
+	_, intable := rt.GetNode(kadt.PeerID(candidate.ID).Key())
 	require.False(t, intable)
 
 	// notify that there is a new node to be included
 	routingBehaviour.Notify(ctx, &EventAddAddrInfo{
-		NodeInfo: candidate,
+		NodeID: kadt.PeerID(candidate.ID),
 	})
 
 	// collect the result of the notify
@@ -286,11 +287,11 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 		QueryID:     oev.QueryID,
 		To:          oev.To,
 		Target:      oev.Target,
-		CloserNodes: []peer.AddrInfo{nodes[1].NodeInfo}, // must include one for include check to pass
+		CloserNodes: []kadt.PeerID{kadt.PeerID(nodes[1].NodeInfo.ID)}, // must include one for include check to pass
 	})
 
 	// the routing table should now contain the node
-	_, intable = rt.GetNode(PeerID(candidate.ID).Key())
+	_, intable = rt.GetNode(kadt.PeerID(candidate.ID).Key())
 	require.True(t, intable)
 
 	// routing update event should be emitted from the include state machine

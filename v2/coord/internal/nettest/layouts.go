@@ -1,14 +1,12 @@
 package nettest
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 
 	"github.com/benbjohnson/clock"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 )
 
@@ -37,7 +35,7 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 		nodes[i] = &Node{
 			NodeInfo:     ai,
 			Router:       NewRouter(ai.ID, top),
-			RoutingTable: simplert.New[coord.Key, kad.NodeID[coord.Key]](coord.PeerID(ai.ID), 20),
+			RoutingTable: simplert.New[kadt.Key, kadt.PeerID](kadt.PeerID(ai.ID), 20),
 		}
 	}
 
@@ -51,12 +49,10 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 	// Connect nodes in a chain
 	for i := 0; i < len(nodes); i++ {
 		if i > 0 {
-			nodes[i].Router.AddNodeInfo(context.Background(), nodes[i-1].NodeInfo, 0)
-			nodes[i].RoutingTable.AddNode(coord.PeerID(nodes[i-1].NodeInfo.ID))
+			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i-1].NodeInfo.ID))
 		}
 		if i < len(nodes)-1 {
-			nodes[i].Router.AddNodeInfo(context.Background(), nodes[i+1].NodeInfo, 0)
-			nodes[i].RoutingTable.AddNode(coord.PeerID(nodes[i+1].NodeInfo.ID))
+			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i+1].NodeInfo.ID))
 		}
 	}
 

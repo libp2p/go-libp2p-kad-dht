@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/plprobelab/go-kademlia/query"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 )
 
 type PooledQueryBehaviour struct {
-	pool    *query.Pool[Key, PeerID]
+	pool    *query.Pool[kadt.Key, kadt.PeerID]
 	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
@@ -22,7 +24,7 @@ type PooledQueryBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[Key, PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
@@ -43,7 +45,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	var cmd query.PoolEvent
 	switch ev := ev.(type) {
 	case *EventStartQuery:
-		cmd = &query.EventPoolAddQuery[Key, PeerID]{
+		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
 			ProtocolID:        ev.ProtocolID,
@@ -63,26 +65,26 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
 			p.pending = append(p.pending, &EventAddAddrInfo{
-				NodeInfo: info,
+				NodeID: info,
 			})
 		}
 		waiter, ok := p.waiters[ev.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventQueryProgressed{
-				NodeID:   ev.To.ID,
+				NodeID:   ev.To,
 				QueryID:  ev.QueryID,
 				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 				// Stats:    stats,
 			})
 		}
-		cmd = &query.EventPoolMessageResponse[Key, PeerID]{
-			NodeID:   PeerID(ev.To.ID),
+		cmd = &query.EventPoolMessageResponse[kadt.Key, kadt.PeerID]{
+			NodeID:   ev.To,
 			QueryID:  ev.QueryID,
 			Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
-		cmd = &query.EventPoolMessageFailure[Key]{
-			NodeID:  PeerID(ev.To.ID),
+		cmd = &query.EventPoolMessageFailure[kadt.Key, kadt.PeerID]{
+			NodeID:  ev.To,
 			QueryID: ev.QueryID,
 			Error:   ev.Err,
 		}
@@ -148,10 +150,10 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 
 	pstate := p.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {
-	case *query.StatePoolQueryMessage[Key, PeerID]:
+	case *query.StatePoolQueryMessage[kadt.Key, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
-			To:      NodeInfoToAddrInfo(st.Node),
+			To:      st.NodeID,
 			Target:  st.Message.Target(),
 			Notify:  p,
 		}, true

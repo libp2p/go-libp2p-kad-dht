@@ -115,7 +115,7 @@ func TestAddAddresses(t *testing.T) {
 	require.NotEmpty(t, remoteAddrInfo.ID)
 	require.NotEmpty(t, remoteAddrInfo.Addrs)
 
-	// Add remote's addresss to the local dht
+	// Add remote's addresses to the local dht
 	err = local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
 	require.NoError(t, err)
 

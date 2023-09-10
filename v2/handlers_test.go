@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 
 	"github.com/benbjohnson/clock"
 	"github.com/ipfs/boxo/ipns"
@@ -95,7 +95,7 @@ func fillRoutingTable(t testing.TB, d *DHT, n int) {
 		pid := newPeerID(t)
 
 		// add peer to routing table
-		d.rt.AddNode(coord.PeerID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// craft network address for peer
 		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
@@ -136,7 +136,7 @@ func BenchmarkDHT_handleFindPeer(b *testing.B) {
 		pid := newPeerID(b)
 
 		// add peer to routing table
-		d.rt.AddNode(coord.PeerID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// keep track of peer
 		peers = append(peers, pid)
@@ -188,7 +188,7 @@ func TestDHT_handleFindPeer_happy_path(t *testing.T) {
 		// closer peers. This means we can't assert for exactly 20 closer peers
 		// below.
 		if i > 0 {
-			d.rt.AddNode(coord.PeerID(pid))
+			d.rt.AddNode(kadt.PeerID(pid))
 		}
 
 		// keep track of peer
@@ -222,7 +222,7 @@ func TestDHT_handleFindPeer_self_in_routing_table(t *testing.T) {
 	// a case that shouldn't happen
 	d := newTestDHT(t)
 
-	d.rt.AddNode(coord.PeerID(d.host.ID()))
+	d.rt.AddNode(kadt.PeerID(d.host.ID()))
 
 	req := &pb.Message{
 		Type: pb.Message_FIND_NODE,
@@ -267,7 +267,7 @@ func TestDHT_handleFindPeer_unknown_addresses_but_in_routing_table(t *testing.T)
 		pid := newPeerID(t)
 
 		// add peer to routing table
-		d.rt.AddNode(coord.PeerID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// keep track of peer
 		peers[i] = pid
@@ -336,7 +336,7 @@ func TestDHT_handleFindPeer_request_for_self(t *testing.T) {
 		pid := newPeerID(t)
 
 		// add peer to routing table
-		d.rt.AddNode(coord.PeerID(pid))
+		d.rt.AddNode(kadt.PeerID(pid))
 
 		// keep track of peer
 		peers[i] = pid
@@ -392,7 +392,7 @@ func TestDHT_handleFindPeer_request_for_known_but_far_peer(t *testing.T) {
 		// don't add first peer to routing table -> the one we're asking for
 		// don't add second peer -> the one that's requesting
 		if i > 1 {
-			d.rt.AddNode(coord.PeerID(pid))
+			d.rt.AddNode(kadt.PeerID(pid))
 		}
 	}
 

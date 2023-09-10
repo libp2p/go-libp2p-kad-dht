@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/ipfs/go-datastore/trace"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing"
 	"golang.org/x/exp/slog"
@@ -42,7 +43,7 @@ type DHT struct {
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
+	rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 
 	// backends
 	backends map[string]Backend
@@ -77,7 +78,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 		log:  cfg.Logger,
 	}
 
-	nid := coord.PeerID(d.host.ID())
+	nid := kadt.PeerID(d.host.ID())
 
 	// Use the configured routing table if it was provided
 	if cfg.RoutingTable != nil {

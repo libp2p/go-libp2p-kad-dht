@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
@@ -39,7 +41,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		// we're
 	}
 
-	target := coord.PeerID(id)
+	target := kadt.PeerID(id)
 
 	var foundNode coord.Node
 	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
@@ -60,10 +62,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
 	}
 
-	return peer.AddrInfo{
-		ID:    foundNode.ID(),
-		Addrs: foundNode.Addresses(),
-	}, nil
+	return d.host.Peerstore().PeerInfo(foundNode.ID()), nil
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
@@ -182,5 +181,11 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
-	return d.kad.Bootstrap(ctx, d.cfg.BootstrapPeers)
+	peerIDs := make([]peer.ID, len(d.cfg.BootstrapPeers))
+	for i, addrInfo := range d.cfg.BootstrapPeers {
+		peerIDs[i] = addrInfo.ID
+		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: set TTL
+	}
+
+	return d.kad.Bootstrap(ctx, peerIDs)
 }

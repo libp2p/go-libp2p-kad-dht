@@ -41,28 +41,30 @@ type ProtoKadMessage interface {
 	proto.Message
 }
 
-type ProtoKadRequestMessage[K kad.Key[K], A kad.Address[A]] interface {
+type ProtoKadRequestMessage[K kad.Key[K], N kad.NodeID[K]] interface {
 	ProtoKadMessage
-	kad.Request[K, A]
+	kad.Request[K, N]
 }
 
-type ProtoKadResponseMessage[K kad.Key[K], A kad.Address[A]] interface {
+type ProtoKadResponseMessage[K kad.Key[K], N kad.NodeID[K]] interface {
 	ProtoKadMessage
-	kad.Response[K, A]
+	kad.Response[K, N]
 }
 
-func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
+func (r *Router) SendMessage(ctx context.Context, to peer.ID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 
+	ai := r.host.Peerstore().PeerInfo(to)
+
 	var err error
-	if err = r.host.Connect(ctx, to); err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", to.ID, err)
+	if err = r.host.Connect(ctx, ai); err != nil {
+		return nil, fmt.Errorf("connect to %s: %w", to, err)
 	}
 
 	var s network.Stream
-	s, err = r.host.NewStream(ctx, to.ID, protocol.ID(protoID))
+	s, err = r.host.NewStream(ctx, to, protocol.ID(protoID))
 	if err != nil {
 		return nil, fmt.Errorf("stream creation: %w", err)
 	}
@@ -86,20 +88,19 @@ func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID addr
 		return nil, err
 	}
 
-	for _, info := range protoResp.CloserPeersAddrInfos() {
-		_ = r.AddNodeInfo(ctx, info, time.Hour)
+	// Don't add addresses for self or our connected peers. We have better ones.
+	if to == r.host.ID() || r.host.Network().Connectedness(ai.ID) == network.Connected {
+		return nil, nil
 	}
+
+	protoResp.CloserPeersAddrInfos()
+
+	r.host.Peerstore().AddAddrs(ai.ID, ai.Addrs, time.Hour)
 
 	return &protoResp, err
 }
 
 func (r *Router) AddNodeInfo(ctx context.Context, ai peer.AddrInfo, ttl time.Duration) error {
-	// Don't add addresses for self or our connected peers. We have better ones.
-	if ai.ID == r.host.ID() || r.host.Network().Connectedness(ai.ID) == network.Connected {
-		return nil
-	}
-
-	r.host.Peerstore().AddAddrs(ai.ID, ai.Addrs, ttl)
 	return nil
 }
 
@@ -107,7 +108,7 @@ func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, er
 	return r.host.Peerstore().PeerInfo(id), nil
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target key.Key256) ([]peer.AddrInfo, error) {
+func (r *Router) GetClosestNodes(ctx context.Context, to peer.ID, target key.Key256) ([]peer.AddrInfo, error) {
 	resp, err := r.SendMessage(ctx, to, address.ProtocolID(ProtocolAmino), FindKeyRequest(target))
 	if err != nil {
 		return nil, err

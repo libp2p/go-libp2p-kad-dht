@@ -86,13 +86,13 @@ type EventStopQuery struct {
 func (*EventStopQuery) behaviourEvent() {}
 func (*EventStopQuery) queryCommand()   {}
 
-type EventAddAddrInfo struct {
+type EventAddNode struct {
 	NodeID kadt.PeerID
 	TTL    time.Duration
 }
 
-func (*EventAddAddrInfo) behaviourEvent() {}
-func (*EventAddAddrInfo) routingCommand() {}
+func (*EventAddNode) behaviourEvent() {}
+func (*EventAddNode) routingCommand() {}
 
 type EventGetCloserNodesSuccess struct {
 	QueryID     query.QueryID

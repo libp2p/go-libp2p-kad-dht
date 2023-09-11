@@ -78,8 +78,8 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			r.pending = append(r.pending, next)
 		}
 
-	case *EventAddAddrInfo:
-		span.SetAttributes(attribute.String("event", "EventAddAddrInfo"))
+	case *EventAddNode:
+		span.SetAttributes(attribute.String("event", "EventAddNode"))
 		// Ignore self
 		if ev.NodeID.ID() == r.self {
 			break
@@ -111,7 +111,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		case "bootstrap":
 			for _, info := range ev.CloserNodes {
 				// TODO: do this after advancing bootstrap
-				r.pending = append(r.pending, &EventAddAddrInfo{
+				r.pending = append(r.pending, &EventAddNode{
 					NodeID: info,
 				})
 			}
@@ -340,7 +340,7 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 	case *routing.StateProbeNodeFailure[kadt.Key, kadt.PeerID]:
 		// a node has failed a connectivity check been removed from the routing table and the probe list
 		// add the node to the inclusion list for a second chance
-		r.notify(ctx, &EventAddAddrInfo{
+		r.notify(ctx, &EventAddNode{
 			NodeID: st.NodeID,
 		})
 	case *routing.StateProbeWaitingAtCapacity:

@@ -64,7 +64,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventGetCloserNodesSuccess:
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
-			p.pending = append(p.pending, &EventAddAddrInfo{
+			p.pending = append(p.pending, &EventAddNode{
 				NodeID: info,
 			})
 		}

@@ -103,7 +103,8 @@ func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (
 	b.nodeHandlersMu.Lock()
 	nh, ok := b.nodeHandlers[id.ID()]
 	if !ok {
-		b.nodeHandlers[id.ID()] = NewNodeHandler(id, b.rtr, b.logger, b.tracer)
+		nh = NewNodeHandler(id, b.rtr, b.logger, b.tracer)
+		b.nodeHandlers[id.ID()] = nh
 	}
 	b.nodeHandlersMu.Unlock()
 	return nh, nil

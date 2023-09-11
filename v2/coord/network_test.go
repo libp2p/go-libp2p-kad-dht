@@ -19,8 +19,7 @@ func TestGetClosestNodes(t *testing.T) {
 	ctx, cancel := kadtest.CtxShort(t)
 	defer cancel()
 
-	clk := clock.NewMock()
-	_, nodes, err := nettest.LinearTopology(4, clk)
+	_, nodes, err := nettest.LinearTopology(4, clock.NewMock())
 	require.NoError(t, err)
 
 	h := NewNodeHandler(kadt.PeerID(nodes[1].NodeInfo.ID), nodes[1].Router, slog.Default(), trace.NewNoopTracerProvider().Tracer(""))

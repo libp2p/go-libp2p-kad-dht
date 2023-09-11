@@ -322,11 +322,18 @@ func (d *DHT) logErr(err error, msg string) {
 
 // AddAddresses suggests peers and their associated addresses to be added to the routing table.
 // Addresses will be added to the peerstore with the supplied time to live.
-func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
+func (d *DHT) AddAddresses(ctx context.Context, addrInfos []peer.AddrInfo, ttl time.Duration) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
 	defer span.End()
 
-	return d.kad.AddNodes(ctx, ais, ttl)
+	// TODO: apply address filter
+	peerIDs := make([]peer.ID, len(addrInfos))
+	for i, addrInfo := range addrInfos {
+		peerIDs[i] = addrInfo.ID
+		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: set TTL
+	}
+
+	return d.kad.AddNodes(ctx, peerIDs, ttl)
 }
 
 // newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by

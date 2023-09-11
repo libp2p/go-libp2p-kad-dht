@@ -3,11 +3,11 @@ package nettest
 import (
 	"fmt"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
 	"github.com/benbjohnson/clock"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // LinearTopology creates a network topology consisting of n nodes peered in a linear chain.
@@ -49,9 +49,11 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 	// Connect nodes in a chain
 	for i := 0; i < len(nodes); i++ {
 		if i > 0 {
+			nodes[i].Router.AddNode(nodes[i-1].NodeInfo)
 			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i-1].NodeInfo.ID))
 		}
 		if i < len(nodes)-1 {
+			nodes[i].Router.AddNode(nodes[i+1].NodeInfo)
 			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i+1].NodeInfo.ID))
 		}
 	}

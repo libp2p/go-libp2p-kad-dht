@@ -9,8 +9,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -61,8 +59,6 @@ type Router struct {
 	nodes map[peer.ID]*nodeStatus
 }
 
-var _ coord.Router = (*Router)(nil)
-
 type nodeStatus struct {
 	NodeInfo      peer.AddrInfo
 	Connectedness endpoint.Connectedness
@@ -70,9 +66,28 @@ type nodeStatus struct {
 
 func NewRouter(self peer.ID, top *Topology) *Router {
 	return &Router{
-		self:  self,
-		top:   top,
-		nodes: make(map[peer.ID]*nodeStatus),
+		self: self,
+		top:  top,
+		nodes: map[peer.ID]*nodeStatus{
+			self: {
+				NodeInfo:      peer.AddrInfo{ID: self},
+				Connectedness: endpoint.Connected,
+			},
+		},
+	}
+}
+
+func (r *Router) AddNode(addrInfo peer.AddrInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, found := r.nodes[addrInfo.ID]; found {
+		return
+	}
+
+	r.nodes[addrInfo.ID] = &nodeStatus{
+		NodeInfo:      addrInfo,
+		Connectedness: endpoint.NotConnected,
 	}
 }
 
@@ -85,7 +100,13 @@ func (r *Router) SendMessage(ctx context.Context, to peer.ID, protoID address.Pr
 		return nil, fmt.Errorf("dial: %w", err)
 	}
 
-	return r.top.RouteMessage(ctx, r.self, to, protoID, req)
+	resp, err := r.top.RouteMessage(ctx, r.self, to, protoID, req)
+
+	for _, n := range resp.CloserPeersAddrInfos() {
+		r.AddNode(n)
+	}
+
+	return resp, err
 }
 
 func (r *Router) HandleMessage(ctx context.Context, n peer.ID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
@@ -119,7 +140,7 @@ func (r *Router) Dial(ctx context.Context, to peer.ID) error {
 		switch status.Connectedness {
 		case endpoint.Connected:
 			return nil
-		case endpoint.CanConnect:
+		case endpoint.NotConnected, endpoint.CanConnect:
 			if _, err := r.top.Dial(ctx, r.self, to); err != nil {
 				return err
 			}

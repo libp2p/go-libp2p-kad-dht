@@ -3,7 +3,7 @@ package coord
 var _ NetworkCommand = (*EventOutboundGetCloserNodes)(nil)
 
 var (
-	_ RoutingCommand = (*EventAddAddrInfo)(nil)
+	_ RoutingCommand = (*EventAddNode)(nil)
 	_ RoutingCommand = (*EventStartBootstrap)(nil)
 )
 

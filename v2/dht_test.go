@@ -95,13 +95,11 @@ func TestAddAddresses(t *testing.T) {
 	ctx, cancel := kadtest.CtxShort(t)
 	defer cancel()
 
-	localCfg := DefaultConfig()
-
-	local := newClientDht(t, localCfg)
+	local := newClientDht(t, nil)
 
 	remote := newServerDht(t, nil)
 
-	// Populate entries in remote's routing table so it passes a connectivity check
+	// Populate entries in remote's routing table, so it passes a connectivity check
 	fillRoutingTable(t, remote, 1)
 
 	// local routing table should not contain the node
@@ -119,7 +117,7 @@ func TestAddAddresses(t *testing.T) {
 	err = local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
 	require.NoError(t, err)
 
-	// the include state machine runs in the background and eventually should add the node to routing table
+	// the include state machine runs in the background and eventually should add the node to the routing table
 	_, err = expectEventType(t, ctx, local.kad.RoutingNotifications(), &coord.EventRoutingUpdated{})
 	require.NoError(t, err)
 

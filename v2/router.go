@@ -90,10 +90,8 @@ func (r *Router) SendMessage(ctx context.Context, to peer.ID, protoID address.Pr
 
 	// Don't add addresses for self or our connected peers. We have better ones.
 	if to == r.host.ID() || r.host.Network().Connectedness(ai.ID) == network.Connected {
-		return nil, nil
+		return &protoResp, nil
 	}
-
-	protoResp.CloserPeersAddrInfos()
 
 	r.host.Peerstore().AddAddrs(ai.ID, ai.Addrs, time.Hour)
 

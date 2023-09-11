@@ -342,12 +342,12 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seeds, err := c.GetClosestNodes(ctx, target, 20)
+	seeds, err := c.GetClosestNodes(ctx, target, 20) // TODO: 20
 	if err != nil {
 		return QueryStats{}, err
 	}
 
-	seedIDs := make([]kadt.PeerID, 0, len(seeds))
+	seedIDs := make([]kadt.PeerID, len(seeds))
 	for i, s := range seeds {
 		seedIDs[i] = kadt.PeerID(s.ID())
 	}
@@ -419,19 +419,18 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 // AddNodes suggests new DHT nodes and their associated addresses to be added to the routing table.
 // If the routing table is updated as a result of this operation an EventRoutingUpdated notification
 // is emitted on the routing notification channel.
-func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
+func (c *Coordinator) AddNodes(ctx context.Context, peerIDs []peer.ID, ttl time.Duration) error {
 	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.AddNodes")
 	defer span.End()
-	for _, ai := range ais {
-		if ai.ID == c.self {
+
+	for _, peerID := range peerIDs {
+		if peerID == c.self {
 			// skip self
 			continue
 		}
 
-		// TODO: apply address filter
-
-		c.routingBehaviour.Notify(ctx, &EventAddAddrInfo{
-			NodeID: kadt.PeerID(ai.ID),
+		c.routingBehaviour.Notify(ctx, &EventAddNode{
+			NodeID: kadt.PeerID(peerID),
 			TTL:    ttl,
 		})
 

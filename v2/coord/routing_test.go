@@ -90,7 +90,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	require.IsType(t, &routing.EventBootstrapMessageResponse[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
 
 	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[kadt.Key, kadt.PeerID])
-	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID)
+	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID.ID())
 	require.Equal(t, ev.CloserNodes, rev.Response.CloserNodes())
 }
 
@@ -125,7 +125,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	require.IsType(t, &routing.EventBootstrapMessageFailure[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
 
 	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[kadt.Key, kadt.PeerID])
-	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID)
+	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID.ID())
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -147,7 +147,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 
 	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
-	ev := &EventAddAddrInfo{
+	ev := &EventAddNode{
 		NodeID: kadt.PeerID(nodes[2].NodeInfo.ID),
 	}
 
@@ -191,7 +191,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	require.IsType(t, &routing.EventIncludeMessageResponse[kadt.Key, kadt.PeerID]{}, include.Received)
 
 	rev := include.Received.(*routing.EventIncludeMessageResponse[kadt.Key, kadt.PeerID])
-	require.Equal(t, nodes[1].NodeInfo, rev.NodeID)
+	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID.ID())
 	require.Equal(t, ev.CloserNodes, rev.Response.CloserNodes())
 }
 
@@ -227,7 +227,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	require.IsType(t, &routing.EventIncludeMessageFailure[kadt.Key, kadt.PeerID]{}, include.Received)
 
 	rev := include.Received.(*routing.EventIncludeMessageFailure[kadt.Key, kadt.PeerID])
-	require.Equal(t, nodes[1].NodeInfo, rev.NodeID)
+	require.Equal(t, nodes[1].NodeInfo.ID, rev.NodeID.ID())
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -266,7 +266,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	require.False(t, intable)
 
 	// notify that there is a new node to be included
-	routingBehaviour.Notify(ctx, &EventAddAddrInfo{
+	routingBehaviour.Notify(ctx, &EventAddNode{
 		NodeID: kadt.PeerID(candidate.ID),
 	})
 
@@ -310,5 +310,5 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	// confirm that the message is for the correct node
 	oev = dev.(*EventOutboundGetCloserNodes)
 	require.Equal(t, query.QueryID("probe"), oev.QueryID)
-	require.Equal(t, candidate.ID, oev.To.ID)
+	require.Equal(t, candidate.ID, oev.To.ID())
 }

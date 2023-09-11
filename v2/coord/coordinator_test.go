@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
@@ -18,6 +16,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
@@ -163,8 +162,10 @@ func TestExhaustiveQuery(t *testing.T) {
 	defer cancel()
 
 	clk := clock.NewMock()
+
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
+
 	ccfg, err := DefaultCoordinatorConfig()
 	require.NoError(t, err)
 
@@ -332,20 +333,21 @@ func TestIncludeNode(t *testing.T) {
 	candidate := nodes[len(nodes)-1].NodeInfo // not in nodes[0] routing table
 
 	self := nodes[0].NodeInfo.ID
-	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
+	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
 	}
 
 	// the routing table should not contain the node yet
-	_, err = d.GetNode(ctx, candidate.ID)
+	_, err = c.GetNode(ctx, candidate.ID)
 	require.ErrorIs(t, err, ErrNodeNotFound)
 
 	w := new(notificationWatcher)
-	w.Watch(t, ctx, d.RoutingNotifications())
+	w.Watch(t, ctx, c.RoutingNotifications())
 
 	// inject a new node into the dht's includeEvents queue
-	err = d.AddNodes(ctx, []peer.AddrInfo{candidate}, time.Minute)
+	nodes[0].Router.AddNode(candidate) // add addresses to the "peerstore"
+	err = c.AddNodes(ctx, []peer.ID{candidate.ID}, time.Minute)
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
@@ -356,6 +358,6 @@ func TestIncludeNode(t *testing.T) {
 	require.Equal(t, candidate.ID, tev.NodeID.ID())
 
 	// the routing table should now contain the node
-	_, err = d.GetNode(ctx, candidate.ID)
+	_, err = c.GetNode(ctx, candidate.ID)
 	require.NoError(t, err)
 }

@@ -92,7 +92,7 @@ type ProvidersBackendConfig struct {
 
 	// Tele holds a reference to the telemetry struct to capture metrics and
 	// traces.
-	Tele *tele.Telemetry
+	Tele *Telemetry
 
 	// AddressFilter is a filter function that any addresses that we attempt to
 	// store or fetch from the peerstore's address book need to pass through.
@@ -106,7 +106,7 @@ type ProvidersBackendConfig struct {
 // configuration is passed to [NewBackendProvider], this default configuration
 // here is used.
 func DefaultProviderBackendConfig() (*ProvidersBackendConfig, error) {
-	telemetry, err := tele.NewWithGlobalProviders()
+	telemetry, err := NewWithGlobalProviders()
 	if err != nil {
 		return nil, fmt.Errorf("new telemetry: %w", err)
 	}

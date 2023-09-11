@@ -33,6 +33,13 @@ type Telemetry struct {
 	NetworkSize            metric.Int64Counter
 }
 
+// NewWithGlobalProviders uses the global meter and tracer providers from
+// opentelemetry. Check out the documentation of [MeterProviderOpts] for
+// implications of using this constructor.
+func NewWithGlobalProviders() (*Telemetry, error) {
+	return NewTelemetry(otel.GetMeterProvider(), otel.GetTracerProvider())
+}
+
 // NewTelemetry initializes a Telemetry struct with the given meter and tracer providers.
 // It constructs the different metric counters and histograms. The histograms
 // have custom boundaries. Therefore, the given [metric.MeterProvider] should

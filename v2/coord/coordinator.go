@@ -15,13 +15,14 @@ import (
 	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/plprobelab/go-kademlia/query"
 	"github.com/plprobelab/go-kademlia/routing"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // A Coordinator coordinates the state machines that comprise a Kademlia DHT
@@ -51,6 +52,9 @@ type Coordinator struct {
 
 	// queryBehaviour is the behaviour responsible for running user-submitted queries
 	queryBehaviour Behaviour[BehaviourEvent, BehaviourEvent]
+
+	// tele provides tracing and metric reporting capabilities
+	tele *Telemetry
 }
 
 type CoordinatorConfig struct {
@@ -64,8 +68,10 @@ type CoordinatorConfig struct {
 	RequestConcurrency int           // the maximum number of concurrent requests that each query may have in flight
 	RequestTimeout     time.Duration // the timeout queries should use for contacting a single node
 
-	Logger *slog.Logger    // a structured logger that should be used when logging.
-	Tele   *tele.Telemetry // a struct holding a reference to various metric counters/histograms and a tracer
+	Logger *slog.Logger // a structured logger that should be used when logging.
+
+	MeterProvider  metric.MeterProvider // the meter provider to use when initialising metric instruments
+	TracerProvider trace.TracerProvider // the tracer provider to use when initialising tracing
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -111,22 +117,24 @@ func (cfg *CoordinatorConfig) Validate() error {
 		}
 	}
 
-	if cfg.Tele == nil {
+	if cfg.MeterProvider == nil {
 		return &kaderr.ConfigurationError{
 			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("telemetry must not be nil"),
+			Err:       fmt.Errorf("meter provider must not be nil"),
+		}
+	}
+
+	if cfg.TracerProvider == nil {
+		return &kaderr.ConfigurationError{
+			Component: "CoordinatorConfig",
+			Err:       fmt.Errorf("tracer provider must not be nil"),
 		}
 	}
 
 	return nil
 }
 
-func DefaultCoordinatorConfig() (*CoordinatorConfig, error) {
-	telemetry, err := tele.NewWithGlobalProviders()
-	if err != nil {
-		return nil, fmt.Errorf("new telemetry: %w", err)
-	}
-
+func DefaultCoordinatorConfig() *CoordinatorConfig {
 	return &CoordinatorConfig{
 		Clock:              clock.New(),
 		PeerstoreTTL:       10 * time.Minute,
@@ -135,19 +143,22 @@ func DefaultCoordinatorConfig() (*CoordinatorConfig, error) {
 		RequestConcurrency: 3,
 		RequestTimeout:     time.Minute,
 		Logger:             slog.New(zapslog.NewHandler(logging.Logger("coord").Desugar().Core())),
-		Tele:               telemetry,
-	}, nil
+		MeterProvider:      otel.GetMeterProvider(),
+		TracerProvider:     otel.GetTracerProvider(),
+	}
 }
 
 func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey, kad.NodeID[KadKey]], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
-		c, err := DefaultCoordinatorConfig()
-		if err != nil {
-			return nil, fmt.Errorf("default config: %w", err)
-		}
-		cfg = c
+		cfg = DefaultCoordinatorConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+
+	// initialize a new telemetry struct
+	tele, err := NewTelemetry(cfg.MeterProvider, cfg.TracerProvider)
+	if err != nil {
+		return nil, fmt.Errorf("init telemetry: %w", err)
 	}
 
 	qpCfg := query.DefaultPoolConfig()
@@ -161,7 +172,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
-	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger, cfg.Tele.Tracer)
+	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger, tele.Tracer)
 
 	bootstrapCfg := routing.DefaultBootstrapConfig[KadKey, ma.Multiaddr]()
 	bootstrapCfg.Clock = cfg.Clock
@@ -199,14 +210,15 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 		return nil, fmt.Errorf("probe: %w", err)
 	}
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, cfg.Logger, cfg.Tele.Tracer)
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, cfg.Logger, tele.Tracer)
 
-	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, cfg.Tele.Tracer)
+	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	d := &Coordinator{
 		self:   self,
+		tele:   tele,
 		cfg:    *cfg,
 		rtr:    rtr,
 		rt:     rt,
@@ -248,7 +260,7 @@ func (c *Coordinator) RoutingNotifications() <-chan RoutingNotification {
 }
 
 func (c *Coordinator) eventLoop(ctx context.Context) {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.eventLoop")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.eventLoop")
 	defer span.End()
 	for {
 		var ev BehaviourEvent
@@ -272,7 +284,7 @@ func (c *Coordinator) eventLoop(ctx context.Context) {
 }
 
 func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.dispatchEvent", trace.WithAttributes(attribute.String("event_type", fmt.Sprintf("%T", ev))))
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.dispatchEvent", trace.WithAttributes(attribute.String("event_type", fmt.Sprintf("%T", ev))))
 	defer span.End()
 
 	switch ev := ev.(type) {
@@ -335,7 +347,7 @@ func (c *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
 
 // Query traverses the DHT calling fn for each node visited.
 func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (QueryStats, error) {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.Query")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -419,7 +431,7 @@ func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (Q
 // If the routing table is updated as a result of this operation an EventRoutingUpdated notification
 // is emitted on the routing notification channel.
 func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.AddNodes")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.AddNodes")
 	defer span.End()
 	for _, ai := range ais {
 		if ai.ID == c.self {
@@ -441,7 +453,7 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 
 // Bootstrap instructs the dht to begin bootstrapping the routing table.
 func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.Bootstrap")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Bootstrap")
 	defer span.End()
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		// Bootstrap state machine uses the message

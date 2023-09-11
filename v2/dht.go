@@ -20,7 +20,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -58,7 +57,7 @@ type DHT struct {
 	sub event.Subscription
 
 	// tele holds a reference to a telemetry struct
-	tele *tele.Telemetry
+	tele *Telemetry
 }
 
 // New constructs a new [DHT] for the given underlying host and with the given
@@ -88,7 +87,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// initialize a new telemetry struct
-	d.tele, err = tele.New(cfg.MeterProvider, cfg.TracerProvider)
+	d.tele, err = NewTelemetry(cfg.MeterProvider, cfg.TracerProvider)
 	if err != nil {
 		return nil, fmt.Errorf("init telemetry: %w", err)
 	}
@@ -152,11 +151,9 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	coordCfg, err := coord.DefaultCoordinatorConfig()
-	if err != nil {
-		return nil, fmt.Errorf("new coordinator config: %w", err)
-	}
-	coordCfg.Tele = d.tele
+	coordCfg := coord.DefaultCoordinatorConfig()
+	coordCfg.MeterProvider = cfg.MeterProvider
+	coordCfg.TracerProvider = cfg.TracerProvider
 
 	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, coordCfg)
 	if err != nil {

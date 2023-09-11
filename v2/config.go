@@ -11,7 +11,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/plprobelab/go-kademlia/coord"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing"
@@ -21,6 +20,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 )
 
 // ServiceName is used to scope incoming streams for the resource manager.
@@ -112,7 +113,7 @@ type Config struct {
 	Mode ModeOpt
 
 	// Kademlia holds the configuration of the underlying Kademlia implementation.
-	Kademlia *coord.Config
+	Kademlia *coord.CoordinatorConfig
 
 	// BucketSize determines the number of closer peers to return
 	BucketSize int
@@ -178,11 +179,15 @@ type Config struct {
 // instantiate a fully functional [DHT] client. All fields that are nil require
 // some additional information to instantiate. The default values for these
 // fields come from separate top-level methods prefixed with Default.
-func DefaultConfig() *Config {
+func DefaultConfig() (*Config, error) {
+	coordConfig, err := coord.DefaultCoordinatorConfig()
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		Clock:             clock.New(),
 		Mode:              ModeOptAutoClient,
-		Kademlia:          coord.DefaultConfig(),
+		Kademlia:          coordConfig,
 		BucketSize:        20, // MAGIC
 		ProtocolID:        ProtocolIPFS,
 		RoutingTable:      nil,                  // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
@@ -193,7 +198,7 @@ func DefaultConfig() *Config {
 		AddressFilter:     AddrFilterPrivate,
 		MeterProvider:     otel.GetMeterProvider(),
 		TracerProvider:    otel.GetTracerProvider(),
-	}
+	}, nil
 }
 
 // DefaultRoutingTable returns a triert.TrieRT routing table. This routing table

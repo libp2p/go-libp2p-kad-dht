@@ -59,7 +59,8 @@ func newPeerPair(t testing.TB) (host.Host, *DHT) {
 	server, err := libp2p.New(listenAddr)
 	require.NoError(t, err)
 
-	cfg := DefaultConfig()
+	cfg, err := DefaultConfig()
+	require.NoError(t, err)
 	cfg.Mode = ModeOptServer
 	serverDHT, err := New(server, cfg)
 

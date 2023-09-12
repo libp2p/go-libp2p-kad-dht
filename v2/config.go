@@ -180,14 +180,10 @@ type Config struct {
 // some additional information to instantiate. The default values for these
 // fields come from separate top-level methods prefixed with Default.
 func DefaultConfig() (*Config, error) {
-	coordConfig, err := coord.DefaultCoordinatorConfig()
-	if err != nil {
-		return nil, err
-	}
 	return &Config{
 		Clock:             clock.New(),
 		Mode:              ModeOptAutoClient,
-		Kademlia:          coordConfig,
+		Kademlia:          coord.DefaultCoordinatorConfig(),
 		BucketSize:        20, // MAGIC
 		ProtocolID:        ProtocolIPFS,
 		RoutingTable:      nil,                  // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.

@@ -17,7 +17,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 const peerstoreTTL = 10 * time.Minute
@@ -75,8 +74,8 @@ func (w *notificationWatcher) Expect(ctx context.Context, expected RoutingNotifi
 }
 
 // TracingTelemetry may be used to create a Telemetry that traces a test
-func TracingTelemetry(t *testing.T) *tele.Telemetry {
-	telemetry, err := tele.New(otel.GetMeterProvider(), kadtest.JaegerTracerProvider(t))
+func TracingTelemetry(t *testing.T) *Telemetry {
+	telemetry, err := NewTelemetry(otel.GetMeterProvider(), kadtest.JaegerTracerProvider(t))
 	if err != nil {
 		t.Fatalf("unexpected error creating telemetry: %v", err)
 	}
@@ -86,23 +85,20 @@ func TracingTelemetry(t *testing.T) *tele.Telemetry {
 
 func TestConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		require.NoError(t, cfg.Validate())
 	})
 
 	t.Run("clock is not nil", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.Clock = nil
 		require.Error(t, cfg.Validate())
 	})
 
 	t.Run("query concurrency positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.QueryConcurrency = 0
 		require.Error(t, cfg.Validate())
@@ -111,8 +107,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("query timeout positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.QueryTimeout = 0
 		require.Error(t, cfg.Validate())
@@ -121,8 +116,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request concurrency positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.RequestConcurrency = 0
 		require.Error(t, cfg.Validate())
@@ -131,8 +125,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request timeout positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.RequestTimeout = 0
 		require.Error(t, cfg.Validate())
@@ -141,18 +134,21 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("logger not nil", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.Logger = nil
 		require.Error(t, cfg.Validate())
 	})
 
-	t.Run("telemetry not nil", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+	t.Run("meter provider not nil", func(t *testing.T) {
+		cfg := DefaultCoordinatorConfig()
+		cfg.MeterProvider = nil
+		require.Error(t, cfg.Validate())
+	})
 
-		cfg.Tele = nil
+	t.Run("tracer provider not nil", func(t *testing.T) {
+		cfg := DefaultCoordinatorConfig()
+		cfg.TracerProvider = nil
 		require.Error(t, cfg.Validate())
 	})
 }
@@ -163,8 +159,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
@@ -203,8 +198,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
@@ -265,8 +259,7 @@ func TestBootstrap(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
@@ -318,8 +311,7 @@ func TestIncludeNode(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL

@@ -7,7 +7,8 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/network/address"
-	"github.com/plprobelab/go-kademlia/query"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 )
 
 type BehaviourEvent interface {

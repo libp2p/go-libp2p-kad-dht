@@ -9,10 +9,10 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/query"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -234,16 +234,13 @@ func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-func CloserNodesResponse(k KadKey, nodes []peer.AddrInfo) kad.Response[KadKey, ma.Multiaddr] {
-	infos := make([]kad.NodeInfo[KadKey, ma.Multiaddr], len(nodes))
+func CloserNodeIDs(nodes []peer.AddrInfo) []kad.NodeID[KadKey] {
+	ids := make([]kad.NodeID[KadKey], len(nodes))
 	for i := range nodes {
-		infos[i] = kadt.AddrInfo{Info: nodes[i]}
+		ids[i] = kadt.PeerID(nodes[i].ID)
 	}
 
-	return &fakeMessage{
-		key:   k,
-		infos: infos,
-	}
+	return ids
 }
 
 type fakeMessage struct {

@@ -13,7 +13,6 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/plprobelab/go-kademlia/routing/triert"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -22,6 +21,7 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 )
 
 // ServiceName is used to scope incoming streams for the resource manager.

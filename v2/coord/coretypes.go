@@ -5,11 +5,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // KadKey is a type alias for the type of key that's used with this DHT

@@ -13,8 +13,6 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
 	"github.com/plprobelab/go-kademlia/network/address"
-	"github.com/plprobelab/go-kademlia/query"
-	"github.com/plprobelab/go-kademlia/routing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -22,6 +20,8 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -168,19 +168,19 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[KadKey, ma.Multiaddr](kadt.PeerID(self), qpCfg)
+	qp, err := query.NewPool[KadKey](kadt.PeerID(self), qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
 	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger, tele.Tracer)
 
-	bootstrapCfg := routing.DefaultBootstrapConfig[KadKey, ma.Multiaddr]()
+	bootstrapCfg := routing.DefaultBootstrapConfig[KadKey]()
 	bootstrapCfg.Clock = cfg.Clock
 	bootstrapCfg.Timeout = cfg.QueryTimeout
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[KadKey, ma.Multiaddr](kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap[KadKey](kadt.PeerID(self), bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -194,7 +194,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 	// includeCfg.Concurrency = cfg.IncludeConcurrency
 	// includeCfg.Timeout = cfg.IncludeTimeout
 
-	include, err := routing.NewInclude[KadKey, ma.Multiaddr](rt, includeCfg)
+	include, err := routing.NewInclude[KadKey](rt, includeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("include: %w", err)
 	}
@@ -205,7 +205,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 
 	// TODO: expose config
 	// probeCfg.Concurrency = cfg.ProbeConcurrency
-	probe, err := routing.NewProbe[KadKey, ma.Multiaddr](rt, probeCfg)
+	probe, err := routing.NewProbe[KadKey](rt, probeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("probe: %w", err)
 	}

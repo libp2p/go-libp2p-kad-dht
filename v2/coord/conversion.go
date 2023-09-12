@@ -55,6 +55,14 @@ func SliceOfPeerIDToSliceOfNodeID(peers []peer.ID) []kad.NodeID[KadKey] {
 	return nodes
 }
 
+func SliceOfAddrInfoToSliceOfNodeID(ais []peer.AddrInfo) []kad.NodeID[KadKey] {
+	nodes := make([]kad.NodeID[KadKey], len(ais))
+	for i := range ais {
+		nodes[i] = kadt.PeerID(ais[i].ID)
+	}
+	return nodes
+}
+
 // NodeIDToPeerID converts a kad.NodeID to a peer.ID.
 // This function will panic if id's underlying type is not kadt.PeerID
 func NodeIDToPeerID(id kad.NodeID[KadKey]) peer.ID {

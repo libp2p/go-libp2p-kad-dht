@@ -8,7 +8,6 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
-	"github.com/plprobelab/go-kademlia/network/address"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
@@ -227,7 +226,6 @@ type EventBootstrapPoll struct{}
 
 // EventBootstrapStart is an event that attempts to start a new bootstrap
 type EventBootstrapStart[K kad.Key[K], N kad.NodeID[K]] struct {
-	ProtocolID        address.ProtocolID
 	KnownClosestNodes []N
 }
 

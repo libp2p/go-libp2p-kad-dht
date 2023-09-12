@@ -6,7 +6,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/network/address"
 	"github.com/stretchr/testify/require"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
@@ -76,11 +75,8 @@ func TestBootstrapStart(t *testing.T) {
 
 	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
 
-	protocolID := address.ProtocolID("testprotocol")
-
 	// start the bootstrap
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
-		ProtocolID:        protocolID,
 		KnownClosestNodes: []tiny.Node{a},
 	})
 	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
@@ -114,11 +110,8 @@ func TestBootstrapMessageResponse(t *testing.T) {
 
 	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
 
-	protocolID := address.ProtocolID("testprotocol")
-
 	// start the bootstrap
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
-		ProtocolID:        protocolID,
 		KnownClosestNodes: []tiny.Node{a},
 	})
 	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
@@ -162,11 +155,8 @@ func TestBootstrapProgress(t *testing.T) {
 	require.True(t, self.Key().Xor(b.Key()).Compare(self.Key().Xor(c.Key())) == -1)
 	require.True(t, self.Key().Xor(c.Key()).Compare(self.Key().Xor(d.Key())) == -1)
 
-	protocolID := address.ProtocolID("testprotocol")
-
 	// start the bootstrap
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
-		ProtocolID:        protocolID,
 		KnownClosestNodes: []tiny.Node{d, a, b, c},
 	})
 

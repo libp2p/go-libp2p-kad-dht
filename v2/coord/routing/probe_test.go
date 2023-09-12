@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 	"github.com/stretchr/testify/require"
@@ -16,13 +15,6 @@ import (
 )
 
 var _ heap.Interface = (*nodeValuePendingList[tiny.Key])(nil)
-
-type unaddressedNodeInfo[K kad.Key[K], A kad.Address[A]] struct {
-	NodeID kad.NodeID[K]
-}
-
-func (u unaddressedNodeInfo[K, A]) ID() kad.NodeID[K] { return u.NodeID }
-func (u unaddressedNodeInfo[K, A]) Addresses() []A    { return nil }
 
 func TestProbeConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {

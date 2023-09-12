@@ -82,9 +82,9 @@ func TestIncludeAddCandidateStartsCheckIfCapacity(t *testing.T) {
 		NodeID: candidate,
 	})
 	// the state machine should attempt to send a message
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
-	st := state.(*StateIncludeConnectivityCheck[tiny.Key])
+	st := state.(*StateIncludeConnectivityCheck[tiny.Key, tiny.Node])
 
 	// the message should be sent to the candidate node
 	require.Equal(t, candidate, st.NodeID)
@@ -114,7 +114,7 @@ func TestIncludeAddCandidateReportsCapacity(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
 		NodeID: candidate,
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
 	// now the state machine reports that it is waiting with capacity since concurrency
 	// is greater than the number of checks in flight
@@ -139,7 +139,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
 		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
 	// include reports that it is waiting and has capacity for more
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -150,7 +150,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 		NodeID: tiny.NewNode(tiny.Key(0b00000010)),
 	})
 	// sends a message to the candidate
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
 	// include reports that it is waiting and has capacity for more
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -162,7 +162,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 		NodeID: tiny.NewNode(tiny.Key(0b00000011)),
 	})
 	// sends a message to the candidate
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
 	// include reports that it is waiting at capacity since 3 messages are in flight
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -211,7 +211,7 @@ func TestIncludeConnectivityCheckSuccess(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
 		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
 	// notify that node was contacted successfully, with no closer nodes
 	state = p.Advance(ctx, &EventIncludeConnectivityCheckSuccess[tiny.Key, tiny.Node]{
@@ -219,9 +219,9 @@ func TestIncludeConnectivityCheckSuccess(t *testing.T) {
 	})
 
 	// should respond that the routing table was updated
-	require.IsType(t, &StateIncludeRoutingUpdated[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeRoutingUpdated[tiny.Key, tiny.Node]{}, state)
 
-	st := state.(*StateIncludeRoutingUpdated[tiny.Key])
+	st := state.(*StateIncludeRoutingUpdated[tiny.Key, tiny.Node])
 
 	// the update is for the correct node
 	require.Equal(t, tiny.NewNode(tiny.Key(4)), st.NodeID)
@@ -254,7 +254,7 @@ func TestIncludeConnectivityCheckFailure(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
 		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
 
 	// notify that node was not contacted successfully
 	state = p.Advance(ctx, &EventIncludeConnectivityCheckFailure[tiny.Key, tiny.Node]{

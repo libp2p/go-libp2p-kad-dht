@@ -80,7 +80,7 @@ type Query[K kad.Key[K], N kad.NodeID[K]] struct {
 	// cfg is a copy of the optional configuration supplied to the query
 	cfg QueryConfig[K]
 
-	iter   NodeIter[K]
+	iter   NodeIter[K, N]
 	target K
 	stats  QueryStats
 
@@ -91,7 +91,7 @@ type Query[K kad.Key[K], N kad.NodeID[K]] struct {
 	inFlight int
 }
 
-func NewQuery[K kad.Key[K], N kad.NodeID[K]](self N, id QueryID, target K, iter NodeIter[K], knownClosestNodes []N, cfg *QueryConfig[K]) (*Query[K, N], error) {
+func NewQuery[K kad.Key[K], N kad.NodeID[K]](self N, id QueryID, target K, iter NodeIter[K, N], knownClosestNodes []N, cfg *QueryConfig[K]) (*Query[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultQueryConfig[K]()
 	} else if err := cfg.Validate(); err != nil {
@@ -103,7 +103,7 @@ func NewQuery[K kad.Key[K], N kad.NodeID[K]](self N, id QueryID, target K, iter 
 		if key.Equal(node.Key(), self.Key()) {
 			continue
 		}
-		iter.Add(&NodeStatus[K]{
+		iter.Add(&NodeStatus[K, N]{
 			NodeID: node,
 			State:  &StateNodeNotContacted{},
 		})
@@ -137,7 +137,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 		}
 	case *EventQueryFindCloserResponse[K, N]:
 		q.onMessageResponse(ctx, tev.NodeID, tev.CloserNodes)
-	case *EventQueryFindCloserFailure[K]:
+	case *EventQueryFindCloserFailure[K, N]:
 		q.onMessageFailure(ctx, tev.NodeID)
 	case nil:
 		// TEMPORARY: no event to process
@@ -161,7 +161,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 
 	var returnState QueryState
 
-	q.iter.Each(ctx, func(ctx context.Context, ni *NodeStatus[K]) bool {
+	q.iter.Each(ctx, func(ctx context.Context, ni *NodeStatus[K, N]) bool {
 		switch st := ni.State.(type) {
 		case *StateNodeWaiting:
 			if q.cfg.Clock.Now().After(st.Deadline) {
@@ -202,7 +202,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 				if q.stats.Start.IsZero() {
 					q.stats.Start = q.cfg.Clock.Now()
 				}
-				returnState = &StateQueryFindCloser[K]{
+				returnState = &StateQueryFindCloser[K, N]{
 					NodeID:  ni.NodeID,
 					QueryID: q.id,
 					Stats:   q.stats,
@@ -288,7 +288,7 @@ func (q *Query[K, N]) onMessageResponse(ctx context.Context, node N, closer []N)
 		if key.Equal(id.Key(), q.self.Key()) {
 			continue
 		}
-		q.iter.Add(&NodeStatus[K]{
+		q.iter.Add(&NodeStatus[K, N]{
 			NodeID: id,
 			State:  &StateNodeNotContacted{},
 		})
@@ -297,7 +297,7 @@ func (q *Query[K, N]) onMessageResponse(ctx context.Context, node N, closer []N)
 }
 
 // onMessageFailure processes the result of a failed attempt to contact a node.
-func (q *Query[K, N]) onMessageFailure(ctx context.Context, node kad.NodeID[K]) {
+func (q *Query[K, N]) onMessageFailure(ctx context.Context, node N) {
 	ni, found := q.iter.Find(node.Key())
 	if !found {
 		// got a rogue message
@@ -337,10 +337,10 @@ type StateQueryFinished struct {
 }
 
 // StateQueryFindCloser indicates that the [Query] wants to send a find closer nodes message to a node.
-type StateQueryFindCloser[K kad.Key[K]] struct {
+type StateQueryFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 	QueryID QueryID
-	Target  K             // the key that the query wants to find closer nodes for
-	NodeID  kad.NodeID[K] // the node to send the message to
+	Target  K // the key that the query wants to find closer nodes for
+	NodeID  N // the node to send the message to
 	Stats   QueryStats
 }
 
@@ -358,7 +358,7 @@ type StateQueryWaitingWithCapacity struct {
 
 // queryState() ensures that only [Query] states can be assigned to a QueryState.
 func (*StateQueryFinished) queryState()            {}
-func (*StateQueryFindCloser[K]) queryState()       {}
+func (*StateQueryFindCloser[K, N]) queryState()    {}
 func (*StateQueryWaitingAtCapacity) queryState()   {}
 func (*StateQueryWaitingWithCapacity) queryState() {}
 
@@ -376,12 +376,12 @@ type EventQueryFindCloserResponse[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 // EventQueryFindCloserFailure notifies a [Query] that an attempt to find closer nodes has failed.
-type EventQueryFindCloserFailure[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K] // the node the message was sent to
-	Error  error         // the error that caused the failure, if any
+type EventQueryFindCloserFailure[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N     // the node the message was sent to
+	Error  error // the error that caused the failure, if any
 }
 
 // queryEvent() ensures that only events accepted by [Query] can be assigned to a [QueryEvent].
 func (*EventQueryCancel) queryEvent()                   {}
 func (*EventQueryFindCloserResponse[K, N]) queryEvent() {}
-func (*EventQueryFindCloserFailure[K]) queryEvent()     {}
+func (*EventQueryFindCloserFailure[K, N]) queryEvent()  {}

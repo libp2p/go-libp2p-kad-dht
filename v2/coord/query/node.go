@@ -6,8 +6,8 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 )
 
-type NodeStatus[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K]
+type NodeStatus[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N
 	State  NodeState
 }
 

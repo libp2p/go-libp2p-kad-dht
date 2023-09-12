@@ -142,9 +142,9 @@ func (p *Pool[K, N]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 			}
 			eventQueryID = qry.id
 		}
-	case *EventPoolFindCloserFailure[K]:
+	case *EventPoolFindCloserFailure[K, N]:
 		if qry, ok := p.queryIndex[tev.QueryID]; ok {
-			state, terminal := p.advanceQuery(ctx, qry, &EventQueryFindCloserFailure[K]{
+			state, terminal := p.advanceQuery(ctx, qry, &EventQueryFindCloserFailure[K, N]{
 				NodeID: tev.NodeID,
 				Error:  tev.Error,
 			})
@@ -191,9 +191,9 @@ func (p *Pool[K, N]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 func (p *Pool[K, N]) advanceQuery(ctx context.Context, qry *Query[K, N], qev QueryEvent) (PoolState, bool) {
 	state := qry.Advance(ctx, qev)
 	switch st := state.(type) {
-	case *StateQueryFindCloser[K]:
+	case *StateQueryFindCloser[K, N]:
 		p.queriesInFlight++
-		return &StatePoolFindCloser[K]{
+		return &StatePoolFindCloser[K, N]{
 			QueryID: st.QueryID,
 			Stats:   st.Stats,
 			NodeID:  st.NodeID,
@@ -249,7 +249,7 @@ func (p *Pool[K, N]) addQuery(ctx context.Context, queryID QueryID, target K, kn
 	if _, exists := p.queryIndex[queryID]; exists {
 		return fmt.Errorf("query id already in use")
 	}
-	iter := NewClosestNodesIter(target)
+	iter := NewClosestNodesIter[K, N](target)
 
 	qryCfg := DefaultQueryConfig[K]()
 	qryCfg.Clock = p.cfg.Clock
@@ -277,10 +277,10 @@ type PoolState interface {
 type StatePoolIdle struct{}
 
 // StatePoolFindCloser indicates that a pool query wants to send a find closer nodes message to a node.
-type StatePoolFindCloser[K kad.Key[K]] struct {
+type StatePoolFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 	QueryID QueryID
-	Target  K             // the key that the query wants to find closer nodes for
-	NodeID  kad.NodeID[K] // the node to send the message to
+	Target  K // the key that the query wants to find closer nodes for
+	NodeID  N // the node to send the message to
 	Stats   QueryStats
 }
 
@@ -306,7 +306,7 @@ type StatePoolQueryTimeout struct {
 
 // poolState() ensures that only Pool states can be assigned to the PoolState interface.
 func (*StatePoolIdle) poolState()                {}
-func (*StatePoolFindCloser[K]) poolState()       {}
+func (*StatePoolFindCloser[K, N]) poolState()    {}
 func (*StatePoolWaitingAtCapacity) poolState()   {}
 func (*StatePoolWaitingWithCapacity) poolState() {}
 func (*StatePoolQueryFinished) poolState()       {}
@@ -337,10 +337,10 @@ type EventPoolFindCloserResponse[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 // EventPoolFindCloserFailure notifies a [Pool] that an attempt to find closer nodes has failed.
-type EventPoolFindCloserFailure[K kad.Key[K]] struct {
-	QueryID QueryID       // the id of the query that sent the message
-	NodeID  kad.NodeID[K] // the node the message was sent to
-	Error   error         // the error that caused the failure, if any
+type EventPoolFindCloserFailure[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID QueryID // the id of the query that sent the message
+	NodeID  N       // the node the message was sent to
+	Error   error   // the error that caused the failure, if any
 }
 
 // EventPoolPoll is an event that signals the pool that it can perform housekeeping work such as time out queries.
@@ -350,5 +350,5 @@ type EventPoolPoll struct{}
 func (*EventPoolAddQuery[K, N]) poolEvent()           {}
 func (*EventPoolStopQuery) poolEvent()                {}
 func (*EventPoolFindCloserResponse[K, N]) poolEvent() {}
-func (*EventPoolFindCloserFailure[K]) poolEvent()     {}
+func (*EventPoolFindCloserFailure[K, N]) poolEvent()  {}
 func (*EventPoolPoll) poolEvent()                     {}

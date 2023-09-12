@@ -79,10 +79,10 @@ func TestBootstrapStart(t *testing.T) {
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
 		KnownClosestNodes: []tiny.Node{a},
 	})
-	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
+	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
 
 	// the query should attempt to contact the node it was given
-	st := state.(*StateBootstrapFindCloser[tiny.Key])
+	st := state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 
 	// the query should be the one just added
 	require.Equal(t, query.QueryID("bootstrap"), st.QueryID)
@@ -114,10 +114,10 @@ func TestBootstrapMessageResponse(t *testing.T) {
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
 		KnownClosestNodes: []tiny.Node{a},
 	})
-	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
+	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
 
 	// the bootstrap should attempt to contact the node it was given
-	st := state.(*StateBootstrapFindCloser[tiny.Key])
+	st := state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 	require.Equal(t, query.QueryID("bootstrap"), st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
@@ -161,21 +161,21 @@ func TestBootstrapProgress(t *testing.T) {
 	})
 
 	// the bootstrap should attempt to contact the closest node it was given
-	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
-	st := state.(*StateBootstrapFindCloser[tiny.Key])
+	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
+	st := state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 	require.Equal(t, query.QueryID("bootstrap"), st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
 	// next the bootstrap attempts to contact second nearest node
 	state = bs.Advance(ctx, &EventBootstrapPoll{})
-	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
-	st = state.(*StateBootstrapFindCloser[tiny.Key])
+	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
+	st = state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 	require.Equal(t, b, st.NodeID)
 
 	// next the bootstrap attempts to contact third nearest node
 	state = bs.Advance(ctx, &EventBootstrapPoll{})
-	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
-	st = state.(*StateBootstrapFindCloser[tiny.Key])
+	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
+	st = state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 	require.Equal(t, c, st.NodeID)
 
 	// now the bootstrap should be waiting since it is at request capacity
@@ -188,8 +188,8 @@ func TestBootstrapProgress(t *testing.T) {
 	})
 
 	// now the bootstrap has capacity to contact fourth nearest node
-	require.IsType(t, &StateBootstrapFindCloser[tiny.Key]{}, state)
-	st = state.(*StateBootstrapFindCloser[tiny.Key])
+	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
+	st = state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 	require.Equal(t, d, st.NodeID)
 
 	// notify bootstrap that a node was contacted successfully

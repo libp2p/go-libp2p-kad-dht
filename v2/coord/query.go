@@ -81,7 +81,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 			CloserNodes: CloserNodeIDs(ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
-		cmd = &query.EventPoolFindCloserFailure[KadKey]{
+		cmd = &query.EventPoolFindCloserFailure[KadKey, kadt.PeerID]{
 			NodeID:  kadt.PeerID(ev.To.ID),
 			QueryID: ev.QueryID,
 			Error:   ev.Err,
@@ -148,7 +148,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 
 	pstate := p.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {
-	case *query.StatePoolFindCloser[KadKey]:
+	case *query.StatePoolFindCloser[KadKey, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
 			To:      KadPeerIDToAddrInfo(st.NodeID),

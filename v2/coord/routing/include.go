@@ -128,7 +128,7 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 		if ok {
 			delete(b.checks, key.HexString(tev.NodeID.Key()))
 			if b.rt.AddNode(tev.NodeID) {
-				return &StateIncludeRoutingUpdated[K]{
+				return &StateIncludeRoutingUpdated[K, N]{
 					NodeID: ch.NodeID,
 				}
 			}
@@ -164,7 +164,7 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 	}
 
 	// Ask the node to find itself
-	return &StateIncludeConnectivityCheck[K]{
+	return &StateIncludeConnectivityCheck[K, N]{
 		NodeID: candidate,
 	}
 }
@@ -226,8 +226,8 @@ type IncludeState interface {
 
 // StateIncludeConnectivityCheck indicates that an [Include] is waiting to send a connectivity check to a node.
 // A find node message should be sent to the node, with the target being the node's key.
-type StateIncludeConnectivityCheck[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K] // the node to send the message to
+type StateIncludeConnectivityCheck[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N // the node to send the message to
 }
 
 // StateIncludeIdle indicates that an [Include] is not peforming any work or waiting for any responses..
@@ -246,17 +246,17 @@ type StateIncludeWaitingWithCapacity struct{}
 type StateIncludeWaitingFull struct{}
 
 // StateIncludeRoutingUpdated indicates the routing table has been updated with a new node.
-type StateIncludeRoutingUpdated[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K]
+type StateIncludeRoutingUpdated[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N
 }
 
 // includeState() ensures that only Include states can be assigned to an IncludeState.
-func (*StateIncludeConnectivityCheck[K]) includeState() {}
-func (*StateIncludeIdle) includeState()                 {}
-func (*StateIncludeWaitingAtCapacity) includeState()    {}
-func (*StateIncludeWaitingWithCapacity) includeState()  {}
-func (*StateIncludeWaitingFull) includeState()          {}
-func (*StateIncludeRoutingUpdated[K]) includeState()    {}
+func (*StateIncludeConnectivityCheck[K, N]) includeState() {}
+func (*StateIncludeIdle) includeState()                    {}
+func (*StateIncludeWaitingAtCapacity) includeState()       {}
+func (*StateIncludeWaitingWithCapacity) includeState()     {}
+func (*StateIncludeWaitingFull) includeState()             {}
+func (*StateIncludeRoutingUpdated[K, N]) includeState()    {}
 
 // IncludeEvent is an event intended to advance the state of an [Include].
 type IncludeEvent interface {

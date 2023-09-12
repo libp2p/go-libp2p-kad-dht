@@ -98,7 +98,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 	case *EventBootstrapStart[K, N]:
 
 		// TODO: ignore start event if query is already in progress
-		iter := query.NewClosestNodesIter(b.self.Key())
+		iter := query.NewClosestNodesIter[K, N](b.self.Key())
 
 		qryCfg := query.DefaultQueryConfig[K]()
 		qryCfg.Clock = b.cfg.Clock
@@ -107,7 +107,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 
 		queryID := query.QueryID("bootstrap")
 
-		qry, err := query.NewQuery[K](b.self, queryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
+		qry, err := query.NewQuery[K, N](b.self, queryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
 		if err != nil {
 			// TODO: don't panic
 			panic(err)
@@ -121,7 +121,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventBootstrapFindCloserFailure[K, N]:
-		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K]{
+		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K, N]{
 			NodeID: tev.NodeID,
 			Error:  tev.Error,
 		})
@@ -142,8 +142,8 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) BootstrapState {
 	state := b.qry.Advance(ctx, qev)
 	switch st := state.(type) {
-	case *query.StateQueryFindCloser[K]:
-		return &StateBootstrapFindCloser[K]{
+	case *query.StateQueryFindCloser[K, N]:
+		return &StateBootstrapFindCloser[K, N]{
 			QueryID: st.QueryID,
 			Stats:   st.Stats,
 			NodeID:  st.NodeID,
@@ -184,10 +184,10 @@ type BootstrapState interface {
 }
 
 // StateBootstrapFindCloser indicates that the bootstrap query wants to send a find closer nodes message to a node.
-type StateBootstrapFindCloser[K kad.Key[K]] struct {
+type StateBootstrapFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 	QueryID query.QueryID
-	Target  K             // the key that the query wants to find closer nodes for
-	NodeID  kad.NodeID[K] // the node to send the message to
+	Target  K // the key that the query wants to find closer nodes for
+	NodeID  N // the node to send the message to
 	Stats   query.QueryStats
 }
 
@@ -210,11 +210,11 @@ type StateBootstrapWaiting struct {
 }
 
 // bootstrapState() ensures that only Bootstrap states can be assigned to a BootstrapState.
-func (*StateBootstrapFindCloser[K]) bootstrapState() {}
-func (*StateBootstrapIdle) bootstrapState()          {}
-func (*StateBootstrapFinished) bootstrapState()      {}
-func (*StateBootstrapTimeout) bootstrapState()       {}
-func (*StateBootstrapWaiting) bootstrapState()       {}
+func (*StateBootstrapFindCloser[K, N]) bootstrapState() {}
+func (*StateBootstrapIdle) bootstrapState()             {}
+func (*StateBootstrapFinished) bootstrapState()         {}
+func (*StateBootstrapTimeout) bootstrapState()          {}
+func (*StateBootstrapWaiting) bootstrapState()          {}
 
 // BootstrapEvent is an event intended to advance the state of a bootstrap.
 type BootstrapEvent interface {

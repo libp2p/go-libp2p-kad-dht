@@ -12,11 +12,11 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-type Pool[K kad.Key[K]] struct {
+type Pool[K kad.Key[K], N kad.NodeID[K]] struct {
 	// self is the node id of the system the pool is running on
-	self       kad.NodeID[K]
-	queries    []*Query[K]
-	queryIndex map[QueryID]*Query[K]
+	self       N
+	queries    []*Query[K, N]
+	queryIndex map[QueryID]*Query[K, N]
 
 	// cfg is a copy of the optional configuration supplied to the pool
 	cfg PoolConfig
@@ -92,23 +92,23 @@ func DefaultPoolConfig() *PoolConfig {
 	}
 }
 
-func NewPool[K kad.Key[K]](self kad.NodeID[K], cfg *PoolConfig) (*Pool[K], error) {
+func NewPool[K kad.Key[K], N kad.NodeID[K]](self N, cfg *PoolConfig) (*Pool[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultPoolConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	return &Pool[K]{
+	return &Pool[K, N]{
 		self:       self,
 		cfg:        *cfg,
-		queries:    make([]*Query[K], 0),
-		queryIndex: make(map[QueryID]*Query[K]),
+		queries:    make([]*Query[K, N], 0),
+		queryIndex: make(map[QueryID]*Query[K, N]),
 	}, nil
 }
 
 // Advance advances the state of the pool by attempting to advance one of its queries
-func (p *Pool[K]) Advance(ctx context.Context, ev PoolEvent) PoolState {
+func (p *Pool[K, N]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 	ctx, span := tele.StartSpan(ctx, "Pool.Advance")
 	defer span.End()
 
@@ -120,7 +120,7 @@ func (p *Pool[K]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 	eventQueryID := InvalidQueryID
 
 	switch tev := ev.(type) {
-	case *EventPoolAddQuery[K]:
+	case *EventPoolAddQuery[K, N]:
 		p.addQuery(ctx, tev.QueryID, tev.Target, tev.KnownClosestNodes)
 		// TODO: return error as state
 	case *EventPoolStopQuery:
@@ -131,9 +131,9 @@ func (p *Pool[K]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 			}
 			eventQueryID = qry.id
 		}
-	case *EventPoolFindCloserResponse[K]:
+	case *EventPoolFindCloserResponse[K, N]:
 		if qry, ok := p.queryIndex[tev.QueryID]; ok {
-			state, terminal := p.advanceQuery(ctx, qry, &EventQueryFindCloserResponse[K]{
+			state, terminal := p.advanceQuery(ctx, qry, &EventQueryFindCloserResponse[K, N]{
 				NodeID:      tev.NodeID,
 				CloserNodes: tev.CloserNodes,
 			})
@@ -188,7 +188,7 @@ func (p *Pool[K]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 	return &StatePoolIdle{}
 }
 
-func (p *Pool[K]) advanceQuery(ctx context.Context, qry *Query[K], qev QueryEvent) (PoolState, bool) {
+func (p *Pool[K, N]) advanceQuery(ctx context.Context, qry *Query[K, N], qev QueryEvent) (PoolState, bool) {
 	state := qry.Advance(ctx, qev)
 	switch st := state.(type) {
 	case *StateQueryFindCloser[K]:
@@ -229,7 +229,7 @@ func (p *Pool[K]) advanceQuery(ctx context.Context, qry *Query[K], qev QueryEven
 	return nil, false
 }
 
-func (p *Pool[K]) removeQuery(queryID QueryID) {
+func (p *Pool[K, N]) removeQuery(queryID QueryID) {
 	for i := range p.queries {
 		if p.queries[i].id != queryID {
 			continue
@@ -245,7 +245,7 @@ func (p *Pool[K]) removeQuery(queryID QueryID) {
 
 // addQuery adds a query to the pool, returning the new query id
 // TODO: remove target argument and use msg.Target
-func (p *Pool[K]) addQuery(ctx context.Context, queryID QueryID, target K, knownClosestNodes []kad.NodeID[K]) error {
+func (p *Pool[K, N]) addQuery(ctx context.Context, queryID QueryID, target K, knownClosestNodes []N) error {
 	if _, exists := p.queryIndex[queryID]; exists {
 		return fmt.Errorf("query id already in use")
 	}
@@ -256,7 +256,7 @@ func (p *Pool[K]) addQuery(ctx context.Context, queryID QueryID, target K, known
 	qryCfg.Concurrency = p.cfg.QueryConcurrency
 	qryCfg.RequestTimeout = p.cfg.RequestTimeout
 
-	qry, err := NewQuery[K](p.self, queryID, target, iter, knownClosestNodes, qryCfg)
+	qry, err := NewQuery[K, N](p.self, queryID, target, iter, knownClosestNodes, qryCfg)
 	if err != nil {
 		return fmt.Errorf("new query: %w", err)
 	}
@@ -318,10 +318,10 @@ type PoolEvent interface {
 }
 
 // EventPoolAddQuery is an event that attempts to add a new query
-type EventPoolAddQuery[K kad.Key[K]] struct {
-	QueryID           QueryID         // the id to use for the new query
-	Target            K               // the target key for the query
-	KnownClosestNodes []kad.NodeID[K] // an initial set of close nodes the query should use
+type EventPoolAddQuery[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID           QueryID // the id to use for the new query
+	Target            K       // the target key for the query
+	KnownClosestNodes []N     // an initial set of close nodes the query should use
 }
 
 // EventPoolStopQuery notifies a [Pool] to stop a query.
@@ -330,10 +330,10 @@ type EventPoolStopQuery struct {
 }
 
 // EventPoolFindCloserResponse notifies a [Pool] that an attempt to find closer nodes has received a successful response.
-type EventPoolFindCloserResponse[K kad.Key[K]] struct {
-	QueryID     QueryID         // the id of the query that sent the message
-	NodeID      kad.NodeID[K]   // the node the message was sent to
-	CloserNodes []kad.NodeID[K] // the closer nodes sent by the node
+type EventPoolFindCloserResponse[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID     QueryID // the id of the query that sent the message
+	NodeID      N       // the node the message was sent to
+	CloserNodes []N     // the closer nodes sent by the node
 }
 
 // EventPoolFindCloserFailure notifies a [Pool] that an attempt to find closer nodes has failed.
@@ -347,8 +347,8 @@ type EventPoolFindCloserFailure[K kad.Key[K]] struct {
 type EventPoolPoll struct{}
 
 // poolEvent() ensures that only events accepted by a [Pool] can be assigned to the [PoolEvent] interface.
-func (*EventPoolAddQuery[K]) poolEvent()           {}
-func (*EventPoolStopQuery) poolEvent()             {}
-func (*EventPoolFindCloserResponse[K]) poolEvent() {}
-func (*EventPoolFindCloserFailure[K]) poolEvent()  {}
-func (*EventPoolPoll) poolEvent()                  {}
+func (*EventPoolAddQuery[K, N]) poolEvent()           {}
+func (*EventPoolStopQuery) poolEvent()                {}
+func (*EventPoolFindCloserResponse[K, N]) poolEvent() {}
+func (*EventPoolFindCloserFailure[K]) poolEvent()     {}
+func (*EventPoolPoll) poolEvent()                     {}

@@ -5,12 +5,10 @@ import (
 	"testing"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/kad"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/dtype"
 )
 
 func TestIncludeConfigValidate(t *testing.T) {
@@ -56,9 +54,9 @@ func TestIncludeStartsIdle(t *testing.T) {
 	cfg := DefaultIncludeConfig()
 	cfg.Clock = clk
 
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
 
-	bs, err := NewInclude[key.Key8](rt, cfg)
+	bs, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
 	state := bs.Advance(ctx, &EventIncludePoll{})
@@ -72,21 +70,21 @@ func TestIncludeAddCandidateStartsCheckIfCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 1
 
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
 
-	p, err := NewInclude[key.Key8](rt, cfg)
+	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
-	candidate := dtype.NewID(key.Key8(0b00000100))
+	candidate := tiny.NewNode(tiny.Key(0b00000100))
 
 	// add a candidate
-	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
+	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
 		NodeID: candidate,
 	})
 	// the state machine should attempt to send a message
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
-	st := state.(*StateIncludeConnectivityCheck[key.Key8])
+	st := state.(*StateIncludeConnectivityCheck[tiny.Key])
 
 	// the message should be sent to the candidate node
 	require.Equal(t, candidate, st.NodeID)
@@ -106,17 +104,17 @@ func TestIncludeAddCandidateReportsCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
-	p, err := NewInclude[key.Key8](rt, cfg)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
+	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
-	candidate := dtype.NewID(key.Key8(0b00000100))
+	candidate := tiny.NewNode(tiny.Key(0b00000100))
 
 	// add a candidate
-	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
+	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
 		NodeID: candidate,
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
 	// now the state machine reports that it is waiting with capacity since concurrency
 	// is greater than the number of checks in flight
@@ -132,27 +130,27 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	cfg.QueueCapacity = 2 // only allow two candidates in the queue
 	cfg.Concurrency = 3
 
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
 
-	p, err := NewInclude[key.Key8](rt, cfg)
+	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
 	// add a candidate
-	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
+	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
 	// include reports that it is waiting and has capacity for more
 	state = p.Advance(ctx, &EventIncludePoll{})
 	require.IsType(t, &StateIncludeWaitingWithCapacity{}, state)
 
 	// add second candidate
-	state = p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000010)),
+	state = p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000010)),
 	})
 	// sends a message to the candidate
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
 	// include reports that it is waiting and has capacity for more
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -160,27 +158,27 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	require.IsType(t, &StateIncludeWaitingWithCapacity{}, state)
 
 	// add third candidate
-	state = p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000011)),
+	state = p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000011)),
 	})
 	// sends a message to the candidate
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
 	// include reports that it is waiting at capacity since 3 messages are in flight
 	state = p.Advance(ctx, &EventIncludePoll{})
 	require.IsType(t, &StateIncludeWaitingAtCapacity{}, state)
 
 	// add fourth candidate
-	state = p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000101)),
+	state = p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000101)),
 	})
 
 	// include reports that it is waiting at capacity since 3 messages are already in flight
 	require.IsType(t, &StateIncludeWaitingAtCapacity{}, state)
 
 	// add fifth candidate
-	state = p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000110)),
+	state = p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000110)),
 	})
 
 	// include reports that it is waiting and the candidate queue is full since it
@@ -188,8 +186,8 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	require.IsType(t, &StateIncludeWaitingFull{}, state)
 
 	// add sixth candidate
-	state = p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000111)),
+	state = p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000111)),
 	})
 
 	// include reports that it is still waiting and the candidate queue is full since it
@@ -204,36 +202,36 @@ func TestIncludeConnectivityCheckSuccess(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
 
-	p, err := NewInclude[key.Key8](rt, cfg)
+	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
 	// add a candidate
-	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
+	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
 	// notify that node was contacted successfully, with no closer nodes
-	state = p.Advance(ctx, &EventIncludeConnectivityCheckSuccess[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
+	state = p.Advance(ctx, &EventIncludeConnectivityCheckSuccess[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
 
 	// should respond that the routing table was updated
-	require.IsType(t, &StateIncludeRoutingUpdated[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeRoutingUpdated[tiny.Key]{}, state)
 
-	st := state.(*StateIncludeRoutingUpdated[key.Key8])
+	st := state.(*StateIncludeRoutingUpdated[tiny.Key])
 
 	// the update is for the correct node
-	require.Equal(t, dtype.NewID(key.Key8(4)), st.NodeID)
+	require.Equal(t, tiny.NewNode(tiny.Key(4)), st.NodeID)
 
 	// the routing table should contain the node
-	foundNode, found := rt.GetNode(key.Key8(4))
+	foundNode, found := rt.GetNode(tiny.Key(4))
 	require.True(t, found)
 	require.NotNil(t, foundNode)
 
-	require.True(t, key.Equal(foundNode.Key(), key.Key8(4)))
+	require.True(t, key.Equal(foundNode.Key(), tiny.Key(4)))
 
 	// advancing again should reports that it is idle
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -247,27 +245,27 @@ func TestIncludeConnectivityCheckFailure(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
 
-	p, err := NewInclude[key.Key8](rt, cfg)
+	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
 	// add a candidate
-	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
+	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key]{}, state)
 
 	// notify that node was not contacted successfully
-	state = p.Advance(ctx, &EventIncludeConnectivityCheckFailure[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
+	state = p.Advance(ctx, &EventIncludeConnectivityCheckFailure[tiny.Key, tiny.Node]{
+		NodeID: tiny.NewNode(tiny.Key(0b00000100)),
 	})
 
 	// should respond that state machine is idle
 	require.IsType(t, &StateIncludeIdle{}, state)
 
 	// the routing table should not contain the node
-	foundNode, found := rt.GetNode(key.Key8(4))
+	foundNode, found := rt.GetNode(tiny.Key(4))
 	require.False(t, found)
-	require.Nil(t, foundNode)
+	require.Zero(t, foundNode)
 }

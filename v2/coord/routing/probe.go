@@ -55,8 +55,8 @@ type RoutingTableCpl[K kad.Key[K], N kad.NodeID[K]] interface {
 // The state machine accepts the [EventProbeNotifyConnectivity] event as a notification that an external system has
 // performed a suitable connectivity check, such as when the node responds to a query. The probe state machine treats
 // these events as if a successful response had been received from a check by advancing the time of the next check.
-type Probe[K kad.Key[K]] struct {
-	rt RoutingTableCpl[K, kad.NodeID[K]]
+type Probe[K kad.Key[K], N kad.NodeID[K]] struct {
+	rt RoutingTableCpl[K, N]
 
 	// nvl is a list of nodes with information about their connectivity checks
 	// TODO: this will be expanded with more general scoring information related to their utility
@@ -118,14 +118,14 @@ func DefaultProbeConfig() *ProbeConfig {
 	}
 }
 
-func NewProbe[K kad.Key[K]](rt RoutingTableCpl[K, kad.NodeID[K]], cfg *ProbeConfig) (*Probe[K], error) {
+func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *ProbeConfig) (*Probe[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultProbeConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	return &Probe[K]{
+	return &Probe[K, N]{
 		cfg: *cfg,
 		rt:  rt,
 		nvl: NewNodeValueList[K](),
@@ -133,7 +133,7 @@ func NewProbe[K kad.Key[K]](rt RoutingTableCpl[K, kad.NodeID[K]], cfg *ProbeConf
 }
 
 // Advance advances the state of the probe state machine by attempting to advance its query if running.
-func (p *Probe[K]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
+func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	_, span := tele.StartSpan(ctx, "Probe.Advance")
 	defer span.End()
 

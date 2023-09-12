@@ -57,11 +57,11 @@ package dtype
 // }
 
 // type (
-// 	// Request8 is a Request message that uses key.Key8
-// 	Request8 = Request[key.Key8]
+// 	// Request8 is a Request message that uses tiny.Key
+// 	Request8 = Request[tiny.Key]
 
-// 	// Response8 is a Response message that uses key.Key8
-// 	Response8 = Response[key.Key8]
+// 	// Response8 is a Response message that uses tiny.Key
+// 	Response8 = Response[tiny.Key]
 
 // 	// Request8 is a Request message that uses key.Key256
 // 	Request256 = Request[key.Key256]
@@ -71,8 +71,8 @@ package dtype
 // )
 
 // var (
-// 	_ kad.Request[key.Key8, StrAddr]  = (*Request8)(nil)
-// 	_ kad.Response[key.Key8, StrAddr] = (*Response8)(nil)
+// 	_ kad.Request[tiny.Key, StrAddr]  = (*Request8)(nil)
+// 	_ kad.Response[tiny.Key, StrAddr] = (*Response8)(nil)
 // )
 
 // var (

@@ -13,7 +13,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 
@@ -42,7 +41,7 @@ type DHT struct {
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
+	rt routing.RoutingTableCpl[key.Key256, kadt.PeerID]
 
 	// backends
 	backends map[string]Backend

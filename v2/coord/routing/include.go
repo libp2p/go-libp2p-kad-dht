@@ -14,18 +14,18 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-type check[K kad.Key[K]] struct {
-	NodeID  kad.NodeID[K]
+type check[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID  N
 	Started time.Time
 }
 
-type Include[K kad.Key[K]] struct {
-	rt kad.RoutingTable[K, kad.NodeID[K]]
+type Include[K kad.Key[K], N kad.NodeID[K]] struct {
+	rt kad.RoutingTable[K, N]
 
 	// checks is an index of checks in progress
-	checks map[string]check[K]
+	checks map[string]check[K, N]
 
-	candidates *nodeQueue[K]
+	candidates *nodeQueue[K, N]
 
 	// cfg is a copy of the optional configuration supplied to the Include
 	cfg IncludeConfig
@@ -83,29 +83,29 @@ func DefaultIncludeConfig() *IncludeConfig {
 	}
 }
 
-func NewInclude[K kad.Key[K]](rt kad.RoutingTable[K, kad.NodeID[K]], cfg *IncludeConfig) (*Include[K], error) {
+func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *IncludeConfig) (*Include[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultIncludeConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	return &Include[K]{
-		candidates: newNodeQueue[K](cfg.QueueCapacity),
+	return &Include[K, N]{
+		candidates: newNodeQueue[K, N](cfg.QueueCapacity),
 		cfg:        *cfg,
 		rt:         rt,
-		checks:     make(map[string]check[K], cfg.Concurrency),
+		checks:     make(map[string]check[K, N], cfg.Concurrency),
 	}, nil
 }
 
 // Advance advances the state of the include state machine by attempting to advance its query if running.
-func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState {
+func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeState {
 	ctx, span := tele.StartSpan(ctx, "Include.Advance")
 	defer span.End()
 
 	switch tev := ev.(type) {
 
-	case *EventIncludeAddCandidate[K]:
+	case *EventIncludeAddCandidate[K, N]:
 		// Ignore if already running a check
 		_, checking := b.checks[key.HexString(tev.NodeID.Key())]
 		if checking {
@@ -123,7 +123,7 @@ func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState 
 		}
 		b.candidates.Enqueue(ctx, tev.NodeID)
 
-	case *EventIncludeConnectivityCheckSuccess[K]:
+	case *EventIncludeConnectivityCheckSuccess[K, N]:
 		ch, ok := b.checks[key.HexString(tev.NodeID.Key())]
 		if ok {
 			delete(b.checks, key.HexString(tev.NodeID.Key()))
@@ -133,7 +133,7 @@ func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState 
 				}
 			}
 		}
-	case *EventIncludeConnectivityCheckFailure[K]:
+	case *EventIncludeConnectivityCheckFailure[K, N]:
 		delete(b.checks, key.HexString(tev.NodeID.Key()))
 
 	case *EventIncludePoll:
@@ -158,7 +158,7 @@ func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState 
 		return &StateIncludeIdle{}
 	}
 
-	b.checks[key.HexString(candidate.Key())] = check[K]{
+	b.checks[key.HexString(candidate.Key())] = check[K, N]{
 		NodeID:  candidate,
 		Started: b.cfg.Clock.Now(),
 	}
@@ -170,23 +170,23 @@ func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState 
 }
 
 // nodeQueue is a bounded queue of unique NodeIDs
-type nodeQueue[K kad.Key[K]] struct {
+type nodeQueue[K kad.Key[K], N kad.NodeID[K]] struct {
 	capacity int
-	nodes    []kad.NodeID[K]
+	nodes    []N
 	keys     map[string]struct{}
 }
 
-func newNodeQueue[K kad.Key[K]](capacity int) *nodeQueue[K] {
-	return &nodeQueue[K]{
+func newNodeQueue[K kad.Key[K], N kad.NodeID[K]](capacity int) *nodeQueue[K, N] {
+	return &nodeQueue[K, N]{
 		capacity: capacity,
-		nodes:    make([]kad.NodeID[K], 0, capacity),
+		nodes:    make([]N, 0, capacity),
 		keys:     make(map[string]struct{}, capacity),
 	}
 }
 
 // Enqueue adds a node to the queue. It returns true if the node was
 // added and false otherwise.
-func (q *nodeQueue[K]) Enqueue(ctx context.Context, id kad.NodeID[K]) bool {
+func (q *nodeQueue[K, N]) Enqueue(ctx context.Context, id N) bool {
 	if len(q.nodes) == q.capacity {
 		return false
 	}
@@ -202,20 +202,20 @@ func (q *nodeQueue[K]) Enqueue(ctx context.Context, id kad.NodeID[K]) bool {
 
 // Dequeue reads an node from the queue. It returns the node and a true value
 // if a node was read or nil and false if no node was read.
-func (q *nodeQueue[K]) Dequeue(ctx context.Context) (kad.NodeID[K], bool) {
+func (q *nodeQueue[K, N]) Dequeue(ctx context.Context) (N, bool) {
 	if len(q.nodes) == 0 {
-		var v kad.NodeID[K]
+		var v N
 		return v, false
 	}
 
-	var id kad.NodeID[K]
+	var id N
 	id, q.nodes = q.nodes[0], q.nodes[1:]
 	delete(q.keys, key.HexString(id.Key()))
 
 	return id, true
 }
 
-func (q *nodeQueue[K]) HasCapacity() bool {
+func (q *nodeQueue[K, N]) HasCapacity() bool {
 	return len(q.nodes) < q.capacity
 }
 
@@ -267,23 +267,23 @@ type IncludeEvent interface {
 type EventIncludePoll struct{}
 
 // EventIncludeAddCandidate notifies an [Include] that a node should be added to the candidate list.
-type EventIncludeAddCandidate[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K] // the candidate node
+type EventIncludeAddCandidate[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N // the candidate node
 }
 
 // EventIncludeConnectivityCheckSuccess notifies an [Include] that a requested connectivity check has received a successful response.
-type EventIncludeConnectivityCheckSuccess[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K] // the node the message was sent to
+type EventIncludeConnectivityCheckSuccess[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N // the node the message was sent to
 }
 
 // EventIncludeConnectivityCheckFailure notifies an [Include] that a requested connectivity check has failed.
-type EventIncludeConnectivityCheckFailure[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K] // the node the message was sent to
-	Error  error         // the error that caused the failure, if any
+type EventIncludeConnectivityCheckFailure[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N     // the node the message was sent to
+	Error  error // the error that caused the failure, if any
 }
 
 // includeEvent() ensures that only events accepted by an [Include] can be assigned to the [IncludeEvent] interface.
-func (*EventIncludePoll) includeEvent()                        {}
-func (*EventIncludeAddCandidate[K]) includeEvent()             {}
-func (*EventIncludeConnectivityCheckSuccess[K]) includeEvent() {}
-func (*EventIncludeConnectivityCheckFailure[K]) includeEvent() {}
+func (*EventIncludePoll) includeEvent()                           {}
+func (*EventIncludeAddCandidate[K, N]) includeEvent()             {}
+func (*EventIncludeConnectivityCheckSuccess[K, N]) includeEvent() {}
+func (*EventIncludeConnectivityCheckFailure[K, N]) includeEvent() {}

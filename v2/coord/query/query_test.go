@@ -6,27 +6,26 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/dtype"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
 )
 
 func TestQueryConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
-		cfg := DefaultQueryConfig[key.Key8]()
+		cfg := DefaultQueryConfig[tiny.Key]()
 		require.NoError(t, cfg.Validate())
 	})
 
 	t.Run("clock is not nil", func(t *testing.T) {
-		cfg := DefaultQueryConfig[key.Key8]()
+		cfg := DefaultQueryConfig[tiny.Key]()
 		cfg.Clock = nil
 		require.Error(t, cfg.Validate())
 	})
 
 	t.Run("request timeout positive", func(t *testing.T) {
-		cfg := DefaultQueryConfig[key.Key8]()
+		cfg := DefaultQueryConfig[tiny.Key]()
 		cfg.RequestTimeout = 0
 		require.Error(t, cfg.Validate())
 		cfg.RequestTimeout = -1
@@ -34,7 +33,7 @@ func TestQueryConfigValidate(t *testing.T) {
 	})
 
 	t.Run("concurrency positive", func(t *testing.T) {
-		cfg := DefaultQueryConfig[key.Key8]()
+		cfg := DefaultQueryConfig[tiny.Key]()
 		cfg.Concurrency = 0
 		require.Error(t, cfg.Validate())
 		cfg.Concurrency = -1
@@ -42,7 +41,7 @@ func TestQueryConfigValidate(t *testing.T) {
 	})
 
 	t.Run("num results positive", func(t *testing.T) {
-		cfg := DefaultQueryConfig[key.Key8]()
+		cfg := DefaultQueryConfig[tiny.Key]()
 		cfg.NumResults = 0
 		require.Error(t, cfg.Validate())
 		cfg.NumResults = -1
@@ -53,31 +52,31 @@ func TestQueryConfigValidate(t *testing.T) {
 func TestQueryMessagesNode(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{a}
+	knownNodes := []tiny.Node{a}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is request to send a message to the node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// check that we are messaging the correct node with the right message
-	st := state.(*StateQueryFindCloser[key.Key8])
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, queryID, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 	require.True(t, key.Equal(target, st.Target))
@@ -96,15 +95,15 @@ func TestQueryMessagesNode(t *testing.T) {
 func TestQueryMessagesNearest(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000011)
-	far := dtype.NewID(key.Key8(0b11011011))
-	near := dtype.NewID(key.Key8(0b00000110))
+	target := tiny.Key(0b00000011)
+	far := tiny.NewNode(tiny.Key(0b11011011))
+	near := tiny.NewNode(tiny.Key(0b00000110))
 
 	// ensure near is nearer to target than far is
 	require.Less(t, target.Xor(near.Key()), target.Xor(far.Key()))
 
 	// knownNodes are in "random" order with furthest before nearest
-	knownNodes := []kad.NodeID[key.Key8]{
+	knownNodes := []tiny.Node{
 		far,
 		near,
 	}
@@ -112,49 +111,49 @@ func TestQueryMessagesNearest(t *testing.T) {
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is message the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// check that we are contacting the nearest node first
-	st := state.(*StateQueryFindCloser[key.Key8])
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, near, st.NodeID)
 }
 
 func TestQueryCancelFinishesQuery(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{a}
+	knownNodes := []tiny.Node{a}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is request to send a message to the node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	clk.Add(time.Second)
 
@@ -178,21 +177,21 @@ func TestQueryCancelFinishesQuery(t *testing.T) {
 func TestQueryNoClosest(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000011)
+	target := tiny.Key(0b00000011)
 
 	// no known nodes to start with
-	knownNodes := []kad.NodeID[key.Key8]{}
+	knownNodes := []tiny.Node{}
 
 	iter := NewClosestNodesIter(target)
 
 	clk := clock.NewMock()
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// query is finished because there were no nodes to contat
@@ -217,39 +216,39 @@ func TestQueryNoClosest(t *testing.T) {
 func TestQueryWaitsAtCapacity(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{a, b, c}
+	knownNodes := []tiny.Node{a, b, c}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is request to send a message to the node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 	require.Equal(t, 1, st.Stats.Requests)
 
 	// advancing sends the message to the next node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 	require.Equal(t, 2, st.Stats.Requests)
 
@@ -264,11 +263,11 @@ func TestQueryWaitsAtCapacity(t *testing.T) {
 func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -276,29 +275,29 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 	require.True(t, target.Xor(c.Key()).Compare(target.Xor(d.Key())) == -1)
 
 	// knownNodes are in "random" order
-	knownNodes := []kad.NodeID[key.Key8]{b, c, a, d}
+	knownNodes := []tiny.Node{b, c, a, d}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.RequestTimeout = 3 * time.Minute
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
-	stwm := state.(*StateQueryFindCloser[key.Key8])
+	stwm := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 1, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -308,10 +307,10 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
-	stwm = state.(*StateQueryFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 2, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -321,10 +320,10 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// while the query has capacity the query should contact the second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, c, st.NodeID)
-	stwm = state.(*StateQueryFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 3, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -345,11 +344,11 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// the first node request should have timed out, making capacity for the last node to attempt connection
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, d, st.NodeID)
 
-	stwm = state.(*StateQueryFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 4, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 1, stwm.Stats.Failure)
@@ -370,11 +369,11 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -382,48 +381,48 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 	require.True(t, target.Xor(c.Key()).Compare(target.Xor(d.Key())) == -1)
 
 	// knownNodes are in "random" order
-	knownNodes := []kad.NodeID[key.Key8]{b, c, a, d}
+	knownNodes := []tiny.Node{b, c, a, d}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
-	stwm := state.(*StateQueryFindCloser[key.Key8])
+	stwm := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 1, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
-	stwm = state.(*StateQueryFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 2, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
 
 	// while the query has capacity the query should contact the second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, c, st.NodeID)
-	stwm = state.(*StateQueryFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 3, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -433,11 +432,11 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was contacted successfully, now node d can be contacted
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: a})
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{NodeID: a})
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, d, st.NodeID)
-	stwm = state.(*StateQueryFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 4, stwm.Stats.Requests)
 	require.Equal(t, 1, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -454,11 +453,11 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -466,26 +465,26 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 	require.True(t, target.Xor(c.Key()).Compare(target.Xor(d.Key())) == -1)
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{d}
+	knownNodes := []tiny.Node{d}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, d, st.NodeID)
 
 	// advancing reports query has capacity
@@ -493,28 +492,28 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that first node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID: d,
-		CloserNodes: []kad.NodeID[key.Key8]{
+		CloserNodes: []tiny.Node{
 			b,
 			a,
 		},
 	})
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// query should contact the next nearest uncontacted node
-	st = state.(*StateQueryFindCloser[key.Key8])
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 }
 
 func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -522,32 +521,32 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 	require.True(t, target.Xor(c.Key()).Compare(target.Xor(d.Key())) == -1)
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{d, a}
+	knownNodes := []tiny.Node{d, a}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 
 	// next the query attempts to contact second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, d, st.NodeID)
 
 	// advancing reports query has no capacity
@@ -555,47 +554,47 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that second node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID: d,
-		CloserNodes: []kad.NodeID[key.Key8]{
+		CloserNodes: []tiny.Node{
 			b,
 			a,
 		},
 	})
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// query should contact the next nearest uncontacted node, which is b
-	st = state.(*StateQueryFindCloser[key.Key8])
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 }
 
 func TestQueryCancelFinishesIteration(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{a}
+	knownNodes := []tiny.Node{a}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 
 	// cancel the query so it is now finished
@@ -609,31 +608,31 @@ func TestQueryCancelFinishesIteration(t *testing.T) {
 func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{b}
+	knownNodes := []tiny.Node{b}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 
 	// cancel the query so it is now finished
@@ -647,9 +646,9 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 	require.Equal(t, 0, stf.Stats.Failure)
 
 	// notify query that second node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID:      b,
-		CloserNodes: []kad.NodeID[key.Key8]{a},
+		CloserNodes: []tiny.Node{a},
 	})
 
 	// query remains finished
@@ -665,42 +664,42 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 func TestQueryWithCloserIterIgnoresMessagesFromUnknownNodes(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{c}
+	knownNodes := []tiny.Node{c}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, c, st.NodeID)
-	stwm := state.(*StateQueryFindCloser[key.Key8])
+	stwm := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, 1, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
 
 	// notify query that second node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID:      b,
-		CloserNodes: []kad.NodeID[key.Key8]{a},
+		CloserNodes: []tiny.Node{a},
 	})
 
 	// query ignores message from unknown node
@@ -715,54 +714,54 @@ func TestQueryWithCloserIterIgnoresMessagesFromUnknownNodes(t *testing.T) {
 func TestQueryWithCloserIterFinishesWhenNumResultsReached(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{a, b, c, d}
+	knownNodes := []tiny.Node{a, b, c, d}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 4
 	cfg.NumResults = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// contact first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 
 	// contact second node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 
 	// notify query that first node was contacted successfully
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID: a,
 	})
 
 	// query attempts to contact third node
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, c, st.NodeID)
 
 	// notify query that second node was contacted successfully
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID: b,
 	})
 
@@ -773,63 +772,63 @@ func TestQueryWithCloserIterFinishesWhenNumResultsReached(t *testing.T) {
 func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
 
 	// one known node to start with, the furthesr
-	knownNodes := []kad.NodeID[key.Key8]{c}
+	knownNodes := []tiny.Node{c}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 4
 	cfg.NumResults = 2
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// contact first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, c, st.NodeID)
 
 	// notify query that node was contacted successfully and tell it about
 	// a closer one
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID:      c,
-		CloserNodes: []kad.NodeID[key.Key8]{b},
+		CloserNodes: []tiny.Node{b},
 	})
 
 	// query attempts to contact second node
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 
 	// notify query that node was contacted successfully and tell it about
 	// a closer one
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID:      b,
-		CloserNodes: []kad.NodeID[key.Key8]{a},
+		CloserNodes: []tiny.Node{a},
 	})
 
 	// query has seen enough successful contacts but there are still
 	// closer nodes that have not been contacted, so query attempts
 	// to contact third node
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 
 	// notify query that second node was contacted successfully
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID: a,
 	})
 
@@ -843,47 +842,47 @@ func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 func TestQueryNotContactedMakesCapacity(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
 	require.True(t, target.Xor(b.Key()).Compare(target.Xor(c.Key())) == -1)
 	require.True(t, target.Xor(c.Key()).Compare(target.Xor(d.Key())) == -1)
 
-	knownNodes := []kad.NodeID[key.Key8]{a, b, c, d}
-	iter := NewSequentialIter[key.Key8]()
+	knownNodes := []tiny.Node{a, b, c, d}
+	iter := NewSequentialIter[tiny.Key]()
 
 	clk := clock.NewMock()
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, a, st.NodeID)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 
 	// while the query has capacity the query should contact the second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, c, st.NodeID)
 
 	// the query should be at capacity
@@ -891,9 +890,9 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was not contacted, now node d can be contacted
-	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: a})
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryFindCloser[key.Key8])
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[tiny.Key]{NodeID: a})
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st = state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, d, st.NodeID)
 
 	// the query should be at capacity again
@@ -904,54 +903,54 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 func TestQueryAllNotContactedFinishes(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
 
 	// knownNodes are in "random" order
-	knownNodes := []kad.NodeID[key.Key8]{a, b, c}
+	knownNodes := []tiny.Node{a, b, c}
 
 	clk := clock.NewMock()
 
-	iter := NewSequentialIter[key.Key8]()
+	iter := NewSequentialIter[tiny.Key]()
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) // allow all to be contacted at once
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// while the query has capacity the query should contact the third nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// the query should be at capacity
 	state = qry.Advance(ctx, nil)
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was not contacted
-	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: a})
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[tiny.Key]{NodeID: a})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that second node was not contacted
-	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: b})
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[tiny.Key]{NodeID: b})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that third node was not contacted
-	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: c})
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[tiny.Key]{NodeID: c})
 
 	// query has finished since it contacted all possible nodes
 	require.IsType(t, &StateQueryFinished{}, state)
@@ -963,54 +962,54 @@ func TestQueryAllNotContactedFinishes(t *testing.T) {
 func TestQueryAllContactedFinishes(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
 
-	knownNodes := []kad.NodeID[key.Key8]{a, b, c}
+	knownNodes := []tiny.Node{a, b, c}
 
 	clk := clock.NewMock()
 
-	iter := NewSequentialIter[key.Key8]()
+	iter := NewSequentialIter[tiny.Key]()
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes)    // allow all to be contacted at once
 	cfg.NumResults = len(knownNodes) + 1 // one more than the size of the network
 
 	queryID := QueryID("test")
 
-	self := dtype.NewID(key.Key8(0))
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	self := tiny.NewNode(tiny.Key(0))
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// while the query has capacity the query should contact the third nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
 
 	// the query should be at capacity
 	state = qry.Advance(ctx, nil)
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was contacted successfully, but no closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: a})
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{NodeID: a})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that second node was contacted successfully, but no closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: b})
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{NodeID: b})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that third node was contacted successfully, but no closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: c})
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{NodeID: c})
 
 	// query has finished since it contacted all possible nodes, even though it didn't
 	// reach the desired NumResults
@@ -1023,37 +1022,37 @@ func TestQueryAllContactedFinishes(t *testing.T) {
 func TestQueryNeverMessagesSelf(t *testing.T) {
 	ctx := context.Background()
 
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
 
 	// one known node to start with
-	knownNodes := []kad.NodeID[key.Key8]{b}
+	knownNodes := []tiny.Node{b}
 
 	clk := clock.NewMock()
 
 	iter := NewClosestNodesIter(target)
 
-	cfg := DefaultQueryConfig[key.Key8]()
+	cfg := DefaultQueryConfig[tiny.Key]()
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
 	queryID := QueryID("test")
 
 	self := a
-	qry, err := NewQuery[key.Key8](self, queryID, target, iter, knownNodes, cfg)
+	qry, err := NewQuery[tiny.Key](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[tiny.Key]{}, state)
+	st := state.(*StateQueryFindCloser[tiny.Key])
 	require.Equal(t, b, st.NodeID)
 
 	// notify query that first node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[tiny.Key, tiny.Node]{
 		NodeID:      b,
-		CloserNodes: []kad.NodeID[key.Key8]{a},
+		CloserNodes: []tiny.Node{a},
 	})
 
 	// query is finished since it can't contact self

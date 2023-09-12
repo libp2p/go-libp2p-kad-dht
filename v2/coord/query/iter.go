@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/key/trie"
@@ -30,7 +31,7 @@ type ClosestNodesIter[K kad.Key[K]] struct {
 	nodes *trie.Trie[K, *NodeStatus[K]]
 }
 
-var _ NodeIter[key.Key8] = (*ClosestNodesIter[key.Key8])(nil)
+var _ NodeIter[tiny.Key] = (*ClosestNodesIter[tiny.Key])(nil)
 
 // NewClosestNodesIter creates a new ClosestNodesIter
 func NewClosestNodesIter[K kad.Key[K]](target K) *ClosestNodesIter[K] {
@@ -68,7 +69,7 @@ type SequentialIter[K kad.Key[K]] struct {
 	nodes []*NodeStatus[K]
 }
 
-var _ NodeIter[key.Key8] = (*SequentialIter[key.Key8])(nil)
+var _ NodeIter[tiny.Key] = (*SequentialIter[tiny.Key])(nil)
 
 // NewSequentialIter creates a new SequentialIter
 func NewSequentialIter[K kad.Key[K]]() *SequentialIter[K] {

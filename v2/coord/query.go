@@ -13,7 +13,7 @@ import (
 )
 
 type PooledQueryBehaviour struct {
-	pool    *query.Pool[KadKey]
+	pool    *query.Pool[KadKey, kadt.PeerID]
 	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
@@ -24,7 +24,7 @@ type PooledQueryBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[KadKey], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(pool *query.Pool[KadKey, kadt.PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
@@ -45,10 +45,10 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	var cmd query.PoolEvent
 	switch ev := ev.(type) {
 	case *EventStartQuery:
-		cmd = &query.EventPoolAddQuery[KadKey]{
+		cmd = &query.EventPoolAddQuery[KadKey, kadt.PeerID]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
-			KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.KnownClosestNodes),
+			KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.KnownClosestNodes),
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
@@ -75,7 +75,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 				// Stats:    stats,
 			})
 		}
-		cmd = &query.EventPoolFindCloserResponse[KadKey]{
+		cmd = &query.EventPoolFindCloserResponse[KadKey, kadt.PeerID]{
 			NodeID:      kadt.PeerID(ev.To.ID),
 			QueryID:     ev.QueryID,
 			CloserNodes: CloserNodeIDs(ev.CloserNodes),
@@ -151,7 +151,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 	case *query.StatePoolFindCloser[KadKey]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
-			To:      NodeIDToAddrInfo(st.NodeID),
+			To:      KadPeerIDToAddrInfo(st.NodeID),
 			Target:  st.Target,
 			Notify:  p,
 		}, true

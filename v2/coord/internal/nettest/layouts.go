@@ -6,7 +6,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 
@@ -38,7 +37,7 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Node, error) {
 		nodes[i] = &Node{
 			NodeInfo:     ai,
 			Router:       NewRouter(ai.ID, top),
-			RoutingTable: simplert.New[key.Key256, kad.NodeID[key.Key256]](kadt.PeerID(ai.ID), 20),
+			RoutingTable: simplert.New[key.Key256, kadt.PeerID](kadt.PeerID(ai.ID), 20),
 		}
 	}
 

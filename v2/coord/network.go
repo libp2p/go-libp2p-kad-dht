@@ -234,8 +234,8 @@ func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-func CloserNodeIDs(nodes []peer.AddrInfo) []kad.NodeID[KadKey] {
-	ids := make([]kad.NodeID[KadKey], len(nodes))
+func CloserNodeIDs(nodes []peer.AddrInfo) []kadt.PeerID {
+	ids := make([]kadt.PeerID, len(nodes))
 	for i := range nodes {
 		ids[i] = kadt.PeerID(nodes[i].ID)
 	}

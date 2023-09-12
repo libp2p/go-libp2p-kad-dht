@@ -7,15 +7,15 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/dtype"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
 )
 
 func TestClosestNodesIter(t *testing.T) {
-	target := key.Key8(0b00000001)
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -26,15 +26,15 @@ func TestClosestNodesIter(t *testing.T) {
 
 	// add nodes in "random order"
 
-	iter.Add(&NodeStatus[key.Key8]{NodeID: b})
-	iter.Add(&NodeStatus[key.Key8]{NodeID: d})
-	iter.Add(&NodeStatus[key.Key8]{NodeID: a})
-	iter.Add(&NodeStatus[key.Key8]{NodeID: c})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: b})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: d})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: a})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: c})
 
 	// Each should iterate in order of distance from target
 
-	distances := make([]key.Key8, 0, 4)
-	iter.Each(context.Background(), func(ctx context.Context, ns *NodeStatus[key.Key8]) bool {
+	distances := make([]tiny.Key, 0, 4)
+	iter.Each(context.Background(), func(ctx context.Context, ns *NodeStatus[tiny.Key]) bool {
 		distances = append(distances, target.Xor(ns.NodeID.Key()))
 		return false
 	})
@@ -43,24 +43,24 @@ func TestClosestNodesIter(t *testing.T) {
 }
 
 func TestSequentialIter(t *testing.T) {
-	a := dtype.NewID(key.Key8(0b00000100)) // 4
-	b := dtype.NewID(key.Key8(0b00001000)) // 8
-	c := dtype.NewID(key.Key8(0b00010000)) // 16
-	d := dtype.NewID(key.Key8(0b00100000)) // 32
+	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
 
-	iter := NewSequentialIter[key.Key8]()
+	iter := NewSequentialIter[tiny.Key]()
 
 	// add nodes in "random order"
 
-	iter.Add(&NodeStatus[key.Key8]{NodeID: b})
-	iter.Add(&NodeStatus[key.Key8]{NodeID: d})
-	iter.Add(&NodeStatus[key.Key8]{NodeID: a})
-	iter.Add(&NodeStatus[key.Key8]{NodeID: c})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: b})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: d})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: a})
+	iter.Add(&NodeStatus[tiny.Key]{NodeID: c})
 
 	// Each should iterate in order the nodes were added to the iiterator
 
-	order := make([]key.Key8, 0, 4)
-	iter.Each(context.Background(), func(ctx context.Context, ns *NodeStatus[key.Key8]) bool {
+	order := make([]tiny.Key, 0, 4)
+	iter.Each(context.Background(), func(ctx context.Context, ns *NodeStatus[tiny.Key]) bool {
 		order = append(order, ns.NodeID.Key())
 		return false
 	})

@@ -51,9 +51,9 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the bootstrap state machine
-	expected := &routing.EventBootstrapStart[KadKey]{
+	expected := &routing.EventBootstrapStart[KadKey, kadt.PeerID]{
 		ProtocolID:        ev.ProtocolID,
-		KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
+		KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
 	}
 	require.Equal(t, expected, bootstrap.Received)
 }
@@ -84,11 +84,11 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapFindCloserResponse[KadKey]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserResponse[KadKey, kadt.PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserResponse[KadKey])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
-	require.Equal(t, SliceOfAddrInfoToSliceOfNodeID(ev.CloserNodes), rev.CloserNodes)
+	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserResponse[KadKey, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
+	require.Equal(t, SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes), rev.CloserNodes)
 }
 
 func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
@@ -118,10 +118,10 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapFindCloserFailure[KadKey]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserFailure[KadKey, kadt.PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserFailure[KadKey])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
+	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserFailure[KadKey, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -149,7 +149,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the include state machine
-	expected := &routing.EventIncludeAddCandidate[KadKey]{
+	expected := &routing.EventIncludeAddCandidate[KadKey, kadt.PeerID]{
 		NodeID: kadt.PeerID(ev.NodeInfo.ID),
 	}
 	require.Equal(t, expected, include.Received)
@@ -182,10 +182,10 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeConnectivityCheckSuccess[KadKey]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckSuccess[KadKey, kadt.PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeConnectivityCheckSuccess[KadKey])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
+	rev := include.Received.(*routing.EventIncludeConnectivityCheckSuccess[KadKey, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
 }
 
 func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
@@ -216,10 +216,10 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeConnectivityCheckFailure[KadKey]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckFailure[KadKey, kadt.PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeConnectivityCheckFailure[KadKey])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
+	rev := include.Received.(*routing.EventIncludeConnectivityCheckFailure[KadKey, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -235,7 +235,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 
 	includeCfg := routing.DefaultIncludeConfig()
 	includeCfg.Clock = clk
-	include, err := routing.NewInclude[KadKey](rt, includeCfg)
+	include, err := routing.NewInclude[KadKey, kadt.PeerID](rt, includeCfg)
 	require.NoError(t, err)
 
 	probeCfg := routing.DefaultProbeConfig()

@@ -14,12 +14,12 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-type Bootstrap[K kad.Key[K]] struct {
+type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	// self is the node id of the system the bootstrap is running on
-	self kad.NodeID[K]
+	self N
 
 	// qry is the query used by the bootstrap process
-	qry *query.Query[K]
+	qry *query.Query[K, N]
 
 	// cfg is a copy of the optional configuration supplied to the Bootstrap
 	cfg BootstrapConfig[K]
@@ -77,26 +77,26 @@ func DefaultBootstrapConfig[K kad.Key[K]]() *BootstrapConfig[K] {
 	}
 }
 
-func NewBootstrap[K kad.Key[K]](self kad.NodeID[K], cfg *BootstrapConfig[K]) (*Bootstrap[K], error) {
+func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig[K]) (*Bootstrap[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultBootstrapConfig[K]()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	return &Bootstrap[K]{
+	return &Bootstrap[K, N]{
 		self: self,
 		cfg:  *cfg,
 	}, nil
 }
 
 // Advance advances the state of the bootstrap by attempting to advance its query if running.
-func (b *Bootstrap[K]) Advance(ctx context.Context, ev BootstrapEvent) BootstrapState {
+func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) BootstrapState {
 	ctx, span := tele.StartSpan(ctx, "Bootstrap.Advance")
 	defer span.End()
 
 	switch tev := ev.(type) {
-	case *EventBootstrapStart[K]:
+	case *EventBootstrapStart[K, N]:
 
 		// TODO: ignore start event if query is already in progress
 		iter := query.NewClosestNodesIter(b.self.Key())
@@ -116,12 +116,12 @@ func (b *Bootstrap[K]) Advance(ctx context.Context, ev BootstrapEvent) Bootstrap
 		b.qry = qry
 		return b.advanceQuery(ctx, nil)
 
-	case *EventBootstrapFindCloserResponse[K]:
-		return b.advanceQuery(ctx, &query.EventQueryFindCloserResponse[K]{
+	case *EventBootstrapFindCloserResponse[K, N]:
+		return b.advanceQuery(ctx, &query.EventQueryFindCloserResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
-	case *EventBootstrapFindCloserFailure[K]:
+	case *EventBootstrapFindCloserFailure[K, N]:
 		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K]{
 			NodeID: tev.NodeID,
 			Error:  tev.Error,
@@ -140,7 +140,7 @@ func (b *Bootstrap[K]) Advance(ctx context.Context, ev BootstrapEvent) Bootstrap
 	return &StateBootstrapIdle{}
 }
 
-func (b *Bootstrap[K]) advanceQuery(ctx context.Context, qev query.QueryEvent) BootstrapState {
+func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) BootstrapState {
 	state := b.qry.Advance(ctx, qev)
 	switch st := state.(type) {
 	case *query.StateQueryFindCloser[K]:
@@ -226,25 +226,25 @@ type BootstrapEvent interface {
 type EventBootstrapPoll struct{}
 
 // EventBootstrapStart is an event that attempts to start a new bootstrap
-type EventBootstrapStart[K kad.Key[K]] struct {
+type EventBootstrapStart[K kad.Key[K], N kad.NodeID[K]] struct {
 	ProtocolID        address.ProtocolID
-	KnownClosestNodes []kad.NodeID[K]
+	KnownClosestNodes []N
 }
 
 // EventBootstrapFindCloserResponse notifies a bootstrap that an attempt to find closer nodes has received a successful response.
-type EventBootstrapFindCloserResponse[K kad.Key[K]] struct {
-	NodeID      kad.NodeID[K]   // the node the message was sent to
-	CloserNodes []kad.NodeID[K] // the closer nodes sent by the node
+type EventBootstrapFindCloserResponse[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID      N   // the node the message was sent to
+	CloserNodes []N // the closer nodes sent by the node
 }
 
 // EventBootstrapFindCloserFailure notifies a bootstrap that an attempt to find closer nodes has failed.
-type EventBootstrapFindCloserFailure[K kad.Key[K]] struct {
-	NodeID kad.NodeID[K] // the node the message was sent to
-	Error  error         // the error that caused the failure, if any
+type EventBootstrapFindCloserFailure[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N     // the node the message was sent to
+	Error  error // the error that caused the failure, if any
 }
 
 // bootstrapEvent() ensures that only events accepted by a [Bootstrap] can be assigned to the [BootstrapEvent] interface.
-func (*EventBootstrapPoll) bootstrapEvent()                  {}
-func (*EventBootstrapStart[K]) bootstrapEvent()              {}
-func (*EventBootstrapFindCloserResponse[K]) bootstrapEvent() {}
-func (*EventBootstrapFindCloserFailure[K]) bootstrapEvent()  {}
+func (*EventBootstrapPoll) bootstrapEvent()                     {}
+func (*EventBootstrapStart[K, N]) bootstrapEvent()              {}
+func (*EventBootstrapFindCloserResponse[K, N]) bootstrapEvent() {}
+func (*EventBootstrapFindCloserFailure[K, N]) bootstrapEvent()  {}

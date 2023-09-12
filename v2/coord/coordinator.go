@@ -37,7 +37,7 @@ type Coordinator struct {
 	cfg CoordinatorConfig
 
 	// rt is the routing table used to look up nodes by distance
-	rt kad.RoutingTable[KadKey, kad.NodeID[KadKey]]
+	rt kad.RoutingTable[KadKey, kadt.PeerID]
 
 	// rtr is the message router used to send messages
 	rtr Router
@@ -148,7 +148,7 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 	}
 }
 
-func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey, kad.NodeID[KadKey]], cfg *CoordinatorConfig) (*Coordinator, error) {
+func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		cfg = DefaultCoordinatorConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -194,7 +194,7 @@ func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[KadKey,
 	// includeCfg.Concurrency = cfg.IncludeConcurrency
 	// includeCfg.Timeout = cfg.IncludeTimeout
 
-	include, err := routing.NewInclude[KadKey](rt, includeCfg)
+	include, err := routing.NewInclude[KadKey, kadt.PeerID](rt, includeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("include: %w", err)
 	}
@@ -324,7 +324,7 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]N
 	closest := c.rt.NearestNodes(k, n)
 	nodes := make([]Node, 0, len(closest))
 	for _, id := range closest {
-		nh, err := c.networkBehaviour.getNodeHandler(ctx, NodeIDToPeerID(id))
+		nh, err := c.networkBehaviour.getNodeHandler(ctx, peer.ID(id))
 		if err != nil {
 			return nil, err
 		}

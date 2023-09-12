@@ -245,7 +245,7 @@ func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256
 	// pre-allocated the result set slice.
 	filtered := make([]*pb.Message_Peer, 0, len(peers))
 	for _, p := range peers {
-		pid := peer.ID(p.(kadt.PeerID)) // TODO: type cast
+		pid := peer.ID(p) // TODO: type cast
 
 		// check for own peer ID
 		if pid == d.host.ID() {

@@ -1,5 +1,9 @@
 name: Go Test
 
+defaults:
+  run:
+    working-directory: v2
+
 on:
   pull_request:
   push:

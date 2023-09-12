@@ -1,8 +1,6 @@
 package coord
 
 import (
-	"time"
-
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
@@ -89,7 +87,6 @@ func (*EventStopQuery) queryCommand()   {}
 
 type EventAddAddrInfo struct {
 	NodeInfo peer.AddrInfo
-	TTL      time.Duration
 }
 
 func (*EventAddAddrInfo) behaviourEvent() {}

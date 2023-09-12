@@ -430,7 +430,7 @@ func (c *Coordinator) Query(ctx context.Context, target KadKey, fn QueryFunc) (Q
 // AddNodes suggests new DHT nodes and their associated addresses to be added to the routing table.
 // If the routing table is updated as a result of this operation an EventRoutingUpdated notification
 // is emitted on the routing notification channel.
-func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl time.Duration) error {
+func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.AddNodes")
 	defer span.End()
 	for _, ai := range ais {
@@ -443,7 +443,6 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo, ttl tim
 
 		c.routingBehaviour.Notify(ctx, &EventAddAddrInfo{
 			NodeInfo: ai,
-			TTL:      ttl,
 		})
 
 	}

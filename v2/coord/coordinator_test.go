@@ -331,8 +331,8 @@ func TestIncludeNode(t *testing.T) {
 	w := new(notificationWatcher)
 	w.Watch(t, ctx, d.RoutingNotifications())
 
-	// inject a new node into the dht's includeEvents queue
-	err = d.AddNodes(ctx, []peer.AddrInfo{candidate}, time.Minute)
+	// inject a new node
+	err = d.AddNodes(ctx, []peer.AddrInfo{candidate})
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table

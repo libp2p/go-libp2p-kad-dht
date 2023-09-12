@@ -52,7 +52,6 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 
 	// the event that should be passed to the bootstrap state machine
 	expected := &routing.EventBootstrapStart[KadKey, kadt.PeerID]{
-		ProtocolID:        ev.ProtocolID,
 		KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
 	}
 	require.Equal(t, expected, bootstrap.Received)

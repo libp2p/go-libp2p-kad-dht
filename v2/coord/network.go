@@ -36,7 +36,7 @@ func NewNetworkBehaviour(rtr Router, logger *slog.Logger, tracer trace.Tracer) *
 		rtr:          rtr,
 		nodeHandlers: make(map[peer.ID]*NodeHandler),
 		ready:        make(chan struct{}, 1),
-		logger:       logger,
+		logger:       logger.With("behaviour", "network"),
 		tracer:       tracer,
 	}
 

@@ -42,7 +42,7 @@ func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, rout
 		include:   include,
 		probe:     probe,
 		ready:     make(chan struct{}, 1),
-		logger:    logger,
+		logger:    logger.With("behaviour", "routing"),
 		tracer:    tracer,
 	}
 	return r
@@ -65,7 +65,6 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventStartBootstrap:
 		span.SetAttributes(attribute.String("event", "EventStartBootstrap"))
 		cmd := &routing.EventBootstrapStart[KadKey, kadt.PeerID]{
-			ProtocolID:        ev.ProtocolID,
 			KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
 		}
 		// attempt to advance the bootstrap
@@ -123,6 +122,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 
 		case "include":
 			var cmd routing.IncludeEvent
+
 			// require that the node responded with at least one closer node
 			if len(ev.CloserNodes) > 0 {
 				cmd = &routing.EventIncludeConnectivityCheckSuccess[KadKey, kadt.PeerID]{

@@ -29,7 +29,7 @@ func NewPooledQueryBehaviour(pool *query.Pool[KadKey, kadt.PeerID], logger *slog
 		pool:    pool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
-		logger:  logger,
+		logger:  logger.With("behaviour", "query"),
 		tracer:  tracer,
 	}
 	return h

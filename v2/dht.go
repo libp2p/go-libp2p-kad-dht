@@ -308,7 +308,12 @@ func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Du
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
 	defer span.End()
 
-	return d.kad.AddNodes(ctx, ais, ttl)
+	ps := d.host.Peerstore()
+	for _, ai := range ais {
+		ps.AddAddrs(ai.ID, ai.Addrs, ttl)
+	}
+
+	return d.kad.AddNodes(ctx, ais)
 }
 
 // newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by

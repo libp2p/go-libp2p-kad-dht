@@ -467,7 +467,7 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 // NotifyConnectivity notifies the coordinator that a peer has passed a connectivity check
 // which means it is connected and supports finding closer nodes
 func (c *Coordinator) NotifyConnectivity(ctx context.Context, id peer.ID) error {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
 	defer span.End()
 
 	ai := peer.AddrInfo{
@@ -483,7 +483,7 @@ func (c *Coordinator) NotifyConnectivity(ctx context.Context, id peer.ID) error 
 // NotifyNonConnectivity notifies the coordinator that a peer has failed a connectivity check
 // which means it is not connected and/or it doesn't support finding closer nodes
 func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id peer.ID) error {
-	ctx, span := c.cfg.Tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
 	defer span.End()
 
 	c.routingBehaviour.Notify(ctx, &EventNotifyNonConnectivity{

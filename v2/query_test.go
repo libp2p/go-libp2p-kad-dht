@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 )
 
 func newServerHost(t testing.TB) host.Host {
@@ -151,9 +152,10 @@ func connectLinearChain(t *testing.T, ctx context.Context, dhts ...*DHT) {
 func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	d1 := newServerDht(t, nil)
-	d2 := newServerDht(t, nil)
-	d3 := newServerDht(t, nil)
+	cfg := DefaultConfig()
+	d1 := newServerDht(t, cfg)
+	d2 := newServerDht(t, cfg)
+	d3 := newServerDht(t, cfg)
 
 	connectLinearChain(t, ctx, d1, d2, d3)
 
@@ -189,8 +191,10 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 func TestRTEvictionOnFailedQuery(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	d1 := newServerDht(t, nil)
-	d2 := newServerDht(t, nil)
+	cfg := DefaultConfig()
+
+	d1 := newServerDht(t, cfg)
+	d2 := newServerDht(t, cfg)
 	connect(t, ctx, d1, d2)
 	connect(t, ctx, d2, d1)
 

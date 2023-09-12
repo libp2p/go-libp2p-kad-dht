@@ -98,7 +98,6 @@ func TestAddAddresses(t *testing.T) {
 
 	local := newClientDht(t, localCfg)
 
-
 	remote := newServerDht(t, nil)
 
 	// Populate entries in remote's routing table so it passes a connectivity check

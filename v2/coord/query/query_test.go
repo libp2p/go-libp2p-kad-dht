@@ -74,10 +74,10 @@ func TestQueryMessagesNode(t *testing.T) {
 
 	// first thing the new query should do is request to send a message to the node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// check that we are messaging the correct node with the right message
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, queryID, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 	require.True(t, key.Equal(target, st.Target))
@@ -123,10 +123,10 @@ func TestQueryMessagesNearest(t *testing.T) {
 
 	// first thing the new query should do is message the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// check that we are contacting the nearest node first
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, near, st.NodeID)
 }
 
@@ -154,7 +154,7 @@ func TestQueryCancelFinishesQuery(t *testing.T) {
 
 	// first thing the new query should do is request to send a message to the node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	clk.Add(time.Second)
 
@@ -241,15 +241,15 @@ func TestQueryWaitsAtCapacity(t *testing.T) {
 
 	// first thing the new query should do is request to send a message to the node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 	require.Equal(t, 1, st.Stats.Requests)
 
 	// advancing sends the message to the next node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 	require.Equal(t, 2, st.Stats.Requests)
 
@@ -295,10 +295,10 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
-	stwm := state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 1, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -308,10 +308,10 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
-	stwm = state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 2, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -321,10 +321,10 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// while the query has capacity the query should contact the second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, c, st.NodeID)
-	stwm = state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 3, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -345,11 +345,11 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	// the first node request should have timed out, making capacity for the last node to attempt connection
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, d, st.NodeID)
 
-	stwm = state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 4, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 1, stwm.Stats.Failure)
@@ -400,30 +400,30 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
-	stwm := state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 1, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
-	stwm = state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 2, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
 
 	// while the query has capacity the query should contact the second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, c, st.NodeID)
-	stwm = state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 3, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -433,11 +433,11 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was contacted successfully, now node d can be contacted
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{NodeID: a})
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: a})
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, d, st.NodeID)
-	stwm = state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 4, stwm.Stats.Requests)
 	require.Equal(t, 1, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
@@ -484,8 +484,8 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, d, st.NodeID)
 
 	// advancing reports query has capacity
@@ -493,17 +493,17 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that first node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID: d,
 		CloserNodes: []kad.NodeID[key.Key8]{
 			b,
 			a,
 		},
 	})
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// query should contact the next nearest uncontacted node
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 }
 
@@ -540,14 +540,14 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 
 	// next the query attempts to contact second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, d, st.NodeID)
 
 	// advancing reports query has no capacity
@@ -555,17 +555,17 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that second node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID: d,
 		CloserNodes: []kad.NodeID[key.Key8]{
 			b,
 			a,
 		},
 	})
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// query should contact the next nearest uncontacted node, which is b
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 }
 
@@ -594,8 +594,8 @@ func TestQueryCancelFinishesIteration(t *testing.T) {
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 
 	// cancel the query so it is now finished
@@ -632,8 +632,8 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 
 	// cancel the query so it is now finished
@@ -647,7 +647,7 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 	require.Equal(t, 0, stf.Stats.Failure)
 
 	// notify query that second node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID:      b,
 		CloserNodes: []kad.NodeID[key.Key8]{a},
 	})
@@ -689,16 +689,16 @@ func TestQueryWithCloserIterIgnoresMessagesFromUnknownNodes(t *testing.T) {
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, c, st.NodeID)
-	stwm := state.(*StateQueryWaitingFindCloser[key.Key8])
+	stwm := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, 1, stwm.Stats.Requests)
 	require.Equal(t, 0, stwm.Stats.Success)
 	require.Equal(t, 0, stwm.Stats.Failure)
 
 	// notify query that second node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID:      b,
 		CloserNodes: []kad.NodeID[key.Key8]{a},
 	})
@@ -741,28 +741,28 @@ func TestQueryWithCloserIterFinishesWhenNumResultsReached(t *testing.T) {
 
 	// contact first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 
 	// contact second node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 
 	// notify query that first node was contacted successfully
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID: a,
 	})
 
 	// query attempts to contact third node
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, c, st.NodeID)
 
 	// notify query that second node was contacted successfully
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID: b,
 	})
 
@@ -798,25 +798,25 @@ func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 
 	// contact first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, c, st.NodeID)
 
 	// notify query that node was contacted successfully and tell it about
 	// a closer one
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID:      c,
 		CloserNodes: []kad.NodeID[key.Key8]{b},
 	})
 
 	// query attempts to contact second node
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 
 	// notify query that node was contacted successfully and tell it about
 	// a closer one
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID:      b,
 		CloserNodes: []kad.NodeID[key.Key8]{a},
 	})
@@ -824,12 +824,12 @@ func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 	// query has seen enough successful contacts but there are still
 	// closer nodes that have not been contacted, so query attempts
 	// to contact third node
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 
 	// notify query that second node was contacted successfully
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID: a,
 	})
 
@@ -870,20 +870,20 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, a, st.NodeID)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 
 	// while the query has capacity the query should contact the second nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, c, st.NodeID)
 
 	// the query should be at capacity
@@ -891,9 +891,9 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was not contacted, now node d can be contacted
-	state = qry.Advance(ctx, &EventQueryMessageFailure[key.Key8]{NodeID: a})
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st = state.(*StateQueryWaitingFindCloser[key.Key8])
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: a})
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st = state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, d, st.NodeID)
 
 	// the query should be at capacity again
@@ -928,30 +928,30 @@ func TestQueryAllNotContactedFinishes(t *testing.T) {
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// while the query has capacity the query should contact the third nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// the query should be at capacity
 	state = qry.Advance(ctx, nil)
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was not contacted
-	state = qry.Advance(ctx, &EventQueryMessageFailure[key.Key8]{NodeID: a})
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: a})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that second node was not contacted
-	state = qry.Advance(ctx, &EventQueryMessageFailure[key.Key8]{NodeID: b})
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: b})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that third node was not contacted
-	state = qry.Advance(ctx, &EventQueryMessageFailure[key.Key8]{NodeID: c})
+	state = qry.Advance(ctx, &EventQueryFindCloserFailure[key.Key8]{NodeID: c})
 
 	// query has finished since it contacted all possible nodes
 	require.IsType(t, &StateQueryFinished{}, state)
@@ -987,30 +987,30 @@ func TestQueryAllContactedFinishes(t *testing.T) {
 
 	// first thing the new query should do is contact the nearest node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// while the query has capacity the query should contact the next nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// while the query has capacity the query should contact the third nearest node
 	state = qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
 
 	// the query should be at capacity
 	state = qry.Advance(ctx, nil)
 	require.IsType(t, &StateQueryWaitingAtCapacity{}, state)
 
 	// notify query that first node was contacted successfully, but no closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{NodeID: a})
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: a})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that second node was contacted successfully, but no closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{NodeID: b})
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: b})
 	require.IsType(t, &StateQueryWaitingWithCapacity{}, state)
 
 	// notify query that third node was contacted successfully, but no closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{NodeID: c})
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{NodeID: c})
 
 	// query has finished since it contacted all possible nodes, even though it didn't
 	// reach the desired NumResults
@@ -1046,12 +1046,12 @@ func TestQueryNeverMessagesSelf(t *testing.T) {
 
 	// first thing the new query should do is contact the first node
 	state := qry.Advance(ctx, nil)
-	require.IsType(t, &StateQueryWaitingFindCloser[key.Key8]{}, state)
-	st := state.(*StateQueryWaitingFindCloser[key.Key8])
+	require.IsType(t, &StateQueryFindCloser[key.Key8]{}, state)
+	st := state.(*StateQueryFindCloser[key.Key8])
 	require.Equal(t, b, st.NodeID)
 
 	// notify query that first node was contacted successfully, with closer nodes
-	state = qry.Advance(ctx, &EventQueryMessageResponse[key.Key8]{
+	state = qry.Advance(ctx, &EventQueryFindCloserResponse[key.Key8]{
 		NodeID:      b,
 		CloserNodes: []kad.NodeID[key.Key8]{a},
 	})

@@ -111,7 +111,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 					NodeInfo: info,
 				})
 			}
-			cmd := &routing.EventBootstrapMessageResponse[KadKey]{
+			cmd := &routing.EventBootstrapFindCloserResponse[KadKey]{
 				NodeID:      kadt.PeerID(ev.To.ID),
 				CloserNodes: CloserNodeIDs(ev.CloserNodes),
 			}
@@ -122,9 +122,17 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 
 		case "include":
-			cmd := &routing.EventIncludeMessageResponse[KadKey]{
-				NodeID:      kadt.PeerID(ev.To.ID),
-				CloserNodes: CloserNodeIDs(ev.CloserNodes),
+			var cmd routing.IncludeEvent
+			// require that the node responded with at least one closer node
+			if len(ev.CloserNodes) > 0 {
+				cmd = &routing.EventIncludeConnectivityCheckSuccess[KadKey]{
+					NodeID: kadt.PeerID(ev.To.ID),
+				}
+			} else {
+				cmd = &routing.EventIncludeConnectivityCheckFailure[KadKey]{
+					NodeID: kadt.PeerID(ev.To.ID),
+					Error:  fmt.Errorf("response did not include any closer nodes"),
+				}
 			}
 			// attempt to advance the include
 			next, ok := r.advanceInclude(ctx, cmd)
@@ -133,9 +141,17 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 
 		case "probe":
-			cmd := &routing.EventProbeMessageResponse[KadKey]{
-				NodeID:      kadt.PeerID(ev.To.ID),
-				CloserNodes: CloserNodeIDs(ev.CloserNodes),
+			var cmd routing.ProbeEvent
+			// require that the node responded with at least one closer node
+			if len(ev.CloserNodes) > 0 {
+				cmd = &routing.EventProbeConnectivityCheckSuccess[KadKey]{
+					NodeID: kadt.PeerID(ev.To.ID),
+				}
+			} else {
+				cmd = &routing.EventProbeConnectivityCheckFailure[KadKey]{
+					NodeID: kadt.PeerID(ev.To.ID),
+					Error:  fmt.Errorf("response did not include any closer nodes"),
+				}
 			}
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
@@ -151,7 +167,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		span.RecordError(ev.Err)
 		switch ev.QueryID {
 		case "bootstrap":
-			cmd := &routing.EventBootstrapMessageFailure[KadKey]{
+			cmd := &routing.EventBootstrapFindCloserFailure[KadKey]{
 				NodeID: kadt.PeerID(ev.To.ID),
 				Error:  ev.Err,
 			}
@@ -161,7 +177,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 		case "include":
-			cmd := &routing.EventIncludeMessageFailure[KadKey]{
+			cmd := &routing.EventIncludeConnectivityCheckFailure[KadKey]{
 				NodeID: kadt.PeerID(ev.To.ID),
 				Error:  ev.Err,
 			}
@@ -171,7 +187,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 		case "probe":
-			cmd := &routing.EventProbeMessageFailure[KadKey]{
+			cmd := &routing.EventProbeConnectivityCheckFailure[KadKey]{
 				NodeID: kadt.PeerID(ev.To.ID),
 				Error:  ev.Err,
 			}
@@ -282,7 +298,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 
 	istate := r.include.Advance(ctx, ev)
 	switch st := istate.(type) {
-	case *routing.StateIncludeFindNodeMessage[KadKey]:
+	case *routing.StateIncludeConnectivityCheck[KadKey]:
 		span.SetAttributes(attribute.String("out_event", "EventOutboundGetCloserNodes"))
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{

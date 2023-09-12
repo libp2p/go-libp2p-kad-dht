@@ -130,7 +130,7 @@ func TestBootstrapMessageResponse(t *testing.T) {
 	require.Equal(t, a, st.NodeID)
 
 	// notify bootstrap that node was contacted successfully, but no closer nodes
-	state = bs.Advance(ctx, &EventBootstrapMessageResponse[key.Key8]{
+	state = bs.Advance(ctx, &EventBootstrapFindCloserResponse[key.Key8]{
 		NodeID: a,
 	})
 
@@ -194,7 +194,7 @@ func TestBootstrapProgress(t *testing.T) {
 	require.IsType(t, &StateBootstrapWaiting{}, state)
 
 	// notify bootstrap that node was contacted successfully, but no closer nodes
-	state = bs.Advance(ctx, &EventBootstrapMessageResponse[key.Key8]{
+	state = bs.Advance(ctx, &EventBootstrapFindCloserResponse[key.Key8]{
 		NodeID: a,
 	})
 
@@ -204,7 +204,7 @@ func TestBootstrapProgress(t *testing.T) {
 	require.Equal(t, d, st.NodeID)
 
 	// notify bootstrap that a node was contacted successfully
-	state = bs.Advance(ctx, &EventBootstrapMessageResponse[key.Key8]{
+	state = bs.Advance(ctx, &EventBootstrapFindCloserResponse[key.Key8]{
 		NodeID: b,
 	})
 
@@ -212,7 +212,7 @@ func TestBootstrapProgress(t *testing.T) {
 	require.IsType(t, &StateBootstrapWaiting{}, state)
 
 	// notify bootstrap that a node was contacted successfully
-	state = bs.Advance(ctx, &EventBootstrapMessageResponse[key.Key8]{
+	state = bs.Advance(ctx, &EventBootstrapFindCloserResponse[key.Key8]{
 		NodeID: c,
 	})
 
@@ -220,7 +220,7 @@ func TestBootstrapProgress(t *testing.T) {
 	require.IsType(t, &StateBootstrapWaiting{}, state)
 
 	// notify bootstrap that the final node was contacted successfully
-	state = bs.Advance(ctx, &EventBootstrapMessageResponse[key.Key8]{
+	state = bs.Advance(ctx, &EventBootstrapFindCloserResponse[key.Key8]{
 		NodeID: d,
 	})
 

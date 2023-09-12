@@ -3,7 +3,6 @@ package dtype
 
 import (
 	// "crypto/sha256"
-	"net"
 
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
@@ -39,44 +38,4 @@ func (i ID[K]) Equal(other K) bool {
 
 func (i ID[K]) String() string {
 	return key.HexString(i.key)
-}
-
-type Info[K kad.Key[K], A kad.Address[A]] struct {
-	id    *ID[K]
-	addrs []A
-}
-
-var _ kad.NodeInfo[key.Key8, net.IP] = (*Info[key.Key8, net.IP])(nil)
-
-func NewInfo[K kad.Key[K], A kad.Address[A]](id *ID[K], addrs []A) *Info[K, A] {
-	return &Info[K, A]{
-		id:    id,
-		addrs: addrs,
-	}
-}
-
-func (a *Info[K, A]) AddAddr(addr A) {
-	a.addrs = append(a.addrs, addr)
-}
-
-func (a *Info[K, A]) RemoveAddr(addr A) {
-	writeIndex := 0
-	// remove all occurrences of addr
-	for _, ad := range a.addrs {
-		if !ad.Equal(addr) {
-			a.addrs[writeIndex] = ad
-			writeIndex++
-		}
-	}
-	a.addrs = a.addrs[:writeIndex]
-}
-
-func (a *Info[K, A]) ID() kad.NodeID[K] {
-	return a.id
-}
-
-func (a *Info[K, A]) Addresses() []A {
-	addresses := make([]A, len(a.addrs))
-	copy(addresses, a.addrs)
-	return addresses
 }

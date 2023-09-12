@@ -135,9 +135,9 @@ func (q *Query[K]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 			QueryID: q.id,
 			Stats:   q.stats,
 		}
-	case *EventQueryMessageResponse[K]:
+	case *EventQueryFindCloserResponse[K]:
 		q.onMessageResponse(ctx, tev.NodeID, tev.CloserNodes)
-	case *EventQueryMessageFailure[K]:
+	case *EventQueryFindCloserFailure[K]:
 		q.onMessageFailure(ctx, tev.NodeID)
 	case nil:
 		// TEMPORARY: no event to process
@@ -202,7 +202,7 @@ func (q *Query[K]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 				if q.stats.Start.IsZero() {
 					q.stats.Start = q.cfg.Clock.Now()
 				}
-				returnState = &StateQueryWaitingFindCloser[K]{
+				returnState = &StateQueryFindCloser[K]{
 					NodeID:  ni.NodeID,
 					QueryID: q.id,
 					Stats:   q.stats,
@@ -330,37 +330,37 @@ type QueryState interface {
 	queryState()
 }
 
-// StateQueryFinished indicates that the Query has finished.
+// StateQueryFinished indicates that the [Query] has finished.
 type StateQueryFinished struct {
 	QueryID QueryID
 	Stats   QueryStats
 }
 
-// StateQueryWaitingFindCloser indicates that the Query wants to send a message to a node asking it for a list of closer nodes to a key.
-type StateQueryWaitingFindCloser[K kad.Key[K]] struct {
+// StateQueryFindCloser indicates that the [Query] wants to send a find closer nodes message to a node.
+type StateQueryFindCloser[K kad.Key[K]] struct {
 	QueryID QueryID
 	Target  K             // the key that the query wants to find closer nodes for
 	NodeID  kad.NodeID[K] // the node to send the message to
 	Stats   QueryStats
 }
 
-// StateQueryWaitingAtCapacity indicates that the Query is waiting for results and is at capacity.
+// StateQueryWaitingAtCapacity indicates that the [Query] is waiting for results and is at capacity.
 type StateQueryWaitingAtCapacity struct {
 	QueryID QueryID
 	Stats   QueryStats
 }
 
-// StateQueryWaitingWithCapacity indicates that the Query is waiting for results but has no further nodes to contact.
+// StateQueryWaitingWithCapacity indicates that the [Query] is waiting for results but has no further nodes to contact.
 type StateQueryWaitingWithCapacity struct {
 	QueryID QueryID
 	Stats   QueryStats
 }
 
-// queryState() ensures that only Query states can be assigned to a QueryState.
-func (*StateQueryFinished) queryState()             {}
-func (*StateQueryWaitingFindCloser[K]) queryState() {}
-func (*StateQueryWaitingAtCapacity) queryState()    {}
-func (*StateQueryWaitingWithCapacity) queryState()  {}
+// queryState() ensures that only [Query] states can be assigned to a QueryState.
+func (*StateQueryFinished) queryState()            {}
+func (*StateQueryFindCloser[K]) queryState()       {}
+func (*StateQueryWaitingAtCapacity) queryState()   {}
+func (*StateQueryWaitingWithCapacity) queryState() {}
 
 type QueryEvent interface {
 	queryEvent()
@@ -369,19 +369,19 @@ type QueryEvent interface {
 // EventQueryMessageResponse notifies a query to stop all work and enter the finished state.
 type EventQueryCancel struct{}
 
-// EventQueryMessageResponse notifies a query that an attempt to send a message has received a successful response.
-type EventQueryMessageResponse[K kad.Key[K]] struct {
+// EventQueryFindCloserResponse notifies a [Query] that an attempt to find closer nodes has received a successful response.
+type EventQueryFindCloserResponse[K kad.Key[K]] struct {
 	NodeID      kad.NodeID[K]   // the node the message was sent to
-	CloserNodes []kad.NodeID[K] // the closer nodes from the response sent by the node
+	CloserNodes []kad.NodeID[K] // the closer nodes sent by the node
 }
 
-// EventQueryMessageFailure notifies a query that an attempt to send a message has failed.
-type EventQueryMessageFailure[K kad.Key[K]] struct {
+// EventQueryFindCloserFailure notifies a [Query] that an attempt to find closer nodes has failed.
+type EventQueryFindCloserFailure[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the node the message was sent to
 	Error  error         // the error that caused the failure, if any
 }
 
-// queryEvent() ensures that only Query events can be assigned to a QueryEvent.
-func (*EventQueryCancel) queryEvent()             {}
-func (*EventQueryMessageResponse[K]) queryEvent() {}
-func (*EventQueryMessageFailure[K]) queryEvent()  {}
+// queryEvent() ensures that only events accepted by [Query] can be assigned to a [QueryEvent].
+func (*EventQueryCancel) queryEvent()                {}
+func (*EventQueryFindCloserResponse[K]) queryEvent() {}
+func (*EventQueryFindCloserFailure[K]) queryEvent()  {}

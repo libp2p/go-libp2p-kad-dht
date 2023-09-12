@@ -84,9 +84,9 @@ func TestIncludeAddCandidateStartsCheckIfCapacity(t *testing.T) {
 		NodeID: candidate,
 	})
 	// the state machine should attempt to send a message
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
-	st := state.(*StateIncludeFindNodeMessage[key.Key8])
+	st := state.(*StateIncludeConnectivityCheck[key.Key8])
 
 	// the message should be sent to the candidate node
 	require.Equal(t, candidate, st.NodeID)
@@ -116,7 +116,7 @@ func TestIncludeAddCandidateReportsCapacity(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
 		NodeID: candidate,
 	})
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
 	// now the state machine reports that it is waiting with capacity since concurrency
 	// is greater than the number of checks in flight
@@ -141,7 +141,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
 		NodeID: dtype.NewID(key.Key8(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
 	// include reports that it is waiting and has capacity for more
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -152,7 +152,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 		NodeID: dtype.NewID(key.Key8(0b00000010)),
 	})
 	// sends a message to the candidate
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
 	// include reports that it is waiting and has capacity for more
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -164,7 +164,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 		NodeID: dtype.NewID(key.Key8(0b00000011)),
 	})
 	// sends a message to the candidate
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
 	// include reports that it is waiting at capacity since 3 messages are in flight
 	state = p.Advance(ctx, &EventIncludePoll{})
@@ -197,7 +197,7 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	require.IsType(t, &StateIncludeWaitingFull{}, state)
 }
 
-func TestIncludeMessageResponse(t *testing.T) {
+func TestIncludeConnectivityCheckSuccess(t *testing.T) {
 	ctx := context.Background()
 	clk := clock.NewMock()
 	cfg := DefaultIncludeConfig()
@@ -213,15 +213,11 @@ func TestIncludeMessageResponse(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
 		NodeID: dtype.NewID(key.Key8(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
 	// notify that node was contacted successfully, with no closer nodes
-	state = p.Advance(ctx, &EventIncludeMessageResponse[key.Key8]{
+	state = p.Advance(ctx, &EventIncludeConnectivityCheckSuccess[key.Key8]{
 		NodeID: dtype.NewID(key.Key8(0b00000100)),
-		CloserNodes: []kad.NodeID[key.Key8]{
-			dtype.NewID(key.Key8(4)),
-			dtype.NewID(key.Key8(6)),
-		},
 	})
 
 	// should respond that the routing table was updated
@@ -244,7 +240,7 @@ func TestIncludeMessageResponse(t *testing.T) {
 	require.IsType(t, &StateIncludeIdle{}, state)
 }
 
-func TestIncludeMessageResponseInvalid(t *testing.T) {
+func TestIncludeConnectivityCheckFailure(t *testing.T) {
 	ctx := context.Background()
 	clk := clock.NewMock()
 	cfg := DefaultIncludeConfig()
@@ -260,41 +256,10 @@ func TestIncludeMessageResponseInvalid(t *testing.T) {
 	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
 		NodeID: dtype.NewID(key.Key8(0b00000100)),
 	})
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
-
-	// notify that node was contacted successfully, but no closer nodes
-	state = p.Advance(ctx, &EventIncludeMessageResponse[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
-	})
-	// should respond that state machine is idle
-	require.IsType(t, &StateIncludeIdle{}, state)
-
-	// the routing table should not contain the node
-	foundNode, found := rt.GetNode(key.Key8(4))
-	require.False(t, found)
-	require.Nil(t, foundNode)
-}
-
-func TestIncludeMessageFailure(t *testing.T) {
-	ctx := context.Background()
-	clk := clock.NewMock()
-	cfg := DefaultIncludeConfig()
-	cfg.Clock = clk
-	cfg.Concurrency = 2
-
-	rt := simplert.New[key.Key8, kad.NodeID[key.Key8]](dtype.NewID(key.Key8(128)), 5)
-
-	p, err := NewInclude[key.Key8](rt, cfg)
-	require.NoError(t, err)
-
-	// add a candidate
-	state := p.Advance(ctx, &EventIncludeAddCandidate[key.Key8]{
-		NodeID: dtype.NewID(key.Key8(0b00000100)),
-	})
-	require.IsType(t, &StateIncludeFindNodeMessage[key.Key8]{}, state)
+	require.IsType(t, &StateIncludeConnectivityCheck[key.Key8]{}, state)
 
 	// notify that node was not contacted successfully
-	state = p.Advance(ctx, &EventIncludeMessageFailure[key.Key8]{
+	state = p.Advance(ctx, &EventIncludeConnectivityCheckFailure[key.Key8]{
 		NodeID: dtype.NewID(key.Key8(0b00000100)),
 	})
 

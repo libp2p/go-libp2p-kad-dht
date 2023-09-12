@@ -114,10 +114,10 @@ func TestPoolAddQueryStartsIfCapacity(t *testing.T) {
 		Target:            target,
 		KnownClosestNodes: []kad.NodeID[key.Key8]{a},
 	})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
 
 	// the query should attempt to contact the node it was given
-	st := state.(*StatePoolQueryFindCloser[key.Key8])
+	st := state.(*StatePoolFindCloser[key.Key8])
 
 	// the query should be the one just added
 	require.Equal(t, queryID, st.QueryID)
@@ -154,15 +154,15 @@ func TestPoolMessageResponse(t *testing.T) {
 		Target:            target,
 		KnownClosestNodes: []kad.NodeID[key.Key8]{a},
 	})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
 
 	// the query should attempt to contact the node it was given
-	st := state.(*StatePoolQueryFindCloser[key.Key8])
+	st := state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
 	// notify query that node was contacted successfully, but no closer nodes
-	state = p.Advance(ctx, &EventPoolMessageResponse[key.Key8]{
+	state = p.Advance(ctx, &EventPoolFindCloserResponse[key.Key8]{
 		QueryID: queryID,
 		NodeID:  a,
 	})
@@ -200,10 +200,10 @@ func TestPoolPrefersRunningQueriesOverNewOnes(t *testing.T) {
 		Target:            target,
 		KnownClosestNodes: []kad.NodeID[key.Key8]{a, b, c, d},
 	})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
 
 	// the first query should attempt to contact the node it was given
-	st := state.(*StatePoolQueryFindCloser[key.Key8])
+	st := state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID1, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
@@ -216,46 +216,46 @@ func TestPoolPrefersRunningQueriesOverNewOnes(t *testing.T) {
 	})
 
 	// the first query should continue its operation in preference to starting the new query
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID1, st.QueryID)
 	require.Equal(t, b, st.NodeID)
 
 	// advance the pool again, the first query should continue its operation in preference to starting the new query
 	state = p.Advance(ctx, &EventPoolPoll{})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID1, st.QueryID)
 	require.Equal(t, c, st.NodeID)
 
 	// advance the pool again, the first query is at capacity so the second query can start
 	state = p.Advance(ctx, &EventPoolPoll{})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID2, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
 	// notify first query that node was contacted successfully, but no closer nodes
-	state = p.Advance(ctx, &EventPoolMessageResponse[key.Key8]{
+	state = p.Advance(ctx, &EventPoolFindCloserResponse[key.Key8]{
 		QueryID: queryID1,
 		NodeID:  a,
 	})
 
 	// first query starts a new message request
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID1, st.QueryID)
 	require.Equal(t, d, st.NodeID)
 
 	// notify first query that next node was contacted successfully, but no closer nodes
-	state = p.Advance(ctx, &EventPoolMessageResponse[key.Key8]{
+	state = p.Advance(ctx, &EventPoolFindCloserResponse[key.Key8]{
 		QueryID: queryID1,
 		NodeID:  b,
 	})
 
 	// first query is out of nodes to try so second query can proceed
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID2, st.QueryID)
 	require.Equal(t, b, st.NodeID)
 }
@@ -282,10 +282,10 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 		Target:            target,
 		KnownClosestNodes: []kad.NodeID[key.Key8]{a},
 	})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
 
 	// the first query should attempt to contact the node it was given
-	st := state.(*StatePoolQueryFindCloser[key.Key8])
+	st := state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID1, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
@@ -298,8 +298,8 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 	})
 
 	// the second query should start since the first query has a request in flight
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID2, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
@@ -315,7 +315,7 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 	require.IsType(t, &StatePoolWaitingAtCapacity{}, state)
 
 	// notify first query that next node was contacted successfully, but no closer nodes
-	state = p.Advance(ctx, &EventPoolMessageResponse[key.Key8]{
+	state = p.Advance(ctx, &EventPoolFindCloserResponse[key.Key8]{
 		QueryID: queryID1,
 		NodeID:  a,
 	})
@@ -327,8 +327,8 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 
 	// advancing pool again allows query 3 to start
 	state = p.Advance(ctx, &EventPoolPoll{})
-	require.IsType(t, &StatePoolQueryFindCloser[key.Key8]{}, state)
-	st = state.(*StatePoolQueryFindCloser[key.Key8])
+	require.IsType(t, &StatePoolFindCloser[key.Key8]{}, state)
+	st = state.(*StatePoolFindCloser[key.Key8])
 	require.Equal(t, queryID3, st.QueryID)
 	require.Equal(t, a, st.NodeID)
 }

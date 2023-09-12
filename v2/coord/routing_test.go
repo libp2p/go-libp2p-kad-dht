@@ -84,9 +84,9 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageResponse[KadKey]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserResponse[KadKey]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[KadKey])
+	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserResponse[KadKey])
 	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
 	require.Equal(t, SliceOfAddrInfoToSliceOfNodeID(ev.CloserNodes), rev.CloserNodes)
 }
@@ -118,9 +118,9 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageFailure[KadKey]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserFailure[KadKey]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[KadKey])
+	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserFailure[KadKey])
 	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
@@ -182,11 +182,10 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageResponse[KadKey]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckSuccess[KadKey]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageResponse[KadKey])
+	rev := include.Received.(*routing.EventIncludeConnectivityCheckSuccess[KadKey])
 	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
-	require.Equal(t, SliceOfAddrInfoToSliceOfNodeID(ev.CloserNodes), rev.CloserNodes)
 }
 
 func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
@@ -217,9 +216,9 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageFailure[KadKey]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckFailure[KadKey]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageFailure[KadKey])
+	rev := include.Received.(*routing.EventIncludeConnectivityCheckFailure[KadKey])
 	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }

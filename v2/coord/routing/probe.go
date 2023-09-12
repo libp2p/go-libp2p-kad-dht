@@ -165,7 +165,7 @@ func (p *Probe[K]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		return &StateProbeNodeFailure[K]{
 			NodeID: tev.NodeID,
 		}
-	case *EventProbeMessageResponse[K]:
+	case *EventProbeConnectivityCheckSuccess[K]:
 		span.SetAttributes(tele.AttrEvent("EventProbeMessageResponse"), attribute.String("nodeid", tev.NodeID.String()))
 		nv, found := p.nvl.Get(tev.NodeID)
 		if !found {
@@ -179,7 +179,7 @@ func (p *Probe[K]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		// put into list, which will clear any ongoing check too
 		p.nvl.Put(nv)
 
-	case *EventProbeMessageFailure[K]:
+	case *EventProbeConnectivityCheckFailure[K]:
 		// probe failed, so remove from routing table and from list
 		span.SetAttributes(tele.AttrEvent("EventProbeMessageFailure"), attribute.String("nodeid", tev.NodeID.String()))
 		span.RecordError(tev.Error)
@@ -294,14 +294,13 @@ type EventProbeRemove[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the node to be removed
 }
 
-// EventProbeMessageResponse notifies a probe that a sent message has received a successful response.
-type EventProbeMessageResponse[K kad.Key[K]] struct {
-	NodeID      kad.NodeID[K]   // the node the message was sent to
-	CloserNodes []kad.NodeID[K] // the closer nodes from the response sent by the node
+// EventProbeConnectivityCheckSuccess notifies a [Probe] that a requested connectivity check has received a successful response.
+type EventProbeConnectivityCheckSuccess[K kad.Key[K]] struct {
+	NodeID kad.NodeID[K] // the node the message was sent to
 }
 
-// EventProbeMessageFailure notifiesa probe that an attempt to send a message has failed.
-type EventProbeMessageFailure[K kad.Key[K]] struct {
+// EventProbeConnectivityCheckFailure notifies a [Probe] that a requested connectivity check has failed.
+type EventProbeConnectivityCheckFailure[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the node the message was sent to
 	Error  error         // the error that caused the failure, if any
 }
@@ -311,13 +310,13 @@ type EventProbeNotifyConnectivity[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K]
 }
 
-// probeEvent() ensures that only Probe events can be assigned to the ProbeEvent interface.
-func (*EventProbePoll) probeEvent()                  {}
-func (*EventProbeAdd[K]) probeEvent()                {}
-func (*EventProbeRemove[K]) probeEvent()             {}
-func (*EventProbeMessageResponse[K]) probeEvent()    {}
-func (*EventProbeMessageFailure[K]) probeEvent()     {}
-func (*EventProbeNotifyConnectivity[K]) probeEvent() {}
+// probeEvent() ensures that only events accepted by a [Probe] can be assigned to the [ProbeEvent] interface.
+func (*EventProbePoll) probeEvent()                        {}
+func (*EventProbeAdd[K]) probeEvent()                      {}
+func (*EventProbeRemove[K]) probeEvent()                   {}
+func (*EventProbeConnectivityCheckSuccess[K]) probeEvent() {}
+func (*EventProbeConnectivityCheckFailure[K]) probeEvent() {}
+func (*EventProbeNotifyConnectivity[K]) probeEvent()       {}
 
 type nodeValue[K kad.Key[K]] struct {
 	NodeID        kad.NodeID[K]

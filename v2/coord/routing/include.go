@@ -123,20 +123,17 @@ func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState 
 		}
 		b.candidates.Enqueue(ctx, tev.NodeID)
 
-	case *EventIncludeMessageResponse[K]:
+	case *EventIncludeConnectivityCheckSuccess[K]:
 		ch, ok := b.checks[key.HexString(tev.NodeID.Key())]
 		if ok {
 			delete(b.checks, key.HexString(tev.NodeID.Key()))
-			// require that the node responded with at least one closer node
-			if len(tev.CloserNodes) > 0 {
-				if b.rt.AddNode(tev.NodeID) {
-					return &StateIncludeRoutingUpdated[K]{
-						NodeID: ch.NodeID,
-					}
+			if b.rt.AddNode(tev.NodeID) {
+				return &StateIncludeRoutingUpdated[K]{
+					NodeID: ch.NodeID,
 				}
 			}
 		}
-	case *EventIncludeMessageFailure[K]:
+	case *EventIncludeConnectivityCheckFailure[K]:
 		delete(b.checks, key.HexString(tev.NodeID.Key()))
 
 	case *EventIncludePoll:
@@ -167,7 +164,7 @@ func (b *Include[K]) Advance(ctx context.Context, ev IncludeEvent) IncludeState 
 	}
 
 	// Ask the node to find itself
-	return &StateIncludeFindNodeMessage[K]{
+	return &StateIncludeConnectivityCheck[K]{
 		NodeID: candidate,
 	}
 }
@@ -227,20 +224,20 @@ type IncludeState interface {
 	includeState()
 }
 
-// StateIncludeFindNodeMessage indicates that the include subsystem is waiting to send a find node message a node.
+// StateIncludeConnectivityCheck indicates that an [Include] is waiting to send a connectivity check to a node.
 // A find node message should be sent to the node, with the target being the node's key.
-type StateIncludeFindNodeMessage[K kad.Key[K]] struct {
+type StateIncludeConnectivityCheck[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the node to send the message to
 }
 
-// StateIncludeIdle indicates that the include is not running its query.
+// StateIncludeIdle indicates that an [Include] is not peforming any work or waiting for any responses..
 type StateIncludeIdle struct{}
 
-// StateIncludeWaitingAtCapacity indicates that the include subsystem is waiting for responses for checks and
+// StateIncludeWaitingAtCapacity indicates that an [Include] is waiting for responses for checks and
 // that the maximum number of concurrent checks has been reached.
 type StateIncludeWaitingAtCapacity struct{}
 
-// StateIncludeWaitingWithCapacity indicates that the include subsystem is waiting for responses for checks
+// StateIncludeWaitingWithCapacity indicates that an [Include] is waiting for responses for checks
 // but has capacity to perform more.
 type StateIncludeWaitingWithCapacity struct{}
 
@@ -254,40 +251,39 @@ type StateIncludeRoutingUpdated[K kad.Key[K]] struct {
 }
 
 // includeState() ensures that only Include states can be assigned to an IncludeState.
-func (*StateIncludeFindNodeMessage[K]) includeState()  {}
-func (*StateIncludeIdle) includeState()                {}
-func (*StateIncludeWaitingAtCapacity) includeState()   {}
-func (*StateIncludeWaitingWithCapacity) includeState() {}
-func (*StateIncludeWaitingFull) includeState()         {}
-func (*StateIncludeRoutingUpdated[K]) includeState()   {}
+func (*StateIncludeConnectivityCheck[K]) includeState() {}
+func (*StateIncludeIdle) includeState()                 {}
+func (*StateIncludeWaitingAtCapacity) includeState()    {}
+func (*StateIncludeWaitingWithCapacity) includeState()  {}
+func (*StateIncludeWaitingFull) includeState()          {}
+func (*StateIncludeRoutingUpdated[K]) includeState()    {}
 
-// IncludeEvent is an event intended to advance the state of a include.
+// IncludeEvent is an event intended to advance the state of an [Include].
 type IncludeEvent interface {
 	includeEvent()
 }
 
-// EventIncludePoll is an event that signals the include that it can perform housekeeping work such as time out queries.
+// EventIncludePoll is an event that signals an [Include] to perform housekeeping work such as time out queries.
 type EventIncludePoll struct{}
 
-// EventIncludeAddCandidate notifies that a node should be added to the candidate list
+// EventIncludeAddCandidate notifies an [Include] that a node should be added to the candidate list.
 type EventIncludeAddCandidate[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the candidate node
 }
 
-// EventIncludeMessageResponse notifies a include that a sent message has received a successful response.
-type EventIncludeMessageResponse[K kad.Key[K]] struct {
-	NodeID      kad.NodeID[K]   // the node the message was sent to
-	CloserNodes []kad.NodeID[K] // the closer nodes from the response sent by the node
+// EventIncludeConnectivityCheckSuccess notifies an [Include] that a requested connectivity check has received a successful response.
+type EventIncludeConnectivityCheckSuccess[K kad.Key[K]] struct {
+	NodeID kad.NodeID[K] // the node the message was sent to
 }
 
-// EventIncludeMessageFailure notifiesa include that an attempt to send a message has failed.
-type EventIncludeMessageFailure[K kad.Key[K]] struct {
+// EventIncludeConnectivityCheckFailure notifies an [Include] that a requested connectivity check has failed.
+type EventIncludeConnectivityCheckFailure[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the node the message was sent to
 	Error  error         // the error that caused the failure, if any
 }
 
-// includeEvent() ensures that only Include events can be assigned to the IncludeEvent interface.
-func (*EventIncludePoll) includeEvent()               {}
-func (*EventIncludeAddCandidate[K]) includeEvent()    {}
-func (*EventIncludeMessageResponse[K]) includeEvent() {}
-func (*EventIncludeMessageFailure[K]) includeEvent()  {}
+// includeEvent() ensures that only events accepted by an [Include] can be assigned to the [IncludeEvent] interface.
+func (*EventIncludePoll) includeEvent()                        {}
+func (*EventIncludeAddCandidate[K]) includeEvent()             {}
+func (*EventIncludeConnectivityCheckSuccess[K]) includeEvent() {}
+func (*EventIncludeConnectivityCheckFailure[K]) includeEvent() {}

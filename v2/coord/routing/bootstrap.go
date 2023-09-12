@@ -116,13 +116,13 @@ func (b *Bootstrap[K]) Advance(ctx context.Context, ev BootstrapEvent) Bootstrap
 		b.qry = qry
 		return b.advanceQuery(ctx, nil)
 
-	case *EventBootstrapMessageResponse[K]:
-		return b.advanceQuery(ctx, &query.EventQueryMessageResponse[K]{
+	case *EventBootstrapFindCloserResponse[K]:
+		return b.advanceQuery(ctx, &query.EventQueryFindCloserResponse[K]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
-	case *EventBootstrapMessageFailure[K]:
-		return b.advanceQuery(ctx, &query.EventQueryMessageFailure[K]{
+	case *EventBootstrapFindCloserFailure[K]:
+		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K]{
 			NodeID: tev.NodeID,
 			Error:  tev.Error,
 		})
@@ -143,7 +143,7 @@ func (b *Bootstrap[K]) Advance(ctx context.Context, ev BootstrapEvent) Bootstrap
 func (b *Bootstrap[K]) advanceQuery(ctx context.Context, qev query.QueryEvent) BootstrapState {
 	state := b.qry.Advance(ctx, qev)
 	switch st := state.(type) {
-	case *query.StateQueryWaitingFindCloser[K]:
+	case *query.StateQueryFindCloser[K]:
 		return &StateBootstrapFindCloser[K]{
 			QueryID: st.QueryID,
 			Stats:   st.Stats,
@@ -184,7 +184,7 @@ type BootstrapState interface {
 	bootstrapState()
 }
 
-// StateBootstrapFindCloser indicates that the bootstrap query wants to send a message to a node asking it for a list of closer nodes to a key.
+// StateBootstrapFindCloser indicates that the bootstrap query wants to send a find closer nodes message to a node.
 type StateBootstrapFindCloser[K kad.Key[K]] struct {
 	QueryID query.QueryID
 	Target  K             // the key that the query wants to find closer nodes for
@@ -231,20 +231,20 @@ type EventBootstrapStart[K kad.Key[K]] struct {
 	KnownClosestNodes []kad.NodeID[K]
 }
 
-// EventBootstrapMessageResponse notifies a bootstrap that a sent message has received a successful response.
-type EventBootstrapMessageResponse[K kad.Key[K]] struct {
+// EventBootstrapFindCloserResponse notifies a bootstrap that an attempt to find closer nodes has received a successful response.
+type EventBootstrapFindCloserResponse[K kad.Key[K]] struct {
 	NodeID      kad.NodeID[K]   // the node the message was sent to
-	CloserNodes []kad.NodeID[K] // the closer nodes from the response sent by the node
+	CloserNodes []kad.NodeID[K] // the closer nodes sent by the node
 }
 
-// EventBootstrapMessageFailure notifiesa bootstrap that an attempt to send a message has failed.
-type EventBootstrapMessageFailure[K kad.Key[K]] struct {
+// EventBootstrapFindCloserFailure notifies a bootstrap that an attempt to find closer nodes has failed.
+type EventBootstrapFindCloserFailure[K kad.Key[K]] struct {
 	NodeID kad.NodeID[K] // the node the message was sent to
 	Error  error         // the error that caused the failure, if any
 }
 
-// bootstrapEvent() ensures that only Bootstrap events can be assigned to the BootstrapEvent interface.
-func (*EventBootstrapPoll) bootstrapEvent()               {}
-func (*EventBootstrapStart[K]) bootstrapEvent()           {}
-func (*EventBootstrapMessageResponse[K]) bootstrapEvent() {}
-func (*EventBootstrapMessageFailure[K]) bootstrapEvent()  {}
+// bootstrapEvent() ensures that only events accepted by a [Bootstrap] can be assigned to the [BootstrapEvent] interface.
+func (*EventBootstrapPoll) bootstrapEvent()                  {}
+func (*EventBootstrapStart[K]) bootstrapEvent()              {}
+func (*EventBootstrapFindCloserResponse[K]) bootstrapEvent() {}
+func (*EventBootstrapFindCloserFailure[K]) bootstrapEvent()  {}

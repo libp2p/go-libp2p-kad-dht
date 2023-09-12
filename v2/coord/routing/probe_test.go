@@ -592,7 +592,7 @@ func TestNodeValueList(t *testing.T) {
 	})
 }
 
-func TestProbeMessageResponse(t *testing.T) {
+func TestProbeConnectivityCheckSuccess(t *testing.T) {
 	ctx := context.Background()
 	clk := clock.NewMock()
 
@@ -625,12 +625,8 @@ func TestProbeMessageResponse(t *testing.T) {
 	st := state.(*StateProbeConnectivityCheck[key.Key8])
 
 	// notify that node was contacted successfully, with no closer nodes
-	state = sm.Advance(ctx, &EventProbeMessageResponse[key.Key8]{
+	state = sm.Advance(ctx, &EventProbeConnectivityCheckSuccess[key.Key8]{
 		NodeID: st.NodeID,
-		CloserNodes: []kad.NodeID[key.Key8]{
-			dtype.NewID(key.Key8(4)),
-			dtype.NewID(key.Key8(6)),
-		},
 	})
 
 	// node remains in routing table
@@ -654,7 +650,7 @@ func TestProbeMessageResponse(t *testing.T) {
 	require.IsType(t, &StateProbeWaitingWithCapacity{}, state)
 }
 
-func TestProbeMessageFailure(t *testing.T) {
+func TestProbeConnectivityCheckFailure(t *testing.T) {
 	ctx := context.Background()
 	clk := clock.NewMock()
 
@@ -687,7 +683,7 @@ func TestProbeMessageFailure(t *testing.T) {
 	st := state.(*StateProbeConnectivityCheck[key.Key8])
 
 	// notify that node was contacted successfully, with no closer nodes
-	state = sm.Advance(ctx, &EventProbeMessageFailure[key.Key8]{
+	state = sm.Advance(ctx, &EventProbeConnectivityCheckFailure[key.Key8]{
 		NodeID: st.NodeID,
 	})
 

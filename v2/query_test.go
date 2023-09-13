@@ -46,6 +46,7 @@ func newClientHost(t testing.TB) host.Host {
 func newServerDht(t testing.TB, cfg *Config) *DHT {
 	h := newServerHost(t)
 
+	var err error
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
@@ -68,6 +69,7 @@ func newServerDht(t testing.TB, cfg *Config) *DHT {
 func newClientDht(t testing.TB, cfg *Config) *DHT {
 	h := newClientHost(t)
 
+	var err error
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}

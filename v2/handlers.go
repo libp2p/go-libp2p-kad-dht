@@ -10,7 +10,6 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
@@ -236,7 +235,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 
 // closerPeers returns the closest peers to the given target key this host knows
 // about. It doesn't return 1) itself 2) the peer that asked for closer peers.
-func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256) []*pb.Message_Peer {
+func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target kadt.Key) []*pb.Message_Peer {
 	_, span := d.tele.Tracer.Start(ctx, "DHT.closerPeers", otel.WithAttributes(attribute.String("remote", remote.String()), attribute.String("target", target.HexString())))
 	defer span.End()
 
@@ -248,7 +247,7 @@ func (d *DHT) closerPeers(ctx context.Context, remote peer.ID, target key.Key256
 	// pre-allocated the result set slice.
 	filtered := make([]*pb.Message_Peer, 0, len(peers))
 	for _, p := range peers {
-		pid := peer.ID(p.(kadt.PeerID)) // TODO: type cast
+		pid := peer.ID(p) // TODO: type cast
 
 		// check for own peer ID
 		if pid == d.host.ID() {

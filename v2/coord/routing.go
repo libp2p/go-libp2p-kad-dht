@@ -6,19 +6,19 @@ import (
 	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/routing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // A RoutingBehaviour provices the behaviours for bootstrapping and maintaining a DHT's routing table.
 type RoutingBehaviour struct {
 	// self is the peer id of the system the dht is running on
-	self peer.ID
+	self kadt.PeerID
+
 	// bootstrap is the bootstrap state machine, responsible for bootstrapping the routing table
 	bootstrap SM[routing.BootstrapEvent, routing.BootstrapState]
 
@@ -36,14 +36,14 @@ type RoutingBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
+func NewRoutingBehaviour(self kadt.PeerID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
 	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,
 		include:   include,
 		probe:     probe,
 		ready:     make(chan struct{}, 1),
-		logger:    logger,
+		logger:    logger.With("behaviour", "routing"),
 		tracer:    tracer,
 	}
 	return r
@@ -65,10 +65,8 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventStartBootstrap:
 		span.SetAttributes(attribute.String("event", "EventStartBootstrap"))
-		cmd := &routing.EventBootstrapStart[KadKey, ma.Multiaddr]{
-			ProtocolID:        ev.ProtocolID,
-			Message:           ev.Message,
-			KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
+		cmd := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
+			KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
 		}
 		// attempt to advance the bootstrap
 		next, ok := r.advanceBootstrap(ctx, cmd)
@@ -79,12 +77,12 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventAddAddrInfo:
 		span.SetAttributes(attribute.String("event", "EventAddAddrInfo"))
 		// Ignore self
-		if ev.NodeInfo.ID == r.self {
+		if ev.NodeInfo.ID == peer.ID(r.self) {
 			break
 		}
 		// TODO: apply ttl
-		cmd := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
-			NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
+		cmd := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
+			NodeID: kadt.PeerID(ev.NodeInfo.ID),
 		}
 		// attempt to advance the include
 		next, ok := r.advanceInclude(ctx, cmd)
@@ -94,8 +92,8 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 
 	case *EventRoutingUpdated:
 		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"), attribute.String("nodeid", ev.NodeInfo.ID.String()))
-		cmd := &routing.EventProbeAdd[KadKey]{
-			NodeID: AddrInfoToNodeID(ev.NodeInfo),
+		cmd := &routing.EventProbeAdd[kadt.Key, kadt.PeerID]{
+			NodeID: AddrInfoToKadPeerID(ev.NodeInfo),
 		}
 		// attempt to advance the probe state machine
 		next, ok := r.advanceProbe(ctx, cmd)
@@ -113,9 +111,9 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 					NodeInfo: info,
 				})
 			}
-			cmd := &routing.EventBootstrapMessageResponse[KadKey, ma.Multiaddr]{
-				NodeID:   kadt.PeerID(ev.To.ID),
-				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
+			cmd := &routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID]{
+				NodeID:      kadt.PeerID(ev.To.ID),
+				CloserNodes: SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
 			}
 			// attempt to advance the bootstrap
 			next, ok := r.advanceBootstrap(ctx, cmd)
@@ -124,9 +122,18 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 
 		case "include":
-			cmd := &routing.EventIncludeMessageResponse[KadKey, ma.Multiaddr]{
-				NodeInfo: kadt.AddrInfo{Info: ev.To},
-				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
+			var cmd routing.IncludeEvent
+
+			// require that the node responded with at least one closer node
+			if len(ev.CloserNodes) > 0 {
+				cmd = &routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID]{
+					NodeID: kadt.PeerID(ev.To.ID),
+				}
+			} else {
+				cmd = &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
+					NodeID: kadt.PeerID(ev.To.ID),
+					Error:  fmt.Errorf("response did not include any closer nodes"),
+				}
 			}
 			// attempt to advance the include
 			next, ok := r.advanceInclude(ctx, cmd)
@@ -135,9 +142,17 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 
 		case "probe":
-			cmd := &routing.EventProbeMessageResponse[KadKey, ma.Multiaddr]{
-				NodeInfo: kadt.AddrInfo{Info: ev.To},
-				Response: CloserNodesResponse(ev.Target, ev.CloserNodes),
+			var cmd routing.ProbeEvent
+			// require that the node responded with at least one closer node
+			if len(ev.CloserNodes) > 0 {
+				cmd = &routing.EventProbeConnectivityCheckSuccess[kadt.Key, kadt.PeerID]{
+					NodeID: kadt.PeerID(ev.To.ID),
+				}
+			} else {
+				cmd = &routing.EventProbeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
+					NodeID: kadt.PeerID(ev.To.ID),
+					Error:  fmt.Errorf("response did not include any closer nodes"),
+				}
 			}
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
@@ -153,7 +168,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		span.RecordError(ev.Err)
 		switch ev.QueryID {
 		case "bootstrap":
-			cmd := &routing.EventBootstrapMessageFailure[KadKey]{
+			cmd := &routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID]{
 				NodeID: kadt.PeerID(ev.To.ID),
 				Error:  ev.Err,
 			}
@@ -163,9 +178,9 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 		case "include":
-			cmd := &routing.EventIncludeMessageFailure[KadKey, ma.Multiaddr]{
-				NodeInfo: kadt.AddrInfo{Info: ev.To},
-				Error:    ev.Err,
+			cmd := &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
+				NodeID: kadt.PeerID(ev.To.ID),
+				Error:  ev.Err,
 			}
 			// attempt to advance the include state machine
 			next, ok := r.advanceInclude(ctx, cmd)
@@ -173,9 +188,9 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 		case "probe":
-			cmd := &routing.EventProbeMessageFailure[KadKey, ma.Multiaddr]{
-				NodeInfo: kadt.AddrInfo{Info: ev.To},
-				Error:    ev.Err,
+			cmd := &routing.EventProbeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
+				NodeID: kadt.PeerID(ev.To.ID),
+				Error:  ev.Err,
 			}
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
@@ -189,12 +204,12 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventNotifyConnectivity:
 		span.SetAttributes(attribute.String("event", "EventNotifyConnectivity"), attribute.String("nodeid", ev.NodeInfo.ID.String()))
 		// ignore self
-		if ev.NodeInfo.ID == r.self {
+		if ev.NodeInfo.ID == peer.ID(r.self) {
 			break
 		}
 		// tell the include state machine in case this is a new peer that could be added to the routing table
-		cmd := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
-			NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
+		cmd := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
+			NodeID: kadt.PeerID(ev.NodeInfo.ID),
 		}
 		next, ok := r.advanceInclude(ctx, cmd)
 		if ok {
@@ -202,7 +217,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		}
 
 		// tell the probe state machine in case there is are connectivity checks that could satisfied
-		cmdProbe := &routing.EventProbeNotifyConnectivity[KadKey]{
+		cmdProbe := &routing.EventProbeNotifyConnectivity[kadt.Key, kadt.PeerID]{
 			NodeID: kadt.PeerID(ev.NodeInfo.ID),
 		}
 		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
@@ -213,7 +228,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		span.SetAttributes(attribute.String("event", "EventNotifyConnectivity"), attribute.String("nodeid", ev.NodeID.String()))
 
 		// tell the probe state machine to remove the node from the routing table and probe list
-		cmdProbe := &routing.EventProbeRemove[KadKey]{
+		cmdProbe := &routing.EventProbeRemove[kadt.Key, kadt.PeerID]{
 			NodeID: kadt.PeerID(ev.NodeID),
 		}
 		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
@@ -290,11 +305,11 @@ func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.Boot
 	bstate := r.bootstrap.Advance(ctx, ev)
 	switch st := bstate.(type) {
 
-	case *routing.StateBootstrapMessage[KadKey, ma.Multiaddr]:
+	case *routing.StateBootstrapFindCloser[kadt.Key, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: "bootstrap",
-			To:      NodeIDToAddrInfo(st.NodeID),
-			Target:  st.Message.Target(),
+			To:      KadPeerIDToAddrInfo(st.NodeID),
+			Target:  st.Target,
 			Notify:  r,
 		}, true
 
@@ -319,28 +334,28 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 
 	istate := r.include.Advance(ctx, ev)
 	switch st := istate.(type) {
-	case *routing.StateIncludeFindNodeMessage[KadKey, ma.Multiaddr]:
+	case *routing.StateIncludeConnectivityCheck[kadt.Key, kadt.PeerID]:
 		span.SetAttributes(attribute.String("out_event", "EventOutboundGetCloserNodes"))
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{
 			QueryID: "include",
-			To:      NodeInfoToAddrInfo(st.NodeInfo),
-			Target:  st.NodeInfo.ID().Key(),
+			To:      KadPeerIDToAddrInfo(st.NodeID),
+			Target:  st.NodeID.Key(),
 			Notify:  r,
 		}, true
 
-	case *routing.StateIncludeRoutingUpdated[KadKey, ma.Multiaddr]:
+	case *routing.StateIncludeRoutingUpdated[kadt.Key, kadt.PeerID]:
 		// a node has been included in the routing table
 
 		// notify other routing state machines that there is a new node in the routing table
 		r.notify(ctx, &EventRoutingUpdated{
-			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
+			NodeInfo: KadPeerIDToAddrInfo(st.NodeID),
 		})
 
 		// return the event to notify outwards too
 		span.SetAttributes(attribute.String("out_event", "EventRoutingUpdated"))
 		return &EventRoutingUpdated{
-			NodeInfo: NodeInfoToAddrInfo(st.NodeInfo),
+			NodeInfo: KadPeerIDToAddrInfo(st.NodeID),
 		}, true
 	case *routing.StateIncludeWaitingAtCapacity:
 		// nothing to do except wait for message response or timeout
@@ -362,25 +377,25 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 	defer span.End()
 	st := r.probe.Advance(ctx, ev)
 	switch st := st.(type) {
-	case *routing.StateProbeConnectivityCheck[KadKey]:
+	case *routing.StateProbeConnectivityCheck[kadt.Key, kadt.PeerID]:
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{
 			QueryID: "probe",
-			To:      NodeIDToAddrInfo(st.NodeID),
+			To:      KadPeerIDToAddrInfo(st.NodeID),
 			Target:  st.NodeID.Key(),
 			Notify:  r,
 		}, true
-	case *routing.StateProbeNodeFailure[KadKey]:
+	case *routing.StateProbeNodeFailure[kadt.Key, kadt.PeerID]:
 		// a node has failed a connectivity check and been removed from the routing table and the probe list
 
 		// emit an EventRoutingRemoved event to notify clients that the node has been removed
 		r.pending = append(r.pending, &EventRoutingRemoved{
-			NodeID: NodeIDToPeerID(st.NodeID),
+			NodeID: peer.ID(st.NodeID),
 		})
 
 		// add the node to the inclusion list for a second chance
 		r.notify(ctx, &EventAddAddrInfo{
-			NodeInfo: NodeIDToAddrInfo(st.NodeID),
+			NodeInfo: KadPeerIDToAddrInfo(st.NodeID),
 		})
 	case *routing.StateProbeWaitingAtCapacity:
 		// the probe state machine is waiting for responses for checks and the maximum number of concurrent checks has been reached.

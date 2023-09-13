@@ -72,7 +72,7 @@ func NewRouter(self peer.ID, top *Topology) *Router {
 	}
 }
 
-func (r *Router) NodeID() kad.NodeID[key.Key256] {
+func (r *Router) NodeID() kad.NodeID[kadt.Key] {
 	return kadt.PeerID(r.self)
 }
 
@@ -158,7 +158,7 @@ func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, er
 	return status.NodeInfo, nil
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target key.Key256) ([]peer.AddrInfo, error) {
+func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target kadt.Key) ([]peer.AddrInfo, error) {
 	protoID := address.ProtocolID("/test/1.0.0")
 
 	req := &pb.Message{

@@ -7,7 +7,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/peerstore"
 )
 
 // networkEventsSubscription registers a subscription on the libp2p event bus
@@ -93,5 +92,5 @@ func (d *DHT) onEvtPeerIdentificationCompleted(evt event.EvtPeerIdentificationCo
 	// tell the coordinator about a new candidate for inclusion in the routing table
 	d.kad.AddNodes(context.Background(), []peer.AddrInfo{
 		{ID: evt.Peer},
-	}, peerstore.RecentlyConnectedAddrTTL)
+	})
 }

@@ -33,7 +33,9 @@ import (
 var rng = rand.New(rand.NewSource(1337))
 
 func newTestDHT(t testing.TB) *DHT {
-	return newTestDHTWithConfig(t, DefaultConfig())
+	cfg := DefaultConfig()
+
+	return newTestDHTWithConfig(t, cfg)
 }
 
 func newTestDHTWithConfig(t testing.TB, cfg *Config) *DHT {

@@ -3,9 +3,11 @@ package tele
 import (
 	"context"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	motel "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ctxKey is an unexported type alias for the value of a context key. This is
@@ -84,6 +86,11 @@ func AttrKey(val string) attribute.KeyValue {
 	return attribute.String("key", val)
 }
 
+// AttrEvent creates an attribute that records the name of an event
+func AttrEvent(val string) attribute.KeyValue {
+	return attribute.String("event", val)
+}
+
 // WithAttributes is a function that attaches the provided attributes to the
 // given context. The given attributes will overwrite any already existing ones.
 func WithAttributes(ctx context.Context, attrs ...attribute.KeyValue) context.Context {
@@ -114,4 +121,9 @@ func FromContext(ctx context.Context, attrs ...attribute.KeyValue) attribute.Set
 	}
 
 	return attribute.NewSet(append(set.ToSlice(), attrs...)...)
+}
+
+// StartSpan creates a span and a [context.Context] containing the newly-created span.
+func StartSpan(ctx context.Context, name string) (context.Context, trace.Span) {
+	return otel.Tracer(TracerName).Start(ctx, name)
 }

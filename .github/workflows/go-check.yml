@@ -23,6 +23,5 @@ jobs:
     uses: pl-strflt/uci/.github/workflows/go-check.yml@v0.0
     with:
       go-version: '1.21.1'
-    defaults:
-      run:
-        working-directory: ./v2
+      working-directory: ./v2
+

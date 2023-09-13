@@ -1,6 +1,0 @@
-files: # Configure what Unified CI templates should be used for your repository; defaults to primary language default fileset
-  - .github/workflows/go-check.yml
-  - .github/workflows/go-test.yml
-force: true # Configure whether Unified CI should overwrite existing workflows; defaults to false
-versions:
-  go: 1.21 # Configure what version of Go should be used; defaults to oldstable

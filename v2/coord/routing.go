@@ -17,7 +17,8 @@ import (
 // A RoutingBehaviour provices the behaviours for bootstrapping and maintaining a DHT's routing table.
 type RoutingBehaviour struct {
 	// self is the peer id of the system the dht is running on
-	self peer.ID
+	self kadt.PeerID
+
 	// bootstrap is the bootstrap state machine, responsible for bootstrapping the routing table
 	bootstrap SM[routing.BootstrapEvent, routing.BootstrapState]
 
@@ -35,7 +36,7 @@ type RoutingBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewRoutingBehaviour(self peer.ID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
+func NewRoutingBehaviour(self kadt.PeerID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
 	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,
@@ -76,7 +77,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventAddAddrInfo:
 		span.SetAttributes(attribute.String("event", "EventAddAddrInfo"))
 		// Ignore self
-		if ev.NodeInfo.ID == r.self {
+		if ev.NodeInfo.ID == peer.ID(r.self) {
 			break
 		}
 		// TODO: apply ttl

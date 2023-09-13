@@ -28,7 +28,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
@@ -64,7 +64,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
@@ -97,7 +97,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
@@ -131,7 +131,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
@@ -161,7 +161,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
@@ -194,7 +194,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
@@ -229,7 +229,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	rt := nodes[0].RoutingTable
 
 	includeCfg := routing.DefaultIncludeConfig()

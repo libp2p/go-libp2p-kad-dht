@@ -28,7 +28,7 @@ import (
 // A Coordinator coordinates the state machines that comprise a Kademlia DHT
 type Coordinator struct {
 	// self is the peer id of the system the dht is running on
-	self peer.ID
+	self kadt.PeerID
 
 	// cancel is used to cancel all running goroutines when the coordinator is cleaning up
 	cancel context.CancelFunc
@@ -148,7 +148,7 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 	}
 }
 
-func NewCoordinator(self peer.ID, rtr Router, rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
+func NewCoordinator(self kadt.PeerID, rtr Router, rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		cfg = DefaultCoordinatorConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -241,13 +241,13 @@ func (c *Coordinator) Close() error {
 	return nil
 }
 
-func (c *Coordinator) ID() peer.ID {
+func (c *Coordinator) ID() kadt.PeerID {
 	return c.self
 }
 
 func (c *Coordinator) Addresses() []ma.Multiaddr {
 	// TODO: return configured listen addresses
-	info, err := c.rtr.GetNodeInfo(context.TODO(), c.self)
+	info, err := c.rtr.GetNodeInfo(context.TODO(), peer.ID(c.self))
 	if err != nil {
 		return nil
 	}
@@ -312,7 +312,7 @@ func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
 		return nil, ErrNodeNotFound
 	}
 
-	nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
+	nh, err := c.networkBehaviour.getNodeHandler(ctx, kadt.PeerID(id))
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 	closest := c.rt.NearestNodes(k, n)
 	nodes := make([]Node, 0, len(closest))
 	for _, id := range closest {
-		nh, err := c.networkBehaviour.getNodeHandler(ctx, peer.ID(id))
+		nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -393,7 +393,7 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 					Success:  ev.Stats.Success,
 					Failure:  ev.Stats.Failure,
 				}
-				nh, err := c.networkBehaviour.getNodeHandler(ctx, ev.NodeID)
+				nh, err := c.networkBehaviour.getNodeHandler(ctx, kadt.PeerID(ev.NodeID))
 				if err != nil {
 					// ignore unknown node
 					break
@@ -434,7 +434,7 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.AddNodes")
 	defer span.End()
 	for _, ai := range ais {
-		if ai.ID == c.self {
+		if ai.ID == peer.ID(c.self) {
 			// skip self
 			continue
 		}

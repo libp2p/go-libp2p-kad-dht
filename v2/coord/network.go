@@ -21,7 +21,7 @@ type NetworkBehaviour struct {
 	rtr Router
 
 	nodeHandlersMu sync.Mutex
-	nodeHandlers   map[peer.ID]*NodeHandler // TODO: garbage collect node handlers
+	nodeHandlers   map[kadt.PeerID]*NodeHandler // TODO: garbage collect node handlers
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -34,7 +34,7 @@ type NetworkBehaviour struct {
 func NewNetworkBehaviour(rtr Router, logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
 	b := &NetworkBehaviour{
 		rtr:          rtr,
-		nodeHandlers: make(map[peer.ID]*NodeHandler),
+		nodeHandlers: make(map[kadt.PeerID]*NodeHandler),
 		ready:        make(chan struct{}, 1),
 		logger:       logger.With("behaviour", "network"),
 		tracer:       tracer,
@@ -53,10 +53,10 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventOutboundGetCloserNodes:
 		b.nodeHandlersMu.Lock()
-		nh, ok := b.nodeHandlers[ev.To.ID]
+		nh, ok := b.nodeHandlers[kadt.PeerID(ev.To.ID)]
 		if !ok {
 			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
-			b.nodeHandlers[ev.To.ID] = nh
+			b.nodeHandlers[kadt.PeerID(ev.To.ID)] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
@@ -100,11 +100,11 @@ func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	return nil, false
 }
 
-func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id peer.ID) (*NodeHandler, error) {
+func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (*NodeHandler, error) {
 	b.nodeHandlersMu.Lock()
 	nh, ok := b.nodeHandlers[id]
 	if !ok || len(nh.Addresses()) == 0 {
-		info, err := b.rtr.GetNodeInfo(ctx, id)
+		info, err := b.rtr.GetNodeInfo(ctx, peer.ID(id))
 		if err != nil {
 			return nil, err
 		}

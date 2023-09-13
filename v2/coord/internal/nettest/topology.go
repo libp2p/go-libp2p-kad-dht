@@ -6,7 +6,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
@@ -17,7 +16,7 @@ import (
 type Node struct {
 	NodeInfo     peer.AddrInfo
 	Router       *Router
-	RoutingTable routing.RoutingTableCpl[key.Key256, kadt.PeerID]
+	RoutingTable routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 }
 
 type Topology struct {

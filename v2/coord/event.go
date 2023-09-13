@@ -7,6 +7,7 @@ import (
 	"github.com/plprobelab/go-kademlia/network/address"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 type BehaviourEvent interface {
@@ -48,7 +49,7 @@ type RoutingNotification interface {
 
 type EventStartBootstrap struct {
 	ProtocolID address.ProtocolID
-	Message    kad.Request[KadKey, ma.Multiaddr]
+	Message    kad.Request[kadt.Key, ma.Multiaddr]
 	SeedNodes  []peer.ID // TODO: peer.AddrInfo
 }
 
@@ -58,7 +59,7 @@ func (*EventStartBootstrap) routingCommand() {}
 type EventOutboundGetCloserNodes struct {
 	QueryID query.QueryID
 	To      peer.AddrInfo
-	Target  KadKey
+	Target  kadt.Key
 	Notify  Notify[BehaviourEvent]
 }
 
@@ -68,9 +69,9 @@ func (*EventOutboundGetCloserNodes) networkCommand()     {}
 
 type EventStartQuery struct {
 	QueryID           query.QueryID
-	Target            KadKey
+	Target            kadt.Key
 	ProtocolID        address.ProtocolID
-	Message           kad.Request[KadKey, ma.Multiaddr]
+	Message           kad.Request[kadt.Key, ma.Multiaddr]
 	KnownClosestNodes []peer.ID
 	Notify            NotifyCloser[BehaviourEvent]
 }
@@ -95,7 +96,7 @@ func (*EventAddAddrInfo) routingCommand() {}
 type EventGetCloserNodesSuccess struct {
 	QueryID     query.QueryID
 	To          peer.AddrInfo
-	Target      KadKey
+	Target      kadt.Key
 	CloserNodes []peer.AddrInfo
 }
 
@@ -105,7 +106,7 @@ func (*EventGetCloserNodesSuccess) nodeHandlerResponse() {}
 type EventGetCloserNodesFailure struct {
 	QueryID query.QueryID
 	To      peer.AddrInfo
-	Target  KadKey
+	Target  kadt.Key
 	Err     error
 }
 
@@ -117,7 +118,7 @@ func (*EventGetCloserNodesFailure) nodeHandlerResponse() {}
 type EventQueryProgressed struct {
 	QueryID  query.QueryID
 	NodeID   peer.ID
-	Response kad.Response[KadKey, ma.Multiaddr]
+	Response kad.Response[kadt.Key, ma.Multiaddr]
 	Stats    query.QueryStats
 }
 

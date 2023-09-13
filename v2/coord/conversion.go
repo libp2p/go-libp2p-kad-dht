@@ -9,7 +9,7 @@ import (
 
 // KadPeerIDToAddrInfo converts a kad.NodeID to a peer.AddrInfo with no addresses.
 // This function will panic if id's underlying type is not kadt.PeerID
-func KadPeerIDToAddrInfo(id kad.NodeID[KadKey]) peer.AddrInfo {
+func KadPeerIDToAddrInfo(id kad.NodeID[kadt.Key]) peer.AddrInfo {
 	peerID := id.(kadt.PeerID)
 	return peer.AddrInfo{
 		ID: peer.ID(peerID),

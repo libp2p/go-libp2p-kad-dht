@@ -182,7 +182,7 @@ func (h *NodeHandler) Addresses() []ma.Multiaddr {
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
-func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]Node, error) {
+func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
 	ctx, span := h.tracer.Start(ctx, "NodeHandler.GetClosestNodes")
 	defer span.End()
 	w := NewWaiter[BehaviourEvent]()
@@ -224,7 +224,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]N
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (h *NodeHandler) GetValue(ctx context.Context, key KadKey) (Value, error) {
+func (h *NodeHandler) GetValue(ctx context.Context, key kadt.Key) (Value, error) {
 	panic("not implemented")
 }
 
@@ -244,18 +244,18 @@ func CloserNodeIDs(nodes []peer.AddrInfo) []kadt.PeerID {
 }
 
 type fakeMessage struct {
-	key   KadKey
-	infos []kad.NodeInfo[KadKey, ma.Multiaddr]
+	key   kadt.Key
+	infos []kad.NodeInfo[kadt.Key, ma.Multiaddr]
 }
 
-func (r fakeMessage) Target() KadKey {
+func (r fakeMessage) Target() kadt.Key {
 	return r.key
 }
 
-func (r fakeMessage) CloserNodes() []kad.NodeInfo[KadKey, ma.Multiaddr] {
+func (r fakeMessage) CloserNodes() []kad.NodeInfo[kadt.Key, ma.Multiaddr] {
 	return r.infos
 }
 
-func (r fakeMessage) EmptyResponse() kad.Response[KadKey, ma.Multiaddr] {
+func (r fakeMessage) EmptyResponse() kad.Response[kadt.Key, ma.Multiaddr] {
 	return &fakeMessage{}
 }

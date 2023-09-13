@@ -41,7 +41,7 @@ type DHT struct {
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt routing.RoutingTableCpl[key.Key256, kadt.PeerID]
+	rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 
 	// backends
 	backends map[string]Backend
@@ -316,9 +316,9 @@ func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Du
 	return d.kad.AddNodes(ctx, ais)
 }
 
-// newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by
-// SHA256 hashing the given bytes and wrapping them in a [key.Key256].
-func newSHA256Key(data []byte) key.Key256 {
+// newSHA256Key returns a [kadt.KadKey] that conforms to the [kad.Key] interface by
+// SHA256 hashing the given bytes and wrapping them in a [kadt.KadKey].
+func newSHA256Key(data []byte) kadt.Key {
 	h := sha256.Sum256(data)
 	return key.NewKey256(h[:])
 }

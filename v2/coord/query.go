@@ -13,7 +13,7 @@ import (
 )
 
 type PooledQueryBehaviour struct {
-	pool    *query.Pool[KadKey, kadt.PeerID]
+	pool    *query.Pool[kadt.Key, kadt.PeerID]
 	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
@@ -24,7 +24,7 @@ type PooledQueryBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[KadKey, kadt.PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
@@ -45,7 +45,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	var cmd query.PoolEvent
 	switch ev := ev.(type) {
 	case *EventStartQuery:
-		cmd = &query.EventPoolAddQuery[KadKey, kadt.PeerID]{
+		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
 			KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.KnownClosestNodes),
@@ -75,13 +75,13 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 				// Stats:    stats,
 			})
 		}
-		cmd = &query.EventPoolFindCloserResponse[KadKey, kadt.PeerID]{
+		cmd = &query.EventPoolFindCloserResponse[kadt.Key, kadt.PeerID]{
 			NodeID:      kadt.PeerID(ev.To.ID),
 			QueryID:     ev.QueryID,
 			CloserNodes: CloserNodeIDs(ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
-		cmd = &query.EventPoolFindCloserFailure[KadKey, kadt.PeerID]{
+		cmd = &query.EventPoolFindCloserFailure[kadt.Key, kadt.PeerID]{
 			NodeID:  kadt.PeerID(ev.To.ID),
 			QueryID: ev.QueryID,
 			Error:   ev.Err,
@@ -148,7 +148,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 
 	pstate := p.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {
-	case *query.StatePoolFindCloser[KadKey, kadt.PeerID]:
+	case *query.StatePoolFindCloser[kadt.Key, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
 			To:      KadPeerIDToAddrInfo(st.NodeID),

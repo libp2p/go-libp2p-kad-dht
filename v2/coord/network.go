@@ -9,10 +9,10 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/query"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -21,7 +21,7 @@ type NetworkBehaviour struct {
 	rtr Router
 
 	nodeHandlersMu sync.Mutex
-	nodeHandlers   map[peer.ID]*NodeHandler // TODO: garbage collect node handlers
+	nodeHandlers   map[kadt.PeerID]*NodeHandler // TODO: garbage collect node handlers
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -34,9 +34,9 @@ type NetworkBehaviour struct {
 func NewNetworkBehaviour(rtr Router, logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
 	b := &NetworkBehaviour{
 		rtr:          rtr,
-		nodeHandlers: make(map[peer.ID]*NodeHandler),
+		nodeHandlers: make(map[kadt.PeerID]*NodeHandler),
 		ready:        make(chan struct{}, 1),
-		logger:       logger,
+		logger:       logger.With("behaviour", "network"),
 		tracer:       tracer,
 	}
 
@@ -53,10 +53,10 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventOutboundGetCloserNodes:
 		b.nodeHandlersMu.Lock()
-		nh, ok := b.nodeHandlers[ev.To.ID]
+		nh, ok := b.nodeHandlers[kadt.PeerID(ev.To.ID)]
 		if !ok {
 			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
-			b.nodeHandlers[ev.To.ID] = nh
+			b.nodeHandlers[kadt.PeerID(ev.To.ID)] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
@@ -100,11 +100,11 @@ func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	return nil, false
 }
 
-func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id peer.ID) (*NodeHandler, error) {
+func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (*NodeHandler, error) {
 	b.nodeHandlersMu.Lock()
 	nh, ok := b.nodeHandlers[id]
 	if !ok || len(nh.Addresses()) == 0 {
-		info, err := b.rtr.GetNodeInfo(ctx, id)
+		info, err := b.rtr.GetNodeInfo(ctx, peer.ID(id))
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func (h *NodeHandler) Addresses() []ma.Multiaddr {
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
-func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]Node, error) {
+func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
 	ctx, span := h.tracer.Start(ctx, "NodeHandler.GetClosestNodes")
 	defer span.End()
 	w := NewWaiter[BehaviourEvent]()
@@ -224,7 +224,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k KadKey, n int) ([]N
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (h *NodeHandler) GetValue(ctx context.Context, key KadKey) (Value, error) {
+func (h *NodeHandler) GetValue(ctx context.Context, key kadt.Key) (Value, error) {
 	panic("not implemented")
 }
 
@@ -234,31 +234,19 @@ func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-func CloserNodesResponse(k KadKey, nodes []peer.AddrInfo) kad.Response[KadKey, ma.Multiaddr] {
-	infos := make([]kad.NodeInfo[KadKey, ma.Multiaddr], len(nodes))
-	for i := range nodes {
-		infos[i] = kadt.AddrInfo{Info: nodes[i]}
-	}
-
-	return &fakeMessage{
-		key:   k,
-		infos: infos,
-	}
-}
-
 type fakeMessage struct {
-	key   KadKey
-	infos []kad.NodeInfo[KadKey, ma.Multiaddr]
+	key   kadt.Key
+	infos []kad.NodeInfo[kadt.Key, ma.Multiaddr]
 }
 
-func (r fakeMessage) Target() KadKey {
+func (r fakeMessage) Target() kadt.Key {
 	return r.key
 }
 
-func (r fakeMessage) CloserNodes() []kad.NodeInfo[KadKey, ma.Multiaddr] {
+func (r fakeMessage) CloserNodes() []kad.NodeInfo[kadt.Key, ma.Multiaddr] {
 	return r.infos
 }
 
-func (r fakeMessage) EmptyResponse() kad.Response[KadKey, ma.Multiaddr] {
+func (r fakeMessage) EmptyResponse() kad.Response[kadt.Key, ma.Multiaddr] {
 	return &fakeMessage{}
 }

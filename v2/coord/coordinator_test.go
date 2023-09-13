@@ -167,7 +167,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
@@ -206,7 +206,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
@@ -264,7 +264,7 @@ func TestBootstrap(t *testing.T) {
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
@@ -318,7 +318,7 @@ func TestIncludeNode(t *testing.T) {
 
 	candidate := nodes[len(nodes)-1].NodeInfo // not in nodes[0] routing table
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
@@ -331,8 +331,8 @@ func TestIncludeNode(t *testing.T) {
 	w := new(notificationWatcher)
 	w.Watch(t, ctx, d.RoutingNotifications())
 
-	// inject a new node into the dht's includeEvents queue
-	err = d.AddNodes(ctx, []peer.AddrInfo{candidate}, time.Minute)
+	// inject a new node
+	err = d.AddNodes(ctx, []peer.AddrInfo{candidate})
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table

@@ -13,12 +13,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/routing"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -42,7 +41,7 @@ type DHT struct {
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
+	rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 
 	// backends
 	backends map[string]Backend
@@ -155,7 +154,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	coordCfg.MeterProvider = cfg.MeterProvider
 	coordCfg.TracerProvider = cfg.TracerProvider
 
-	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, coordCfg)
+	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &Router{host: h}, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -309,12 +308,17 @@ func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Du
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
 	defer span.End()
 
-	return d.kad.AddNodes(ctx, ais, ttl)
+	ps := d.host.Peerstore()
+	for _, ai := range ais {
+		ps.AddAddrs(ai.ID, ai.Addrs, ttl)
+	}
+
+	return d.kad.AddNodes(ctx, ais)
 }
 
-// newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by
-// SHA256 hashing the given bytes and wrapping them in a [key.Key256].
-func newSHA256Key(data []byte) key.Key256 {
+// newSHA256Key returns a [kadt.KadKey] that conforms to the [kad.Key] interface by
+// SHA256 hashing the given bytes and wrapping them in a [kadt.KadKey].
+func newSHA256Key(data []byte) kadt.Key {
 	h := sha256.Sum256(data)
 	return key.NewKey256(h[:])
 }

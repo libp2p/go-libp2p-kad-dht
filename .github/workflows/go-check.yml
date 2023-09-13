@@ -24,4 +24,5 @@ jobs:
     with:
       go-version: '1.21.1'
     defaults:
-      working-directory: ./v2
+      run:
+        working-directory: ./v2

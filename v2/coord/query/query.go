@@ -130,14 +130,18 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 
 	switch tev := ev.(type) {
 	case *EventQueryCancel:
+		span.SetAttributes(tele.AttrEvent("EventQueryCancel"))
 		q.markFinished()
 		return &StateQueryFinished{
 			QueryID: q.id,
 			Stats:   q.stats,
 		}
 	case *EventQueryFindCloserResponse[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventQueryFindCloserResponse"))
 		q.onMessageResponse(ctx, tev.NodeID, tev.CloserNodes)
 	case *EventQueryFindCloserFailure[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventQueryFindCloserFailure"))
+		span.RecordError(tev.Error)
 		q.onMessageFailure(ctx, tev.NodeID)
 	case nil:
 		// TEMPORARY: no event to process
@@ -170,6 +174,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 				q.inFlight--
 				q.stats.Failure++
 			} else if atCapacity() {
+				span.SetAttributes(tele.AttrOutEvent("StateQueryWaitingAtCapacity")) // this is the query's tracing span
 				returnState = &StateQueryWaitingAtCapacity{
 					QueryID: q.id,
 					Stats:   q.stats,
@@ -186,6 +191,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 			// If it has contacted at least NumResults nodes successfully then the iteration is done.
 			if !progressing && successes >= q.cfg.NumResults {
 				q.markFinished()
+				span.SetAttributes(tele.AttrOutEvent("StateQueryFinished")) // this is the query's tracing span
 				returnState = &StateQueryFinished{
 					QueryID: q.id,
 					Stats:   q.stats,
@@ -202,6 +208,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 				if q.stats.Start.IsZero() {
 					q.stats.Start = q.cfg.Clock.Now()
 				}
+				span.SetAttributes(tele.AttrOutEvent("StateQueryFindCloser")) // this is the query's tracing span
 				returnState = &StateQueryFindCloser[K, N]{
 					NodeID:  ni.NodeID,
 					QueryID: q.id,
@@ -211,6 +218,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 				return true
 
 			}
+			span.SetAttributes(tele.AttrOutEvent("StateQueryWaitingAtCapacity")) // this is the query's tracing span
 			returnState = &StateQueryWaitingAtCapacity{
 				QueryID: q.id,
 				Stats:   q.stats,
@@ -233,6 +241,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 
 	if q.inFlight > 0 {
 		// The iterator is still waiting for results and not at capacity
+		span.SetAttributes(tele.AttrOutEvent("StateQueryWaitingWithCapacity"))
 		return &StateQueryWaitingWithCapacity{
 			QueryID: q.id,
 			Stats:   q.stats,
@@ -242,6 +251,7 @@ func (q *Query[K, N]) Advance(ctx context.Context, ev QueryEvent) QueryState {
 	// The iterator is finished because all available nodes have been contacted
 	// and the iterator is not waiting for any more results.
 	q.markFinished()
+	span.SetAttributes(tele.AttrOutEvent("StateQueryFinished"))
 	return &StateQueryFinished{
 		QueryID: q.id,
 		Stats:   q.stats,

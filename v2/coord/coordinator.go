@@ -308,6 +308,8 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.
 // If the node isn't found in the table, it returns ErrNodeNotFound.
 func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetNode")
+	defer span.End()
 	if _, exists := c.rt.GetNode(kadt.PeerID(id).Key()); !exists {
 		return nil, ErrNodeNotFound
 	}
@@ -321,6 +323,8 @@ func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetClosestNodes")
+	defer span.End()
 	closest := c.rt.NearestNodes(k, n)
 	nodes := make([]Node, 0, len(closest))
 	for _, id := range closest {
@@ -482,7 +486,7 @@ func (c *Coordinator) NotifyConnectivity(ctx context.Context, id peer.ID) error 
 // NotifyNonConnectivity notifies the coordinator that a peer has failed a connectivity check
 // which means it is not connected and/or it doesn't support finding closer nodes
 func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id peer.ID) error {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyNonConnectivity")
 	defer span.End()
 
 	c.routingBehaviour.Notify(ctx, &EventNotifyNonConnectivity{

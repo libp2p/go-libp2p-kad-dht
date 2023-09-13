@@ -106,6 +106,7 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 	switch tev := ev.(type) {
 
 	case *EventIncludeAddCandidate[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventIncludeAddCandidate"))
 		// Ignore if already running a check
 		_, checking := b.checks[key.HexString(tev.NodeID.Key())]
 		if checking {
@@ -124,20 +125,25 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 		b.candidates.Enqueue(ctx, tev.NodeID)
 
 	case *EventIncludeConnectivityCheckSuccess[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventIncludeConnectivityCheckSuccess"))
 		ch, ok := b.checks[key.HexString(tev.NodeID.Key())]
 		if ok {
 			delete(b.checks, key.HexString(tev.NodeID.Key()))
 			if b.rt.AddNode(tev.NodeID) {
+				span.SetAttributes(tele.AttrOutEvent("StateIncludeRoutingUpdated"))
 				return &StateIncludeRoutingUpdated[K, N]{
 					NodeID: ch.NodeID,
 				}
 			}
 		}
 	case *EventIncludeConnectivityCheckFailure[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventIncludeConnectivityCheckFailure"))
+		span.RecordError(tev.Error)
 		delete(b.checks, key.HexString(tev.NodeID.Key()))
 
 	case *EventIncludePoll:
-	// ignore, nothing to do
+		span.SetAttributes(tele.AttrEvent("EventIncludePoll"))
+		// ignore, nothing to do
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
@@ -153,6 +159,7 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 	if !ok {
 		// No candidate in queue
 		if len(b.checks) > 0 {
+			span.SetAttributes(tele.AttrOutEvent("StateIncludeWaitingWithCapacity"))
 			return &StateIncludeWaitingWithCapacity{}
 		}
 		return &StateIncludeIdle{}
@@ -164,6 +171,7 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 	}
 
 	// Ask the node to find itself
+	span.SetAttributes(tele.AttrOutEvent("StateIncludeConnectivityCheck"))
 	return &StateIncludeConnectivityCheck[K, N]{
 		NodeID: candidate,
 	}

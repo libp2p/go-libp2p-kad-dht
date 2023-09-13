@@ -211,6 +211,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		candidate, found := p.nvl.FindCheckPastDeadline(p.cfg.Clock.Now())
 		if !found {
 			// nothing suitable for time out
+			span.SetAttributes(tele.AttrOutEvent("StateProbeWaitingAtCapacity"))
 			return &StateProbeWaitingAtCapacity{}
 		}
 
@@ -228,6 +229,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	if !ok {
 		if p.nvl.OngoingCount() > 0 {
 			// waiting for a check but nothing else to do
+			span.SetAttributes(tele.AttrOutEvent("StateProbeWaitingWithCapacity"))
 			return &StateProbeWaitingWithCapacity{}
 		}
 		// nothing happening and nothing to do
@@ -237,6 +239,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	p.nvl.MarkOngoing(next.NodeID, p.cfg.Clock.Now().Add(p.cfg.Timeout))
 
 	// Ask the node to find itself
+	span.SetAttributes(tele.AttrOutEvent("StateProbeConnectivityCheck"))
 	return &StateProbeConnectivityCheck[K, N]{
 		NodeID: next.NodeID,
 	}

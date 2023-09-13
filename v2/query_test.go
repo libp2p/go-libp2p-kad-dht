@@ -153,8 +153,11 @@ func connectLinearChain(t *testing.T, ctx context.Context, dhts ...*DHT) {
 
 func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
+	ctx, tp := kadtest.MaybeTrace(t, ctx)
 
 	cfg := DefaultConfig()
+	cfg.TracerProvider = tp
+
 	d1 := newServerDht(t, cfg)
 	d2 := newServerDht(t, cfg)
 	d3 := newServerDht(t, cfg)

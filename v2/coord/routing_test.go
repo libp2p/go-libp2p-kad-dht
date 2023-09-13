@@ -9,14 +9,13 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/network/address"
-	"github.com/plprobelab/go-kademlia/query"
-	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
@@ -29,7 +28,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
@@ -52,10 +51,8 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the bootstrap state machine
-	expected := &routing.EventBootstrapStart[KadKey, ma.Multiaddr]{
-		ProtocolID:        ev.ProtocolID,
-		Message:           ev.Message,
-		KnownClosestNodes: SliceOfPeerIDToSliceOfNodeID(ev.SeedNodes),
+	expected := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
+		KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
 	}
 	require.Equal(t, expected, bootstrap.Received)
 }
@@ -67,7 +64,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
@@ -86,11 +83,11 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageResponse[KadKey, ma.Multiaddr]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageResponse[KadKey, ma.Multiaddr])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
-	require.Equal(t, ev.CloserNodes, SliceOfNodeInfoToSliceOfAddrInfo(rev.Response.CloserNodes()))
+	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
+	require.Equal(t, SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes), rev.CloserNodes)
 }
 
 func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
@@ -100,7 +97,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
@@ -120,10 +117,10 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapMessageFailure[KadKey]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
 
-	rev := bootstrap.Received.(*routing.EventBootstrapMessageFailure[KadKey])
-	require.Equal(t, nodes[1].NodeInfo.ID, NodeIDToPeerID(rev.NodeID))
+	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -134,7 +131,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
@@ -151,8 +148,8 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// the event that should be passed to the include state machine
-	expected := &routing.EventIncludeAddCandidate[KadKey, ma.Multiaddr]{
-		NodeInfo: kadt.AddrInfo{Info: ev.NodeInfo},
+	expected := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
+		NodeID: kadt.PeerID(ev.NodeInfo.ID),
 	}
 	require.Equal(t, expected, include.Received)
 }
@@ -164,7 +161,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
@@ -184,11 +181,10 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageResponse[KadKey, ma.Multiaddr]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageResponse[KadKey, ma.Multiaddr])
-	require.Equal(t, nodes[1].NodeInfo, NodeInfoToAddrInfo(rev.NodeInfo))
-	require.Equal(t, ev.CloserNodes, SliceOfNodeInfoToSliceOfAddrInfo(rev.Response.CloserNodes()))
+	rev := include.Received.(*routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
 }
 
 func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
@@ -198,7 +194,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
@@ -219,10 +215,10 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	routingBehaviour.Notify(ctx, ev)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeMessageFailure[KadKey, ma.Multiaddr]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{}, include.Received)
 
-	rev := include.Received.(*routing.EventIncludeMessageFailure[KadKey, ma.Multiaddr])
-	require.Equal(t, nodes[1].NodeInfo, NodeInfoToAddrInfo(rev.NodeInfo))
+	rev := include.Received.(*routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID])
+	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
 
@@ -233,18 +229,18 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	rt := nodes[0].RoutingTable
 
 	includeCfg := routing.DefaultIncludeConfig()
 	includeCfg.Clock = clk
-	include, err := routing.NewInclude[KadKey, ma.Multiaddr](rt, includeCfg)
+	include, err := routing.NewInclude[kadt.Key, kadt.PeerID](rt, includeCfg)
 	require.NoError(t, err)
 
 	probeCfg := routing.DefaultProbeConfig()
 	probeCfg.Clock = clk
 	probeCfg.CheckInterval = 5 * time.Minute
-	probe, err := routing.NewProbe[KadKey, ma.Multiaddr](rt, probeCfg)
+	probe, err := routing.NewProbe[kadt.Key](rt, probeCfg)
 	require.NoError(t, err)
 
 	// ensure bootstrap is always idle

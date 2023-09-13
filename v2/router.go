@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -13,11 +12,12 @@ import (
 	"github.com/libp2p/go-msgio"
 	"github.com/libp2p/go-msgio/pbio"
 	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
@@ -112,7 +112,7 @@ func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, er
 	return r.host.Peerstore().PeerInfo(id), nil
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target key.Key256) ([]peer.AddrInfo, error) {
+func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target kadt.Key) ([]peer.AddrInfo, error) {
 	resp, err := r.SendMessage(ctx, to, address.ProtocolID(ProtocolIPFS), FindKeyRequest(target))
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target k
 	return resp.CloserPeersAddrInfos(), nil
 }
 
-func FindKeyRequest(k key.Key256) *pb.Message {
+func FindKeyRequest(k kadt.Key) *pb.Message {
 	marshalledKey, _ := k.MarshalBinary()
 	return &pb.Message{
 		Type: pb.Message_FIND_NODE,

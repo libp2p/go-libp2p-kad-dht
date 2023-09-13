@@ -2,8 +2,6 @@ module github.com/libp2p/go-libp2p-kad-dht/v2
 
 go 1.21
 
-replace github.com/multiformats/go-multistream => github.com/multiformats/go-multistream v0.4.1
-
 require (
 	github.com/benbjohnson/clock v1.3.5
 	github.com/hashicorp/golang-lru/v2 v2.0.5
@@ -12,7 +10,7 @@ require (
 	github.com/ipfs/go-datastore v0.6.1-0.20230901172804-1caa2449ed7c
 	github.com/ipfs/go-ds-leveldb v0.5.0
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/libp2p/go-libp2p v0.29.1-0.20230817072656-d2398ee4f251
+	github.com/libp2p/go-libp2p v0.30.0
 	github.com/libp2p/go-libp2p-record v0.2.0
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/multiformats/go-base32 v0.1.0

@@ -13,6 +13,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 func newServerHost(t testing.TB) host.Host {
@@ -57,6 +58,7 @@ func newServerDht(t testing.TB, cfg *Config) *DHT {
 
 	// add at least 1 entry in the routing table so the server will pass connectivity checks
 	fillRoutingTable(t, d, 1)
+	require.NotEmpty(t, d.rt.NearestNodes(kadt.PeerID(d.host.ID()).Key(), 1))
 
 	t.Cleanup(func() {
 		if err = d.Close(); err != nil {

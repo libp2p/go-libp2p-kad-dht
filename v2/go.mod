@@ -17,7 +17,7 @@ require (
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/multiformats/go-base32 v0.1.0
 	github.com/multiformats/go-multiaddr v0.11.0
-	github.com/plprobelab/go-kademlia v0.0.0-20230912113250-9c7dc6509360
+	github.com/plprobelab/go-kademlia v0.0.0-20230913171354-443ec1f56080
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/otel v1.17.0
 	go.opentelemetry.io/otel/exporters/jaeger v1.16.0

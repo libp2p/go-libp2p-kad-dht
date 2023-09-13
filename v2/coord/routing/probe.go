@@ -160,11 +160,13 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		p.nvl.Put(nv)
 	case *EventProbeRemove[K, N]:
 		span.SetAttributes(tele.AttrEvent("EventProbeRemove"), attribute.String("nodeid", tev.NodeID.String()))
+
 		p.rt.RemoveKey(tev.NodeID.Key())
 		p.nvl.Remove(tev.NodeID)
 		return &StateProbeNodeFailure[K, N]{
 			NodeID: tev.NodeID,
 		}
+
 	case *EventProbeConnectivityCheckSuccess[K, N]:
 		span.SetAttributes(tele.AttrEvent("EventProbeMessageResponse"), attribute.String("nodeid", tev.NodeID.String()))
 		nv, found := p.nvl.Get(tev.NodeID)
@@ -183,6 +185,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		// probe failed, so remove from routing table and from list
 		span.SetAttributes(tele.AttrEvent("EventProbeMessageFailure"), attribute.String("nodeid", tev.NodeID.String()))
 		span.RecordError(tev.Error)
+
 		p.rt.RemoveKey(tev.NodeID.Key())
 		p.nvl.Remove(tev.NodeID)
 		return &StateProbeNodeFailure[K, N]{

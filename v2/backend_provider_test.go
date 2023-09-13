@@ -9,6 +9,7 @@ import (
 
 	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
+	syncds "github.com/ipfs/go-datastore/sync"
 	"github.com/libp2p/go-libp2p"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,9 +22,7 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 	h, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 
-	dstore, err := InMemoryDatastore()
-	require.NoError(t, err)
-
+	dstore := syncds.MutexWrap(ds.NewMapDatastore())
 	t.Cleanup(func() {
 		if err = dstore.Close(); err != nil {
 			t.Logf("closing datastore: %s", err)
@@ -71,22 +70,12 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	// advance clock half the validity time and check if record is still there
 	clk.Add(cfg.ProvideValidity / 2)
 
-	// sync datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey("/"))
-	require.NoError(t, err)
-
 	// we expect the record to still be there after half the ProvideValidity
 	_, err = b.datastore.Get(ctx, dsKey)
 	require.NoError(t, err)
 
 	// advance clock another time and check if the record was GC'd now
 	clk.Add(cfg.ProvideValidity + cfg.GCInterval)
-
-	// sync datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey("/"))
-	require.NoError(t, err)
-
-	clk.Add(time.Minute)
 
 	// we expect the record to be GC'd now
 	val, err := b.datastore.Get(ctx, dsKey)

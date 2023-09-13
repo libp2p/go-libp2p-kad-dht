@@ -21,3 +21,5 @@ concurrency:
 jobs:
   go-check:
     uses: pl-strflt/uci/.github/workflows/go-check.yml@v0.0
+    with:
+      go-version: '1.21.1'

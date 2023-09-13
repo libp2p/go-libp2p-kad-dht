@@ -90,6 +90,7 @@ jobs:
           run: |
             set -o pipefail
             staticcheck ./... | sed -e 's@\(.*\)\.go@./\1.go@g'
+          working-directory: ./v2
       - name: go generate
         uses: protocol/multiple-go-modules@v1.2
         if: (success() || failure()) && fromJSON(steps.config.outputs.json).gogenerate == true

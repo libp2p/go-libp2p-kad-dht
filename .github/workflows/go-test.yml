@@ -18,7 +18,104 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go-test:
-    uses: pl-strflt/uci/.github/workflows/go-test.yml@v0.0
-    with:
-      go-versions: '["1.20.8"]'
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu", "windows", "macos" ]
+        go: ${{ fromJSON(inputs.go-versions) }}
+    env:
+      GOTESTFLAGS: -cover -coverprofile=module-coverage.txt -coverpkg=./...
+      GO386FLAGS: ''
+      GORACEFLAGS: ''
+    runs-on: ${{ fromJSON(vars[format('UCI_GO_TEST_RUNNER_{0}', matrix.os)] || format('"{0}-latest"', matrix.os)) }}
+    name: ${{ matrix.os }} (go ${{ matrix.go }})
+    steps:
+      - name: Use msys2 on windows
+        if: matrix.os == 'windows'
+        # The executable for msys2 is also called bash.cmd
+        #   https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md#shells
+        # If we prepend its location to the PATH
+        #   subsequent 'shell: bash' steps will use msys2 instead of gitbash
+        run: echo "C:/msys64/usr/bin" >> $GITHUB_PATH
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      # Update to v4 is blocked by https://github.com/actions/setup-go/pull/411
+      # - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v3
+        with:
+          go-version: stable
+          # cache: false
+      - id: config
+        uses: pl-strflt/uci/.github/actions/read-config@main
+      - id: go-mod
+        uses: pl-strflt/uci/.github/actions/read-go-mod@main
+      - id: go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21.1'
+          cache: false
+      - if: toJSON(fromJSON(steps.config.outputs.json).shuffle) != 'false'
+        run: |
+          echo "GOTESTFLAGS=-shuffle=on $GOTESTFLAGS" >> $GITHUB_ENV
+          echo "GO386FLAGS=-shuffle=on $GO386FLAGS" >> $GITHUB_ENV
+          echo "GORACEFLAGS=-shuffle=on $GORACEFLAGS" >> $GITHUB_ENV
+      - if: toJSON(fromJSON(steps.config.outputs.json).verbose) != 'false'
+        run: |
+          echo "GOTESTFLAGS=-v $GOTESTFLAGS" >> $GITHUB_ENV
+          echo "GO386FLAGS=-v $GO386FLAGS" >> $GITHUB_ENV
+          echo "GORACEFLAGS=-v $GORACEFLAGS" >> $GITHUB_ENV
+      # Update to v4 is blocked by https://github.com/actions/setup-go/pull/411
+      # - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v3
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+      - name: Go information
+        run: |
+          go version
+          go env
+      - name: Run repo-specific setup
+        uses: ./.github/actions/go-test-setup
+        if: hashFiles('./.github/actions/go-test-setup') != ''
+      - name: Run tests
+        if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
+        uses: protocol/multiple-go-modules@v1.2
+        env:
+          GOFLAGS: ${{ format('{0} {1}', env.GOTESTFLAGS, env.GOFLAGS) }}
+        with:
+          run: go test ./...
+          working-directory: ./v2
+      - name: Run tests (32 bit)
+        # can't run 32 bit tests on OSX.
+        if: matrix.os != 'macos' &&
+          fromJSON(steps.config.outputs.json).skip32bit != true &&
+          contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
+        uses: protocol/multiple-go-modules@v1.2
+        env:
+          GOARCH: 386
+          GOFLAGS: ${{ format('{0} {1}', env.GO386FLAGS, env.GOFLAGS) }}
+        with:
+          run: |
+            export "PATH=$PATH_386:$PATH"
+            go test ./...
+          working-directory: ./v2
+      - name: Run tests with race detector
+        # speed things up. Windows and OSX VMs are slow
+        if: matrix.os == 'ubuntu' &&
+          fromJSON(steps.config.outputs.json).skipRace != true &&
+          contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
+        uses: protocol/multiple-go-modules@v1.2
+        env:
+          GOFLAGS: ${{ format('{0} {1}', env.GORACEFLAGS, env.GOFLAGS) }}
+        with:
+          run: go test -race ./...
+          working-directory: ./v2
+      - name: Collect coverage files
+        id: coverages
+        run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@eaaf4bedf32dbdc6b720b63067d99c4d77d6047d # v3.1.4
+        with:
+          files: ${{ steps.coverages.outputs.files }}
+          env_vars: OS=${{ matrix.os }}, GO=${{ steps.go.outputs.version }}

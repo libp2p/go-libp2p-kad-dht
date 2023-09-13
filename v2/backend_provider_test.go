@@ -47,7 +47,7 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg.clk = clk
-	cfg.Logger = devnull
+	// cfg.Logger = devnull
 
 	b := newBackendProvider(t, cfg)
 

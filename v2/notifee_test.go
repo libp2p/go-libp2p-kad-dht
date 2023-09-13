@@ -7,13 +7,11 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestDHT_consumeNetworkEvents_onEvtLocalReachabilityChanged(t *testing.T) {
 	newModeDHT := func(m ModeOpt) *DHT {
-		cfg, err := DefaultConfig()
-		require.NoError(t, err)
+		cfg := DefaultConfig()
 		cfg.Mode = m
 
 		return newTestDHTWithConfig(t, cfg)

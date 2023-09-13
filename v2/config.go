@@ -178,7 +178,7 @@ type Config struct {
 // instantiate a fully functional [DHT] client. All fields that are nil require
 // some additional information to instantiate. The default values for these
 // fields come from separate top-level methods prefixed with Default.
-func DefaultConfig() (*Config, error) {
+func DefaultConfig() *Config {
 	return &Config{
 		Clock:             clock.New(),
 		Mode:              ModeOptAutoClient,
@@ -193,7 +193,7 @@ func DefaultConfig() (*Config, error) {
 		AddressFilter:     AddrFilterPrivate,
 		MeterProvider:     otel.GetMeterProvider(),
 		TracerProvider:    otel.GetTracerProvider(),
-	}, nil
+	}
 }
 
 // DefaultRoutingTable returns a triert.TrieRT routing table. This routing table

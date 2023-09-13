@@ -41,8 +41,7 @@ func newServerDht(t testing.TB, cfg *Config) *DHT {
 
 	var err error
 	if cfg == nil {
-		cfg, err = DefaultConfig()
-		require.NoError(t, err)
+		cfg = DefaultConfig()
 	}
 	cfg.Mode = ModeOptServer
 
@@ -62,8 +61,7 @@ func newClientDht(t testing.TB, cfg *Config) *DHT {
 
 	var err error
 	if cfg == nil {
-		cfg, err = DefaultConfig()
-		require.NoError(t, err)
+		cfg = DefaultConfig()
 	}
 	cfg.Mode = ModeOptClient
 	d, err := New(h, cfg)

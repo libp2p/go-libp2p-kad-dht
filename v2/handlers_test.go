@@ -33,8 +33,7 @@ import (
 var rng = rand.New(rand.NewSource(1337))
 
 func newTestDHT(t testing.TB) *DHT {
-	cfg, err := DefaultConfig()
-	require.NoError(t, err)
+	cfg := DefaultConfig()
 
 	return newTestDHTWithConfig(t, cfg)
 }
@@ -1330,8 +1329,7 @@ func TestDHT_handleAddProvider_empty_provider_peers(t *testing.T) {
 
 func TestDHT_handleAddProvider_only_store_filtered_addresses(t *testing.T) {
 	ctx := context.Background()
-	cfg, err := DefaultConfig()
-	require.NoError(t, err)
+	cfg := DefaultConfig()
 
 	testMaddr := ma.StringCast("/dns/maddr.dummy")
 
@@ -1350,7 +1348,7 @@ func TestDHT_handleAddProvider_only_store_filtered_addresses(t *testing.T) {
 	req := newAddProviderRequest([]byte("random-key"), addrInfo)
 
 	// do the request
-	_, err = d.handleAddProvider(ctx, addrInfo.ID, req)
+	_, err := d.handleAddProvider(ctx, addrInfo.ID, req)
 	assert.NoError(t, err)
 
 	maddrs := d.host.Peerstore().Addrs(addrInfo.ID)
@@ -1506,8 +1504,7 @@ func TestDHT_handleGetProviders_do_not_return_expired_records(t *testing.T) {
 
 func TestDHT_handleGetProviders_only_serve_filtered_addresses(t *testing.T) {
 	ctx := context.Background()
-	cfg, err := DefaultConfig()
-	require.NoError(t, err)
+	cfg := DefaultConfig()
 
 	testMaddr := ma.StringCast("/dns/maddr.dummy")
 

@@ -56,8 +56,7 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := DefaultConfig()
-			require.NoError(t, err)
+			c := DefaultConfig()
 			d, err := New(h, c)
 			if err != nil {
 				t.Fatal(err)
@@ -95,8 +94,7 @@ func expectEventType(t *testing.T, ctx context.Context, events <-chan coord.Rout
 func TestAddAddresses(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	localCfg, err := DefaultConfig()
-	assert.NoError(t, err)
+	localCfg := DefaultConfig()
 
 	local := newClientDht(t, localCfg)
 
@@ -106,7 +104,7 @@ func TestAddAddresses(t *testing.T) {
 	fillRoutingTable(t, remote, 1)
 
 	// local routing table should not contain the node
-	_, err = local.kad.GetNode(ctx, remote.host.ID())
+	_, err := local.kad.GetNode(ctx, remote.host.ID())
 	require.ErrorIs(t, err, coord.ErrNodeNotFound)
 
 	remoteAddrInfo := peer.AddrInfo{

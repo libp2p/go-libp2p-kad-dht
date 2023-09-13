@@ -65,10 +65,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	var err error
 
 	if cfg == nil {
-		cfg, err = DefaultConfig()
-		if err != nil {
-			return nil, fmt.Errorf("default config: %w", err)
-		}
+		cfg = DefaultConfig()
 	} else if err = cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate DHT config: %w", err)
 	}

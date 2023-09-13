@@ -2,7 +2,7 @@ name: Go Checks
 
 defaults:
   run:
-    working-directory: v2
+    working-directory: ./v2
 
 
 on:
@@ -22,4 +22,4 @@ jobs:
   go-check:
     uses: pl-strflt/uci/.github/workflows/go-check.yml@v0.0
     with:
-      go-version: '1.20.8'
+      go-version: '1.21.1'

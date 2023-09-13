@@ -113,7 +113,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 			cmd := &routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID]{
 				NodeID:      kadt.PeerID(ev.To.ID),
-				CloserNodes: CloserNodeIDs(ev.CloserNodes),
+				CloserNodes: SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
 			}
 			// attempt to advance the bootstrap
 			next, ok := r.advanceBootstrap(ctx, cmd)

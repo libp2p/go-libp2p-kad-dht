@@ -78,7 +78,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		cmd = &query.EventPoolFindCloserResponse[kadt.Key, kadt.PeerID]{
 			NodeID:      kadt.PeerID(ev.To.ID),
 			QueryID:     ev.QueryID,
-			CloserNodes: CloserNodeIDs(ev.CloserNodes),
+			CloserNodes: SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
 		cmd = &query.EventPoolFindCloserFailure[kadt.Key, kadt.PeerID]{

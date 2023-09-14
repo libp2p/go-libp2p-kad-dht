@@ -59,7 +59,7 @@ func TestProbeStartsIdle(t *testing.T) {
 	cfg := DefaultProbeConfig()
 	cfg.Clock = clk
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
 
 	bs, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -79,13 +79,13 @@ func TestProbeAddChecksPresenceInRoutingTable(t *testing.T) {
 	// Set concurrency to allow one check to run
 	cfg.Concurrency = 1
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
 	// Add node that isn't in routing table
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
@@ -108,8 +108,8 @@ func TestProbeAddStartsCheckIfCapacity(t *testing.T) {
 	// Set concurrency to allow one check to run
 	cfg.Concurrency = 1
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestProbeAddStartsCheckIfCapacity(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
@@ -148,10 +148,10 @@ func TestProbeAddManyStartsChecksIfCapacity(t *testing.T) {
 	// Set concurrency lower than the number of nodes
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
-	rt.AddNode(tiny.NewNode(tiny.Key(3)))
-	rt.AddNode(tiny.NewNode(tiny.Key(2)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
+	rt.AddNode(tiny.NewNode(3))
+	rt.AddNode(tiny.NewNode(2))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -159,21 +159,21 @@ func TestProbeAddManyStartsChecksIfCapacity(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
 	// after adding second node the probe should still be idle since the
 	// connectivity check will be scheduled for the future
 	state = sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(3)),
+		NodeID: tiny.NewNode(3),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
 	// after adding third node the probe should still be idle since the
 	// connectivity check will be scheduled for the future
 	state = sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(2)),
+		NodeID: tiny.NewNode(2),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
@@ -212,8 +212,8 @@ func TestProbeAddReportsCapacity(t *testing.T) {
 	// Set concurrency to allow more than one check to run
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestProbeAddReportsCapacity(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
@@ -255,8 +255,8 @@ func TestProbeRemoveDeletesNodeValue(t *testing.T) {
 	// Set concurrency to allow more than one check to run
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -264,13 +264,13 @@ func TestProbeRemoveDeletesNodeValue(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
 	// remove the node
 	state = sm.Advance(ctx, &EventProbeRemove[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 
 	// state indicate that node failed
@@ -291,13 +291,13 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 
 		l.Put(nv)
 
-		got, found := l.Get(tiny.NewNode(tiny.Key(4)))
+		got, found := l.Get(tiny.NewNode(4))
 		require.True(t, found)
 		require.True(t, key.Equal(got.NodeID.Key(), tiny.Key(4)))
 	})
@@ -308,19 +308,19 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 
 		l.Put(nv1)
 
 		nv2 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now().Add(-time.Minute),
 		}
 		l.Put(nv2)
 
-		got, found := l.Get(tiny.NewNode(tiny.Key(4)))
+		got, found := l.Get(tiny.NewNode(4))
 		require.True(t, found)
 		require.True(t, key.Equal(got.NodeID.Key(), tiny.Key(4)))
 		require.Equal(t, nv2.NextCheckDue, got.NextCheckDue)
@@ -332,19 +332,19 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 
 		l.Put(nv1)
 
 		nv2 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now().Add(time.Minute),
 		}
 		l.Put(nv2)
 
-		got, found := l.Get(tiny.NewNode(tiny.Key(4)))
+		got, found := l.Get(tiny.NewNode(4))
 		require.True(t, found)
 		require.True(t, key.Equal(got.NodeID.Key(), tiny.Key(4)))
 		require.Equal(t, nv2.NextCheckDue, got.NextCheckDue)
@@ -356,7 +356,7 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 
@@ -365,11 +365,11 @@ func TestNodeValueList(t *testing.T) {
 		require.Equal(t, 1, l.PendingCount())
 		require.Equal(t, 1, l.NodeCount())
 
-		_, found := l.Get(tiny.NewNode(tiny.Key(4)))
+		_, found := l.Get(tiny.NewNode(4))
 		require.True(t, found)
 
-		l.Remove(tiny.NewNode(tiny.Key(4)))
-		_, found = l.Get(tiny.NewNode(tiny.Key(4)))
+		l.Remove(tiny.NewNode(4))
+		_, found = l.Get(tiny.NewNode(4))
 		require.False(t, found)
 
 		require.Equal(t, 0, l.PendingCount())
@@ -382,14 +382,14 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 
 		l.Put(nv)
 
-		l.Remove(tiny.NewNode(tiny.Key(5)))
-		_, found := l.Get(tiny.NewNode(tiny.Key(4)))
+		l.Remove(tiny.NewNode(5))
+		_, found := l.Get(tiny.NewNode(4))
 		require.True(t, found)
 	})
 
@@ -409,7 +409,7 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 		l.Put(nv)
@@ -425,12 +425,12 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(5)),
+			NodeID:       tiny.NewNode(5),
 			NextCheckDue: clk.Now().Add(-time.Minute),
 		}
 		l.Put(nv1)
 		nv2 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now().Add(-2 * time.Minute),
 		}
 		l.Put(nv2)
@@ -453,13 +453,13 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(5)),
+			NodeID:       tiny.NewNode(5),
 			Cpl:          1,
 			NextCheckDue: clk.Now().Add(-time.Minute),
 		}
 		l.Put(nv1)
 		nv2 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			Cpl:          2,
 			NextCheckDue: clk.Now().Add(-time.Minute),
 		}
@@ -483,12 +483,12 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(5)),
+			NodeID:       tiny.NewNode(5),
 			NextCheckDue: clk.Now().Add(time.Minute),
 		}
 		l.Put(nv1)
 		nv2 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now().Add(2 * time.Minute),
 		}
 		l.Put(nv2)
@@ -504,7 +504,7 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(5)),
+			NodeID:       tiny.NewNode(5),
 			NextCheckDue: clk.Now().Add(time.Minute),
 		}
 		l.Put(nv1)
@@ -512,7 +512,7 @@ func TestNodeValueList(t *testing.T) {
 		require.Equal(t, 0, l.OngoingCount())
 		require.Equal(t, 1, l.NodeCount())
 
-		l.MarkOngoing(tiny.NewNode(tiny.Key(5)), clk.Now().Add(time.Minute))
+		l.MarkOngoing(tiny.NewNode(5), clk.Now().Add(time.Minute))
 		require.Equal(t, 0, l.PendingCount())
 		require.Equal(t, 1, l.OngoingCount())
 		require.Equal(t, 1, l.NodeCount())
@@ -524,13 +524,13 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(5)),
+			NodeID:       tiny.NewNode(5),
 			NextCheckDue: clk.Now().Add(-2 * time.Minute),
 		}
 		l.Put(nv1)
 
 		nv2 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now().Add(-1 * time.Minute),
 		}
 		l.Put(nv2)
@@ -561,7 +561,7 @@ func TestNodeValueList(t *testing.T) {
 		clk := clock.NewMock()
 		l := NewNodeValueList[tiny.Key, tiny.Node]()
 		nv1 := &nodeValue[tiny.Key, tiny.Node]{
-			NodeID:       tiny.NewNode(tiny.Key(4)),
+			NodeID:       tiny.NewNode(4),
 			NextCheckDue: clk.Now(),
 		}
 		l.Put(nv1)
@@ -595,8 +595,8 @@ func TestProbeConnectivityCheckSuccess(t *testing.T) {
 	// Set concurrency to allow more than one check to run
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -604,7 +604,7 @@ func TestProbeConnectivityCheckSuccess(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
@@ -653,8 +653,8 @@ func TestProbeConnectivityCheckFailure(t *testing.T) {
 	// Set concurrency to allow more than one check to run
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -662,7 +662,7 @@ func TestProbeConnectivityCheckFailure(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 	require.IsType(t, &StateProbeIdle{}, state)
 
@@ -707,9 +707,9 @@ func TestProbeNotifyConnectivity(t *testing.T) {
 	cfg.CheckInterval = 10 * time.Minute
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
-	rt.AddNode(tiny.NewNode(tiny.Key(3)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
+	rt.AddNode(tiny.NewNode(3))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -717,7 +717,7 @@ func TestProbeNotifyConnectivity(t *testing.T) {
 	// after adding first node the probe should be idle since the
 	// connectivity check will be scheduled for the future (t0+10)
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 
 	// not time for a check yet
@@ -730,7 +730,7 @@ func TestProbeNotifyConnectivity(t *testing.T) {
 	// add a second node, which will be second in the probe list since it's
 	// time of next check will be later (t0+2+10=t0+12)
 	state = sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(3)),
+		NodeID: tiny.NewNode(3),
 	})
 
 	// still not time for a check
@@ -743,7 +743,7 @@ func TestProbeNotifyConnectivity(t *testing.T) {
 	// notify that the node with key 4 was connected to successfully by another process
 	// this will delay the time for the next check to t0+11+10=to+21
 	state = sm.Advance(ctx, &EventProbeNotifyConnectivity[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 
 	// still not time for a check
@@ -777,16 +777,16 @@ func TestProbeTimeout(t *testing.T) {
 	cfg.Timeout = 3 * time.Minute
 	cfg.Concurrency = 1 // one probe at a time, timeouts will be used to free capacity if there are more requests
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(tiny.Key(128)), 5)
-	rt.AddNode(tiny.NewNode(tiny.Key(4)))
-	rt.AddNode(tiny.NewNode(tiny.Key(3)))
+	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt.AddNode(tiny.NewNode(4))
+	rt.AddNode(tiny.NewNode(3))
 
 	sm, err := NewProbe[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
 	// add a node
 	state := sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(4)),
+		NodeID: tiny.NewNode(4),
 	})
 
 	// not time for a check yet
@@ -797,7 +797,7 @@ func TestProbeTimeout(t *testing.T) {
 
 	// add another node
 	state = sm.Advance(ctx, &EventProbeAdd[tiny.Key, tiny.Node]{
-		NodeID: tiny.NewNode(tiny.Key(3)),
+		NodeID: tiny.NewNode(3),
 	})
 
 	// not time for a check yet

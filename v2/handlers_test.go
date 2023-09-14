@@ -33,9 +33,7 @@ import (
 var rng = rand.New(rand.NewSource(1337))
 
 func newTestDHT(t testing.TB) *DHT {
-	cfg := DefaultConfig()
-
-	return newTestDHTWithConfig(t, cfg)
+	return newTestDHTWithConfig(t, DefaultConfig())
 }
 
 func newTestDHTWithConfig(t testing.TB, cfg *Config) *DHT {
@@ -772,7 +770,7 @@ type atomicPutValidator struct{}
 
 var _ record.Validator = (*atomicPutValidator)(nil)
 
-func (v atomicPutValidator) Validate(key string, value []byte) error {
+func (v atomicPutValidator) Validate(_ string, value []byte) error {
 	if bytes.Equal(value, []byte("expired")) {
 		return errors.New("expired")
 	}
@@ -811,7 +809,7 @@ func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ds, err := InMemoryDatastore()
+	dstore, err := InMemoryDatastore()
 	require.NoError(t, err)
 
 	cfg, err := DefaultRecordBackendConfig()
@@ -821,7 +819,7 @@ func TestDHT_handlePutValue_moved_from_v1_atomic_operation(t *testing.T) {
 		cfg:       cfg,
 		log:       devnull,
 		namespace: "test",
-		datastore: ds,
+		datastore: dstore,
 		validator: atomicPutValidator{},
 	}
 

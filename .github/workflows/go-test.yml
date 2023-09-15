@@ -41,7 +41,7 @@ jobs:
       # - uses: actions/setup-go@v4
       - uses: actions/setup-go@v3
         with:
-          go-version: stable
+          go-version:  ${{ steps.go.outputs.version }}
           # cache: false
       - id: config
         uses: pl-strflt/uci/.github/actions/read-config@main
@@ -50,7 +50,7 @@ jobs:
       - id: go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21.1'
+          go-version: ${{ steps.go.outputs.version }}
           cache: false
       - if: toJSON(fromJSON(steps.config.outputs.json).shuffle) != 'false'
         run: |

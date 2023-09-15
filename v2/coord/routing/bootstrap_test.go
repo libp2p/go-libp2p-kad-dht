@@ -55,7 +55,7 @@ func TestBootstrapStartsIdle(t *testing.T) {
 	cfg := DefaultBootstrapConfig[tiny.Key]()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	bs, err := NewBootstrap[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
@@ -69,11 +69,11 @@ func TestBootstrapStart(t *testing.T) {
 	cfg := DefaultBootstrapConfig[tiny.Key]()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	bs, err := NewBootstrap[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	// start the bootstrap
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
@@ -104,11 +104,11 @@ func TestBootstrapMessageResponse(t *testing.T) {
 	cfg := DefaultBootstrapConfig[tiny.Key]()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	bs, err := NewBootstrap[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	// start the bootstrap
 	state := bs.Advance(ctx, &EventBootstrapStart[tiny.Key, tiny.Node]{
@@ -141,14 +141,14 @@ func TestBootstrapProgress(t *testing.T) {
 	cfg.Clock = clk
 	cfg.RequestConcurrency = 3 // 1 less than the 4 nodes to be visited
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	bs, err := NewBootstrap[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, self.Key().Xor(a.Key()).Compare(self.Key().Xor(b.Key())) == -1)

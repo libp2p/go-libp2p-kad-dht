@@ -17,10 +17,10 @@ var (
 
 func TestClosestNodesIter(t *testing.T) {
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -48,10 +48,10 @@ func TestClosestNodesIter(t *testing.T) {
 }
 
 func TestSequentialIter(t *testing.T) {
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	iter := NewSequentialIter[tiny.Key, tiny.Node]()
 

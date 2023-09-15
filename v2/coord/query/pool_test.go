@@ -70,7 +70,7 @@ func TestPoolStartsIdle(t *testing.T) {
 	cfg := DefaultPoolConfig()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	p, err := NewPool[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
@@ -84,7 +84,7 @@ func TestPoolStopWhenNoQueries(t *testing.T) {
 	cfg := DefaultPoolConfig()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	p, err := NewPool[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
@@ -98,12 +98,12 @@ func TestPoolAddQueryStartsIfCapacity(t *testing.T) {
 	cfg := DefaultPoolConfig()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	p, err := NewPool[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	queryID := QueryID("test")
 
@@ -138,12 +138,12 @@ func TestPoolMessageResponse(t *testing.T) {
 	cfg := DefaultPoolConfig()
 	cfg.Clock = clk
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	p, err := NewPool[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	queryID := QueryID("test")
 
@@ -182,15 +182,15 @@ func TestPoolPrefersRunningQueriesOverNewOnes(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2 // allow two queries to run concurrently
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	p, err := NewPool[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// Add the first query
 	queryID1 := QueryID("1")
@@ -267,12 +267,12 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 	cfg.Concurrency = 2      // allow two queries to run concurrently
 	cfg.QueryConcurrency = 1 // allow each query to have a single request in flight
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	p, err := NewPool[tiny.Key](self, cfg)
 	require.NoError(t, err)
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	// Add the first query
 	queryID1 := QueryID("1")

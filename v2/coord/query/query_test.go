@@ -53,7 +53,7 @@ func TestQueryMessagesNode(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	// one known node to start with
 	knownNodes := []tiny.Node{a}
@@ -67,7 +67,7 @@ func TestQueryMessagesNode(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -96,8 +96,8 @@ func TestQueryMessagesNearest(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000011)
-	far := tiny.NewNode(tiny.Key(0b11011011))
-	near := tiny.NewNode(tiny.Key(0b00000110))
+	far := tiny.NewNode(0b11011011)
+	near := tiny.NewNode(0b00000110)
 
 	// ensure near is nearer to target than far is
 	require.Less(t, target.Xor(near.Key()), target.Xor(far.Key()))
@@ -116,7 +116,7 @@ func TestQueryMessagesNearest(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -133,7 +133,7 @@ func TestQueryCancelFinishesQuery(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	// one known node to start with
 	knownNodes := []tiny.Node{a}
@@ -147,7 +147,7 @@ func TestQueryCancelFinishesQuery(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -190,7 +190,7 @@ func TestQueryNoClosest(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -217,9 +217,9 @@ func TestQueryWaitsAtCapacity(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
 
 	// one known node to start with
 	knownNodes := []tiny.Node{a, b, c}
@@ -234,7 +234,7 @@ func TestQueryWaitsAtCapacity(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -264,10 +264,10 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -288,7 +288,7 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -370,10 +370,10 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -393,7 +393,7 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -454,10 +454,10 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -477,7 +477,7 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -510,10 +510,10 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -533,7 +533,7 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -572,7 +572,7 @@ func TestQueryCancelFinishesIteration(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
+	a := tiny.NewNode(0b00000100) // 4
 
 	// one known node to start with
 	knownNodes := []tiny.Node{a}
@@ -587,7 +587,7 @@ func TestQueryCancelFinishesIteration(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -609,8 +609,8 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
 
 	// one known node to start with
 	knownNodes := []tiny.Node{b}
@@ -625,7 +625,7 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -665,9 +665,9 @@ func TestQueryWithCloserIterIgnoresMessagesFromUnknownNodes(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
 
 	// one known node to start with
 	knownNodes := []tiny.Node{c}
@@ -682,7 +682,7 @@ func TestQueryWithCloserIterIgnoresMessagesFromUnknownNodes(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -715,10 +715,10 @@ func TestQueryWithCloserIterFinishesWhenNumResultsReached(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// one known node to start with
 	knownNodes := []tiny.Node{a, b, c, d}
@@ -734,7 +734,7 @@ func TestQueryWithCloserIterFinishesWhenNumResultsReached(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -773,9 +773,9 @@ func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
 
 	// one known node to start with, the furthesr
 	knownNodes := []tiny.Node{c}
@@ -791,7 +791,7 @@ func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -843,10 +843,10 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
-	d := tiny.NewNode(tiny.Key(0b00100000)) // 32
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
+	d := tiny.NewNode(0b00100000) // 32
 
 	// ensure the order of the known nodes
 	require.True(t, target.Xor(a.Key()).Compare(target.Xor(b.Key())) == -1)
@@ -863,7 +863,7 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -904,9 +904,9 @@ func TestQueryAllNotContactedFinishes(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
 
 	// knownNodes are in "random" order
 	knownNodes := []tiny.Node{a, b, c}
@@ -921,7 +921,7 @@ func TestQueryAllNotContactedFinishes(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -963,9 +963,9 @@ func TestQueryAllContactedFinishes(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
-	c := tiny.NewNode(tiny.Key(0b00010000)) // 16
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
+	c := tiny.NewNode(0b00010000) // 16
 
 	knownNodes := []tiny.Node{a, b, c}
 
@@ -980,7 +980,7 @@ func TestQueryAllContactedFinishes(t *testing.T) {
 
 	queryID := QueryID("test")
 
-	self := tiny.NewNode(tiny.Key(0))
+	self := tiny.NewNode(0)
 	qry, err := NewQuery[tiny.Key, tiny.Node](self, queryID, target, iter, knownNodes, cfg)
 	require.NoError(t, err)
 
@@ -1023,8 +1023,8 @@ func TestQueryNeverMessagesSelf(t *testing.T) {
 	ctx := context.Background()
 
 	target := tiny.Key(0b00000001)
-	a := tiny.NewNode(tiny.Key(0b00000100)) // 4
-	b := tiny.NewNode(tiny.Key(0b00001000)) // 8
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00001000) // 8
 
 	// one known node to start with
 	knownNodes := []tiny.Node{b}

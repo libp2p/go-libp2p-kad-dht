@@ -17,7 +17,7 @@ type NodeIter[K kad.Key[K], N kad.NodeID[K]] interface {
 	Find(K) (*NodeStatus[K, N], bool)
 
 	// Each applies fn to each entry in the iterator in order. Each stops and returns true if fn returns true.
-	// Otherwise Each returns false when there are no further entries.
+	// Otherwise, Each returns false when there are no further entries.
 	Each(ctx context.Context, fn func(context.Context, *NodeStatus[K, N]) bool) bool
 }
 

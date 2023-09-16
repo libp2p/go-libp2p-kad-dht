@@ -1,8 +1,17 @@
-# File managed by web3-bot. DO NOT EDIT.
-# See https://github.com/protocol/.github/ for details.
-
-on: [push, pull_request]
 name: Go Test
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit:
@@ -10,43 +19,69 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu", "windows", "macos" ]
-        go: ["1.19.x","1.20.x"]
+        go: ["1.20.8", "1.21.1"]
     env:
-      COVERAGES: ""
+      GOTESTFLAGS: -cover -coverprofile=module-coverage.txt -coverpkg=./...
+      GO386FLAGS: ''
+      GORACEFLAGS: ''
     runs-on: ${{ fromJSON(vars[format('UCI_GO_TEST_RUNNER_{0}', matrix.os)] || format('"{0}-latest"', matrix.os)) }}
     name: ${{ matrix.os }} (go ${{ matrix.go }})
     steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: recursive
-      - id: config
-        uses: protocol/.github/.github/actions/read-config@master
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ${{ matrix.go }}
-      - name: Go information
-        run: |
-          go version
-          go env
       - name: Use msys2 on windows
         if: matrix.os == 'windows'
-        shell: bash
         # The executable for msys2 is also called bash.cmd
         #   https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md#shells
         # If we prepend its location to the PATH
         #   subsequent 'shell: bash' steps will use msys2 instead of gitbash
         run: echo "C:/msys64/usr/bin" >> $GITHUB_PATH
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      # Update to v4 is blocked by https://github.com/actions/setup-go/pull/411
+      # - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v3
+        with:
+          go-version:  ${{ steps.go.outputs.version }}
+          # cache: false
+      - id: config
+        uses: pl-strflt/uci/.github/actions/read-config@main
+      - id: go-mod
+        uses: pl-strflt/uci/.github/actions/read-go-mod@main
+      - id: go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+          cache: false
+      - if: toJSON(fromJSON(steps.config.outputs.json).shuffle) != 'false'
+        run: |
+          echo "GOTESTFLAGS=-shuffle=on $GOTESTFLAGS" >> $GITHUB_ENV
+          echo "GO386FLAGS=-shuffle=on $GO386FLAGS" >> $GITHUB_ENV
+          echo "GORACEFLAGS=-shuffle=on $GORACEFLAGS" >> $GITHUB_ENV
+      - if: toJSON(fromJSON(steps.config.outputs.json).verbose) != 'false'
+        run: |
+          echo "GOTESTFLAGS=-v $GOTESTFLAGS" >> $GITHUB_ENV
+          echo "GO386FLAGS=-v $GO386FLAGS" >> $GITHUB_ENV
+          echo "GORACEFLAGS=-v $GORACEFLAGS" >> $GITHUB_ENV
+      # Update to v4 is blocked by https://github.com/actions/setup-go/pull/411
+      # - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v3
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+      - name: Go information
+        run: |
+          go version
+          go env
       - name: Run repo-specific setup
         uses: ./.github/actions/go-test-setup
         if: hashFiles('./.github/actions/go-test-setup') != ''
       - name: Run tests
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.2
+        env:
+          GOFLAGS: ${{ format('{0} {1}', env.GOTESTFLAGS, env.GOFLAGS) }}
         with:
-          # Use -coverpkg=./..., so that we include cross-package coverage.
-          # If package ./A imports ./B, and ./A's tests also cover ./B,
-          # this means ./B's coverage will be significantly higher than 0%.
-          run: go test -v -shuffle=on -coverprofile=module-coverage.txt -coverpkg=./... ./...
+          run: go test ./...
+          working-directory: ./v2
       - name: Run tests (32 bit)
         # can't run 32 bit tests on OSX.
         if: matrix.os != 'macos' &&
@@ -55,22 +90,28 @@ jobs:
         uses: protocol/multiple-go-modules@v1.2
         env:
           GOARCH: 386
+          GOFLAGS: ${{ format('{0} {1}', env.GO386FLAGS, env.GOFLAGS) }}
         with:
           run: |
             export "PATH=$PATH_386:$PATH"
-            go test -v -shuffle=on ./...
+            go test ./...
+          working-directory: ./v2
       - name: Run tests with race detector
         # speed things up. Windows and OSX VMs are slow
         if: matrix.os == 'ubuntu' &&
+          fromJSON(steps.config.outputs.json).skipRace != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.2
+        env:
+          GOFLAGS: ${{ format('{0} {1}', env.GORACEFLAGS, env.GOFLAGS) }}
         with:
-          run: go test -v -race ./...
+          run: go test -race ./...
+          working-directory: ./v2
       - name: Collect coverage files
-        shell: bash
-        run: echo "COVERAGES=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
+        id: coverages
+        run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@d9f34f8cd5cb3b3eb79b3e4b5dae3a16df499a70 # v3.1.1
+        uses: codecov/codecov-action@eaaf4bedf32dbdc6b720b63067d99c4d77d6047d # v3.1.4
         with:
-          files: '${{ env.COVERAGES }}'
-          env_vars: OS=${{ matrix.os }}, GO=${{ matrix.go }}
+          files: ${{ steps.coverages.outputs.files }}
+          env_vars: OS=${{ matrix.os }}, GO=${{ steps.go.outputs.version }}

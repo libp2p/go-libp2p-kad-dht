@@ -9,6 +9,7 @@ import (
 
 	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
+	syncds "github.com/ipfs/go-datastore/sync"
 	"github.com/libp2p/go-libp2p"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,9 +22,7 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 	h, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 
-	dstore, err := InMemoryDatastore()
-	require.NoError(t, err)
-
+	dstore := syncds.MutexWrap(ds.NewMapDatastore())
 	t.Cleanup(func() {
 		if err = dstore.Close(); err != nil {
 			t.Logf("closing datastore: %s", err)
@@ -41,17 +40,19 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 }
 
 func TestProvidersBackend_GarbageCollection(t *testing.T) {
-	mockClock := clock.NewMock()
+	clk := clock.NewMock()
+
 	cfg, err := DefaultProviderBackendConfig()
 	require.NoError(t, err)
 
-	cfg.clk = mockClock
+	cfg.clk = clk
 	cfg.Logger = devnull
 
 	b := newBackendProvider(t, cfg)
 
 	// start the garbage collection process
 	b.StartGarbageCollection()
+	t.Cleanup(func() { b.StopGarbageCollection() })
 
 	// write random record to datastore and peerstore
 	ctx := context.Background()
@@ -59,7 +60,7 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 
 	// write to datastore
 	dsKey := newDatastoreKey(namespaceProviders, "random-key", string(p.ID))
-	rec := expiryRecord{expiry: mockClock.Now()}
+	rec := expiryRecord{expiry: clk.Now()}
 	err = b.datastore.Put(ctx, dsKey, rec.MarshalBinary())
 	require.NoError(t, err)
 
@@ -67,28 +68,19 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	b.addrBook.AddAddrs(p.ID, p.Addrs, time.Hour)
 
 	// advance clock half the validity time and check if record is still there
-	mockClock.Add(cfg.ProvideValidity / 2)
-
-	// sync autobatching datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey(""))
-	require.NoError(t, err)
+	clk.Add(cfg.ProvideValidity / 2)
 
 	// we expect the record to still be there after half the ProvideValidity
 	_, err = b.datastore.Get(ctx, dsKey)
 	require.NoError(t, err)
 
 	// advance clock another time and check if the record was GC'd now
-	mockClock.Add(cfg.ProvideValidity + cfg.GCInterval)
-
-	// sync autobatching datastore to have all put/deletes visible
-	err = b.datastore.Sync(ctx, ds.NewKey(""))
-	require.NoError(t, err)
+	clk.Add(cfg.ProvideValidity + cfg.GCInterval)
 
 	// we expect the record to be GC'd now
-	_, err = b.datastore.Get(ctx, dsKey)
-	require.ErrorIs(t, err, ds.ErrNotFound)
-
-	b.StopGarbageCollection()
+	val, err := b.datastore.Get(ctx, dsKey)
+	assert.ErrorIs(t, err, ds.ErrNotFound)
+	assert.Nil(t, val)
 }
 
 func TestProvidersBackend_GarbageCollection_lifecycle_thread_safe(t *testing.T) {

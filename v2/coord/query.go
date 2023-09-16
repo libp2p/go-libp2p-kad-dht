@@ -48,7 +48,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
-			KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.KnownClosestNodes),
+			KnownClosestNodes: sliceOfPeerIDToSliceOfKadPeerID(ev.KnownClosestNodes),
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
@@ -78,7 +78,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		cmd = &query.EventPoolFindCloserResponse[kadt.Key, kadt.PeerID]{
 			NodeID:      kadt.PeerID(ev.To.ID),
 			QueryID:     ev.QueryID,
-			CloserNodes: SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
+			CloserNodes: sliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
 		// queue an event that will notify the routing behaviour of a failed node
@@ -156,7 +156,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 	case *query.StatePoolFindCloser[kadt.Key, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
-			To:      KadPeerIDToAddrInfo(st.NodeID),
+			To:      kadPeerIDToAddrInfo(st.NodeID),
 			Target:  st.Target,
 			Notify:  p,
 		}, true

@@ -52,7 +52,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 
 	// the event that should be passed to the bootstrap state machine
 	expected := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
-		KnownClosestNodes: SliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
+		KnownClosestNodes: sliceOfPeerIDToSliceOfKadPeerID(ev.SeedNodes),
 	}
 	require.Equal(t, expected, bootstrap.Received)
 }
@@ -87,7 +87,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 
 	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID])
 	require.Equal(t, nodes[1].NodeInfo.ID, peer.ID(rev.NodeID))
-	require.Equal(t, SliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes), rev.CloserNodes)
+	require.Equal(t, sliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes), rev.CloserNodes)
 }
 
 func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {

@@ -33,7 +33,7 @@ jobs:
       - id: go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21.1'
+          go-version: '1.20.8'
           cache: false
       - name: Run repo-specific setup
         uses: ./.github/actions/go-check-setup

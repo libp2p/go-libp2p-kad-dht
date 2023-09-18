@@ -12,7 +12,6 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
@@ -71,16 +70,6 @@ func (w *notificationWatcher) Expect(ctx context.Context, expected RoutingNotifi
 		case <-w.signal:
 		}
 	}
-}
-
-// TracingTelemetry may be used to create a Telemetry that traces a test
-func TracingTelemetry(t *testing.T) *Telemetry {
-	telemetry, err := NewTelemetry(otel.GetMeterProvider(), kadtest.JaegerTracerProvider(t))
-	if err != nil {
-		t.Fatalf("unexpected error creating telemetry: %v", err)
-	}
-
-	return telemetry
 }
 
 func TestConfigValidate(t *testing.T) {

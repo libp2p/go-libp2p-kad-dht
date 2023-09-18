@@ -12,16 +12,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/plprobelab/go-kademlia/coord"
-	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/routing"
 	"github.com/plprobelab/go-kademlia/routing/triert"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // ServiceName is used to scope incoming streams for the resource manager.
@@ -113,7 +113,7 @@ type Config struct {
 	Mode ModeOpt
 
 	// Kademlia holds the configuration of the underlying Kademlia implementation.
-	Kademlia *coord.Config
+	Kademlia *coord.CoordinatorConfig
 
 	// BucketSize determines the number of closer peers to return
 	BucketSize int
@@ -132,7 +132,7 @@ type Config struct {
 	// [triert.TrieRT] routing table will be used. This field will be nil
 	// in the default configuration because a routing table requires information
 	// about the local node.
-	RoutingTable routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
+	RoutingTable routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 
 	// The Backends field holds a map of key namespaces to their corresponding
 	// backend implementation. For example, if we received an IPNS record, the
@@ -193,7 +193,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Clock:             clock.New(),
 		Mode:              ModeOptAutoClient,
-		Kademlia:          coord.DefaultConfig(),
+		Kademlia:          coord.DefaultCoordinatorConfig(),
 		BucketSize:        20, // MAGIC
 		BootstrapPeers:    DefaultBootstrapPeers(),
 		ProtocolID:        ProtocolAmino,
@@ -211,9 +211,9 @@ func DefaultConfig() *Config {
 // DefaultRoutingTable returns a triert.TrieRT routing table. This routing table
 // cannot be initialized in [DefaultConfig] because it requires information
 // about the local peer.
-func DefaultRoutingTable(nodeID kad.NodeID[key.Key256]) (routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]], error) {
-	rtCfg := triert.DefaultConfig[key.Key256, kad.NodeID[key.Key256]]()
-	rt, err := triert.New[key.Key256, kad.NodeID[key.Key256]](nodeID, rtCfg)
+func DefaultRoutingTable(nodeID kadt.PeerID) (routing.RoutingTableCpl[kadt.Key, kadt.PeerID], error) {
+	rtCfg := triert.DefaultConfig[kadt.Key, kadt.PeerID]()
+	rt, err := triert.New[kadt.Key, kadt.PeerID](nodeID, rtCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new trie routing table: %w", err)
 	}

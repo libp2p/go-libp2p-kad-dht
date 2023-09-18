@@ -13,14 +13,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/routing"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -43,7 +41,7 @@ type DHT struct {
 
 	// rt holds a reference to the routing table implementation. This can be
 	// configured via the Config struct.
-	rt routing.RoutingTableCpl[key.Key256, kad.NodeID[key.Key256]]
+	rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 
 	// backends
 	backends map[string]Backend
@@ -58,7 +56,7 @@ type DHT struct {
 	sub event.Subscription
 
 	// tele holds a reference to a telemetry struct
-	tele *tele.Telemetry
+	tele *Telemetry
 }
 
 // New constructs a new [DHT] for the given underlying host and with the given
@@ -88,7 +86,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// initialize a new telemetry struct
-	d.tele, err = tele.New(cfg.MeterProvider, cfg.TracerProvider)
+	d.tele, err = NewTelemetry(cfg.MeterProvider, cfg.TracerProvider)
 	if err != nil {
 		return nil, fmt.Errorf("init telemetry: %w", err)
 	}
@@ -109,13 +107,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	coordCfg, err := coord.DefaultCoordinatorConfig()
-	if err != nil {
-		return nil, fmt.Errorf("new coordinator config: %w", err)
-	}
-	coordCfg.Tele = d.tele
+	coordCfg := coord.DefaultCoordinatorConfig()
+	coordCfg.Clock = cfg.Clock
+	coordCfg.MeterProvider = cfg.MeterProvider
+	coordCfg.TracerProvider = cfg.TracerProvider
 
-	d.kad, err = coord.NewCoordinator(d.host.ID(), &Router{host: h}, d.rt, coordCfg)
+	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &Router{host: h}, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -326,12 +323,17 @@ func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Du
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
 	defer span.End()
 
-	return d.kad.AddNodes(ctx, ais, ttl)
+	ps := d.host.Peerstore()
+	for _, ai := range ais {
+		ps.AddAddrs(ai.ID, ai.Addrs, ttl)
+	}
+
+	return d.kad.AddNodes(ctx, ais)
 }
 
-// newSHA256Key returns a [key.Key256] that conforms to the [kad.Key] interface by
-// SHA256 hashing the given bytes and wrapping them in a [key.Key256].
-func newSHA256Key(data []byte) key.Key256 {
+// newSHA256Key returns a [kadt.KadKey] that conforms to the [kad.Key] interface by
+// SHA256 hashing the given bytes and wrapping them in a [kadt.KadKey].
+func newSHA256Key(data []byte) kadt.Key {
 	h := sha256.Sum256(data)
 	return key.NewKey256(h[:])
 }

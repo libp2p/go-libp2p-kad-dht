@@ -1,8 +1,22 @@
-# File managed by web3-bot. DO NOT EDIT.
-# See https://github.com/protocol/.github/ for details.
-
-on: [push, pull_request]
 name: Go Checks
+
+defaults:
+  run:
+    working-directory: ./v2
+
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit:
@@ -13,15 +27,37 @@ jobs:
         with:
           submodules: recursive
       - id: config
-        uses: protocol/.github/.github/actions/read-config@master
-      - uses: actions/setup-go@v3
+        uses: pl-strflt/uci/.github/actions/read-config@main
+      - id: go-mod
+        uses: pl-strflt/uci/.github/actions/read-go-mod@main
+      - id: go
+        uses: actions/setup-go@v4
         with:
-          go-version: 1.20.x
+          go-version: '1.20.8'
+          cache: false
       - name: Run repo-specific setup
         uses: ./.github/actions/go-check-setup
         if: hashFiles('./.github/actions/go-check-setup') != ''
       - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@4970552d932f48b71485287748246cf3237cebdf # 2023.1 (v0.4.0)
+        env:
+          STATICCHECK_VERSIONS: |
+            {
+              "1.21": "9e12e6014d3b0a854950490051ad1338fc6badd1",
+              "1.20": "9e12e6014d3b0a854950490051ad1338fc6badd1",
+              "1.19": "376210a89477dedbe6fdc4484b233998650d7b3c",
+              "1.18": "376210a89477dedbe6fdc4484b233998650d7b3c",
+              "1.17": "c8caa92bad8c27ae734c6725b8a04932d54a147b",
+              "1.16": "4dc1992c9bb4310ba1e98b30c8d7d46444891d3b",
+              "1.15": "5b7de96f09104e2be384aa93a7c821eb5e77378b",
+              "1.14": "5b7de96f09104e2be384aa93a7c821eb5e77378b",
+              "1.13": "afd67930eec2a9ed3e9b19f684d17a062285f16a"
+            }
+          GO_VERSION: ${{ steps.go.outputs.go-version }}
+          GO111MODULE: on
+        run: |
+          version="$(jq -nr 'env.STATICCHECK_VERSIONS | fromjson | .[env.GO_VERSION | sub("\\.[^.]+$"; "")] // "latest"')"
+          echo "Installing staticcheck@$version"
+          go install honnef.co/go/tools/cmd/staticcheck@$version || go get honnef.co/go/tools/cmd/staticcheck@$version
       - name: Check that go.mod is tidy
         uses: protocol/multiple-go-modules@v1.2
         with:
@@ -32,6 +68,7 @@ jobs:
               exit 1
             fi
             git diff --exit-code -- go.sum go.mod
+          working-directory: ./v2
       - name: gofmt
         if: success() || failure() # run this step even if the previous one failed
         run: |
@@ -45,6 +82,7 @@ jobs:
         uses: protocol/multiple-go-modules@v1.2
         with:
           run: go vet ./...
+          working-directory: ./v2
       - name: staticcheck
         if: success() || failure() # run this step even if the previous one failed
         uses: protocol/multiple-go-modules@v1.2
@@ -52,6 +90,7 @@ jobs:
           run: |
             set -o pipefail
             staticcheck ./... | sed -e 's@\(.*\)\.go@./\1.go@g'
+          working-directory: ./v2
       - name: go generate
         uses: protocol/multiple-go-modules@v1.2
         if: (success() || failure()) && fromJSON(steps.config.outputs.json).gogenerate == true
@@ -65,3 +104,4 @@ jobs:
               git status --short
               exit 1
             fi
+          working-directory: ./v2

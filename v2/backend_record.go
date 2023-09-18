@@ -11,8 +11,6 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"golang.org/x/exp/slog"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type RecordBackend struct {
@@ -29,11 +27,11 @@ type RecordBackendConfig struct {
 	clk          clock.Clock
 	MaxRecordAge time.Duration
 	Logger       *slog.Logger
-	Tele         *tele.Telemetry
+	Tele         *Telemetry
 }
 
 func DefaultRecordBackendConfig() (*RecordBackendConfig, error) {
-	telemetry, err := tele.NewWithGlobalProviders()
+	telemetry, err := NewWithGlobalProviders()
 	if err != nil {
 		return nil, fmt.Errorf("new telemetry: %w", err)
 	}

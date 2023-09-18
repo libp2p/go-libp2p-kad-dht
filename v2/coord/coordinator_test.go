@@ -12,12 +12,10 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 const peerstoreTTL = 10 * time.Minute
@@ -74,35 +72,22 @@ func (w *notificationWatcher) Expect(ctx context.Context, expected RoutingNotifi
 	}
 }
 
-// TracingTelemetry may be used to create a Telemetry that traces a test
-func TracingTelemetry(t *testing.T) *tele.Telemetry {
-	telemetry, err := tele.New(otel.GetMeterProvider(), kadtest.JaegerTracerProvider(t))
-	if err != nil {
-		t.Fatalf("unexpected error creating telemetry: %v", err)
-	}
-
-	return telemetry
-}
-
 func TestConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		require.NoError(t, cfg.Validate())
 	})
 
 	t.Run("clock is not nil", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.Clock = nil
 		require.Error(t, cfg.Validate())
 	})
 
 	t.Run("query concurrency positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.QueryConcurrency = 0
 		require.Error(t, cfg.Validate())
@@ -111,8 +96,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("query timeout positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.QueryTimeout = 0
 		require.Error(t, cfg.Validate())
@@ -121,8 +105,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request concurrency positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.RequestConcurrency = 0
 		require.Error(t, cfg.Validate())
@@ -131,8 +114,7 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request timeout positive", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.RequestTimeout = 0
 		require.Error(t, cfg.Validate())
@@ -141,31 +123,32 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("logger not nil", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+		cfg := DefaultCoordinatorConfig()
 
 		cfg.Logger = nil
 		require.Error(t, cfg.Validate())
 	})
 
-	t.Run("telemetry not nil", func(t *testing.T) {
-		cfg, err := DefaultCoordinatorConfig()
-		require.NoError(t, err)
+	t.Run("meter provider not nil", func(t *testing.T) {
+		cfg := DefaultCoordinatorConfig()
+		cfg.MeterProvider = nil
+		require.Error(t, cfg.Validate())
+	})
 
-		cfg.Tele = nil
+	t.Run("tracer provider not nil", func(t *testing.T) {
+		cfg := DefaultCoordinatorConfig()
+		cfg.TracerProvider = nil
 		require.Error(t, cfg.Validate())
 	})
 }
 
 func TestExhaustiveQuery(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
@@ -173,7 +156,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
@@ -198,15 +181,13 @@ func TestExhaustiveQuery(t *testing.T) {
 }
 
 func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
@@ -214,7 +195,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
@@ -261,20 +242,18 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 }
 
 func TestBootstrap(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
@@ -315,22 +294,20 @@ func TestBootstrap(t *testing.T) {
 }
 
 func TestIncludeNode(t *testing.T) {
-	ctx, cancel := kadtest.CtxShort(t)
-	defer cancel()
+	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
 	require.NoError(t, err)
 
-	ccfg, err := DefaultCoordinatorConfig()
-	require.NoError(t, err)
+	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
 	candidate := nodes[len(nodes)-1].NodeInfo // not in nodes[0] routing table
 
-	self := nodes[0].NodeInfo.ID
+	self := kadt.PeerID(nodes[0].NodeInfo.ID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
@@ -343,8 +320,8 @@ func TestIncludeNode(t *testing.T) {
 	w := new(notificationWatcher)
 	w.Watch(t, ctx, d.RoutingNotifications())
 
-	// inject a new node into the dht's includeEvents queue
-	err = d.AddNodes(ctx, []peer.AddrInfo{candidate}, time.Minute)
+	// inject a new node
+	err = d.AddNodes(ctx, []peer.AddrInfo{candidate})
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table

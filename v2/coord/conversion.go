@@ -2,61 +2,38 @@ package coord
 
 import (
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
-// NodeInfoToAddrInfo converts a kad.NodeInfo to a peer.AddrInfo.
-// This function will panic if info.ID() does not return a kadt.PeerID
-func NodeInfoToAddrInfo(info kad.NodeInfo[KadKey, ma.Multiaddr]) peer.AddrInfo {
-	peerID := info.ID().(kadt.PeerID)
-	return peer.AddrInfo{
-		ID:    peer.ID(peerID),
-		Addrs: info.Addresses(),
-	}
-}
-
-// NodeIDToAddrInfo converts a kad.NodeID to a peer.AddrInfo with no addresses.
+// kadPeerIDToAddrInfo converts a kad.NodeID to a peer.AddrInfo with no addresses.
 // This function will panic if id's underlying type is not kadt.PeerID
-func NodeIDToAddrInfo(id kad.NodeID[KadKey]) peer.AddrInfo {
+func kadPeerIDToAddrInfo(id kad.NodeID[kadt.Key]) peer.AddrInfo {
 	peerID := id.(kadt.PeerID)
 	return peer.AddrInfo{
 		ID: peer.ID(peerID),
 	}
 }
 
-// AddrInfoToNodeID converts a peer.AddrInfo to a kad.NodeID.
-func AddrInfoToNodeID(ai peer.AddrInfo) kad.NodeID[KadKey] {
-	return kadt.PeerID(ai.ID)
+// addrInfoToKadPeerID converts a peer.AddrInfo to a kad.NodeID.
+func addrInfoToKadPeerID(addrInfo peer.AddrInfo) kadt.PeerID {
+	return kadt.PeerID(addrInfo.ID)
 }
 
-// SliceOfNodeInfoToSliceOfAddrInfo converts a kad.NodeInfo to a peer.AddrInfo.
-// This function will panic if any info.ID() does not return a kadt.PeerID
-func SliceOfNodeInfoToSliceOfAddrInfo(infos []kad.NodeInfo[KadKey, ma.Multiaddr]) []peer.AddrInfo {
-	peers := make([]peer.AddrInfo, len(infos))
-	for i := range infos {
-		peerID := infos[i].ID().(kadt.PeerID)
-		peers[i] = peer.AddrInfo{
-			ID:    peer.ID(peerID),
-			Addrs: infos[i].Addresses(),
-		}
-	}
-	return peers
-}
-
-// SliceOfPeerIDToSliceOfNodeID converts a slice peer.ID to a slice of kad.NodeID
-func SliceOfPeerIDToSliceOfNodeID(peers []peer.ID) []kad.NodeID[KadKey] {
-	nodes := make([]kad.NodeID[KadKey], len(peers))
+// sliceOfPeerIDToSliceOfKadPeerID converts a slice of peer.ID to a slice of kadt.PeerID
+func sliceOfPeerIDToSliceOfKadPeerID(peers []peer.ID) []kadt.PeerID {
+	nodes := make([]kadt.PeerID, len(peers))
 	for i := range peers {
 		nodes[i] = kadt.PeerID(peers[i])
 	}
 	return nodes
 }
 
-// NodeIDToPeerID converts a kad.NodeID to a peer.ID.
-// This function will panic if id's underlying type is not kadt.PeerID
-func NodeIDToPeerID(id kad.NodeID[KadKey]) peer.ID {
-	return peer.ID(id.(kadt.PeerID))
+func sliceOfAddrInfoToSliceOfKadPeerID(addrInfos []peer.AddrInfo) []kadt.PeerID {
+	peers := make([]kadt.PeerID, len(addrInfos))
+	for i := range addrInfos {
+		peers[i] = kadt.PeerID(addrInfos[i].ID)
+	}
+	return peers
 }

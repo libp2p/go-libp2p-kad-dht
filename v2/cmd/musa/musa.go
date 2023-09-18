@@ -28,6 +28,7 @@ import (
 	expslog "golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
@@ -168,6 +169,11 @@ func daemonAction(cCtx *cli.Context) error {
 	dhtConfig.ProtocolID = protocol.ID(cfg.ProtocolID)
 	dhtConfig.MeterProvider = meterProvider
 	dhtConfig.TracerProvider = traceProvider
+
+	kadConfig := coord.DefaultCoordinatorConfig()
+	kadConfig.MeterProvider = meterProvider
+	kadConfig.TracerProvider = traceProvider
+	dhtConfig.Kademlia = kadConfig
 
 	if dhtConfig.ProtocolID == dht.ProtocolIPFS {
 		dhtConfig.Datastore = datastore.NewNullDatastore()

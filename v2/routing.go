@@ -181,13 +181,14 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	defer span.End()
 
 	seed := make([]peer.ID, len(d.cfg.BootstrapPeers))
-	seedStr := make([]string, len(d.cfg.BootstrapPeers))
 	for i, addrInfo := range d.cfg.BootstrapPeers {
 		seed[i] = addrInfo.ID
-		seedStr[i] = addrInfo.ID.String()
+		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: TTL
 	}
 
-	span.SetAttributes(attribute.StringSlice("seed", seedStr))
+	if err := d.kad.AddNodes(ctx, d.cfg.BootstrapPeers); err != nil {
+		return fmt.Errorf("add nodes: %w", err)
+	}
 
 	return d.kad.Bootstrap(ctx, seed)
 }

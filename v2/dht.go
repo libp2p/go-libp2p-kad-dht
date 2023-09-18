@@ -107,7 +107,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	coordCfg := coord.DefaultCoordinatorConfig()
+	coordCfg := cfg.Kademlia
 	coordCfg.Clock = cfg.Clock
 	coordCfg.MeterProvider = cfg.MeterProvider
 	coordCfg.TracerProvider = cfg.TracerProvider

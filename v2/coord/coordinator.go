@@ -476,7 +476,7 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		// Bootstrap state machine uses the message
-		Message:   &fakeMessage{key: kadt.PeerID(c.self).Key()},
+		Message:   &fakeMessage{key: c.self.Key()},
 		SeedNodes: seeds,
 	})
 

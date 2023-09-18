@@ -5,12 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/network/address"
+	"github.com/plprobelab/go-kademlia/kad"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // Value is a value that may be stored in the DHT.
@@ -22,10 +19,7 @@ type Value interface {
 // Node represents the local or a remote node participating in the DHT.
 type Node interface {
 	// ID returns the peer ID identifying this node.
-	ID() peer.ID
-
-	// Addresses returns the network addresses associated with the given node.
-	Addresses() []ma.Multiaddr
+	ID() kadt.PeerID
 
 	// GetClosestNodes requests the n closest nodes to the key from the node's
 	// local routing table. The node may return fewer nodes than requested.
@@ -74,17 +68,13 @@ var (
 	ErrSkipRemaining = errors.New("skip remaining nodes")
 )
 
-// Router its a work in progress
-// TODO figure out the role of protocol identifiers
-type Router interface {
-	// SendMessage attempts to send a request to another node. The Router will absorb the addresses in to into its
-	// internal nodestore. This method blocks until a response is received or an error is encountered.
-	SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error)
+type Message interface{}
 
-	AddNodeInfo(ctx context.Context, info peer.AddrInfo, ttl time.Duration) error
-	GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, error)
+type Router[K kad.Key[K], N kad.NodeID[K], M Message] interface {
+	// SendMessage attempts to send a request to another node. This method blocks until a response is received or an error is encountered.
+	SendMessage(ctx context.Context, to N, req M) (M, error)
 
 	// GetClosestNodes attempts to send a request to another node asking it for nodes that it considers to be
 	// closest to the target key.
-	GetClosestNodes(ctx context.Context, to peer.AddrInfo, target kadt.Key) ([]peer.AddrInfo, error)
+	GetClosestNodes(ctx context.Context, to N, target K) ([]N, error)
 }

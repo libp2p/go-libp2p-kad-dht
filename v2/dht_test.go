@@ -14,6 +14,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 func TestNew(t *testing.T) {
@@ -104,7 +105,7 @@ func TestAddAddresses(t *testing.T) {
 	fillRoutingTable(t, remote, 1)
 
 	// local routing table should not contain the node
-	_, err := local.kad.GetNode(ctx, remote.host.ID())
+	_, err := local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
 	require.ErrorIs(t, err, coord.ErrNodeNotFound)
 
 	remoteAddrInfo := peer.AddrInfo{
@@ -123,6 +124,6 @@ func TestAddAddresses(t *testing.T) {
 	require.NoError(t, err)
 
 	// the routing table should now contain the node
-	_, err = local.kad.GetNode(ctx, remote.host.ID())
+	_, err = local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
 	require.NoError(t, err)
 }

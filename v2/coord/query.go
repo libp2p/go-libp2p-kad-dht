@@ -48,7 +48,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
-			KnownClosestNodes: sliceOfPeerIDToSliceOfKadPeerID(ev.KnownClosestNodes),
+			KnownClosestNodes: ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
@@ -60,34 +60,36 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		}
 
 	case *EventGetCloserNodesSuccess:
+		// TODO: add addresses for discovered nodes in DHT
+
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
-			p.pending = append(p.pending, &EventAddAddrInfo{
-				NodeInfo: info,
+			p.pending = append(p.pending, &EventAddNode{
+				NodeID: info,
 			})
 		}
 		waiter, ok := p.waiters[ev.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventQueryProgressed{
-				NodeID:  ev.To.ID,
+				NodeID:  ev.To,
 				QueryID: ev.QueryID,
 				// CloserNodes: CloserNodeIDs(ev.CloserNodes),
 				// Stats:    stats,
 			})
 		}
 		cmd = &query.EventPoolFindCloserResponse[kadt.Key, kadt.PeerID]{
-			NodeID:      kadt.PeerID(ev.To.ID),
+			NodeID:      ev.To,
 			QueryID:     ev.QueryID,
-			CloserNodes: sliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
+			CloserNodes: ev.CloserNodes,
 		}
 	case *EventGetCloserNodesFailure:
 		// queue an event that will notify the routing behaviour of a failed node
 		p.pending = append(p.pending, &EventNotifyNonConnectivity{
-			ev.To.ID,
+			ev.To,
 		})
 
 		cmd = &query.EventPoolFindCloserFailure[kadt.Key, kadt.PeerID]{
-			NodeID:  kadt.PeerID(ev.To.ID),
+			NodeID:  ev.To,
 			QueryID: ev.QueryID,
 			Error:   ev.Err,
 		}
@@ -156,7 +158,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 	case *query.StatePoolFindCloser[kadt.Key, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
 			QueryID: st.QueryID,
-			To:      kadPeerIDToAddrInfo(st.NodeID),
+			To:      st.NodeID,
 			Target:  st.Target,
 			Notify:  p,
 		}, true

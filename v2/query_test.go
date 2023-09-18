@@ -94,10 +94,10 @@ func expectRoutingUpdated(t *testing.T, ctx context.Context, events <-chan coord
 		select {
 		case ev := <-events:
 			if tev, ok := ev.(*coord.EventRoutingUpdated); ok {
-				if tev.NodeInfo.ID == id {
+				if peer.ID(tev.NodeID) == id {
 					return tev, nil
 				}
-				t.Logf("saw routing update for %s", tev.NodeInfo.ID)
+				t.Logf("saw routing update for %s", tev.NodeID)
 			}
 		case <-ctx.Done():
 			return nil, fmt.Errorf("test deadline exceeded while waiting for routing update event")
@@ -105,14 +105,14 @@ func expectRoutingUpdated(t *testing.T, ctx context.Context, events <-chan coord
 	}
 }
 
-// expectRoutingUpdated selects on the event channel until an EventRoutingUpdated event is seen for the specified peer id
+// expectRoutingRemoved selects on the event channel until an EventRoutingRemoved event is seen for the specified peer id
 func expectRoutingRemoved(t *testing.T, ctx context.Context, events <-chan coord.RoutingNotification, id peer.ID) (*coord.EventRoutingRemoved, error) {
 	t.Helper()
 	for {
 		select {
 		case ev := <-events:
 			if tev, ok := ev.(*coord.EventRoutingRemoved); ok {
-				if tev.NodeID == id {
+				if peer.ID(tev.NodeID) == id {
 					return tev, nil
 				}
 				t.Logf("saw routing removed for %s", tev.NodeID)
@@ -140,7 +140,7 @@ func connect(t *testing.T, ctx context.Context, a, b *DHT) {
 	require.NoError(t, err)
 
 	// the routing table should now contain the node
-	_, err = a.kad.GetNode(ctx, b.host.ID())
+	_, err = a.kad.GetNode(ctx, kadt.PeerID(b.host.ID()))
 	require.NoError(t, err)
 }
 
@@ -167,11 +167,11 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	connectLinearChain(t, ctx, d1, d2, d3)
 
 	// d3 does not know about d1
-	_, err := d3.kad.GetNode(ctx, d1.host.ID())
+	_, err := d3.kad.GetNode(ctx, kadt.PeerID(d1.host.ID()))
 	require.ErrorIs(t, err, coord.ErrNodeNotFound)
 
 	// d1 does not know about d3
-	_, err = d1.kad.GetNode(ctx, d3.host.ID())
+	_, err = d1.kad.GetNode(ctx, kadt.PeerID(d3.host.ID()))
 	require.ErrorIs(t, err, coord.ErrNodeNotFound)
 
 	// // but when d3 queries d2, d1 and d3 discover each other
@@ -183,7 +183,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	require.NoError(t, err)
 
 	// d3 now has d1 in its routing table
-	_, err = d3.kad.GetNode(ctx, d1.host.ID())
+	_, err = d3.kad.GetNode(ctx, kadt.PeerID(d1.host.ID()))
 	require.NoError(t, err)
 
 	// d1 should update its routing table to include d3 during the query
@@ -191,7 +191,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	require.NoError(t, err)
 
 	// d1 now has d3 in its routing table
-	_, err = d1.kad.GetNode(ctx, d3.host.ID())
+	_, err = d1.kad.GetNode(ctx, kadt.PeerID(d3.host.ID()))
 	require.NoError(t, err)
 }
 
@@ -213,11 +213,11 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	// no scheduled probes will have taken place
 
 	// d1 still has d2 in the routing table
-	_, err := d1.kad.GetNode(ctx, d2.host.ID())
+	_, err := d1.kad.GetNode(ctx, kadt.PeerID(d2.host.ID()))
 	require.NoError(t, err)
 
 	// d2 still has d1 in the routing table
-	_, err = d2.kad.GetNode(ctx, d1.host.ID())
+	_, err = d2.kad.GetNode(ctx, kadt.PeerID(d1.host.ID()))
 	require.NoError(t, err)
 
 	// failed queries should remove the queried peers from the routing table

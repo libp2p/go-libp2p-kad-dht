@@ -1,10 +1,12 @@
 package dht
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // networkEventsSubscription registers a subscription on the libp2p event bus
@@ -49,6 +51,7 @@ func (d *DHT) consumeNetworkEvents(sub event.Subscription) {
 		case event.EvtLocalAddressesUpdated:
 		case event.EvtPeerProtocolsUpdated:
 		case event.EvtPeerIdentificationCompleted:
+			d.onEvtPeerIdentificationCompleted(evt)
 		case event.EvtPeerConnectednessChanged:
 		default:
 			d.log.Warn("unknown libp2p event", "type", fmt.Sprintf("%T", evt))
@@ -83,4 +86,11 @@ func (d *DHT) onEvtLocalReachabilityChanged(evt event.EvtLocalReachabilityChange
 	default:
 		d.log.With("reachability", evt.Reachability).Warn("unknown reachability type")
 	}
+}
+
+func (d *DHT) onEvtPeerIdentificationCompleted(evt event.EvtPeerIdentificationCompleted) {
+	// tell the coordinator about a new candidate for inclusion in the routing table
+	d.kad.AddNodes(context.Background(), []peer.AddrInfo{
+		{ID: evt.Peer},
+	})
 }

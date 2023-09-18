@@ -58,7 +58,7 @@ func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID addr
 
 	// TODO: what to do with addresses in peer.AddrInfo?
 	if len(r.host.Peerstore().Addrs(to.ID)) == 0 {
-		return nil, fmt.Errorf("aaah ProtoKadMessage")
+		return nil, fmt.Errorf("no address for peer %s", to.ID)
 	}
 
 	var cancel context.CancelFunc

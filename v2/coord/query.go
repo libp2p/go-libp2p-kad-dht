@@ -81,6 +81,11 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 			CloserNodes: sliceOfAddrInfoToSliceOfKadPeerID(ev.CloserNodes),
 		}
 	case *EventGetCloserNodesFailure:
+		// queue an event that will notify the routing behaviour of a failed node
+		p.pending = append(p.pending, &EventNotifyNonConnectivity{
+			ev.To.ID,
+		})
+
 		cmd = &query.EventPoolFindCloserFailure[kadt.Key, kadt.PeerID]{
 			NodeID:  kadt.PeerID(ev.To.ID),
 			QueryID: ev.QueryID,

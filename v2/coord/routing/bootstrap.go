@@ -8,6 +8,7 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
@@ -96,6 +97,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 
 	switch tev := ev.(type) {
 	case *EventBootstrapStart[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventBootstrapStart"))
 
 		// TODO: ignore start event if query is already in progress
 		iter := query.NewClosestNodesIter[K, N](b.self.Key())
@@ -116,17 +118,21 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		return b.advanceQuery(ctx, nil)
 
 	case *EventBootstrapFindCloserResponse[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventBootstrapFindCloserResponse"))
 		return b.advanceQuery(ctx, &query.EventQueryFindCloserResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventBootstrapFindCloserFailure[K, N]:
+		span.SetAttributes(tele.AttrEvent("EventBootstrapFindCloserFailure"))
+		span.RecordError(tev.Error)
 		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K, N]{
 			NodeID: tev.NodeID,
 			Error:  tev.Error,
 		})
 
 	case *EventBootstrapPoll:
+		span.SetAttributes(tele.AttrEvent("EventBootstrapPoll"))
 	// ignore, nothing to do
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
@@ -140,9 +146,12 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 }
 
 func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) BootstrapState {
+	ctx, span := tele.StartSpan(ctx, "Bootstrap.advanceQuery")
+	defer span.End()
 	state := b.qry.Advance(ctx, qev)
 	switch st := state.(type) {
 	case *query.StateQueryFindCloser[K, N]:
+		span.SetAttributes(attribute.String("out_state", "StateQueryFindCloser"))
 		return &StateBootstrapFindCloser[K, N]{
 			QueryID: st.QueryID,
 			Stats:   st.Stats,
@@ -150,26 +159,31 @@ func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent
 			Target:  st.Target,
 		}
 	case *query.StateQueryFinished:
+		span.SetAttributes(attribute.String("out_state", "StateBootstrapFinished"))
 		return &StateBootstrapFinished{
 			Stats: st.Stats,
 		}
 	case *query.StateQueryWaitingAtCapacity:
 		elapsed := b.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > b.cfg.Timeout {
+			span.SetAttributes(attribute.String("out_state", "StateBootstrapTimeout"))
 			return &StateBootstrapTimeout{
 				Stats: st.Stats,
 			}
 		}
+		span.SetAttributes(attribute.String("out_state", "StateBootstrapWaiting"))
 		return &StateBootstrapWaiting{
 			Stats: st.Stats,
 		}
 	case *query.StateQueryWaitingWithCapacity:
 		elapsed := b.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > b.cfg.Timeout {
+			span.SetAttributes(attribute.String("out_state", "StateBootstrapTimeout"))
 			return &StateBootstrapTimeout{
 				Stats: st.Stats,
 			}
 		}
+		span.SetAttributes(attribute.String("out_state", "StateBootstrapWaiting"))
 		return &StateBootstrapWaiting{
 			Stats: st.Stats,
 		}

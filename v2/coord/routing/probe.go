@@ -160,11 +160,13 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		p.nvl.Put(nv)
 	case *EventProbeRemove[K, N]:
 		span.SetAttributes(tele.AttrEvent("EventProbeRemove"), attribute.String("nodeid", tev.NodeID.String()))
+
 		p.rt.RemoveKey(tev.NodeID.Key())
 		p.nvl.Remove(tev.NodeID)
 		return &StateProbeNodeFailure[K, N]{
 			NodeID: tev.NodeID,
 		}
+
 	case *EventProbeConnectivityCheckSuccess[K, N]:
 		span.SetAttributes(tele.AttrEvent("EventProbeMessageResponse"), attribute.String("nodeid", tev.NodeID.String()))
 		nv, found := p.nvl.Get(tev.NodeID)
@@ -183,6 +185,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		// probe failed, so remove from routing table and from list
 		span.SetAttributes(tele.AttrEvent("EventProbeMessageFailure"), attribute.String("nodeid", tev.NodeID.String()))
 		span.RecordError(tev.Error)
+
 		p.rt.RemoveKey(tev.NodeID.Key())
 		p.nvl.Remove(tev.NodeID)
 		return &StateProbeNodeFailure[K, N]{
@@ -211,6 +214,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		candidate, found := p.nvl.FindCheckPastDeadline(p.cfg.Clock.Now())
 		if !found {
 			// nothing suitable for time out
+			span.SetAttributes(tele.AttrOutEvent("StateProbeWaitingAtCapacity"))
 			return &StateProbeWaitingAtCapacity{}
 		}
 
@@ -228,6 +232,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	if !ok {
 		if p.nvl.OngoingCount() > 0 {
 			// waiting for a check but nothing else to do
+			span.SetAttributes(tele.AttrOutEvent("StateProbeWaitingWithCapacity"))
 			return &StateProbeWaitingWithCapacity{}
 		}
 		// nothing happening and nothing to do
@@ -237,6 +242,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	p.nvl.MarkOngoing(next.NodeID, p.cfg.Clock.Now().Add(p.cfg.Timeout))
 
 	// Ask the node to find itself
+	span.SetAttributes(tele.AttrOutEvent("StateProbeConnectivityCheck"))
 	return &StateProbeConnectivityCheck[K, N]{
 		NodeID: next.NodeID,
 	}

@@ -91,6 +91,11 @@ func AttrEvent(val string) attribute.KeyValue {
 	return attribute.String("event", val)
 }
 
+// AttrOutEvent creates an attribute that records the name of an event being returned
+func AttrOutEvent(val string) attribute.KeyValue {
+	return attribute.String("out_event", val)
+}
+
 // WithAttributes is a function that attaches the provided attributes to the
 // given context. The given attributes will overwrite any already existing ones.
 func WithAttributes(ctx context.Context, attrs ...attribute.KeyValue) context.Context {

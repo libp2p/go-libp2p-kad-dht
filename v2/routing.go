@@ -186,9 +186,5 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: TTL
 	}
 
-	if err := d.kad.AddNodes(ctx, d.cfg.BootstrapPeers); err != nil {
-		return fmt.Errorf("add nodes: %w", err)
-	}
-
 	return d.kad.Bootstrap(ctx, seed)
 }

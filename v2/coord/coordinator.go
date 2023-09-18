@@ -173,7 +173,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router, rt routing.RoutingTableCpl[kad
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[kadt.Key](kadt.PeerID(self), qpCfg)
+	qp, err := query.NewPool[kadt.Key](self, qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
@@ -185,7 +185,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router, rt routing.RoutingTableCpl[kad
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[kadt.Key](kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap[kadt.Key](self, bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}

@@ -2,6 +2,7 @@ package tele
 
 import (
 	"context"
+	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -86,14 +87,14 @@ func AttrKey(val string) attribute.KeyValue {
 	return attribute.String("key", val)
 }
 
-// AttrEvent creates an attribute that records the name of an event
-func AttrEvent(val string) attribute.KeyValue {
-	return attribute.String("event", val)
+// AttrInEvent creates an attribute that records the type of an event
+func AttrInEvent(t any) attribute.KeyValue {
+	return attribute.String("in_event", fmt.Sprintf("%T", t))
 }
 
-// AttrOutEvent creates an attribute that records the name of an event being returned
-func AttrOutEvent(val string) attribute.KeyValue {
-	return attribute.String("out_event", val)
+// AttrOutEvent creates an attribute that records the type of an event being returned
+func AttrOutEvent(t any) attribute.KeyValue {
+	return attribute.String("out_event", fmt.Sprintf("%T", t))
 }
 
 // WithAttributes is a function that attaches the provided attributes to the
@@ -129,6 +130,6 @@ func FromContext(ctx context.Context, attrs ...attribute.KeyValue) attribute.Set
 }
 
 // StartSpan creates a span and a [context.Context] containing the newly-created span.
-func StartSpan(ctx context.Context, name string) (context.Context, trace.Span) {
-	return otel.Tracer(TracerName).Start(ctx, name)
+func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	return otel.Tracer(TracerName).Start(ctx, name, opts...)
 }

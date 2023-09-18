@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
@@ -133,17 +135,19 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 }
 
 // Advance advances the state of the probe state machine by attempting to advance its query if running.
-func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
-	_, span := tele.StartSpan(ctx, "Probe.Advance")
-	defer span.End()
+func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeState) {
+	_, span := tele.StartSpan(ctx, "Probe.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	switch tev := ev.(type) {
 	case *EventProbePoll:
 		// ignore, nothing to do
-		span.SetAttributes(tele.AttrEvent("EventProbePoll"))
 	case *EventProbeAdd[K, N]:
 		// check presence in routing table
-		span.SetAttributes(tele.AttrEvent("EventProbeAdd"), attribute.String("nodeid", tev.NodeID.String()))
+		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 		if _, found := p.rt.GetNode(tev.NodeID.Key()); !found {
 			// ignore if not in routing table
 			span.RecordError(errors.New("node not in routing table"))
@@ -159,7 +163,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		// TODO: if node was in ongoing list return a state that can signal the caller to cancel any prior outbound message
 		p.nvl.Put(nv)
 	case *EventProbeRemove[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventProbeRemove"), attribute.String("nodeid", tev.NodeID.String()))
+		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 
 		p.rt.RemoveKey(tev.NodeID.Key())
 		p.nvl.Remove(tev.NodeID)
@@ -168,7 +172,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		}
 
 	case *EventProbeConnectivityCheckSuccess[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventProbeMessageResponse"), attribute.String("nodeid", tev.NodeID.String()))
+		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 		nv, found := p.nvl.Get(tev.NodeID)
 		if !found {
 			// ignore message for unknown node, which might have been removed
@@ -183,7 +187,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 
 	case *EventProbeConnectivityCheckFailure[K, N]:
 		// probe failed, so remove from routing table and from list
-		span.SetAttributes(tele.AttrEvent("EventProbeMessageFailure"), attribute.String("nodeid", tev.NodeID.String()))
+		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 		span.RecordError(tev.Error)
 
 		p.rt.RemoveKey(tev.NodeID.Key())
@@ -192,7 +196,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 			NodeID: tev.NodeID,
 		}
 	case *EventProbeNotifyConnectivity[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventProbeNotifyConnectivity"), attribute.String("nodeid", tev.NodeID.String()))
+		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 		nv, found := p.nvl.Get(tev.NodeID)
 		if !found {
 			// ignore message for unknown node, which might have been removed
@@ -214,7 +218,6 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 		candidate, found := p.nvl.FindCheckPastDeadline(p.cfg.Clock.Now())
 		if !found {
 			// nothing suitable for time out
-			span.SetAttributes(tele.AttrOutEvent("StateProbeWaitingAtCapacity"))
 			return &StateProbeWaitingAtCapacity{}
 		}
 
@@ -232,7 +235,6 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	if !ok {
 		if p.nvl.OngoingCount() > 0 {
 			// waiting for a check but nothing else to do
-			span.SetAttributes(tele.AttrOutEvent("StateProbeWaitingWithCapacity"))
 			return &StateProbeWaitingWithCapacity{}
 		}
 		// nothing happening and nothing to do
@@ -242,7 +244,6 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) ProbeState {
 	p.nvl.MarkOngoing(next.NodeID, p.cfg.Clock.Now().Add(p.cfg.Timeout))
 
 	// Ask the node to find itself
-	span.SetAttributes(tele.AttrOutEvent("StateProbeConnectivityCheck"))
 	return &StateProbeConnectivityCheck[K, N]{
 		NodeID: next.NodeID,
 	}

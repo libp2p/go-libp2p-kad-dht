@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
 	"github.com/plprobelab/go-kademlia/key"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
@@ -99,14 +99,15 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 }
 
 // Advance advances the state of the include state machine by attempting to advance its query if running.
-func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeState {
-	ctx, span := tele.StartSpan(ctx, "Include.Advance")
-	defer span.End()
+func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out IncludeState) {
+	ctx, span := tele.StartSpan(ctx, "Include.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	switch tev := ev.(type) {
-
 	case *EventIncludeAddCandidate[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventIncludeAddCandidate"))
 		// Ignore if already running a check
 		_, checking := b.checks[key.HexString(tev.NodeID.Key())]
 		if checking {
@@ -125,24 +126,20 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 		b.candidates.Enqueue(ctx, tev.NodeID)
 
 	case *EventIncludeConnectivityCheckSuccess[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventIncludeConnectivityCheckSuccess"))
 		ch, ok := b.checks[key.HexString(tev.NodeID.Key())]
 		if ok {
 			delete(b.checks, key.HexString(tev.NodeID.Key()))
 			if b.rt.AddNode(tev.NodeID) {
-				span.SetAttributes(tele.AttrOutEvent("StateIncludeRoutingUpdated"))
 				return &StateIncludeRoutingUpdated[K, N]{
 					NodeID: ch.NodeID,
 				}
 			}
 		}
 	case *EventIncludeConnectivityCheckFailure[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventIncludeConnectivityCheckFailure"))
 		span.RecordError(tev.Error)
 		delete(b.checks, key.HexString(tev.NodeID.Key()))
 
 	case *EventIncludePoll:
-		span.SetAttributes(tele.AttrEvent("EventIncludePoll"))
 		// ignore, nothing to do
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
@@ -159,7 +156,6 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 	if !ok {
 		// No candidate in queue
 		if len(b.checks) > 0 {
-			span.SetAttributes(tele.AttrOutEvent("StateIncludeWaitingWithCapacity"))
 			return &StateIncludeWaitingWithCapacity{}
 		}
 		return &StateIncludeIdle{}
@@ -171,7 +167,6 @@ func (b *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) IncludeSta
 	}
 
 	// Ask the node to find itself
-	span.SetAttributes(tele.AttrOutEvent("StateIncludeConnectivityCheck"))
 	return &StateIncludeConnectivityCheck[K, N]{
 		NodeID: candidate,
 	}

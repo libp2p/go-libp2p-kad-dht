@@ -60,8 +60,9 @@ func (r *RoutingBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 
 // notify must only be called while r.pendingMu is held
 func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.notify")
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.notify", trace.WithAttributes(attribute.String("event", fmt.Sprintf("%T", ev))))
 	defer span.End()
+
 	switch ev := ev.(type) {
 	case *EventStartBootstrap:
 		span.SetAttributes(attribute.String("event", "EventStartBootstrap"))

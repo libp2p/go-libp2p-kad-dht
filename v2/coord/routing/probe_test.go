@@ -512,7 +512,7 @@ func TestNodeValueList(t *testing.T) {
 		require.Equal(t, 0, l.OngoingCount())
 		require.Equal(t, 1, l.NodeCount())
 
-		l.MarkOngoing(tiny.NewNode(5), clk.Now().Add(time.Minute))
+		l.MarkOngoing(nv1.NodeID, clk.Now().Add(time.Minute))
 		require.Equal(t, 0, l.PendingCount())
 		require.Equal(t, 1, l.OngoingCount())
 		require.Equal(t, 1, l.NodeCount())
@@ -581,6 +581,26 @@ func TestNodeValueList(t *testing.T) {
 		require.Equal(t, 1, l.PendingCount())
 		require.Equal(t, 0, l.OngoingCount())
 		require.Equal(t, 1, l.NodeCount())
+	})
+
+	t.Run("mark ongoing pending mixed", func(t *testing.T) {
+		t.Parallel()
+
+		clk := clock.NewMock()
+		l := NewNodeValueList[tiny.Key, tiny.Node]()
+		nv1 := &nodeValue[tiny.Key, tiny.Node]{
+			NodeID:       tiny.NewNode(5),
+			NextCheckDue: clk.Now().Add(time.Minute),
+		}
+		nv2 := &nodeValue[tiny.Key, tiny.Node]{
+			NodeID:       tiny.NewNode(6),
+			NextCheckDue: clk.Now().Add(time.Minute),
+		}
+
+		l.Put(nv1)
+		l.Put(nv2)
+		l.MarkOngoing(nv1.NodeID, clk.Now().Add(time.Minute))
+		l.Put(nv1)
 	})
 }
 

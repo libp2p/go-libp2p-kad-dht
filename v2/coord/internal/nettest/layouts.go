@@ -27,7 +27,7 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Peer, error) {
 		}
 
 		nodes[i] = &Peer{
-			NodeID:     id,
+			NodeID:       id,
 			Router:       NewRouter(id, top),
 			RoutingTable: simplert.New[kadt.Key, kadt.PeerID](id, 20),
 		}

@@ -9,12 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	metric2 "go.opentelemetry.io/otel/metric"
-
-	"go.opentelemetry.io/otel/metric/noop"
-
-	trace2 "go.opentelemetry.io/otel/trace"
-
 	"github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -22,17 +16,22 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
-	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/sdk/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
-	"golang.org/x/exp/slog"
+	"go.opentelemetry.io/otel/trace"
+	expslog "golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
+
+var slog = expslog.New(expslog.NewTextHandler(os.Stdout, &expslog.HandlerOptions{Level: expslog.LevelInfo}))
 
 type Config struct {
 	Host        string
@@ -61,8 +60,8 @@ func (c Config) EnableTraceProvider() bool {
 var cfg = Config{
 	Host:       "127.0.0.1",
 	Port:       0,
-	ProtocolID: string(dht.ProtocolAmino),
-	LogLevel:   int(slog.LevelInfo),
+	ProtocolID: string(dht.ProtocolIPFS),
+	LogLevel:   int(expslog.LevelInfo),
 }
 
 func main() {
@@ -113,7 +112,7 @@ func main() {
 			},
 			&cli.IntFlag{
 				Name:        "trace-port",
-				Usage:       "the port to which musa should push traces",
+				Usage:       "the grpc otlp port to which musa should push traces to",
 				Destination: &cfg.TracePort,
 				EnvVars:     []string{"MUSA_TRACE_PORT"},
 			},
@@ -130,7 +129,7 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	go func() {
 		sig := <-sigs
 		slog.Info("Received signal - Stopping...", "signal", sig.String())
@@ -145,6 +144,8 @@ func main() {
 }
 
 func daemonAction(cCtx *cli.Context) error {
+	slog = expslog.New(expslog.NewTextHandler(os.Stdout, &expslog.HandlerOptions{Level: expslog.Level(cfg.LogLevel)}))
+
 	slog.Info("Starting musa daemon process with configuration:")
 	slog.Debug(cfg.String())
 
@@ -153,23 +154,22 @@ func daemonAction(cCtx *cli.Context) error {
 		return fmt.Errorf("new meter provider: %w", err)
 	}
 
-	traceProvider, err := newTraceProvider()
+	traceProvider, err := newTraceProvider(cCtx.Context)
 	if err != nil {
 		return fmt.Errorf("new trace provider: %w", err)
 	}
-
-	if cfg.EnableTraceProvider() || cfg.EnableTraceProvider() {
+	if cfg.EnableTraceProvider() || cfg.EnableMeterProvider() {
 		go serveMetrics()
 	}
 
 	dhtConfig := dht.DefaultConfig()
 	dhtConfig.Mode = dht.ModeOptServer
-	dhtConfig.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.Level(cfg.LogLevel)}))
+	dhtConfig.Logger = slog
 	dhtConfig.ProtocolID = protocol.ID(cfg.ProtocolID)
 	dhtConfig.MeterProvider = meterProvider
 	dhtConfig.TracerProvider = traceProvider
 
-	if dhtConfig.ProtocolID == dht.ProtocolAmino {
+	if dhtConfig.ProtocolID == dht.ProtocolIPFS {
 		dhtConfig.Datastore = datastore.NewNullDatastore()
 	}
 
@@ -218,20 +218,22 @@ func serveMetrics() {
 	}
 }
 
-func newTraceProvider() (trace2.TracerProvider, error) {
+func newTraceProvider(ctx context.Context) (trace.TracerProvider, error) {
 	if !cfg.EnableTraceProvider() {
-		return trace2.NewNoopTracerProvider(), nil
+		return trace.NewNoopTracerProvider(), nil
 	}
 
-	endpoint := fmt.Sprintf("http://%s:%d/api/traces", cfg.TraceHost, cfg.TracePort)
-	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(endpoint)))
+	exp, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(fmt.Sprintf("%s:%d", cfg.TraceHost, cfg.TracePort)),
+		otlptracegrpc.WithInsecure(),
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	tp := trace.NewTracerProvider(
-		trace.WithBatcher(exp),
-		trace.WithResource(resource.NewWithAttributes(
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
 			semconv.ServiceNameKey.String("musa"),
 			semconv.DeploymentEnvironmentKey.String("production"),
@@ -241,7 +243,7 @@ func newTraceProvider() (trace2.TracerProvider, error) {
 	return tp, nil
 }
 
-func newMeterProvider() (metric2.MeterProvider, error) {
+func newMeterProvider() (metric.MeterProvider, error) {
 	if !cfg.EnableMeterProvider() {
 		return noop.NewMeterProvider(), nil
 	}
@@ -251,5 +253,5 @@ func newMeterProvider() (metric2.MeterProvider, error) {
 		return nil, fmt.Errorf("new prometheus exporter: :%w", err)
 	}
 
-	return metric.NewMeterProvider(append(tele.MeterProviderOpts, metric.WithReader(exporter))...), nil
+	return sdkmetric.NewMeterProvider(append(tele.MeterProviderOpts, sdkmetric.WithReader(exporter))...), nil
 }

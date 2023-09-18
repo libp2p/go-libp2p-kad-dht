@@ -54,6 +54,7 @@ func MaybeTrace(t testing.TB, ctx context.Context) (context.Context, trace.Trace
 // Jaeger instance running on localhost on port 14268
 func OtelTracerProvider(ctx context.Context, t testing.TB) trace.TracerProvider {
 	t.Helper()
+
 	exp, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(fmt.Sprintf("%s:%d", *tracingHost, *tracingPort)),
 		otlptracegrpc.WithInsecure(),

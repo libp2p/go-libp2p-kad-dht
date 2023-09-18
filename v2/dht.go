@@ -94,7 +94,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	// initialize backends
 	if len(cfg.Backends) != 0 {
 		d.backends = cfg.Backends
-	} else if cfg.ProtocolID == ProtocolAmino {
+	} else if cfg.ProtocolID == ProtocolIPFS {
 		d.backends, err = d.initAminoBackends()
 		if err != nil {
 			return nil, fmt.Errorf("init amino backends: %w", err)
@@ -225,7 +225,7 @@ func (d *DHT) Close() error {
 	// we check if the conditions are met that we have initialized the datastore
 	// and the get hold of a reference to that datastore by looking in our
 	// backends map and casting one to one of our known providers.
-	if d.cfg.ProtocolID == ProtocolAmino && d.cfg.Datastore == nil {
+	if d.cfg.ProtocolID == ProtocolIPFS && d.cfg.Datastore == nil {
 		if pbe, err := typedBackend[*ProvidersBackend](d, namespaceProviders); err == nil {
 			if err := pbe.datastore.Close(); err != nil {
 				d.log.Warn("failed closing in memory datastore", "err", err.Error())

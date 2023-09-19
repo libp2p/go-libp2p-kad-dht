@@ -2,10 +2,7 @@ package coord
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"reflect"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,58 +15,6 @@ import (
 )
 
 const peerstoreTTL = 10 * time.Minute
-
-type notificationWatcher struct {
-	mu       sync.Mutex
-	buffered []RoutingNotification
-	signal   chan struct{}
-}
-
-func (w *notificationWatcher) Watch(t *testing.T, ctx context.Context, ch <-chan RoutingNotification) {
-	t.Helper()
-	w.signal = make(chan struct{}, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev := <-ch:
-				w.mu.Lock()
-				t.Logf("buffered routing notification: %T\n", ev)
-				w.buffered = append(w.buffered, ev)
-				select {
-				case w.signal <- struct{}{}:
-				default:
-				}
-				w.mu.Unlock()
-
-			}
-		}
-	}()
-}
-
-func (w *notificationWatcher) Expect(ctx context.Context, expected RoutingNotification) (RoutingNotification, error) {
-	for {
-		// look in buffered events
-		w.mu.Lock()
-		for i, ev := range w.buffered {
-			if reflect.TypeOf(ev) == reflect.TypeOf(expected) {
-				// remove first from buffer and return it
-				w.buffered = w.buffered[:i+copy(w.buffered[i:], w.buffered[i+1:])]
-				w.mu.Unlock()
-				return ev, nil
-			}
-		}
-		w.mu.Unlock()
-
-		// wait to be signaled that there is a new event
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("test deadline exceeded while waiting for event %T", expected)
-		case <-w.signal:
-		}
-	}
-}
 
 func TestConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
@@ -139,6 +84,12 @@ func TestConfigValidate(t *testing.T) {
 		cfg.TracerProvider = nil
 		require.Error(t, cfg.Validate())
 	})
+
+	t.Run("routing notifier not nil", func(t *testing.T) {
+		cfg := DefaultCoordinatorConfig()
+		cfg.RoutingNotifier = nil
+		require.Error(t, cfg.Validate())
+	})
 }
 
 func TestExhaustiveQuery(t *testing.T) {
@@ -191,6 +142,9 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
+	rn := NewBufferedRoutingNotifier()
+	ccfg.RoutingNotifier = rn
+
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
@@ -199,9 +153,6 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	if err != nil {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
 	}
-
-	w := new(notificationWatcher)
-	w.Watch(t, ctx, c.RoutingNotifications())
 
 	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
 		return nil
@@ -223,11 +174,11 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 
 	// However the order in which these events are emitted may vary depending on timing.
 
-	ev1, err := w.Expect(ctx, &EventRoutingUpdated{})
+	ev1, err := rn.Expect(ctx, &EventRoutingUpdated{})
 	require.NoError(t, err)
 	tev1 := ev1.(*EventRoutingUpdated)
 
-	ev2, err := w.Expect(ctx, &EventRoutingUpdated{})
+	ev2, err := rn.Expect(ctx, &EventRoutingUpdated{})
 	require.NoError(t, err)
 	tev2 := ev2.(*EventRoutingUpdated)
 
@@ -252,19 +203,19 @@ func TestBootstrap(t *testing.T) {
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
+	rn := NewBufferedRoutingNotifier()
+	ccfg.RoutingNotifier = rn
+
 	self := kadt.PeerID(nodes[0].NodeID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
-
-	w := new(notificationWatcher)
-	w.Watch(t, ctx, d.RoutingNotifications())
 
 	seeds := []kadt.PeerID{nodes[1].NodeID}
 	err = d.Bootstrap(ctx, seeds)
 	require.NoError(t, err)
 
 	// the query run by the dht should have completed
-	ev, err := w.Expect(ctx, &EventBootstrapFinished{})
+	ev, err := rn.Expect(ctx, &EventBootstrapFinished{})
 	require.NoError(t, err)
 
 	require.IsType(t, &EventBootstrapFinished{}, ev)
@@ -273,10 +224,10 @@ func TestBootstrap(t *testing.T) {
 	require.Equal(t, 3, tevf.Stats.Success)
 	require.Equal(t, 0, tevf.Stats.Failure)
 
-	_, err = w.Expect(ctx, &EventRoutingUpdated{})
+	_, err = rn.Expect(ctx, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
-	_, err = w.Expect(ctx, &EventRoutingUpdated{})
+	_, err = rn.Expect(ctx, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
 	// coordinator will have node1 in its routing table
@@ -304,6 +255,9 @@ func TestIncludeNode(t *testing.T) {
 	ccfg.Clock = clk
 	ccfg.PeerstoreTTL = peerstoreTTL
 
+	rn := NewBufferedRoutingNotifier()
+	ccfg.RoutingNotifier = rn
+
 	candidate := nodes[len(nodes)-1].NodeID // not in nodes[0] routing table
 
 	self := nodes[0].NodeID
@@ -316,15 +270,12 @@ func TestIncludeNode(t *testing.T) {
 	_, err = d.GetNode(ctx, candidate)
 	require.ErrorIs(t, err, ErrNodeNotFound)
 
-	w := new(notificationWatcher)
-	w.Watch(t, ctx, d.RoutingNotifications())
-
 	// inject a new node
 	err = d.AddNodes(ctx, []kadt.PeerID{candidate})
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
-	ev, err := w.Expect(ctx, &EventRoutingUpdated{})
+	ev, err := rn.Expect(ctx, &EventRoutingUpdated{})
 	require.NoError(t, err)
 
 	tev := ev.(*EventRoutingUpdated)

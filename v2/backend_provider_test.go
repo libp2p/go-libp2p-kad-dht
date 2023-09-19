@@ -120,6 +120,7 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	require.NoError(t, err)
 
 	// advance clock another time and check if the record was GC'd now
+	cfg.Logger.Debug("advance time")
 	clk.Add(cfg.ProvideValidity + cfg.GCInterval)
 
 	// advancing the clock's time does not guarantee that all other goroutines

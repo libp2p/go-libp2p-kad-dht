@@ -470,7 +470,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, w
 					Success:  ev.Stats.Success,
 					Failure:  ev.Stats.Failure,
 				}
-				nh, err := c.networkBehaviour.getNodeHandler(ctx, kadt.PeerID(ev.NodeID))
+				nh, err := c.networkBehaviour.getNodeHandler(ctx, ev.NodeID)
 				if err != nil {
 					// ignore unknown node
 					break

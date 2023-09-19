@@ -76,16 +76,9 @@ func TestNew(t *testing.T) {
 func TestAddAddresses(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	localCfg := DefaultConfig()
-	rn := coord.NewBufferedRoutingNotifier()
-	localCfg.Kademlia.RoutingNotifier = rn
-
-	local := newClientDht(t, localCfg)
-
-	remote := newServerDht(t, nil)
-
-	// Populate entries in remote's routing table so it passes a connectivity check
-	fillRoutingTable(t, remote, 1)
+	top := NewTopology(t)
+	local := top.AddClient(nil)
+	remote := top.AddServer(nil)
 
 	// local routing table should not contain the node
 	_, err := local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
@@ -103,7 +96,7 @@ func TestAddAddresses(t *testing.T) {
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
-	_, err = rn.Expect(ctx, &coord.EventRoutingUpdated{})
+	_, err = top.ExpectRoutingUpdated(ctx, local, remote.host.ID())
 	require.NoError(t, err)
 
 	// the routing table should now contain the node

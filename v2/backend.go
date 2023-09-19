@@ -102,7 +102,7 @@ func NewBackendPublicKey(ds ds.TxnDatastore, cfg *RecordBackendConfig) (be *Reco
 // The values returned from [ProvidersBackend.Fetch] will be of type
 // [*providerSet] (unexported). The cfg parameter can be nil, in which case the
 // [DefaultProviderBackendConfig] will be used.
-func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Batching, cfg *ProvidersBackendConfig) (be *ProvidersBackend, err error) {
+func NewBackendProvider(pstore peerstore.Peerstore, dstore ds.Datastore, cfg *ProvidersBackendConfig) (be *ProvidersBackend, err error) {
 	if cfg == nil {
 		if cfg, err = DefaultProviderBackendConfig(); err != nil {
 			return nil, fmt.Errorf("default provider backend config: %w", err)

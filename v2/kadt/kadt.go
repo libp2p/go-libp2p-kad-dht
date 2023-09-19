@@ -39,6 +39,11 @@ func (p PeerID) String() string {
 	return peer.ID(p).String()
 }
 
+// Equal compares the [PeerID] with another by comparing the underlying [peer.ID].
+func (p PeerID) Equal(o PeerID) bool {
+	return peer.ID(p) == peer.ID(o)
+}
+
 // AddrInfo is a type that wraps peer.AddrInfo and implements the kad.NodeInfo
 // interface. This means we can use AddrInfo for any operation that interfaces
 // with go-kademlia.

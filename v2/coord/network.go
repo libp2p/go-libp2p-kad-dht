@@ -5,20 +5,18 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 type NetworkBehaviour struct {
 	// rtr is the message router used to send messages
-	rtr Router
+	rtr Router[kadt.Key, kadt.PeerID, *pb.Message]
 
 	nodeHandlersMu sync.Mutex
 	nodeHandlers   map[kadt.PeerID]*NodeHandler // TODO: garbage collect node handlers
@@ -31,7 +29,7 @@ type NetworkBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewNetworkBehaviour(rtr Router, logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
+func NewNetworkBehaviour(rtr Router[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
 	b := &NetworkBehaviour{
 		rtr:          rtr,
 		nodeHandlers: make(map[kadt.PeerID]*NodeHandler),
@@ -53,10 +51,11 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventOutboundGetCloserNodes:
 		b.nodeHandlersMu.Lock()
-		nh, ok := b.nodeHandlers[kadt.PeerID(ev.To.ID)]
+		p := kadt.PeerID(ev.To)
+		nh, ok := b.nodeHandlers[p]
 		if !ok {
-			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
-			b.nodeHandlers[kadt.PeerID(ev.To.ID)] = nh
+			nh = NewNodeHandler(p, b.rtr, b.logger, b.tracer)
+			b.nodeHandlers[p] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
@@ -103,12 +102,8 @@ func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (*NodeHandler, error) {
 	b.nodeHandlersMu.Lock()
 	nh, ok := b.nodeHandlers[id]
-	if !ok || len(nh.Addresses()) == 0 {
-		info, err := b.rtr.GetNodeInfo(ctx, peer.ID(id))
-		if err != nil {
-			return nil, err
-		}
-		nh = NewNodeHandler(info, b.rtr, b.logger, b.tracer)
+	if !ok {
+		nh = NewNodeHandler(id, b.rtr, b.logger, b.tracer)
 		b.nodeHandlers[id] = nh
 	}
 	b.nodeHandlersMu.Unlock()
@@ -116,14 +111,14 @@ func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (
 }
 
 type NodeHandler struct {
-	self   peer.AddrInfo
-	rtr    Router
+	self   kadt.PeerID
+	rtr    Router[kadt.Key, kadt.PeerID, *pb.Message]
 	queue  *WorkQueue[NodeHandlerRequest]
 	logger *slog.Logger
 	tracer trace.Tracer
 }
 
-func NewNodeHandler(self peer.AddrInfo, rtr Router, logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
+func NewNodeHandler(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
 	h := &NodeHandler{
 		self:   self,
 		rtr:    rtr,
@@ -172,12 +167,8 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 	return false
 }
 
-func (h *NodeHandler) ID() peer.ID {
-	return h.self.ID
-}
-
-func (h *NodeHandler) Addresses() []ma.Multiaddr {
-	return h.self.Addrs
+func (h *NodeHandler) ID() kadt.PeerID {
+	return h.self
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
@@ -232,21 +223,4 @@ func (h *NodeHandler) GetValue(ctx context.Context, key kadt.Key) (Value, error)
 // If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
 func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
-}
-
-type fakeMessage struct {
-	key   kadt.Key
-	infos []kad.NodeInfo[kadt.Key, ma.Multiaddr]
-}
-
-func (r fakeMessage) Target() kadt.Key {
-	return r.key
-}
-
-func (r fakeMessage) CloserNodes() []kad.NodeInfo[kadt.Key, ma.Multiaddr] {
-	return r.infos
-}
-
-func (r fakeMessage) EmptyResponse() kad.Response[kadt.Key, ma.Multiaddr] {
-	return &fakeMessage{}
 }

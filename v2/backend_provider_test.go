@@ -9,7 +9,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
-	syncds "github.com/ipfs/go-datastore/sync"
 	"github.com/libp2p/go-libp2p"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,7 +21,9 @@ func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBac
 	h, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 
-	dstore := syncds.MutexWrap(ds.NewMapDatastore())
+	dstore, err := InMemoryDatastore()
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		if err = dstore.Close(); err != nil {
 			t.Logf("closing datastore: %s", err)

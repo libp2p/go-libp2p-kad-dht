@@ -2,6 +2,7 @@ package kadtest
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -13,7 +14,13 @@ import (
 func CtxShort(t *testing.T) context.Context {
 	t.Helper()
 
-	timeout := 10 * time.Second
+	var timeout time.Duration
+	// Increase the timeout for 32-bit Windows
+	if runtime.GOOS == "windows" && runtime.GOARCH == "386" {
+		timeout = 60 * time.Second
+	} else {
+		timeout = 10 * time.Second
+	}
 	goal := time.Now().Add(timeout)
 
 	deadline, ok := t.Deadline()

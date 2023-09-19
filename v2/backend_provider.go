@@ -265,6 +265,7 @@ func (p *ProvidersBackend) StartGarbageCollection() {
 		ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
 		defer ticker.Stop()
 
+		p.log.Info("Provider backend's started for loop")
 		for {
 			select {
 			case <-ctx.Done():

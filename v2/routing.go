@@ -177,9 +177,9 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
-	seed := make([]peer.ID, len(d.cfg.BootstrapPeers))
+	seed := make([]kadt.PeerID, len(d.cfg.BootstrapPeers))
 	for i, addrInfo := range d.cfg.BootstrapPeers {
-		seed[i] = addrInfo.ID
+		seed[i] = kadt.PeerID(addrInfo.ID)
 		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: TTL
 	}
 

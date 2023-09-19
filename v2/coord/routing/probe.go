@@ -334,11 +334,12 @@ type nodeValue[K kad.Key[K], N kad.NodeID[K]] struct {
 
 type nodeValueEntry[K kad.Key[K], N kad.NodeID[K]] struct {
 	nv    *nodeValue[K, N]
-	index int // the index of the item in the ordering
+	index int // the index of the item in the ordering, set to -1 when the item is popped from the heap
 }
 
 type nodeValueList[K kad.Key[K], N kad.NodeID[K]] struct {
-	nodes   map[string]*nodeValueEntry[K, N]
+	nodes map[string]*nodeValueEntry[K, N]
+	// pending is a list of nodes ordered by the time of the next check
 	pending *nodeValuePendingList[K, N]
 	// ongoing is a list of nodes with ongoing/in-progress probes, loosely ordered earliest to most recent
 	ongoing []N
@@ -359,14 +360,20 @@ func (l *nodeValueList[K, N]) Put(nv *nodeValue[K, N]) {
 	nve, exists := l.nodes[mk]
 	if !exists {
 		nve = &nodeValueEntry[K, N]{
-			nv: nv,
+			nv:    nv,
+			index: -1,
 		}
+		l.nodes[mk] = nve
 	} else {
 		nve.nv = nv
-		heap.Remove(l.pending, nve.index)
 	}
-	heap.Push(l.pending, nve)
-	l.nodes[mk] = nve
+
+	// nve.index is -1 when the node is not already in the pending list
+	// this could be because it is new or if there is an ongoing check
+	if nve.index == -1 {
+		heap.Push(l.pending, nve)
+	}
+
 	heap.Fix(l.pending, nve.index)
 	l.removeFromOngoing(nv.NodeID)
 }

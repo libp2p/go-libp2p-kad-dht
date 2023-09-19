@@ -130,6 +130,7 @@ func TestProvidersBackend_GarbageCollection(t *testing.T) {
 	// happens after the record was deleted. That way, the below dstore.Get call
 	// will return a ds.ErrNotFound. This synchronization issue is especially
 	// problematic on Windows and didn't surface on MacOS.
+	cfg.Logger.Debug("block until deleted")
 	select {
 	case <-kadtest.CtxShort(t).Done():
 		t.Fatal("garbage collection timeout")

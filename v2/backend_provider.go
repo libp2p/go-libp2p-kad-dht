@@ -257,7 +257,7 @@ func (p *ProvidersBackend) StartGarbageCollection() {
 	p.gcCancel = cancel
 	p.gcDone = make(chan struct{})
 
-	p.log.Info("Provider backend's started garbage collection schedule")
+	p.log.Info("Provider backend started garbage collection schedule")
 
 	go func() {
 		defer close(p.gcDone)
@@ -269,6 +269,7 @@ func (p *ProvidersBackend) StartGarbageCollection() {
 		for {
 			select {
 			case <-ctx.Done():
+				p.log.Info("Provider backend's for loop done")
 				return
 			case <-ticker.C:
 				p.collectGarbage(ctx)

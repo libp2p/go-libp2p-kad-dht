@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -98,6 +99,18 @@ func TestConfig_Validate(t *testing.T) {
 	t.Run("nil clock", func(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.Clock = nil
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("zero bucket size", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.BucketSize = 0
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("empty bootstrap peers", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.BootstrapPeers = []peer.AddrInfo{}
 		assert.Error(t, cfg.Validate())
 	})
 }

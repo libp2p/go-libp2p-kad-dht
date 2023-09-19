@@ -33,6 +33,11 @@ type Coordinator struct {
 	// cancel is used to cancel all running goroutines when the coordinator is cleaning up
 	cancel context.CancelFunc
 
+	// done will be closed when the coordinator's eventLoop exits. Block-read
+	// from this channel to wait until resources of this coordinator were
+	// cleaned up
+	done chan struct{}
+
 	// cfg is a copy of the optional configuration supplied to the dht
 	cfg CoordinatorConfig
 
@@ -180,7 +185,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[kadt.Key](kadt.PeerID(self), qpCfg)
+	qp, err := query.NewPool[kadt.Key](self, qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
@@ -235,11 +240,13 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 		rtr:    rtr,
 		rt:     rt,
 		cancel: cancel,
+		done:   make(chan struct{}),
 
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
 		queryBehaviour:   queryBehaviour,
 	}
+
 	go d.eventLoop(ctx)
 
 	return d, nil
@@ -248,6 +255,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 // Close cleans up all resources associated with this Coordinator.
 func (c *Coordinator) Close() error {
 	c.cancel()
+	<-c.done
 	return nil
 }
 
@@ -256,6 +264,8 @@ func (c *Coordinator) ID() kadt.PeerID {
 }
 
 func (c *Coordinator) eventLoop(ctx context.Context) {
+	defer close(c.done)
+
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.eventLoop")
 	defer span.End()
 	for {
@@ -446,6 +456,7 @@ func (c *Coordinator) AddNodes(ctx context.Context, ids []kadt.PeerID) error {
 func (c *Coordinator) Bootstrap(ctx context.Context, seeds []kadt.PeerID) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Bootstrap")
 	defer span.End()
+
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		SeedNodes: seeds,
 	})

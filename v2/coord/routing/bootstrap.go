@@ -9,6 +9,7 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
@@ -92,13 +93,11 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig[K]
 
 // Advance advances the state of the bootstrap by attempting to advance its query if running.
 func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) BootstrapState {
-	ctx, span := tele.StartSpan(ctx, "Bootstrap.Advance")
+	ctx, span := tele.StartSpan(ctx, "Bootstrap.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer span.End()
 
 	switch tev := ev.(type) {
 	case *EventBootstrapStart[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventBootstrapStart"))
-
 		// TODO: ignore start event if query is already in progress
 		iter := query.NewClosestNodesIter[K, N](b.self.Key())
 
@@ -118,13 +117,11 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		return b.advanceQuery(ctx, nil)
 
 	case *EventBootstrapFindCloserResponse[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventBootstrapFindCloserResponse"))
 		return b.advanceQuery(ctx, &query.EventQueryFindCloserResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventBootstrapFindCloserFailure[K, N]:
-		span.SetAttributes(tele.AttrEvent("EventBootstrapFindCloserFailure"))
 		span.RecordError(tev.Error)
 		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K, N]{
 			NodeID: tev.NodeID,
@@ -132,8 +129,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		})
 
 	case *EventBootstrapPoll:
-		span.SetAttributes(tele.AttrEvent("EventBootstrapPoll"))
-	// ignore, nothing to do
+		// ignore, nothing to do
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}

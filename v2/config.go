@@ -8,6 +8,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	leveldb "github.com/ipfs/go-ds-leveldb"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
@@ -27,9 +28,9 @@ import (
 const ServiceName = "libp2p.DHT"
 
 const (
-	// ProtocolIPFS is the protocol identifier for the main IPFS network. If the
-	// DHT is configured with this protocol, you must configure backends for
-	// IPNS, Public Key, and provider records (ipns, pk, and providers
+	// ProtocolIPFS is the protocol identifier for the main Amino DHT network.
+	// If the DHT is configured with this protocol, you must configure backends
+	// for IPNS, Public Key, and provider records (ipns, pk, and providers
 	// namespaces). Configuration validation will fail if backends are missing.
 	ProtocolIPFS protocol.ID = "/ipfs/kad/1.0.0"
 
@@ -117,6 +118,10 @@ type Config struct {
 	// BucketSize determines the number of closer peers to return
 	BucketSize int
 
+	// BootstrapPeers is the list of peers that should be used to bootstrap
+	// into the DHT network.
+	BootstrapPeers []peer.AddrInfo
+
 	// ProtocolID represents the DHT [protocol] we can query with and respond to.
 	//
 	// [protocol]: https://docs.libp2p.io/concepts/fundamentals/protocols/
@@ -167,10 +172,16 @@ type Config struct {
 	// used to filter out private addresses.
 	AddressFilter AddressFilter
 
-	// MeterProvider .
+	// MeterProvider provides access to named Meter instances. It's used to,
+	// e.g., expose prometheus metrics. Check out the [opentelemetry docs]:
+	//
+	// [opentelemetry docs]: https://opentelemetry.io/docs/specs/otel/metrics/api/#meterprovider
 	MeterProvider metric.MeterProvider
 
-	// TracerProvider .
+	// TracerProvider provides Tracers that are used by instrumentation code to
+	// trace computational workflows. Check out the [opentelemetry docs]:
+	//
+	// [opentelemetry docs]: https://opentelemetry.io/docs/concepts/signals/traces/#tracer-provider
 	TracerProvider trace.TracerProvider
 }
 
@@ -184,6 +195,7 @@ func DefaultConfig() *Config {
 		Mode:              ModeOptAutoClient,
 		Kademlia:          coord.DefaultCoordinatorConfig(),
 		BucketSize:        20, // MAGIC
+		BootstrapPeers:    DefaultBootstrapPeers(),
 		ProtocolID:        ProtocolIPFS,
 		RoutingTable:      nil,                  // nil because a routing table requires information about the local node. triert.TrieRT will be used if this field is nil.
 		Backends:          map[string]Backend{}, // if empty and [ProtocolIPFS] is used, it'll be populated with the ipns, pk and providers backends
@@ -236,6 +248,14 @@ func (c *Config) Validate() error {
 
 	if err := c.Kademlia.Validate(); err != nil {
 		return fmt.Errorf("invalid kademlia configuration: %w", err)
+	}
+
+	if c.BucketSize == 0 {
+		return fmt.Errorf("bucket size must not be 0")
+	}
+
+	if len(c.BootstrapPeers) == 0 {
+		return fmt.Errorf("no bootstrap peer")
 	}
 
 	if c.ProtocolID == "" {

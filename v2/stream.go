@@ -174,7 +174,7 @@ func (d *DHT) streamReadMsg(ctx context.Context, slogger *slog.Logger, r msgio.R
 	data, err := r.ReadMsg()
 	if err != nil {
 		// log any other errors than stream resets
-		if !errors.Is(err, network.ErrReset) {
+		if !errors.Is(err, network.ErrReset) && !errors.Is(err, io.EOF) {
 			slogger.LogAttrs(ctx, slog.LevelDebug, "error reading message", slog.String("err", err.Error()))
 		}
 

@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -175,8 +174,14 @@ func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Optio
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
 
-	panic("implement me")
+	seed := make([]kadt.PeerID, len(d.cfg.BootstrapPeers))
+	for i, addrInfo := range d.cfg.BootstrapPeers {
+		seed[i] = kadt.PeerID(addrInfo.ID)
+		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: TTL
+	}
+
+	return d.kad.Bootstrap(ctx, seed)
 }

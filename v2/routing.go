@@ -15,6 +15,7 @@ import (
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
@@ -233,7 +234,10 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	seed := make([]kadt.PeerID, len(d.cfg.BootstrapPeers))
 	for i, addrInfo := range d.cfg.BootstrapPeers {
 		seed[i] = kadt.PeerID(addrInfo.ID)
-		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: TTL
+		// TODO: how to handle TTL if BootstrapPeers become dynamic and don't
+		// point to stable peers or consist of ephemeral peers that we have
+		// observed during a previous run.
+		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
 	}
 
 	return d.kad.Bootstrap(ctx, seed)

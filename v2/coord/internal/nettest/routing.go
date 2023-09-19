@@ -9,7 +9,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/network/address"
@@ -21,20 +20,17 @@ import (
 
 var rng = rand.New(rand.NewSource(6283185))
 
-func NewAddrInfo(addrs []ma.Multiaddr) (peer.AddrInfo, error) {
+func NewPeerID() (kadt.PeerID, error) {
 	_, pub, err := crypto.GenerateEd25519Key(rng)
 	if err != nil {
-		return peer.AddrInfo{}, err
+		return kadt.PeerID(""), err
 	}
 	pid, err := peer.IDFromPublicKey(pub)
 	if err != nil {
-		return peer.AddrInfo{}, err
+		return kadt.PeerID(""), err
 	}
 
-	return peer.AddrInfo{
-		ID:    pid,
-		Addrs: addrs,
-	}, nil
+	return kadt.PeerID(pid), nil
 }
 
 // Link represents the route between two nodes. It allows latency and transport failures to be simulated.
@@ -53,22 +49,22 @@ func (l *DefaultLink) ConnLatency() time.Duration { return 0 }
 func (l *DefaultLink) DialLatency() time.Duration { return 0 }
 
 type Router struct {
-	self  peer.ID
+	self  kadt.PeerID
 	top   *Topology
 	mu    sync.Mutex // guards nodes
-	nodes map[peer.ID]*nodeStatus
+	nodes map[string]*nodeStatus
 }
 
 type nodeStatus struct {
-	NodeInfo      peer.AddrInfo
+	NodeID        kadt.PeerID
 	Connectedness endpoint.Connectedness
 }
 
-func NewRouter(self peer.ID, top *Topology) *Router {
+func NewRouter(self kadt.PeerID, top *Topology) *Router {
 	return &Router{
 		self:  self,
 		top:   top,
-		nodes: make(map[peer.ID]*nodeStatus),
+		nodes: make(map[string]*nodeStatus),
 	}
 }
 
@@ -76,28 +72,16 @@ func (r *Router) NodeID() kad.NodeID[kadt.Key] {
 	return kadt.PeerID(r.self)
 }
 
-func (r *Router) SendMessage(ctx context.Context, to peer.AddrInfo, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
-	if err := r.AddNodeInfo(ctx, to, 0); err != nil {
-		return nil, fmt.Errorf("add node info: %w", err)
-	}
-
-	if err := r.Dial(ctx, to); err != nil {
-		return nil, fmt.Errorf("dial: %w", err)
-	}
-
-	return r.top.RouteMessage(ctx, r.self, to.ID, protoID, req)
-}
-
-func (r *Router) HandleMessage(ctx context.Context, n peer.ID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
+func (r *Router) handleMessage(ctx context.Context, n kadt.PeerID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
 	closer := make([]*pb.Message_Peer, 0)
 
 	r.mu.Lock()
 	for _, n := range r.nodes {
 		// only include self if it was the target of the request
-		if n.NodeInfo.ID == r.self && !key.Equal(kadt.PeerID(n.NodeInfo.ID).Key(), req.Target()) {
+		if n.NodeID.Equal(r.self) && !key.Equal(n.NodeID.Key(), req.Target()) {
 			continue
 		}
-		closer = append(closer, pb.FromAddrInfo(n.NodeInfo))
+		closer = append(closer, pb.FromAddrInfo(peer.AddrInfo{ID: peer.ID(n.NodeID)}))
 	}
 	r.mu.Unlock()
 
@@ -110,65 +94,68 @@ func (r *Router) HandleMessage(ctx context.Context, n peer.ID, protoID address.P
 	return resp, nil
 }
 
-func (r *Router) Dial(ctx context.Context, to peer.AddrInfo) error {
+func (r *Router) dial(ctx context.Context, to kadt.PeerID) error {
 	r.mu.Lock()
-	status, ok := r.nodes[to.ID]
+	status, ok := r.nodes[to.String()]
 	r.mu.Unlock()
 
-	if ok {
-		switch status.Connectedness {
-		case endpoint.Connected:
-			return nil
-		case endpoint.CanConnect:
-			if _, err := r.top.Dial(ctx, r.self, to.ID); err != nil {
-				return err
-			}
-
-			status.Connectedness = endpoint.Connected
-			r.mu.Lock()
-			r.nodes[to.ID] = status
-			r.mu.Unlock()
-			return nil
+	if !ok {
+		status = &nodeStatus{
+			NodeID:        to,
+			Connectedness: endpoint.CanConnect,
 		}
 	}
-	return endpoint.ErrUnknownPeer
+
+	if status.Connectedness == endpoint.Connected {
+		return nil
+	}
+	if err := r.top.Dial(ctx, r.self, to); err != nil {
+		return err
+	}
+
+	status.Connectedness = endpoint.Connected
+	r.mu.Lock()
+	r.nodes[to.String()] = status
+	r.mu.Unlock()
+	return nil
 }
 
-func (r *Router) AddNodeInfo(ctx context.Context, info peer.AddrInfo, ttl time.Duration) error {
+func (r *Router) AddToPeerStore(ctx context.Context, id kadt.PeerID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.nodes[info.ID]; !ok {
-		r.nodes[info.ID] = &nodeStatus{
-			NodeInfo:      info,
+	if _, ok := r.nodes[id.String()]; !ok {
+		r.nodes[id.String()] = &nodeStatus{
+			NodeID:        id,
 			Connectedness: endpoint.CanConnect,
 		}
 	}
 	return nil
 }
 
-func (r *Router) GetNodeInfo(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	status, ok := r.nodes[id]
-	if !ok {
-		return peer.AddrInfo{}, fmt.Errorf("unknown node")
+func (r *Router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Message) (*pb.Message, error) {
+	if err := r.dial(ctx, to); err != nil {
+		return nil, fmt.Errorf("dial: %w", err)
 	}
-	return status.NodeInfo, nil
+
+	return r.top.RouteMessage(ctx, r.self, to, "", req)
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to peer.AddrInfo, target kadt.Key) ([]peer.AddrInfo, error) {
-	protoID := address.ProtocolID("/test/1.0.0")
-
+func (r *Router) GetClosestNodes(ctx context.Context, to kadt.PeerID, target kadt.Key) ([]kadt.PeerID, error) {
 	req := &pb.Message{
 		Type: pb.Message_FIND_NODE,
 		Key:  []byte("random-key"),
 	}
 
-	resp, err := r.SendMessage(ctx, to, protoID, req)
+	resp, err := r.SendMessage(ctx, to, req)
 	if err != nil {
 		return nil, err
 	}
-	return resp.CloserPeersAddrInfos(), nil
+
+	// possibly learned about some new nodes
+	for _, id := range resp.CloserNodes() {
+		r.AddToPeerStore(ctx, id)
+	}
+
+	return resp.CloserNodes(), nil
 }

@@ -1,9 +1,6 @@
 package dht
 
 import (
-	"context"
-	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
@@ -14,6 +11,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 func TestNew(t *testing.T) {
@@ -75,26 +73,12 @@ func TestNew(t *testing.T) {
 	}
 }
 
-// expectEventType selects on the event channel until an event of the expected type is sent.
-func expectEventType(t *testing.T, ctx context.Context, events <-chan coord.RoutingNotification, expected coord.RoutingNotification) (coord.RoutingNotification, error) {
-	t.Helper()
-	for {
-		select {
-		case ev := <-events:
-			t.Logf("saw event: %T\n", ev)
-			if reflect.TypeOf(ev) == reflect.TypeOf(expected) {
-				return ev, nil
-			}
-		case <-ctx.Done():
-			return nil, fmt.Errorf("test deadline exceeded while waiting for event %T", expected)
-		}
-	}
-}
-
 func TestAddAddresses(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
 	localCfg := DefaultConfig()
+	rn := coord.NewBufferedRoutingNotifier()
+	localCfg.Kademlia.RoutingNotifier = rn
 
 	local := newClientDht(t, localCfg)
 
@@ -104,7 +88,7 @@ func TestAddAddresses(t *testing.T) {
 	fillRoutingTable(t, remote, 1)
 
 	// local routing table should not contain the node
-	_, err := local.kad.GetNode(ctx, remote.host.ID())
+	_, err := local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
 	require.ErrorIs(t, err, coord.ErrNodeNotFound)
 
 	remoteAddrInfo := peer.AddrInfo{
@@ -119,10 +103,10 @@ func TestAddAddresses(t *testing.T) {
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
-	_, err = expectEventType(t, ctx, local.kad.RoutingNotifications(), &coord.EventRoutingUpdated{})
+	_, err = rn.Expect(ctx, &coord.EventRoutingUpdated{})
 	require.NoError(t, err)
 
 	// the routing table should now contain the node
-	_, err = local.kad.GetNode(ctx, remote.host.ID())
+	_, err = local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
 	require.NoError(t, err)
 }

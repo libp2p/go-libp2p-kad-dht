@@ -112,7 +112,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	coordCfg.MeterProvider = cfg.MeterProvider
 	coordCfg.TracerProvider = cfg.TracerProvider
 
-	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &Router{host: h}, d.rt, coordCfg)
+	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &Router{host: h, ProtocolID: cfg.ProtocolID}, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -323,12 +323,16 @@ func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Du
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.AddAddresses")
 	defer span.End()
 
+	ids := make([]kadt.PeerID, 0, len(ais))
+
 	ps := d.host.Peerstore()
 	for _, ai := range ais {
+		// TODO: apply address filter
 		ps.AddAddrs(ai.ID, ai.Addrs, ttl)
+		ids = append(ids, kadt.PeerID(ai.ID))
 	}
 
-	return d.kad.AddNodes(ctx, ais)
+	return d.kad.AddNodes(ctx, ids)
 }
 
 // newSHA256Key returns a [kadt.KadKey] that conforms to the [kad.Key] interface by

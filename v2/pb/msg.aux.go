@@ -7,7 +7,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 )
@@ -15,18 +14,9 @@ import (
 // this file contains auxiliary methods to augment the protobuf generated types.
 // It is used to let these types conform to interfaces or add convenience methods.
 
-var _ kad.Request[kadt.Key, ma.Multiaddr] = (*Message)(nil)
-
 func (m *Message) Target() kadt.Key {
 	b := sha256.Sum256(m.Key)
 	return key.NewKey256(b[:])
-}
-
-func (m *Message) EmptyResponse() kad.Response[kadt.Key, ma.Multiaddr] {
-	return &Message{
-		Type: m.Type,
-		Key:  m.Key,
-	}
 }
 
 // FromAddrInfo constructs a [Message_Peer] from the given [peer.AddrInfo].
@@ -90,20 +80,17 @@ func (m *Message) CloserPeersAddrInfos() []peer.AddrInfo {
 	return addrInfos
 }
 
-func (m *Message) CloserNodes() []kad.NodeInfo[kadt.Key, ma.Multiaddr] {
+func (m *Message) CloserNodes() []kadt.PeerID {
 	if m == nil {
 		return nil
 	}
 
-	infos := make([]kad.NodeInfo[kadt.Key, ma.Multiaddr], 0, len(m.CloserPeers))
+	ids := make([]kadt.PeerID, 0, len(m.CloserPeers))
 	for _, p := range m.CloserPeers {
-		infos = append(infos, &kadt.AddrInfo{Info: peer.AddrInfo{
-			ID:    peer.ID(p.Id),
-			Addrs: p.Addresses(),
-		}})
+		ids = append(ids, kadt.PeerID(peer.ID(p.Id)))
 	}
 
-	return infos
+	return ids
 }
 
 // Addresses returns the Multiaddresses associated with the Message_Peer entry

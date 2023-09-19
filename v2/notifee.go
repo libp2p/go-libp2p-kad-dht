@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // networkEventsSubscription registers a subscription on the libp2p event bus
@@ -90,7 +90,5 @@ func (d *DHT) onEvtLocalReachabilityChanged(evt event.EvtLocalReachabilityChange
 
 func (d *DHT) onEvtPeerIdentificationCompleted(evt event.EvtPeerIdentificationCompleted) {
 	// tell the coordinator about a new candidate for inclusion in the routing table
-	d.kad.AddNodes(context.Background(), []peer.AddrInfo{
-		{ID: evt.Peer},
-	})
+	d.kad.AddNodes(context.Background(), []kadt.PeerID{kadt.PeerID(evt.Peer)})
 }

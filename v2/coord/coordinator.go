@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sync"
 	"time"
 
 	"github.com/benbjohnson/clock"
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
-	"github.com/plprobelab/go-kademlia/network/address"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -23,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // A Coordinator coordinates the state machines that comprise a Kademlia DHT
@@ -45,9 +45,7 @@ type Coordinator struct {
 	rt kad.RoutingTable[kadt.Key, kadt.PeerID]
 
 	// rtr is the message router used to send messages
-	rtr Router
-
-	routingNotifications chan RoutingNotification
+	rtr Router[kadt.Key, kadt.PeerID, *pb.Message]
 
 	// networkBehaviour is the behaviour responsible for communicating with the network
 	networkBehaviour *NetworkBehaviour
@@ -60,6 +58,10 @@ type Coordinator struct {
 
 	// tele provides tracing and metric reporting capabilities
 	tele *Telemetry
+}
+
+type RoutingNotifier interface {
+	Notify(context.Context, RoutingNotification)
 }
 
 type CoordinatorConfig struct {
@@ -77,6 +79,8 @@ type CoordinatorConfig struct {
 
 	MeterProvider  metric.MeterProvider // the meter provider to use when initialising metric instruments
 	TracerProvider trace.TracerProvider // the tracer provider to use when initialising tracing
+
+	RoutingNotifier RoutingNotifier // receives notifications of routing events
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -136,6 +140,13 @@ func (cfg *CoordinatorConfig) Validate() error {
 		}
 	}
 
+	if cfg.RoutingNotifier == nil {
+		return &kaderr.ConfigurationError{
+			Component: "CoordinatorConfig",
+			Err:       fmt.Errorf("routing notifier must not be nil"),
+		}
+	}
+
 	return nil
 }
 
@@ -150,10 +161,11 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 		Logger:             slog.New(zapslog.NewHandler(logging.Logger("coord").Desugar().Core())),
 		MeterProvider:      otel.GetMeterProvider(),
 		TracerProvider:     otel.GetTracerProvider(),
+		RoutingNotifier:    nullRoutingNotifier{},
 	}
 }
 
-func NewCoordinator(self kadt.PeerID, rtr Router, rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
+func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Message], rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		cfg = DefaultCoordinatorConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -185,7 +197,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router, rt routing.RoutingTableCpl[kad
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[kadt.Key](self, bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap[kadt.Key](kadt.PeerID(self), bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -233,8 +245,6 @@ func NewCoordinator(self kadt.PeerID, rtr Router, rt routing.RoutingTableCpl[kad
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
 		queryBehaviour:   queryBehaviour,
-
-		routingNotifications: make(chan RoutingNotification, 20), // buffered mainly to allow tests to read the channel after running an operation
 	}
 
 	go d.eventLoop(ctx)
@@ -251,20 +261,6 @@ func (c *Coordinator) Close() error {
 
 func (c *Coordinator) ID() kadt.PeerID {
 	return c.self
-}
-
-func (c *Coordinator) Addresses() []ma.Multiaddr {
-	// TODO: return configured listen addresses
-	info, err := c.rtr.GetNodeInfo(context.TODO(), peer.ID(c.self))
-	if err != nil {
-		return nil
-	}
-	return info.Addrs
-}
-
-// RoutingNotifications returns a channel that may be read to be notified of routing updates
-func (c *Coordinator) RoutingNotifications() <-chan RoutingNotification {
-	return c.routingNotifications
 }
 
 func (c *Coordinator) eventLoop(ctx context.Context) {
@@ -305,11 +301,7 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 	case RoutingCommand:
 		c.routingBehaviour.Notify(ctx, ev)
 	case RoutingNotification:
-		select {
-		case <-ctx.Done():
-		case c.routingNotifications <- ev:
-		default:
-		}
+		c.cfg.RoutingNotifier.Notify(ctx, ev)
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", ev))
 	}
@@ -317,14 +309,14 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.
 // If the node isn't found in the table, it returns ErrNodeNotFound.
-func (c *Coordinator) GetNode(ctx context.Context, id peer.ID) (Node, error) {
+func (c *Coordinator) GetNode(ctx context.Context, id kadt.PeerID) (Node, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetNode")
 	defer span.End()
-	if _, exists := c.rt.GetNode(kadt.PeerID(id).Key()); !exists {
+	if _, exists := c.rt.GetNode(id.Key()); !exists {
 		return nil, ErrNodeNotFound
 	}
 
-	nh, err := c.networkBehaviour.getNodeHandler(ctx, kadt.PeerID(id))
+	nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -372,9 +364,9 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 		return QueryStats{}, err
 	}
 
-	seedIDs := make([]peer.ID, 0, len(seeds))
+	seedIDs := make([]kadt.PeerID, 0, len(seeds))
 	for _, s := range seeds {
-		seedIDs = append(seedIDs, s.ID())
+		seedIDs = append(seedIDs, kadt.PeerID(s.ID()))
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
@@ -383,8 +375,6 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 	cmd := &EventStartQuery{
 		QueryID:           queryID,
 		Target:            target,
-		ProtocolID:        address.ProtocolID("TODO"),
-		Message:           &fakeMessage{key: target},
 		KnownClosestNodes: seedIDs,
 		Notify:            waiter,
 	}
@@ -441,22 +431,20 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 	}
 }
 
-// AddNodes suggests new DHT nodes and their associated addresses to be added to the routing table.
+// AddNodes suggests new DHT nodes to be added to the routing table.
 // If the routing table is updated as a result of this operation an EventRoutingUpdated notification
 // is emitted on the routing notification channel.
-func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo) error {
+func (c *Coordinator) AddNodes(ctx context.Context, ids []kadt.PeerID) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.AddNodes")
 	defer span.End()
-	for _, ai := range ais {
-		if ai.ID == peer.ID(c.self) {
+	for _, id := range ids {
+		if id.Equal(c.self) {
 			// skip self
 			continue
 		}
 
-		// TODO: apply address filter
-
-		c.routingBehaviour.Notify(ctx, &EventAddAddrInfo{
-			NodeInfo: ai,
+		c.routingBehaviour.Notify(ctx, &EventAddNode{
+			NodeID: id,
 		})
 
 	}
@@ -465,18 +453,11 @@ func (c *Coordinator) AddNodes(ctx context.Context, ais []peer.AddrInfo) error {
 }
 
 // Bootstrap instructs the dht to begin bootstrapping the routing table.
-func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
-	seedStrs := make([]string, len(seeds))
-	for i, seed := range seeds {
-		seedStrs[i] = seed.String()
-	}
-
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Bootstrap", trace.WithAttributes(attribute.StringSlice("peers", seedStrs)))
+func (c *Coordinator) Bootstrap(ctx context.Context, seeds []kadt.PeerID) error {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Bootstrap")
 	defer span.End()
 
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
-		// Bootstrap state machine uses the message
-		Message:   &fakeMessage{key: c.self.Key()},
 		SeedNodes: seeds,
 	})
 
@@ -485,15 +466,12 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []peer.ID) error {
 
 // NotifyConnectivity notifies the coordinator that a peer has passed a connectivity check
 // which means it is connected and supports finding closer nodes
-func (c *Coordinator) NotifyConnectivity(ctx context.Context, id peer.ID) error {
+func (c *Coordinator) NotifyConnectivity(ctx context.Context, id kadt.PeerID) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
 	defer span.End()
 
-	ai := peer.AddrInfo{
-		ID: id,
-	}
 	c.routingBehaviour.Notify(ctx, &EventNotifyConnectivity{
-		NodeInfo: ai,
+		NodeID: id,
 	})
 
 	return nil
@@ -501,7 +479,7 @@ func (c *Coordinator) NotifyConnectivity(ctx context.Context, id peer.ID) error 
 
 // NotifyNonConnectivity notifies the coordinator that a peer has failed a connectivity check
 // which means it is not connected and/or it doesn't support finding closer nodes
-func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id peer.ID) error {
+func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyNonConnectivity")
 	defer span.End()
 
@@ -511,3 +489,106 @@ func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id peer.ID) err
 
 	return nil
 }
+
+// A BufferedRoutingNotifier is a [RoutingNotifier] that buffers [RoutingNotification] events and provides methods
+// to expect occurrences of specific events. It is designed for use in a test environment.
+type BufferedRoutingNotifier struct {
+	mu       sync.Mutex
+	buffered []RoutingNotification
+	signal   chan struct{}
+}
+
+func NewBufferedRoutingNotifier() *BufferedRoutingNotifier {
+	return &BufferedRoutingNotifier{
+		signal: make(chan struct{}, 1),
+	}
+}
+
+func (w *BufferedRoutingNotifier) Notify(ctx context.Context, ev RoutingNotification) {
+	w.mu.Lock()
+	w.buffered = append(w.buffered, ev)
+	select {
+	case w.signal <- struct{}{}:
+	default:
+	}
+	w.mu.Unlock()
+}
+
+func (w *BufferedRoutingNotifier) Expect(ctx context.Context, expected RoutingNotification) (RoutingNotification, error) {
+	for {
+		// look in buffered events
+		w.mu.Lock()
+		for i, ev := range w.buffered {
+			if reflect.TypeOf(ev) == reflect.TypeOf(expected) {
+				// remove first from buffer and return it
+				w.buffered = w.buffered[:i+copy(w.buffered[i:], w.buffered[i+1:])]
+				w.mu.Unlock()
+				return ev, nil
+			}
+		}
+		w.mu.Unlock()
+
+		// wait to be signaled that there is a new event
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("test deadline exceeded while waiting for event %T", expected)
+		case <-w.signal:
+		}
+	}
+}
+
+// ExpectRoutingUpdated blocks until an [EventRoutingUpdated] event is seen for the specified peer id
+func (w *BufferedRoutingNotifier) ExpectRoutingUpdated(ctx context.Context, id kadt.PeerID) (*EventRoutingUpdated, error) {
+	for {
+		// look in buffered events
+		w.mu.Lock()
+		for i, ev := range w.buffered {
+			if tev, ok := ev.(*EventRoutingUpdated); ok {
+				if id.Equal(tev.NodeID) {
+					// remove first from buffer and return it
+					w.buffered = w.buffered[:i+copy(w.buffered[i:], w.buffered[i+1:])]
+					w.mu.Unlock()
+					return tev, nil
+				}
+			}
+		}
+		w.mu.Unlock()
+
+		// wait to be signaled that there is a new event
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("test deadline exceeded while waiting for routing updated event")
+		case <-w.signal:
+		}
+	}
+}
+
+// ExpectRoutingRemoved blocks until an [EventRoutingRemoved] event is seen for the specified peer id
+func (w *BufferedRoutingNotifier) ExpectRoutingRemoved(ctx context.Context, id kadt.PeerID) (*EventRoutingRemoved, error) {
+	for {
+		// look in buffered events
+		w.mu.Lock()
+		for i, ev := range w.buffered {
+			if tev, ok := ev.(*EventRoutingRemoved); ok {
+				if id.Equal(tev.NodeID) {
+					// remove first from buffer and return it
+					w.buffered = w.buffered[:i+copy(w.buffered[i:], w.buffered[i+1:])]
+					w.mu.Unlock()
+					return tev, nil
+				}
+			}
+		}
+		w.mu.Unlock()
+
+		// wait to be signaled that there is a new event
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("test deadline exceeded while waiting for routing removed event")
+		case <-w.signal:
+		}
+	}
+}
+
+type nullRoutingNotifier struct{}
+
+func (nullRoutingNotifier) Notify(context.Context, RoutingNotification) {}

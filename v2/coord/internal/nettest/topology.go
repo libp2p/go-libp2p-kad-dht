@@ -13,8 +13,8 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
-type Node struct {
-	NodeInfo     peer.AddrInfo
+type Peer struct {
+	NodeID       kadt.PeerID
 	Router       *Router
 	RoutingTable routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
 }
@@ -22,37 +22,37 @@ type Node struct {
 type Topology struct {
 	clk       clock.Clock
 	links     map[string]Link
-	nodes     []*Node
-	nodeIndex map[peer.ID]*Node
-	routers   map[peer.ID]*Router
+	nodes     []*Peer
+	nodeIndex map[string]*Peer
+	routers   map[string]*Router
 }
 
 func NewTopology(clk clock.Clock) *Topology {
 	return &Topology{
 		clk:       clk,
 		links:     make(map[string]Link),
-		nodeIndex: make(map[peer.ID]*Node),
-		routers:   make(map[peer.ID]*Router),
+		nodeIndex: make(map[string]*Peer),
+		routers:   make(map[string]*Router),
 	}
 }
 
-func (t *Topology) Nodes() []*Node {
+func (t *Topology) Peers() []*Peer {
 	return t.nodes
 }
 
-func (t *Topology) ConnectNodes(a *Node, b *Node) {
-	t.ConnectNodesWithRoute(a, b, &DefaultLink{})
+func (t *Topology) ConnectPeers(a *Peer, b *Peer) {
+	t.ConnectPeersWithRoute(a, b, &DefaultLink{})
 }
 
-func (t *Topology) ConnectNodesWithRoute(a *Node, b *Node, l Link) {
-	akey := a.NodeInfo.ID
+func (t *Topology) ConnectPeersWithRoute(a *Peer, b *Peer, l Link) {
+	akey := a.NodeID.String()
 	if _, exists := t.nodeIndex[akey]; !exists {
 		t.nodeIndex[akey] = a
 		t.nodes = append(t.nodes, a)
 		t.routers[akey] = a.Router
 	}
 
-	bkey := b.NodeInfo.ID
+	bkey := b.NodeID.String()
 	if _, exists := t.nodeIndex[bkey]; !exists {
 		t.nodeIndex[bkey] = b
 		t.nodes = append(t.nodes, b)
@@ -67,8 +67,8 @@ func (t *Topology) ConnectNodesWithRoute(a *Node, b *Node, l Link) {
 	t.links[btoa] = l
 }
 
-func (t *Topology) findRoute(ctx context.Context, from peer.ID, to peer.ID) (Link, error) {
-	key := fmt.Sprintf("%s->%s", from, to)
+func (t *Topology) findRoute(ctx context.Context, from kadt.PeerID, to kadt.PeerID) (Link, error) {
+	key := fmt.Sprintf("%s->%s", peer.ID(from), peer.ID(to))
 
 	route, ok := t.links[key]
 	if !ok {
@@ -78,19 +78,19 @@ func (t *Topology) findRoute(ctx context.Context, from peer.ID, to peer.ID) (Lin
 	return route, nil
 }
 
-func (t *Topology) Dial(ctx context.Context, from peer.ID, to peer.ID) (peer.AddrInfo, error) {
+func (t *Topology) Dial(ctx context.Context, from kadt.PeerID, to kadt.PeerID) error {
 	if from == to {
-		node, ok := t.nodeIndex[to]
+		_, ok := t.nodeIndex[to.String()]
 		if !ok {
-			return peer.AddrInfo{}, fmt.Errorf("unknown node")
+			return fmt.Errorf("unknown node")
 		}
 
-		return node.NodeInfo, nil
+		return nil
 	}
 
 	route, err := t.findRoute(ctx, from, to)
 	if err != nil {
-		return peer.AddrInfo{}, fmt.Errorf("find route: %w", err)
+		return fmt.Errorf("find route: %w", err)
 	}
 
 	latency := route.DialLatency()
@@ -99,25 +99,25 @@ func (t *Topology) Dial(ctx context.Context, from peer.ID, to peer.ID) (peer.Add
 	}
 
 	if err := route.DialErr(); err != nil {
-		return peer.AddrInfo{}, err
+		return err
 	}
 
-	node, ok := t.nodeIndex[to]
+	_, ok := t.nodeIndex[to.String()]
 	if !ok {
-		return peer.AddrInfo{}, fmt.Errorf("unknown node")
+		return fmt.Errorf("unknown node")
 	}
 
-	return node.NodeInfo, nil
+	return nil
 }
 
-func (t *Topology) RouteMessage(ctx context.Context, from peer.ID, to peer.ID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
+func (t *Topology) RouteMessage(ctx context.Context, from kadt.PeerID, to kadt.PeerID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
 	if from == to {
-		node, ok := t.nodeIndex[to]
+		node, ok := t.nodeIndex[to.String()]
 		if !ok {
 			return nil, fmt.Errorf("unknown node")
 		}
 
-		return node.Router.HandleMessage(ctx, from, protoID, req)
+		return node.Router.handleMessage(ctx, from, protoID, req)
 	}
 
 	route, err := t.findRoute(ctx, from, to)
@@ -130,10 +130,10 @@ func (t *Topology) RouteMessage(ctx context.Context, from peer.ID, to peer.ID, p
 		t.clk.Sleep(latency)
 	}
 
-	node, ok := t.nodeIndex[to]
+	node, ok := t.nodeIndex[to.String()]
 	if !ok {
 		return nil, fmt.Errorf("no route to node")
 	}
 
-	return node.Router.HandleMessage(ctx, from, protoID, req)
+	return node.Router.handleMessage(ctx, from, protoID, req)
 }

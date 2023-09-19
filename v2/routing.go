@@ -42,7 +42,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 
 	var foundNode coord.Node
 	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
-		if node.ID() == id {
+		if peer.ID(node.ID()) == id {
 			foundNode = node
 			return coord.ErrSkipRemaining
 		}
@@ -58,10 +58,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
 	}
 
-	return peer.AddrInfo{
-		ID:    foundNode.ID(),
-		Addrs: foundNode.Addresses(),
-	}, nil
+	return d.host.Peerstore().PeerInfo(peer.ID(foundNode.ID())), nil
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {

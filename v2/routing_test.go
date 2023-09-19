@@ -21,9 +21,8 @@ func makePkKeyValue(t *testing.T) (string, []byte) {
 	id, err := peer.IDFromPublicKey(pub)
 	require.NoError(t, err)
 
-	key := fmt.Sprintf("/pk/%s", string(id))
+	return routing.KeyForPublicKey(id), v
 
-	return key, v
 }
 
 func TestGetSetValueLocal(t *testing.T) {

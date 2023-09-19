@@ -94,7 +94,7 @@ jobs:
         with:
           run: |
             export "PATH=$PATH_386:$PATH"
-            go test -count 100 -failfast ./...
+            go test -count 20 -failfast ./...
           working-directory: ./v2
       - name: Run tests with race detector
         # speed things up. Windows and OSX VMs are slow

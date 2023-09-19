@@ -96,6 +96,8 @@ func TestAddAddresses(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
 	localCfg := DefaultConfig()
+	rn := coord.NewBufferedRoutingNotifier()
+	localCfg.Kademlia.RoutingNotifier = rn
 
 	local := newClientDht(t, localCfg)
 
@@ -120,7 +122,7 @@ func TestAddAddresses(t *testing.T) {
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
-	_, err = expectEventType(t, ctx, local.kad.RoutingNotifications(), &coord.EventRoutingUpdated{})
+	_, err = rn.Expect(ctx, &coord.EventRoutingUpdated{})
 	require.NoError(t, err)
 
 	// the routing table should now contain the node

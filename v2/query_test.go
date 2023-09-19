@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -87,43 +86,7 @@ func newClientDht(t testing.TB, cfg *Config) *DHT {
 	return d
 }
 
-// expectRoutingUpdated selects on the event channel until an EventRoutingUpdated event is seen for the specified peer id
-func expectRoutingUpdated(t *testing.T, ctx context.Context, events <-chan coord.RoutingNotification, id peer.ID) (*coord.EventRoutingUpdated, error) {
-	t.Helper()
-	for {
-		select {
-		case ev := <-events:
-			if tev, ok := ev.(*coord.EventRoutingUpdated); ok {
-				if peer.ID(tev.NodeID) == id {
-					return tev, nil
-				}
-				t.Logf("saw routing update for %s", tev.NodeID)
-			}
-		case <-ctx.Done():
-			return nil, fmt.Errorf("test deadline exceeded while waiting for routing update event")
-		}
-	}
-}
-
-// expectRoutingRemoved selects on the event channel until an EventRoutingRemoved event is seen for the specified peer id
-func expectRoutingRemoved(t *testing.T, ctx context.Context, events <-chan coord.RoutingNotification, id peer.ID) (*coord.EventRoutingRemoved, error) {
-	t.Helper()
-	for {
-		select {
-		case ev := <-events:
-			if tev, ok := ev.(*coord.EventRoutingRemoved); ok {
-				if peer.ID(tev.NodeID) == id {
-					return tev, nil
-				}
-				t.Logf("saw routing removed for %s", tev.NodeID)
-			}
-		case <-ctx.Done():
-			return nil, fmt.Errorf("test deadline exceeded while waiting for routing removed event")
-		}
-	}
-}
-
-func connect(t *testing.T, ctx context.Context, a, b *DHT) {
+func connect(t *testing.T, ctx context.Context, a, b *DHT, arn *coord.BufferedRoutingNotifier) {
 	t.Helper()
 
 	remoteAddrInfo := peer.AddrInfo{
@@ -136,7 +99,7 @@ func connect(t *testing.T, ctx context.Context, a, b *DHT) {
 	require.NoError(t, err)
 
 	// the include state machine runs in the background for a and eventually should add the node to routing table
-	_, err = expectRoutingUpdated(t, ctx, a.kad.RoutingNotifications(), b.host.ID())
+	_, err = arn.ExpectRoutingUpdated(ctx, kadt.PeerID(b.host.ID()))
 	require.NoError(t, err)
 
 	// the routing table should now contain the node
@@ -144,27 +107,29 @@ func connect(t *testing.T, ctx context.Context, a, b *DHT) {
 	require.NoError(t, err)
 }
 
-// connectLinearChain connects the dhts together in a linear chain.
-// The dhts are configured with routing tables that contain immediate neighbours.
-func connectLinearChain(t *testing.T, ctx context.Context, dhts ...*DHT) {
-	for i := 1; i < len(dhts); i++ {
-		connect(t, ctx, dhts[i-1], dhts[i])
-		connect(t, ctx, dhts[i], dhts[i-1])
-	}
-}
-
 func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
-	ctx, tp := kadtest.MaybeTrace(t, ctx)
 
-	cfg := DefaultConfig()
-	cfg.TracerProvider = tp
+	// create dhts and associated routing notifiers so we can inspect routing events
+	cfg1 := DefaultConfig()
+	rn1 := coord.NewBufferedRoutingNotifier()
+	cfg1.Kademlia.RoutingNotifier = rn1
+	d1 := newServerDht(t, cfg1)
 
-	d1 := newServerDht(t, cfg)
-	d2 := newServerDht(t, cfg)
-	d3 := newServerDht(t, cfg)
+	cfg2 := DefaultConfig()
+	rn2 := coord.NewBufferedRoutingNotifier()
+	cfg2.Kademlia.RoutingNotifier = rn2
+	d2 := newServerDht(t, cfg2)
 
-	connectLinearChain(t, ctx, d1, d2, d3)
+	cfg3 := DefaultConfig()
+	rn3 := coord.NewBufferedRoutingNotifier()
+	cfg3.Kademlia.RoutingNotifier = rn3
+	d3 := newServerDht(t, cfg3)
+
+	connect(t, ctx, d1, d2, rn1)
+	connect(t, ctx, d2, d1, rn2)
+	connect(t, ctx, d2, d3, rn2)
+	connect(t, ctx, d3, d2, rn3)
 
 	// d3 does not know about d1
 	_, err := d3.kad.GetNode(ctx, kadt.PeerID(d1.host.ID()))
@@ -179,7 +144,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	// ignore the error
 
 	// d3 should update its routing table to include d1 during the query
-	_, err = expectRoutingUpdated(t, ctx, d3.kad.RoutingNotifications(), d1.host.ID())
+	_, err = rn3.ExpectRoutingUpdated(ctx, kadt.PeerID(d1.host.ID()))
 	require.NoError(t, err)
 
 	// d3 now has d1 in its routing table
@@ -187,7 +152,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	require.NoError(t, err)
 
 	// d1 should update its routing table to include d3 during the query
-	_, err = expectRoutingUpdated(t, ctx, d1.kad.RoutingNotifications(), d3.host.ID())
+	_, err = rn1.ExpectRoutingUpdated(ctx, kadt.PeerID(d3.host.ID()))
 	require.NoError(t, err)
 
 	// d1 now has d3 in its routing table
@@ -198,12 +163,18 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 func TestRTEvictionOnFailedQuery(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	cfg := DefaultConfig()
+	cfg1 := DefaultConfig()
+	rn1 := coord.NewBufferedRoutingNotifier()
+	cfg1.Kademlia.RoutingNotifier = rn1
+	d1 := newServerDht(t, cfg1)
 
-	d1 := newServerDht(t, cfg)
-	d2 := newServerDht(t, cfg)
-	connect(t, ctx, d1, d2)
-	connect(t, ctx, d2, d1)
+	cfg2 := DefaultConfig()
+	rn2 := coord.NewBufferedRoutingNotifier()
+	cfg2.Kademlia.RoutingNotifier = rn2
+	d2 := newServerDht(t, cfg2)
+
+	connect(t, ctx, d1, d2, rn1)
+	connect(t, ctx, d2, d1, rn2)
 
 	// close both hosts so query fails
 	require.NoError(t, d1.host.Close())
@@ -224,6 +195,6 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	_, _ = d1.FindPeer(ctx, "test")
 
 	// d1 should update its routing table to remove d2 because of the failure
-	_, err = expectRoutingRemoved(t, ctx, d1.kad.RoutingNotifications(), d2.host.ID())
+	_, err = rn1.ExpectRoutingRemoved(ctx, kadt.PeerID(d2.host.ID()))
 	require.NoError(t, err)
 }

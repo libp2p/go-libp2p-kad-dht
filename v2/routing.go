@@ -10,6 +10,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -40,25 +41,25 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 
 	target := kadt.PeerID(id)
 
-	var foundNode coord.Node
-	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
-		if peer.ID(node.ID()) == id {
-			foundNode = node
+	var foundPeer peer.ID
+	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coord.QueryStats) error {
+		if peer.ID(visited) == id {
+			foundPeer = peer.ID(visited)
 			return coord.ErrSkipRemaining
 		}
 		return nil
 	}
 
-	_, err := d.kad.Query(ctx, target.Key(), fn)
+	_, _, err := d.kad.QueryClosest(ctx, target.Key(), fn, 20)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
 
-	if foundNode == nil {
+	if foundPeer == "" {
 		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
 	}
 
-	return d.host.Peerstore().PeerInfo(peer.ID(foundNode.ID())), nil
+	return d.host.Peerstore().PeerInfo(foundPeer), nil
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
@@ -151,14 +152,44 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 	defer span.End()
 
 	v, err := d.getValueLocal(ctx, key)
-	if err != nil {
+	if err == nil {
 		return v, nil
 	}
 	if !errors.Is(err, ds.ErrNotFound) {
 		return nil, fmt.Errorf("put value locally: %w", err)
 	}
 
-	panic("implement me")
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  []byte(key),
+	}
+
+	// TODO: quorum
+	var value []byte
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coord.QueryStats) error {
+		if resp == nil {
+			return nil
+		}
+
+		if resp.GetType() != pb.Message_GET_VALUE {
+			return nil
+		}
+
+		if string(resp.GetKey()) != key {
+			return nil
+		}
+
+		value = resp.GetRecord().GetValue()
+
+		return coord.ErrSkipRemaining
+	}
+
+	_, err = d.kad.QueryMessage(ctx, req, fn, 20)
+	if err != nil {
+		return nil, fmt.Errorf("failed to run query: %w", err)
+	}
+
+	return value, nil
 }
 
 // getValueLocal retrieves a value from the local datastore without querying the network.

@@ -59,6 +59,16 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
+	case *EventOutboundSendMessage:
+		b.nodeHandlersMu.Lock()
+		p := kadt.PeerID(ev.To)
+		nh, ok := b.nodeHandlers[p]
+		if !ok {
+			nh = NewNodeHandler(p, b.rtr, b.logger, b.tracer)
+			b.nodeHandlers[p] = nh
+		}
+		b.nodeHandlersMu.Unlock()
+		nh.Notify(ctx, ev)
 	default:
 		panic(fmt.Sprintf("unexpected dht event: %T", ev))
 	}
@@ -159,6 +169,26 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 			To:          h.self,
 			Target:      cmd.Target,
 			CloserNodes: nodes,
+		})
+	case *EventOutboundSendMessage:
+		if cmd.Notify == nil {
+			break
+		}
+		resp, err := h.rtr.SendMessage(ctx, h.self, cmd.Message)
+		if err != nil {
+			cmd.Notify.Notify(ctx, &EventSendMessageFailure{
+				QueryID: cmd.QueryID,
+				To:      h.self,
+				Err:     fmt.Errorf("NodeHandler: %w", err),
+			})
+			return false
+		}
+
+		cmd.Notify.Notify(ctx, &EventSendMessageSuccess{
+			QueryID:     cmd.QueryID,
+			To:          h.self,
+			Response:    resp,
+			CloserNodes: resp.CloserNodes(),
 		})
 	default:
 		panic(fmt.Sprintf("unexpected command type: %T", cmd))

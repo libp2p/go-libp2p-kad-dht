@@ -12,6 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 const peerstoreTTL = 10 * time.Minute
@@ -115,13 +116,13 @@ func TestExhaustiveQuery(t *testing.T) {
 	visited := make(map[string]int)
 
 	// Record the nodes as they are visited
-	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
-		visited[node.ID().String()]++
+	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
+		visited[id.String()]++
 		return nil
 	}
 
 	// Run a query to find the value
-	_, err = c.Query(ctx, target, qfn)
+	_, _, err = c.QueryClosest(ctx, target, qfn, 20)
 	require.NoError(t, err)
 
 	require.Equal(t, 3, len(visited))
@@ -154,13 +155,13 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
 	}
 
-	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
+	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
 		return nil
 	}
 
 	// Run a query to find the value
 	target := nodes[3].NodeID.Key()
-	_, err = c.Query(ctx, target, qfn)
+	_, _, err = c.QueryClosest(ctx, target, qfn, 20)
 	require.NoError(t, err)
 
 	// the query run by the dht should have received a response from nodes[1] with closer nodes

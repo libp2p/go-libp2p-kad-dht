@@ -3,6 +3,7 @@ package coord
 import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 type BehaviourEvent interface {
@@ -60,15 +61,39 @@ func (*EventOutboundGetCloserNodes) behaviourEvent()     {}
 func (*EventOutboundGetCloserNodes) nodeHandlerRequest() {}
 func (*EventOutboundGetCloserNodes) networkCommand()     {}
 
-type EventStartQuery struct {
+type EventOutboundSendMessage struct {
+	QueryID query.QueryID
+	To      kadt.PeerID
+	Message *pb.Message
+	Notify  Notify[BehaviourEvent]
+}
+
+func (*EventOutboundSendMessage) behaviourEvent()     {}
+func (*EventOutboundSendMessage) nodeHandlerRequest() {}
+func (*EventOutboundSendMessage) networkCommand()     {}
+
+type EventStartMessageQuery struct {
+	QueryID           query.QueryID
+	Target            kadt.Key
+	Message           *pb.Message
+	KnownClosestNodes []kadt.PeerID
+	Notify            NotifyCloser[BehaviourEvent]
+	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
+}
+
+func (*EventStartMessageQuery) behaviourEvent() {}
+func (*EventStartMessageQuery) queryCommand()   {}
+
+type EventStartFindCloserQuery struct {
 	QueryID           query.QueryID
 	Target            kadt.Key
 	KnownClosestNodes []kadt.PeerID
 	Notify            NotifyCloser[BehaviourEvent]
+	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
 }
 
-func (*EventStartQuery) behaviourEvent() {}
-func (*EventStartQuery) queryCommand()   {}
+func (*EventStartFindCloserQuery) behaviourEvent() {}
+func (*EventStartFindCloserQuery) queryCommand()   {}
 
 type EventStopQuery struct {
 	QueryID query.QueryID
@@ -109,12 +134,36 @@ type EventGetCloserNodesFailure struct {
 func (*EventGetCloserNodesFailure) behaviourEvent()      {}
 func (*EventGetCloserNodesFailure) nodeHandlerResponse() {}
 
+// EventSendMessageSuccess notifies a behaviour that a SendMessage request, initiated by an
+// [EventOutboundSendMessage] event has produced a successful response.
+type EventSendMessageSuccess struct {
+	QueryID     query.QueryID
+	To          kadt.PeerID // To is the peer that the SendMessage request was sent to.
+	Response    *pb.Message
+	CloserNodes []kadt.PeerID
+}
+
+func (*EventSendMessageSuccess) behaviourEvent()      {}
+func (*EventSendMessageSuccess) nodeHandlerResponse() {}
+
+// EventSendMessageFailure notifies a behaviour that a SendMessage request, initiated by an
+// [EventOutboundSendMessage] event has failed to produce a valid response.
+type EventSendMessageFailure struct {
+	QueryID query.QueryID
+	To      kadt.PeerID // To is the peer that the SendMessage request was sent to.
+	Target  kadt.Key
+	Err     error
+}
+
+func (*EventSendMessageFailure) behaviourEvent()      {}
+func (*EventSendMessageFailure) nodeHandlerResponse() {}
+
 // EventQueryProgressed is emitted by the coordinator when a query has received a
 // response from a node.
 type EventQueryProgressed struct {
 	QueryID  query.QueryID
 	NodeID   kadt.PeerID
-	Response Message
+	Response *pb.Message
 	Stats    query.QueryStats
 }
 
@@ -123,8 +172,9 @@ func (*EventQueryProgressed) behaviourEvent() {}
 // EventQueryFinished is emitted by the coordinator when a query has finished, either through
 // running to completion or by being canceled.
 type EventQueryFinished struct {
-	QueryID query.QueryID
-	Stats   query.QueryStats
+	QueryID      query.QueryID
+	Stats        query.QueryStats
+	ClosestNodes []kadt.PeerID
 }
 
 func (*EventQueryFinished) behaviourEvent() {}

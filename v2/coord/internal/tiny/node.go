@@ -12,6 +12,10 @@ type Node struct {
 	key Key
 }
 
+type Message struct {
+	Content string
+}
+
 var _ kad.NodeID[Key] = Node{}
 
 func NewNode(k Key) Node {

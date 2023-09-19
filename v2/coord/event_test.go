@@ -8,7 +8,8 @@ var (
 )
 
 var (
-	_ QueryCommand = (*EventStartQuery)(nil)
+	_ QueryCommand = (*EventStartMessageQuery)(nil)
+	_ QueryCommand = (*EventStartFindCloserQuery)(nil)
 	_ QueryCommand = (*EventStopQuery)(nil)
 )
 

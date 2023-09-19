@@ -259,10 +259,10 @@ func (p *ProvidersBackend) StartGarbageCollection() {
 
 	p.log.Info("Provider backend started garbage collection schedule")
 
+	ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
+
 	go func() {
 		defer close(p.gcDone)
-
-		ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
 		defer ticker.Stop()
 
 		p.log.Info("Provider backend's started for loop")

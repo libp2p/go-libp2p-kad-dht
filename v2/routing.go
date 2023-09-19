@@ -114,15 +114,15 @@ func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
 
-	if err := d.PutValueLocal(ctx, key, value); err != nil {
+	if err := d.putValueLocal(ctx, key, value); err != nil {
 		return fmt.Errorf("put value locally: %w", err)
 	}
 
 	panic("implement me")
 }
 
-// PutValueLocal stores a value in the local datastore without querying the network.
-func (d *DHT) PutValueLocal(ctx context.Context, key string, value []byte) error {
+// putValueLocal stores a value in the local datastore without querying the network.
+func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValueLocal")
 	defer span.End()
 
@@ -151,7 +151,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
 	defer span.End()
 
-	v, err := d.GetValueLocal(ctx, key)
+	v, err := d.getValueLocal(ctx, key)
 	if err != nil {
 		return v, nil
 	}
@@ -162,8 +162,8 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 	panic("implement me")
 }
 
-// GetValueLocal retrieves a value from the local datastore without querying the network.
-func (d *DHT) GetValueLocal(ctx context.Context, key string) ([]byte, error) {
+// getValueLocal retrieves a value from the local datastore without querying the network.
+func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValueLocal")
 	defer span.End()
 

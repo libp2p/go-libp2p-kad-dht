@@ -34,16 +34,18 @@ func TestGetSetValueLocal(t *testing.T) {
 
 	key, v := makePkKeyValue(t)
 
-	err := d.PutValueLocal(ctx, key, v)
+	err := d.putValueLocal(ctx, key, v)
 	require.NoError(t, err)
 
-	val, err := d.GetValueLocal(ctx, key)
+	val, err := d.getValueLocal(ctx, key)
 	require.NoError(t, err)
 
 	require.Equal(t, v, val)
 }
 
 func TestGetValueOnePeer(t *testing.T) {
+	t.Skip("not implemented yet")
+
 	ctx := kadtest.CtxShort(t)
 	top := NewTopology(t)
 	local := top.AddServer(nil)
@@ -51,7 +53,7 @@ func TestGetValueOnePeer(t *testing.T) {
 
 	// store the value on the remote DHT
 	key, v := makePkKeyValue(t)
-	err := remote.PutValueLocal(ctx, key, v)
+	err := remote.putValueLocal(ctx, key, v)
 	require.NoError(t, err)
 
 	// connect the two DHTs

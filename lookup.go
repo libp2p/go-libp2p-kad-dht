@@ -11,8 +11,6 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -22,7 +20,7 @@ import (
 // If the context is canceled, this function will return the context error along
 // with the closest K peers it has found so far.
 func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
-	ctx, span := internal.StartSpan(ctx, "IpfsDHT.GetClosestPeers", trace.WithAttributes(attribute.String("Key", key)))
+	ctx, span := internal.StartSpan(ctx, "IpfsDHT.GetClosestPeers", trace.WithAttributes(internal.KeyAsAttribute("Key", key)))
 	defer span.End()
 
 	if key == "" {
@@ -64,13 +62,8 @@ func (dht *IpfsDHT) pmGetClosestPeers(key string) queryFn {
 			ID:   p,
 		})
 
-		mctx, mspan := internal.StartSpan(ctx, "protoMessenger.GetClosestPeers", trace.WithAttributes(attribute.Stringer("peer", p)))
-		peers, err := dht.protoMessenger.GetClosestPeers(mctx, p, peer.ID(key))
+		peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
 		if err != nil {
-			if mspan.IsRecording() {
-				mspan.SetStatus(codes.Error, err.Error())
-			}
-			mspan.End()
 			logger.Debugf("error getting closer peers: %s", err)
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:  routing.QueryError,
@@ -79,7 +72,6 @@ func (dht *IpfsDHT) pmGetClosestPeers(key string) queryFn {
 			})
 			return nil, err
 		}
-		mspan.End()
 
 		// For DHT query command
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{

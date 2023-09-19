@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -39,6 +40,9 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
+
+const tracer = tracing.Tracer("go-libp2p-kad-dht")
+const dhtName = "IpfsDHT"
 
 var (
 	logger     = logging.Logger("dht")

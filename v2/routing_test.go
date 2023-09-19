@@ -11,11 +11,8 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 )
 
-func TestGetSetValueLocal(t *testing.T) {
-	ctx := kadtest.CtxShort(t)
-
-	top := NewTopology(t)
-	d := top.AddServer(nil)
+func makePkKeyValue(t *testing.T) (string, []byte) {
+	t.Helper()
 
 	_, pub, _ := crypto.GenerateEd25519Key(rng)
 	v, err := crypto.MarshalPublicKey(pub)
@@ -26,10 +23,42 @@ func TestGetSetValueLocal(t *testing.T) {
 
 	key := fmt.Sprintf("/pk/%s", string(id))
 
-	err = d.PutValueLocal(ctx, key, v)
+	return key, v
+}
+
+func TestGetSetValueLocal(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	top := NewTopology(t)
+	d := top.AddServer(nil)
+
+	key, v := makePkKeyValue(t)
+
+	err := d.PutValueLocal(ctx, key, v)
 	require.NoError(t, err)
 
 	val, err := d.GetValueLocal(ctx, key)
+	require.NoError(t, err)
+
+	require.Equal(t, v, val)
+}
+
+func TestGetValueOnePeer(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	top := NewTopology(t)
+	local := top.AddServer(nil)
+	remote := top.AddServer(nil)
+
+	// store the value on the remote DHT
+	key, v := makePkKeyValue(t)
+	err := remote.PutValueLocal(ctx, key, v)
+	require.NoError(t, err)
+
+	// connect the two DHTs
+	top.Connect(ctx, local, remote)
+
+	// ask the local DHT to find the value
+	val, err := local.GetValue(ctx, key)
 	require.NoError(t, err)
 
 	require.Equal(t, v, val)

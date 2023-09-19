@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 )
@@ -111,12 +113,36 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 	panic("implement me")
 }
 
-func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...routing.Option) error {
+func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ...routing.Option) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
 
-	if err := d.putValueLocal(ctx, key, value); err != nil {
+	// first parse the routing options
+	rOpt := routing.Options{} // routing config
+	if err := rOpt.Apply(opts...); err != nil {
+		return fmt.Errorf("apply routing options: %w", err)
+	}
+
+	// then always store the given value locally
+	if err := d.putValueLocal(ctx, keyStr, value); err != nil {
 		return fmt.Errorf("put value locally: %w", err)
+	}
+
+	// if the routing system should operate in offline mode, stop here
+	if rOpt.Offline {
+		return nil
+	}
+
+	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
+		return nil
+	}
+
+	h := sha256.Sum256([]byte(keyStr))
+	kadKey := key.NewKey256(h[:])
+
+	_, err := d.kad.Query(ctx, kadKey, fn)
+	if err != nil {
+		return fmt.Errorf("query error: %w", err)
 	}
 
 	panic("implement me")
@@ -217,6 +243,7 @@ func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
 	}
+
 	return rec.GetValue(), nil
 }
 

@@ -1,9 +1,6 @@
 package dht
 
 import (
-	"context"
-	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
@@ -73,22 +70,6 @@ func TestNew(t *testing.T) {
 
 			assert.Equal(t, want.mode, got.mode)
 		})
-	}
-}
-
-// expectEventType selects on the event channel until an event of the expected type is sent.
-func expectEventType(t *testing.T, ctx context.Context, events <-chan coord.RoutingNotification, expected coord.RoutingNotification) (coord.RoutingNotification, error) {
-	t.Helper()
-	for {
-		select {
-		case ev := <-events:
-			t.Logf("saw event: %T\n", ev)
-			if reflect.TypeOf(ev) == reflect.TypeOf(expected) {
-				return ev, nil
-			}
-		case <-ctx.Done():
-			return nil, fmt.Errorf("test deadline exceeded while waiting for event %T", expected)
-		}
 	}
 }
 

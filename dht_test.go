@@ -14,9 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -24,7 +21,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
 
@@ -563,133 +559,9 @@ func TestProvides(t *testing.T) {
 			if prov.ID != dhts[3].self {
 				t.Fatal("Got back wrong provider")
 			}
-			if len(prov.Addrs) == 0 {
-				t.Fatal("Got no addresses back")
-			}
 		case <-ctxT.Done():
 			t.Fatal("Did not get a provider back.")
 		}
-	}
-}
-
-type testMessageSender struct {
-	sendRequest func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error)
-	sendMessage func(ctx context.Context, p peer.ID, pmes *pb.Message) error
-}
-
-var _ pb.MessageSender = (*testMessageSender)(nil)
-
-func (t testMessageSender) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	return t.sendRequest(ctx, p, pmes)
-}
-
-func (t testMessageSender) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
-	return t.sendMessage(ctx, p, pmes)
-}
-
-func TestProvideAddressFilter(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dhts := setupDHTS(t, ctx, 2)
-
-	connect(t, ctx, dhts[0], dhts[1])
-	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
-
-	done := make(chan struct{})
-	impl := net.NewMessageSenderImpl(dhts[0].host, dhts[0].protocols)
-	tms := &testMessageSender{
-		sendMessage: func(ctx context.Context, p peer.ID, pmes *pb.Message) error {
-			defer close(done)
-			assert.Equal(t, pmes.Type, pb.Message_ADD_PROVIDER)
-			assert.Len(t, pmes.ProviderPeers[0].Addrs, 1)
-			assert.True(t, pmes.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
-			return impl.SendMessage(ctx, p, pmes)
-		},
-		sendRequest: func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-			return impl.SendRequest(ctx, p, pmes)
-		},
-	}
-	pm, err := pb.NewProtocolMessenger(tms)
-	require.NoError(t, err)
-
-	dhts[0].protoMessenger = pm
-	dhts[0].addrFilter = func(multiaddrs []ma.Multiaddr) []ma.Multiaddr {
-		return []ma.Multiaddr{testMaddr}
-	}
-
-	if err := dhts[0].Provide(ctx, testCaseCids[0], true); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout")
-	}
-}
-
-type testProviderManager struct {
-	addProvider  func(ctx context.Context, key []byte, prov peer.AddrInfo) error
-	getProviders func(ctx context.Context, key []byte) ([]peer.AddrInfo, error)
-	close        func() error
-}
-
-var _ providers.ProviderStore = (*testProviderManager)(nil)
-
-func (t *testProviderManager) AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error {
-	return t.addProvider(ctx, key, prov)
-}
-
-func (t *testProviderManager) GetProviders(ctx context.Context, key []byte) ([]peer.AddrInfo, error) {
-	return t.getProviders(ctx, key)
-}
-
-func (t *testProviderManager) Close() error {
-	return t.close()
-}
-
-func TestHandleAddProviderAddressFilter(t *testing.T) {
-	ctx := context.Background()
-
-	d := setupDHT(ctx, t, false)
-	provider := setupDHT(ctx, t, false)
-
-	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
-
-	d.addrFilter = func(multiaddrs []ma.Multiaddr) []ma.Multiaddr {
-		return []ma.Multiaddr{testMaddr}
-	}
-
-	done := make(chan struct{})
-	d.providerStore = &testProviderManager{
-		addProvider: func(ctx context.Context, key []byte, prov peer.AddrInfo) error {
-			defer close(done)
-			assert.True(t, prov.Addrs[0].Equal(testMaddr))
-			return nil
-		},
-		close: func() error { return nil },
-	}
-
-	pmes := &pb.Message{
-		Type: pb.Message_ADD_PROVIDER,
-		Key:  []byte("test-key"),
-		ProviderPeers: pb.RawPeerInfosToPBPeers([]peer.AddrInfo{{
-			ID: provider.self,
-			Addrs: []ma.Multiaddr{
-				ma.StringCast("/ip4/55.55.55.55/tcp/5555"),
-				ma.StringCast("/ip4/66.66.66.66/tcp/6666"),
-			},
-		}}),
-	}
-
-	_, err := d.handleAddProvider(ctx, provider.self, pmes)
-	require.NoError(t, err)
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout")
 	}
 }
 
@@ -729,47 +601,6 @@ func TestLocalProvides(t *testing.T) {
 	}
 }
 
-func TestAddressFilterProvide(t *testing.T) {
-	// t.Skip("skipping test to debug another")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
-
-	d := setupDHT(ctx, t, false)
-	provider := setupDHT(ctx, t, false)
-
-	d.addrFilter = func(maddrs []ma.Multiaddr) []ma.Multiaddr {
-		return []ma.Multiaddr{
-			testMaddr,
-		}
-	}
-
-	_, err := d.handleAddProvider(ctx, provider.self, &pb.Message{
-		Type: pb.Message_ADD_PROVIDER,
-		Key:  []byte("random-key"),
-		ProviderPeers: pb.PeerInfosToPBPeers(provider.host.Network(), []peer.AddrInfo{{
-			ID:    provider.self,
-			Addrs: provider.host.Addrs(),
-		}}),
-	})
-	require.NoError(t, err)
-
-	// because of the identify protocol we add all
-	// addresses to the peerstore, although the addresses
-	// will be filtered in the above handleAddProvider call
-	d.peerstore.AddAddrs(provider.self, provider.host.Addrs(), time.Hour)
-
-	resp, err := d.handleGetProviders(ctx, d.self, &pb.Message{
-		Type: pb.Message_GET_PROVIDERS,
-		Key:  []byte("random-key"),
-	})
-	require.NoError(t, err)
-
-	assert.True(t, resp.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
-	assert.Len(t, resp.ProviderPeers[0].Addresses(), 1)
-}
-
 // if minPeers or avgPeers is 0, dont test for it.
 func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int, timeout time.Duration) {
 	// test "well-formed-ness" (>= minPeers peers in every routing table)
@@ -797,7 +628,7 @@ func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPe
 		rtlen := dht.routingTable.Size()
 		totalPeers += rtlen
 		if minPeers > 0 && rtlen < minPeers {
-			// t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+			//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
 			return false
 		}
 	}
@@ -1735,7 +1566,9 @@ func TestProvideDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			var optsA, optsB []Option
+			var (
+				optsA, optsB []Option
+			)
 			optsA = append(optsA, ProtocolPrefix("/provMaybeDisabled"))
 			optsB = append(optsB, ProtocolPrefix("/provMaybeDisabled"))
 
@@ -2160,10 +1993,8 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	// convert the bootstrap addresses to a p2p address
 	bootstrapAddrs := make([]peer.AddrInfo, nBootStraps)
 	for i := 0; i < nBootStraps; i++ {
-		b := peer.AddrInfo{
-			ID:    bootstrappers[i].self,
-			Addrs: bootstrappers[i].host.Addrs(),
-		}
+		b := peer.AddrInfo{ID: bootstrappers[i].self,
+			Addrs: bootstrappers[i].host.Addrs()}
 		bootstrapAddrs[i] = b
 	}
 
@@ -2334,93 +2165,4 @@ func TestPreconnectedNodes(t *testing.T) {
 
 	require.Equal(t, len(peers), 1, "why is there more than one peer?")
 	require.Equal(t, h1.ID(), peers[0], "could not find peer")
-}
-
-func TestAddrFilter(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// generate a bunch of addresses
-	publicAddrs := []ma.Multiaddr{
-		ma.StringCast("/ip4/1.2.3.1/tcp/123"),
-		ma.StringCast("/ip4/160.160.160.160/tcp/1600"),
-		ma.StringCast("/ip6/2001::10/tcp/123"),
-	}
-	privAddrs := []ma.Multiaddr{
-		ma.StringCast("/ip4/192.168.1.100/tcp/123"),
-		ma.StringCast("/ip4/172.16.10.10/tcp/123"),
-		ma.StringCast("/ip4/10.10.10.10/tcp/123"),
-		ma.StringCast("/ip6/fc00::10/tcp/123"),
-	}
-	loopbackAddrs := []ma.Multiaddr{
-		ma.StringCast("/ip4/127.0.0.100/tcp/123"),
-		ma.StringCast("/ip6/::1/tcp/123"),
-	}
-
-	allAddrs := append(publicAddrs, privAddrs...)
-	allAddrs = append(allAddrs, loopbackAddrs...)
-
-	// generate different address filters
-	acceptAllFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
-		return addrs
-	})
-	rejectAllFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
-		return []ma.Multiaddr{}
-	})
-	publicIpFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
-		return ma.FilterAddrs(addrs, manet.IsPublicAddr)
-	})
-	localIpFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
-		return ma.FilterAddrs(addrs, func(a ma.Multiaddr) bool { return !manet.IsIPLoopback(a) })
-	})
-
-	// generate peerid for "remote" peer
-	_, pub, err := crypto.GenerateKeyPair(
-		crypto.Ed25519, // Select your key type. Ed25519 are nice short
-		-1,             // Select key length when possible (i.e. RSA).
-	)
-	require.NoError(t, err)
-	peerid, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-
-	// DHT accepting all addresses
-	d0 := setupDHT(ctx, t, false, acceptAllFilter)
-
-	// peerstore should only contain self
-	require.Equal(t, 1, d0.host.Peerstore().Peers().Len())
-
-	d0.maybeAddAddrs(peerid, allAddrs, time.Minute)
-	require.Equal(t, 2, d0.host.Peerstore().Peers().Len())
-	for _, a := range allAddrs {
-		// check that the peerstore contains all addresses of the remote peer
-		require.Contains(t, d0.host.Peerstore().Addrs(peerid), a)
-	}
-
-	// DHT rejecting all addresses
-	d1 := setupDHT(ctx, t, false, rejectAllFilter)
-	d1.maybeAddAddrs(peerid, allAddrs, time.Minute)
-	// remote peer should not be added to peerstore (all addresses rejected)
-	require.Equal(t, 1, d1.host.Peerstore().Peers().Len())
-
-	// DHT accepting only public addresses
-	d2 := setupDHT(ctx, t, false, publicIpFilter)
-	d2.maybeAddAddrs(peerid, allAddrs, time.Minute)
-	for _, a := range publicAddrs {
-		// check that the peerstore contains only public addresses of the remote peer
-		require.Contains(t, d2.host.Peerstore().Addrs(peerid), a)
-	}
-	require.Equal(t, len(publicAddrs), len(d2.host.Peerstore().Addrs(peerid)))
-
-	// DHT accepting only non-loopback addresses
-	d3 := setupDHT(ctx, t, false, localIpFilter)
-	d3.maybeAddAddrs(peerid, allAddrs, time.Minute)
-	for _, a := range publicAddrs {
-		// check that the peerstore contains only non-loopback addresses of the remote peer
-		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
-	}
-	for _, a := range privAddrs {
-		// check that the peerstore contains only non-loopback addresses of the remote peer
-		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
-	}
-	require.Equal(t, len(publicAddrs)+len(privAddrs), len(d3.host.Peerstore().Addrs(peerid)))
 }

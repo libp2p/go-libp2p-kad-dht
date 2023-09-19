@@ -4,9 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/libp2p/go-libp2p/core/event"
@@ -74,12 +72,9 @@ func TestDHT_consumeNetworkEvents_onEvtLocalReachabilityChanged(t *testing.T) {
 func TestDHT_consumeNetworkEvents_onEvtPeerIdentificationCompleted(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	cfg1 := DefaultConfig()
-	rn1 := coord.NewBufferedRoutingNotifier()
-	cfg1.Kademlia.RoutingNotifier = rn1
-	d1 := newServerDht(t, cfg1)
-
-	d2 := newServerDht(t, nil)
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
 
 	// make sure d1 has the address of d2 in its peerstore
 	d1.host.Peerstore().AddAddrs(d2.host.ID(), d2.host.Addrs(), time.Minute)
@@ -89,6 +84,6 @@ func TestDHT_consumeNetworkEvents_onEvtPeerIdentificationCompleted(t *testing.T)
 		Peer: d2.host.ID(),
 	})
 
-	_, err := rn1.ExpectRoutingUpdated(ctx, kadt.PeerID(d2.host.ID()))
+	_, err := top.ExpectRoutingUpdated(ctx, d1, d2.host.ID())
 	require.NoError(t, err)
 }

@@ -114,6 +114,18 @@ func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
 
+	if err := d.PutValueLocal(ctx, key, value); err != nil {
+		return fmt.Errorf("put value locally: %w", err)
+	}
+
+	panic("implement me")
+}
+
+// PutValueLocal stores a value in the local datastore without querying the network.
+func (d *DHT) PutValueLocal(ctx context.Context, key string, value []byte) error {
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValueLocal")
+	defer span.End()
+
 	ns, path, err := record.SplitKey(key)
 	if err != nil {
 		return fmt.Errorf("splitting key: %w", err)
@@ -132,12 +144,27 @@ func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...
 		return fmt.Errorf("store record locally: %w", err)
 	}
 
-	// TODO reach out to Zikade
-	panic("implement me")
+	return nil
 }
 
 func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option) ([]byte, error) {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
+	defer span.End()
+
+	v, err := d.GetValueLocal(ctx, key)
+	if err != nil {
+		return v, nil
+	}
+	if !errors.Is(err, ds.ErrNotFound) {
+		return nil, fmt.Errorf("put value locally: %w", err)
+	}
+
+	panic("implement me")
+}
+
+// GetValueLocal retrieves a value from the local datastore without querying the network.
+func (d *DHT) GetValueLocal(ctx context.Context, key string) ([]byte, error) {
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValueLocal")
 	defer span.End()
 
 	ns, path, err := record.SplitKey(key)
@@ -152,19 +179,14 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 
 	val, err := b.Fetch(ctx, path)
 	if err != nil {
-		if !errors.Is(err, ds.ErrNotFound) {
-			return nil, fmt.Errorf("fetch value locally: %w", err)
-		}
-	} else {
-		rec, ok := val.(*recpb.Record)
-		if !ok {
-			return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
-		}
-		return rec.GetValue(), nil
+		return nil, fmt.Errorf("fetch from backend: %w", err)
 	}
 
-	// TODO reach out to Zikade
-	panic("implement me")
+	rec, ok := val.(*recpb.Record)
+	if !ok {
+		return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
+	}
+	return rec.GetValue(), nil
 }
 
 func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Option) (<-chan []byte, error) {

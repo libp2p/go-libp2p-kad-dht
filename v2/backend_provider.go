@@ -257,14 +257,15 @@ func (p *ProvidersBackend) StartGarbageCollection() {
 	p.gcCancel = cancel
 	p.gcDone = make(chan struct{})
 
-	p.log.Info("Provider backend's started garbage collection schedule")
+	// init ticker outside the goroutine to prevent race condition with
+	// clock mock in garbage collection test.
+	ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
 
 	go func() {
 		defer close(p.gcDone)
-
-		ticker := p.cfg.clk.Ticker(p.cfg.GCInterval)
 		defer ticker.Stop()
 
+		p.log.Info("Provider backend started garbage collection schedule")
 		for {
 			select {
 			case <-ctx.Done():

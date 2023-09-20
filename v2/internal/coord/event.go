@@ -28,6 +28,12 @@ type QueryCommand interface {
 	queryCommand()
 }
 
+// BrdcstCommand is a type of [BehaviourEvent] that instructs a [BrdcstBehaviour] to perform an action.
+type BrdcstCommand interface {
+	BehaviourEvent
+	brdcstCommand()
+}
+
 type NodeHandlerRequest interface {
 	BehaviourEvent
 	nodeHandlerRequest()
@@ -223,3 +229,13 @@ type EventNotifyNonConnectivity struct {
 
 func (*EventNotifyNonConnectivity) behaviourEvent() {}
 func (*EventNotifyNonConnectivity) routingCommand() {}
+
+// EventBroadcastFinished is emitted by the coordinator when a broadcasting
+// a record to the network has finished, either through running to completion or
+// by being canceled.
+type EventBroadcastFinished struct {
+	QueryID query.QueryID
+	Stats   query.QueryStats
+}
+
+func (*EventBroadcastFinished) behaviourEvent() {}

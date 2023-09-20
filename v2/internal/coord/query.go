@@ -65,12 +65,10 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
 		}
-
 	case *EventStopQuery:
 		cmd = &query.EventPoolStopQuery{
 			QueryID: ev.QueryID,
 		}
-
 	case *EventGetCloserNodesSuccess:
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool

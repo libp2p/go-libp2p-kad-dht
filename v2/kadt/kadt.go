@@ -1,7 +1,4 @@
 // Package kadt contains the kademlia types for interacting with go-kademlia.
-// It would be nicer to have these types in the top-level DHT package; however,
-// we also need these types in, e.g., the pb package to let the
-// [pb.Message] type conform to certain interfaces.
 package kadt
 
 import (
@@ -72,4 +69,16 @@ func (ai AddrInfo) Addresses() []ma.Multiaddr {
 	addrs := make([]ma.Multiaddr, len(ai.Info.Addrs))
 	copy(addrs, ai.Info.Addrs)
 	return addrs
+}
+
+// RoutingTable is a mapping between [Key] and [PeerID] and provides methods to interact with the mapping
+// and find PeerIDs close to a particular Key.
+type RoutingTable interface {
+	kad.RoutingTable[Key, PeerID]
+
+	// Cpl returns the longest common prefix length the supplied key shares with the table's key.
+	Cpl(kk Key) int
+
+	// CplSize returns the number of nodes in the table whose longest common prefix with the table's key is of length cpl.
+	CplSize(cpl int) int
 }

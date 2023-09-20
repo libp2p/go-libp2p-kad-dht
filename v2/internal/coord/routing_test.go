@@ -15,8 +15,8 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 func TestRoutingStartBootstrapSendsEvent(t *testing.T) {

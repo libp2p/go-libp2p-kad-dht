@@ -20,7 +20,7 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // ServiceName is used to scope incoming streams for the resource manager.
@@ -131,7 +131,7 @@ type Config struct {
 	// [triert.TrieRT] routing table will be used. This field will be nil
 	// in the default configuration because a routing table requires information
 	// about the local node.
-	RoutingTable routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
+	RoutingTable kadt.RoutingTable
 
 	// The Backends field holds a map of key namespaces to their corresponding
 	// backend implementation. For example, if we received an IPNS record, the

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
 )

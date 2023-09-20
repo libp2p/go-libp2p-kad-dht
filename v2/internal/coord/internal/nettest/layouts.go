@@ -6,7 +6,7 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // LinearTopology creates a network topology consisting of n nodes peered in a linear chain.

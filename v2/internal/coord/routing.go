@@ -10,7 +10,7 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // A RoutingBehaviour provices the behaviours for bootstrapping and maintaining a DHT's routing table.

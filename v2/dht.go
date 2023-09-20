@@ -18,7 +18,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.

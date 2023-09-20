@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
 )
 
 func TestNew(t *testing.T) {

@@ -12,11 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
 )
 
 func TestRoutingStartBootstrapSendsEvent(t *testing.T) {

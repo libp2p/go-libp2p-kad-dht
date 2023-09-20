@@ -20,15 +20,15 @@ func TestConfig_Validate(t *testing.T) {
 		assert.Error(t, cfg.Validate())
 	})
 
-	t.Run("nil Kademlia configuration", func(t *testing.T) {
+	t.Run("nil Query configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		cfg.Kademlia = nil
+		cfg.Query = nil
 		assert.Error(t, cfg.Validate())
 	})
 
-	t.Run("invalid Kademlia configuration", func(t *testing.T) {
+	t.Run("invalid Query configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		cfg.Kademlia.Clock = nil
+		cfg.Query.Concurrency = -1
 		assert.Error(t, cfg.Validate())
 	})
 
@@ -111,6 +111,49 @@ func TestConfig_Validate(t *testing.T) {
 	t.Run("empty bootstrap peers", func(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.BootstrapPeers = []peer.AddrInfo{}
+		assert.Error(t, cfg.Validate())
+	})
+}
+
+func TestQueryConfig_Validate(t *testing.T) {
+	t.Run("default is valid", func(t *testing.T) {
+		cfg := DefaultQueryConfig()
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("concurrency positive", func(t *testing.T) {
+		cfg := DefaultQueryConfig()
+
+		cfg.Concurrency = 0
+		assert.Error(t, cfg.Validate())
+		cfg.Concurrency = -1
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("timeout positive", func(t *testing.T) {
+		cfg := DefaultQueryConfig()
+
+		cfg.Timeout = 0
+		assert.Error(t, cfg.Validate())
+		cfg.Timeout = -1
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("request concurrency positive", func(t *testing.T) {
+		cfg := DefaultQueryConfig()
+
+		cfg.RequestConcurrency = 0
+		assert.Error(t, cfg.Validate())
+		cfg.RequestConcurrency = -1
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("request timeout positive", func(t *testing.T) {
+		cfg := DefaultQueryConfig()
+
+		cfg.RequestTimeout = 0
+		assert.Error(t, cfg.Validate())
+		cfg.RequestTimeout = -1
 		assert.Error(t, cfg.Validate())
 	})
 }

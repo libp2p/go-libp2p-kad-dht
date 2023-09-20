@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 

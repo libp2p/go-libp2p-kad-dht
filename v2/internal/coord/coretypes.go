@@ -7,7 +7,7 @@ import (
 
 	"github.com/plprobelab/go-kademlia/kad"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 

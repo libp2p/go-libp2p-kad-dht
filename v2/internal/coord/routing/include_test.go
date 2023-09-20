@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/benbjohnson/clock"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 	"github.com/stretchr/testify/require"

@@ -9,9 +9,9 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
@@ -54,7 +54,7 @@ func TestConfigValidate(t *testing.T) {
 
 		cfg.RequestConcurrency = 0
 		require.Error(t, cfg.Validate())
-		cfg.QueryConcurrency = -1
+		cfg.RequestConcurrency = -1
 		require.Error(t, cfg.Validate())
 	})
 
@@ -85,12 +85,6 @@ func TestConfigValidate(t *testing.T) {
 		cfg.TracerProvider = nil
 		require.Error(t, cfg.Validate())
 	})
-
-	t.Run("routing notifier not nil", func(t *testing.T) {
-		cfg := DefaultCoordinatorConfig()
-		cfg.RoutingNotifier = nil
-		require.Error(t, cfg.Validate())
-	})
 }
 
 func TestExhaustiveQuery(t *testing.T) {
@@ -102,7 +96,6 @@ func TestExhaustiveQuery(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
 
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
@@ -141,10 +134,6 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
-
-	rn := NewBufferedRoutingNotifier()
-	ccfg.RoutingNotifier = rn
 
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
@@ -154,6 +143,9 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	if err != nil {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
 	}
+
+	rn := NewBufferedRoutingNotifier()
+	c.SetRoutingNotifier(rn)
 
 	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
 		return nil
@@ -202,14 +194,13 @@ func TestBootstrap(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
-
-	rn := NewBufferedRoutingNotifier()
-	ccfg.RoutingNotifier = rn
 
 	self := kadt.PeerID(nodes[0].NodeID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
+
+	rn := NewBufferedRoutingNotifier()
+	d.SetRoutingNotifier(rn)
 
 	seeds := []kadt.PeerID{nodes[1].NodeID}
 	err = d.Bootstrap(ctx, seeds)
@@ -254,10 +245,6 @@ func TestIncludeNode(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
-
-	rn := NewBufferedRoutingNotifier()
-	ccfg.RoutingNotifier = rn
 
 	candidate := nodes[len(nodes)-1].NodeID // not in nodes[0] routing table
 
@@ -266,6 +253,8 @@ func TestIncludeNode(t *testing.T) {
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
 	}
+	rn := NewBufferedRoutingNotifier()
+	d.SetRoutingNotifier(rn)
 
 	// the routing table should not contain the node yet
 	_, err = d.GetNode(ctx, candidate)

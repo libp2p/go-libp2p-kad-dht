@@ -57,6 +57,9 @@ type Coordinator struct {
 	// queryBehaviour is the behaviour responsible for running user-submitted queries
 	queryBehaviour Behaviour[BehaviourEvent, BehaviourEvent]
 
+	// brdcstBehaviour is the behaviour responsible for running user-submitted queries to store records with nodes
+	brdcstBehaviour Behaviour[BehaviourEvent, BehaviourEvent]
+
 	// tele provides tracing and metric reporting capabilities
 	tele *Telemetry
 
@@ -194,7 +197,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap(kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap(self, bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -228,6 +231,8 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 
+	brdcstBehaviour := NewPooledBroadcastBehaviour(qp, cfg.Logger, tele.Tracer)
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	d := &Coordinator{
@@ -242,7 +247,9 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
 		queryBehaviour:   queryBehaviour,
-		routingNotifier:  nullRoutingNotifier{},
+		brdcstBehaviour:  brdcstBehaviour,
+
+		routingNotifier: nullRoutingNotifier{},
 	}
 
 	go d.eventLoop(ctx)
@@ -281,6 +288,8 @@ func (c *Coordinator) eventLoop(ctx context.Context) {
 			ev, ok = c.routingBehaviour.Perform(ctx)
 		case <-c.queryBehaviour.Ready():
 			ev, ok = c.queryBehaviour.Perform(ctx)
+		case <-c.brdcstBehaviour.Ready():
+			ev, ok = c.brdcstBehaviour.Perform(ctx)
 		}
 
 		if ok {
@@ -298,6 +307,8 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 		c.networkBehaviour.Notify(ctx, ev)
 	case QueryCommand:
 		c.queryBehaviour.Notify(ctx, ev)
+	case BrdcstCommand:
+		c.brdcstBehaviour.Notify(ctx, ev)
 	case RoutingCommand:
 		c.routingBehaviour.Notify(ctx, ev)
 	case RoutingNotification:

@@ -20,8 +20,8 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
@@ -60,6 +60,12 @@ type Coordinator struct {
 	// tele provides tracing and metric reporting capabilities
 	tele *Telemetry
 
+	// routingNotifierMu guards access to routingNotifier which may be changed during coordinator operation
+	routingNotifierMu sync.RWMutex
+
+	// routingNotifier receives routing notifications
+	routingNotifier RoutingNotifier
+
 	// lastQueryID holds the last numeric query id generated
 	lastQueryID atomic.Uint64
 }
@@ -69,8 +75,6 @@ type RoutingNotifier interface {
 }
 
 type CoordinatorConfig struct {
-	PeerstoreTTL time.Duration // duration for which a peer is kept in the peerstore
-
 	Clock clock.Clock // a clock that may replaced by a mock when testing
 
 	QueryConcurrency int           // the maximum number of queries that may be waiting for message responses at any one time
@@ -83,8 +87,6 @@ type CoordinatorConfig struct {
 
 	MeterProvider  metric.MeterProvider // the meter provider to use when initialising metric instruments
 	TracerProvider trace.TracerProvider // the tracer provider to use when initialising tracing
-
-	RoutingNotifier RoutingNotifier // receives notifications of routing events
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -144,20 +146,12 @@ func (cfg *CoordinatorConfig) Validate() error {
 		}
 	}
 
-	if cfg.RoutingNotifier == nil {
-		return &kaderr.ConfigurationError{
-			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("routing notifier must not be nil"),
-		}
-	}
-
 	return nil
 }
 
 func DefaultCoordinatorConfig() *CoordinatorConfig {
 	return &CoordinatorConfig{
 		Clock:              clock.New(),
-		PeerstoreTTL:       10 * time.Minute,
 		QueryConcurrency:   3,
 		QueryTimeout:       5 * time.Minute,
 		RequestConcurrency: 3,
@@ -165,7 +159,6 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 		Logger:             slog.New(zapslog.NewHandler(logging.Logger("coord").Desugar().Core())),
 		MeterProvider:      otel.GetMeterProvider(),
 		TracerProvider:     otel.GetTracerProvider(),
-		RoutingNotifier:    nullRoutingNotifier{},
 	}
 }
 
@@ -249,6 +242,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
 		queryBehaviour:   queryBehaviour,
+		routingNotifier:  nullRoutingNotifier{},
 	}
 
 	go d.eventLoop(ctx)
@@ -305,10 +299,19 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 	case RoutingCommand:
 		c.routingBehaviour.Notify(ctx, ev)
 	case RoutingNotification:
-		c.cfg.RoutingNotifier.Notify(ctx, ev)
+		c.routingNotifierMu.RLock()
+		rn := c.routingNotifier
+		c.routingNotifierMu.RUnlock()
+		rn.Notify(ctx, ev)
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", ev))
 	}
+}
+
+func (c *Coordinator) SetRoutingNotifier(rn RoutingNotifier) {
+	c.routingNotifierMu.Lock()
+	c.routingNotifier = rn
+	c.routingNotifierMu.Unlock()
 }
 
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.

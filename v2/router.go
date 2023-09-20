@@ -13,12 +13,12 @@ import (
 	"github.com/libp2p/go-msgio/pbio"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
-type Router struct {
+type router struct {
 	host host.Host
 	// ProtocolID represents the DHT [protocol] we can query with and respond to.
 	//
@@ -26,7 +26,7 @@ type Router struct {
 	ProtocolID protocol.ID
 }
 
-var _ coord.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*Router)(nil)
+var _ coord.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*router)(nil)
 
 func FindKeyRequest(k kadt.Key) *pb.Message {
 	marshalledKey, _ := k.MarshalBinary()
@@ -36,7 +36,7 @@ func FindKeyRequest(k kadt.Key) *pb.Message {
 	}
 }
 
-func (r *Router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Message) (*pb.Message, error) {
+func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Message) (*pb.Message, error) {
 	// TODO: what to do with addresses in peer.AddrInfo?
 	if len(r.host.Peerstore().Addrs(peer.ID(to))) == 0 {
 		return nil, fmt.Errorf("no address for peer %s", to)
@@ -79,7 +79,7 @@ func (r *Router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 	return &protoResp, err
 }
 
-func (r *Router) GetClosestNodes(ctx context.Context, to kadt.PeerID, target kadt.Key) ([]kadt.PeerID, error) {
+func (r *router) GetClosestNodes(ctx context.Context, to kadt.PeerID, target kadt.Key) ([]kadt.PeerID, error) {
 	resp, err := r.SendMessage(ctx, to, FindKeyRequest(target))
 	if err != nil {
 		return nil, err
@@ -88,7 +88,7 @@ func (r *Router) GetClosestNodes(ctx context.Context, to kadt.PeerID, target kad
 	return resp.CloserNodes(), nil
 }
 
-func (r *Router) addToPeerStore(ctx context.Context, ai peer.AddrInfo, ttl time.Duration) error {
+func (r *router) addToPeerStore(ctx context.Context, ai peer.AddrInfo, ttl time.Duration) error {
 	// Don't add addresses for self or our connected peers. We have better ones.
 	if ai.ID == r.host.ID() || r.host.Network().Connectedness(ai.ID) == network.Connected {
 		return nil

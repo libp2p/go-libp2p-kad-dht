@@ -7,7 +7,7 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
@@ -55,11 +55,11 @@ func (t *Topology) AddServer(cfg *Config) *DHT {
 	}
 	cfg.Mode = ModeOptServer
 
-	rn := coord.NewBufferedRoutingNotifier()
-	cfg.Kademlia.RoutingNotifier = rn
-
 	d, err := New(h, cfg)
 	require.NoError(t.tb, err)
+
+	rn := coord.NewBufferedRoutingNotifier()
+	d.kad.SetRoutingNotifier(rn)
 
 	// add at least 1 entry in the routing table so the server will pass connectivity checks
 	fillRoutingTable(t.tb, d, 1)
@@ -97,11 +97,11 @@ func (t *Topology) AddClient(cfg *Config) *DHT {
 	}
 	cfg.Mode = ModeOptClient
 
-	rn := coord.NewBufferedRoutingNotifier()
-	cfg.Kademlia.RoutingNotifier = rn
-
 	d, err := New(h, cfg)
 	require.NoError(t.tb, err)
+
+	rn := coord.NewBufferedRoutingNotifier()
+	d.kad.SetRoutingNotifier(rn)
 
 	t.tb.Cleanup(func() {
 		if err = d.Close(); err != nil {

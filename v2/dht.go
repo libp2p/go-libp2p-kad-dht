@@ -16,8 +16,8 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -107,12 +107,16 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	}
 
 	// instantiate a new Kademlia DHT coordinator.
-	coordCfg := cfg.Kademlia
+	coordCfg := coord.DefaultCoordinatorConfig()
+	coordCfg.QueryConcurrency = cfg.Query.Concurrency
+	coordCfg.QueryTimeout = cfg.Query.Timeout
+	coordCfg.RequestConcurrency = cfg.Query.RequestConcurrency
+	coordCfg.RequestTimeout = cfg.Query.RequestTimeout
 	coordCfg.Clock = cfg.Clock
 	coordCfg.MeterProvider = cfg.MeterProvider
 	coordCfg.TracerProvider = cfg.TracerProvider
 
-	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &Router{host: h, ProtocolID: cfg.ProtocolID}, d.rt, coordCfg)
+	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &router{host: h, ProtocolID: cfg.ProtocolID}, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}

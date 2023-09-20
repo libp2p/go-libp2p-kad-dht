@@ -19,8 +19,7 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
@@ -112,8 +111,8 @@ type Config struct {
 	// between both automatically (see ModeOpt).
 	Mode ModeOpt
 
-	// Kademlia holds the configuration of the underlying Kademlia implementation.
-	Kademlia *coord.CoordinatorConfig
+	// Query holds the configuration used for queries managed by the DHT.
+	Query *QueryConfig
 
 	// BucketSize determines the number of closer peers to return
 	BucketSize int
@@ -132,7 +131,7 @@ type Config struct {
 	// [triert.TrieRT] routing table will be used. This field will be nil
 	// in the default configuration because a routing table requires information
 	// about the local node.
-	RoutingTable routing.RoutingTableCpl[kadt.Key, kadt.PeerID]
+	RoutingTable kadt.RoutingTable
 
 	// The Backends field holds a map of key namespaces to their corresponding
 	// backend implementation. For example, if we received an IPNS record, the
@@ -193,7 +192,6 @@ func DefaultConfig() *Config {
 	return &Config{
 		Clock:             clock.New(),
 		Mode:              ModeOptAutoClient,
-		Kademlia:          coord.DefaultCoordinatorConfig(),
 		BucketSize:        20, // MAGIC
 		BootstrapPeers:    DefaultBootstrapPeers(),
 		ProtocolID:        ProtocolIPFS,
@@ -205,6 +203,7 @@ func DefaultConfig() *Config {
 		AddressFilter:     AddrFilterPrivate,
 		MeterProvider:     otel.GetMeterProvider(),
 		TracerProvider:    otel.GetTracerProvider(),
+		Query:             DefaultQueryConfig(),
 	}
 }
 
@@ -242,62 +241,104 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid mode option: %s", c.Mode)
 	}
 
-	if c.Kademlia == nil {
-		return fmt.Errorf("kademlia configuration must not be nil")
+	if c.Query == nil {
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("query configuration must not be nil"),
+		}
 	}
 
-	if err := c.Kademlia.Validate(); err != nil {
-		return fmt.Errorf("invalid kademlia configuration: %w", err)
+	if err := c.Query.Validate(); err != nil {
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("invalid query configuration: %w", err),
+		}
 	}
 
 	if c.BucketSize == 0 {
-		return fmt.Errorf("bucket size must not be 0")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("bucket size must not be 0"),
+		}
 	}
 
 	if len(c.BootstrapPeers) == 0 {
-		return fmt.Errorf("no bootstrap peer")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("no bootstrap peer"),
+		}
 	}
 
 	if c.ProtocolID == "" {
-		return fmt.Errorf("protocolID must not be empty")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("protocolID must not be empty"),
+		}
 	}
 
 	if c.Logger == nil {
-		return fmt.Errorf("logger must not be nil")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("logger must not be nil"),
+		}
 	}
 
 	if c.TimeoutStreamIdle <= 0 {
-		return fmt.Errorf("stream idle timeout must be a positive duration")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("stream idle timeout must be a positive duration"),
+		}
 	}
 
 	if c.ProtocolID == ProtocolIPFS && len(c.Backends) != 0 {
 		if len(c.Backends) != 3 {
-			return fmt.Errorf("ipfs protocol requires exactly three backends")
+			return &ConfigurationError{
+				Component: "Config",
+				Err:       fmt.Errorf("ipfs protocol requires exactly three backends"),
+			}
 		}
 
 		if _, found := c.Backends[namespaceIPNS]; !found {
-			return fmt.Errorf("ipfs protocol requires an IPNS backend")
+			return &ConfigurationError{
+				Component: "Config",
+				Err:       fmt.Errorf("ipfs protocol requires an IPNS backend"),
+			}
 		}
 
 		if _, found := c.Backends[namespacePublicKey]; !found {
-			return fmt.Errorf("ipfs protocol requires a public key backend")
+			return &ConfigurationError{
+				Component: "Config",
+				Err:       fmt.Errorf("ipfs protocol requires a public key backend"),
+			}
 		}
 
 		if _, found := c.Backends[namespaceProviders]; !found {
-			return fmt.Errorf("ipfs protocol requires a providers backend")
+			return &ConfigurationError{
+				Component: "Config",
+				Err:       fmt.Errorf("ipfs protocol requires a providers backend"),
+			}
 		}
 	}
 
 	if c.AddressFilter == nil {
-		return fmt.Errorf("address filter must not be nil - use AddrFilterIdentity to disable filtering")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("address filter must not be nil - use AddrFilterIdentity to disable filtering"),
+		}
 	}
 
 	if c.MeterProvider == nil {
-		return fmt.Errorf("opentelemetry meter provider must not be nil")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("opentelemetry meter provider must not be nil"),
+		}
 	}
 
 	if c.TracerProvider == nil {
-		return fmt.Errorf("opentelemetry tracer provider must not be nil")
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("opentelemetry tracer provider must not be nil"),
+		}
 	}
 
 	return nil
@@ -321,4 +362,62 @@ func AddrFilterPrivate(maddrs []ma.Multiaddr) []ma.Multiaddr {
 // true, the multiaddress will be in the result set.
 func AddrFilterPublic(maddrs []ma.Multiaddr) []ma.Multiaddr {
 	return ma.FilterAddrs(maddrs, func(maddr ma.Multiaddr) bool { return !manet.IsIPLoopback(maddr) })
+}
+
+// QueryConfig contains the configuration options for queries managed by a [DHT].
+type QueryConfig struct {
+	// Concurrency defines the maximum number of in-flight queries that may be waiting for message responses at any one time.
+	Concurrency int
+
+	// Timeout defines the time to wait before terminating a query that is not making progress
+	Timeout time.Duration
+
+	// RequestConcurrency defines the maximum number of concurrent requests that each query may have in flight.
+	// The maximum number of concurrent requests is equal to [RequestConcurrency] multiplied by [Concurrency].
+	RequestConcurrency int
+
+	// RequestTimeout defines the time to wait before terminating a request to a node that has not responded.
+	RequestTimeout time.Duration
+}
+
+// DefaultQueryConfig returns the default query configuration options for a DHT.
+func DefaultQueryConfig() *QueryConfig {
+	return &QueryConfig{
+		Concurrency:        3,               // MAGIC
+		Timeout:            5 * time.Minute, // MAGIC
+		RequestConcurrency: 3,               // MAGIC
+		RequestTimeout:     time.Minute,     // MAGIC
+	}
+}
+
+// Validate checks the configuration options and returns an error if any have invalid values.
+func (cfg *QueryConfig) Validate() error {
+	if cfg.Concurrency < 1 {
+		return &ConfigurationError{
+			Component: "QueryConfig",
+			Err:       fmt.Errorf("concurrency must be greater than zero"),
+		}
+	}
+	if cfg.Timeout < 1 {
+		return &ConfigurationError{
+			Component: "QueryConfig",
+			Err:       fmt.Errorf("timeout must be greater than zero"),
+		}
+	}
+
+	if cfg.RequestConcurrency < 1 {
+		return &ConfigurationError{
+			Component: "QueryConfig",
+			Err:       fmt.Errorf("request concurrency must be greater than zero"),
+		}
+	}
+
+	if cfg.RequestTimeout < 1 {
+		return &ConfigurationError{
+			Component: "QueryConfig",
+			Err:       fmt.Errorf("request timeout must be greater than zero"),
+		}
+	}
+
+	return nil
 }

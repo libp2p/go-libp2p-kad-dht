@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/benbjohnson/clock v1.3.5
+	github.com/google/uuid v1.3.0
 	github.com/hashicorp/golang-lru/v2 v2.0.5
 	github.com/ipfs/boxo v0.12.0
 	github.com/ipfs/go-cid v0.4.1
@@ -52,7 +53,6 @@ require (
 	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20230817174616-7a8ec2ada47b // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect

@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"testing"
-	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
@@ -14,8 +13,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
-
-const peerstoreTTL = 10 * time.Minute
 
 func TestConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {

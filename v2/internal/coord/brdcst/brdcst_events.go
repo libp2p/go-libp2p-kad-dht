@@ -20,10 +20,11 @@ type EventBroadcastStart[K kad.Key[K], N kad.NodeID[K]] struct {
 	QueryID           query.QueryID
 	Target            K
 	KnownClosestNodes []N
+	Strategy          Strategy
 }
 
-// EventBroadcastStopQuery notifies a [Pool] to stop a query.
-type EventBroadcastStopQuery struct {
+// EventBroadcastStop notifies a [Broadcast] to stop a query.
+type EventBroadcastStop struct {
 	QueryID query.QueryID // the id of the query that should be stopped
 }
 
@@ -41,7 +42,7 @@ type EventBroadcastNodeFailure[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 // broadcastEvent() ensures that only events accepted by a [Broadcast] can be assigned to the [BroadcastEvent] interface.
-func (*EventBroadcastStopQuery) broadcastEvent()          {}
+func (*EventBroadcastStop) broadcastEvent()               {}
 func (*EventBroadcastPoll) broadcastEvent()               {}
 func (*EventBroadcastStart[K, N]) broadcastEvent()        {}
 func (*EventBroadcastNodeResponse[K, N]) broadcastEvent() {}

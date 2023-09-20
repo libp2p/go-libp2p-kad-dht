@@ -63,6 +63,10 @@ func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 		return nil, fmt.Errorf("write message: %w", err)
 	}
 
+	if !req.ExpectResponse() {
+		return nil, nil
+	}
+
 	data, err := reader.ReadMsg()
 	if err != nil {
 		return nil, fmt.Errorf("read message: %w", err)

@@ -249,7 +249,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 
-	b, err := brdcst.NewBroadcast[kadt.Key, kadt.PeerID](qp, nil)
+	b, err := brdcst.NewPool[kadt.Key, kadt.PeerID](qp, nil)
 	if err != nil {
 		return nil, fmt.Errorf("broadcast: %w", err)
 	}
@@ -488,6 +488,43 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn Quer
 
 	_, stats, err := c.waitForQuery(ctx, queryID, waiter, fn)
 	return stats, err
+}
+
+func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, fn QueryFunc) error {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
+	defer span.End()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20)
+	if err != nil {
+		return err
+	}
+
+	seedIDs := make([]kadt.PeerID, 0, len(seeds))
+	for _, s := range seeds {
+		seedIDs = append(seedIDs, s.ID())
+	}
+
+	waiter := NewWaiter[BehaviourEvent]()
+	queryID := c.newQueryID()
+
+	cmd := &EventStartBroadcast{
+		QueryID:           queryID,
+		Target:            msg.Target(),
+		Message:           msg,
+		KnownClosestNodes: seedIDs,
+		Notify:            waiter,
+		Strategy:          brdcst.StrategyFollowUp,
+	}
+
+	// queue the start of the query
+	c.queryBehaviour.Notify(ctx, cmd)
+
+	// TODO: change to waitForBroadcast
+	_, _, err = c.waitForQuery(ctx, queryID, waiter, fn)
+	return err
 }
 
 func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, waiter *Waiter[BehaviourEvent], fn QueryFunc) ([]kadt.PeerID, QueryStats, error) {

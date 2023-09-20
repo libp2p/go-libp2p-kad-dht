@@ -7,6 +7,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
@@ -189,9 +190,12 @@ func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 	}
 }
 
-func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (BehaviourEvent, bool) {
-	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.advancePool")
-	defer span.End()
+func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (out BehaviourEvent, term bool) {
+	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.advancePool", trace.WithAttributes(tele.AttrInEvent(ev)))
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	pstate := p.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {

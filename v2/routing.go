@@ -113,6 +113,11 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 	panic("implement me")
 }
 
+// PutValue satisfies the [routing.Routing] interface and will add the given
+// value to the k-closest nodes to keyStr. The parameter keyStr should have the
+// format `/$namespace/$binary_id`. Namespace examples are `pk` or `ipns`. To
+// identify the closest peers to keyStr, that complete string will be SHA256
+// hashed.
 func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ...routing.Option) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
@@ -133,17 +138,24 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 		return nil
 	}
 
-	fn := func(ctx context.Context, node coord.Node, stats coord.QueryStats) error {
-		return nil
-	}
-
+	// construct Kademlia-key. Yes, we hash the complete key string which
+	// includes the namespace prefix.
 	h := sha256.Sum256([]byte(keyStr))
 	kadKey := key.NewKey256(h[:])
 
-	_, err := d.kad.Query(ctx, kadKey, fn)
+	// define the query function that will be called after each request to a
+	// remote peer.
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coord.QueryStats) error {
+		return nil
+	}
+
+	// finally, find the closest peers to the target key.
+	closest, _, err := d.kad.QueryClosest(ctx, kadKey, fn, 20)
 	if err != nil {
 		return fmt.Errorf("query error: %w", err)
 	}
+
+	_ = closest
 
 	panic("implement me")
 }

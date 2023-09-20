@@ -282,9 +282,11 @@ func (c *Coordinator) eventLoop(ctx context.Context) {
 
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.eventLoop")
 	defer span.End()
+
 	for {
 		var ev BehaviourEvent
 		var ok bool
+
 		select {
 		case <-ctx.Done():
 			// coordinator is closing
@@ -399,7 +401,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn Quer
 
 	seedIDs := make([]kadt.PeerID, 0, len(seeds))
 	for _, s := range seeds {
-		seedIDs = append(seedIDs, kadt.PeerID(s.ID()))
+		seedIDs = append(seedIDs, s.ID())
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
@@ -448,7 +450,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn Quer
 
 	seedIDs := make([]kadt.PeerID, 0, len(seeds))
 	for _, s := range seeds {
-		seedIDs = append(seedIDs, kadt.PeerID(s.ID()))
+		seedIDs = append(seedIDs, s.ID())
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()

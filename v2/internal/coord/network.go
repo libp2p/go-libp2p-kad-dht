@@ -51,21 +51,19 @@ func (b *NetworkBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventOutboundGetCloserNodes:
 		b.nodeHandlersMu.Lock()
-		p := kadt.PeerID(ev.To)
-		nh, ok := b.nodeHandlers[p]
+		nh, ok := b.nodeHandlers[ev.To]
 		if !ok {
-			nh = NewNodeHandler(p, b.rtr, b.logger, b.tracer)
-			b.nodeHandlers[p] = nh
+			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
+			b.nodeHandlers[ev.To] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)
 	case *EventOutboundSendMessage:
 		b.nodeHandlersMu.Lock()
-		p := kadt.PeerID(ev.To)
-		nh, ok := b.nodeHandlers[p]
+		nh, ok := b.nodeHandlers[ev.To]
 		if !ok {
-			nh = NewNodeHandler(p, b.rtr, b.logger, b.tracer)
-			b.nodeHandlers[p] = nh
+			nh = NewNodeHandler(ev.To, b.rtr, b.logger, b.tracer)
+			b.nodeHandlers[ev.To] = nh
 		}
 		b.nodeHandlersMu.Unlock()
 		nh.Notify(ctx, ev)

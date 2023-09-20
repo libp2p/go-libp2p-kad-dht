@@ -4,15 +4,13 @@ import (
 	"context"
 	"sync"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type PooledBroadcastBehaviour struct {

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
+
 	"github.com/benbjohnson/clock"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/plprobelab/go-kademlia/kad"
@@ -231,7 +233,12 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 
-	brdcstBehaviour := NewPooledBroadcastBehaviour(qp, cfg.Logger, tele.Tracer)
+	b, err := brdcst.NewBroadcast[kadt.Key, kadt.PeerID](qp, nil)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast: %w", err)
+	}
+
+	brdcstBehaviour := NewPooledBroadcastBehaviour(b, cfg.Logger, tele.Tracer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

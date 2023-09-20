@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
-
 	"github.com/benbjohnson/clock"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type Broadcast[K kad.Key[K], N kad.NodeID[K]] struct {

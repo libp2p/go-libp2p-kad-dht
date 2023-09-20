@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
-	uuid "github.com/google/uuid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
@@ -59,6 +59,9 @@ type Coordinator struct {
 
 	// tele provides tracing and metric reporting capabilities
 	tele *Telemetry
+
+	// lastQueryID holds the last numeric query id generated
+	lastQueryID atomic.Uint64
 }
 
 type RoutingNotifier interface {
@@ -381,7 +384,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn Quer
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := query.QueryID(uuid.New().String())
+	queryID := c.newQueryID()
 
 	cmd := &EventStartFindCloserQuery{
 		QueryID:           queryID,
@@ -415,7 +418,11 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn Quer
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20)
+	if numResults < 1 {
+		numResults = 20
+	}
+
+	seeds, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
 	if err != nil {
 		return QueryStats{}, err
 	}
@@ -426,7 +433,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn Quer
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := query.QueryID(uuid.New().String())
+	queryID := c.newQueryID()
 
 	cmd := &EventStartMessageQuery{
 		QueryID:           queryID,
@@ -547,6 +554,11 @@ func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID)
 	})
 
 	return nil
+}
+
+func (c *Coordinator) newQueryID() query.QueryID {
+	next := c.lastQueryID.Add(1)
+	return query.QueryID(fmt.Sprintf("%016x", next))
 }
 
 // A BufferedRoutingNotifier is a [RoutingNotifier] that buffers [RoutingNotification] events and provides methods

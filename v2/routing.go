@@ -184,7 +184,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 		return coord.ErrSkipRemaining
 	}
 
-	_, err = d.kad.QueryMessage(ctx, req, fn, 20)
+	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run query: %w", err)
 	}

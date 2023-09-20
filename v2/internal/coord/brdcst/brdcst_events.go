@@ -1,8 +1,9 @@
 package brdcst
 
 import (
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/plprobelab/go-kademlia/kad"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 )
 
 // BroadcastEvent is an event intended to advance the state of a broadcast state machine.

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	uuid "github.com/google/uuid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"

@@ -177,6 +177,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 			cmd.Notify.Notify(ctx, &EventSendMessageFailure{
 				QueryID: cmd.QueryID,
 				To:      h.self,
+				Request: cmd.Message,
 				Err:     fmt.Errorf("NodeHandler: %w", err),
 			})
 			return false
@@ -185,6 +186,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 		cmd.Notify.Notify(ctx, &EventSendMessageSuccess{
 			QueryID:     cmd.QueryID,
 			To:          h.self,
+			Request:     cmd.Message,
 			Response:    resp,
 			CloserNodes: resp.CloserNodes(),
 		})

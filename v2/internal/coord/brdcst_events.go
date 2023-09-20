@@ -1,6 +1,7 @@
 package coord
 
 import (
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
@@ -12,6 +13,7 @@ type EventStartBroadcast struct {
 	Target            kadt.Key
 	Message           *pb.Message
 	KnownClosestNodes []kadt.PeerID
+	Strategy          brdcst.Strategy
 	Notify            NotifyCloser[BehaviourEvent]
 }
 

@@ -144,6 +144,7 @@ func (*EventGetCloserNodesFailure) nodeHandlerResponse() {}
 // [EventOutboundSendMessage] event has produced a successful response.
 type EventSendMessageSuccess struct {
 	QueryID     query.QueryID
+	Request     *pb.Message
 	To          kadt.PeerID // To is the peer that the SendMessage request was sent to.
 	Response    *pb.Message
 	CloserNodes []kadt.PeerID
@@ -156,6 +157,7 @@ func (*EventSendMessageSuccess) nodeHandlerResponse() {}
 // [EventOutboundSendMessage] event has failed to produce a valid response.
 type EventSendMessageFailure struct {
 	QueryID query.QueryID
+	Request *pb.Message
 	To      kadt.PeerID // To is the peer that the SendMessage request was sent to.
 	Target  kadt.Key
 	Err     error

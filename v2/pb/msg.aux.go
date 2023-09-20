@@ -3,6 +3,7 @@ package pb
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -17,6 +18,25 @@ import (
 func (m *Message) Target() kadt.Key {
 	b := sha256.Sum256(m.Key)
 	return key.NewKey256(b[:])
+}
+
+func (m *Message) ExpectResponse() bool {
+	switch m.Type {
+	case Message_PUT_VALUE:
+		return false
+	case Message_GET_VALUE:
+		return true
+	case Message_ADD_PROVIDER:
+		return false
+	case Message_GET_PROVIDERS:
+		return true
+	case Message_FIND_NODE:
+		return true
+	case Message_PING:
+		return true
+	default:
+		panic(fmt.Sprintf("unexpected message type %d", m.Type))
+	}
 }
 
 // FromAddrInfo constructs a [Message_Peer] from the given [peer.AddrInfo].

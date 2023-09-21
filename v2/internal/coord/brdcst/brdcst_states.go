@@ -29,8 +29,13 @@ type StateBroadcastWaiting struct {
 	QueryID query.QueryID
 }
 
-type StateBroadcastFinished struct {
-	QueryID query.QueryID
+type StateBroadcastFinished[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID   query.QueryID
+	Contacted []N
+	Errors    map[string]struct {
+		Node N
+		Err  error
+	}
 }
 
 type StateBroadcastIdle struct{}
@@ -38,5 +43,5 @@ type StateBroadcastIdle struct{}
 func (*StateBroadcastFindCloser[K, N]) broadcastState()     {}
 func (*StateBroadcastStoreRecord[K, N, M]) broadcastState() {}
 func (*StateBroadcastWaiting) broadcastState()              {}
-func (*StateBroadcastFinished) broadcastState()             {}
+func (*StateBroadcastFinished[K, N]) broadcastState()       {}
 func (*StateBroadcastIdle) broadcastState()                 {}

@@ -29,14 +29,19 @@ type StatePoolStoreRecord[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struc
 	Message M
 }
 
-type StatePoolBroadcastFinished struct {
-	QueryID query.QueryID
+type StatePoolBroadcastFinished[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID   query.QueryID
+	Contacted []N
+	Errors    map[string]struct {
+		Node N
+		Err  error
+	}
 }
 
 type StatePoolIdle struct{}
 
-func (*StatePoolFindCloser[K, N]) poolState()     {}
-func (*StatePoolWaiting) poolState()              {}
-func (*StatePoolStoreRecord[K, N, M]) poolState() {}
-func (*StatePoolBroadcastFinished) poolState()    {}
-func (*StatePoolIdle) poolState()                 {}
+func (*StatePoolFindCloser[K, N]) poolState()        {}
+func (*StatePoolWaiting) poolState()                 {}
+func (*StatePoolStoreRecord[K, N, M]) poolState()    {}
+func (*StatePoolBroadcastFinished[K, N]) poolState() {}
+func (*StatePoolIdle) poolState()                    {}

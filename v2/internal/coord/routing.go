@@ -27,6 +27,9 @@ type RoutingBehaviour struct {
 	// probe is the node probing state machine, responsible for periodically checking connectivity of nodes in the routing table
 	probe SM[routing.ProbeEvent, routing.ProbeState]
 
+	// probe is the routing table explore state machine, responsible for increasing the occupanct of the routing table
+	explore SM[routing.ExploreEvent, routing.ExploreState]
+
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
 	ready     chan struct{}
@@ -35,12 +38,13 @@ type RoutingBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewRoutingBehaviour(self kadt.PeerID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
+func NewRoutingBehaviour(self kadt.PeerID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], explore SM[routing.ExploreEvent, routing.ExploreState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
 	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,
 		include:   include,
 		probe:     probe,
+		explore:   explore,
 		ready:     make(chan struct{}, 1),
 		logger:    logger.With("behaviour", "routing"),
 		tracer:    tracer,

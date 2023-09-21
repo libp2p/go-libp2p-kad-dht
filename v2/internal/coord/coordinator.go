@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/cplutil"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -194,7 +195,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap(kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap(self, bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -224,7 +225,22 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 		return nil, fmt.Errorf("probe: %w", err)
 	}
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, cfg.Logger, tele.Tracer)
+	exploreCfg := routing.DefaultExploreConfig()
+	exploreCfg.Clock = cfg.Clock
+	exploreCfg.Timeout = cfg.QueryTimeout
+
+	schedule, err := routing.NewDynamicExploreSchedule(14, cfg.Clock.Now(), time.Hour, 1, 0)
+	if err != nil {
+		return nil, fmt.Errorf("explore schedule: %w", err)
+	}
+
+	// TODO: expose more config
+	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
+	if err != nil {
+		return nil, fmt.Errorf("explore: %w", err)
+	}
+
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, cfg.Logger, tele.Tracer)
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 

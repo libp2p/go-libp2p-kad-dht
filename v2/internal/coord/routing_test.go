@@ -32,8 +32,9 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventStartBootstrap{
 		SeedNodes: []kadt.PeerID{nodes[1].NodeID},
@@ -61,8 +62,9 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("bootstrap"),
@@ -94,8 +96,9 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -129,8 +132,9 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 
 	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventAddNode{
 		NodeID: nodes[2].NodeID,
@@ -159,8 +163,9 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 
 	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     query.QueryID("include"),
@@ -192,8 +197,9 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 
 	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
 	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -236,8 +242,9 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 
 	// ensure bootstrap is always idle
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
+	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
 
 	// a new node to be included
 	candidate := nodes[len(nodes)-1].NodeID

@@ -203,7 +203,8 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	return out, nil
 }
 
-func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan recvdVal, stopCh chan struct{}, out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
+func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan recvdVal, stopCh chan struct{},
+	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
 	numResponses := 0
 	return dht.processValues(ctx, key, valCh,
 		func(ctx context.Context, v recvdVal, better bool) bool {
@@ -225,8 +226,7 @@ func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-c
 }
 
 func (dht *IpfsDHT) processValues(ctx context.Context, key string, vals <-chan recvdVal,
-	newVal func(ctx context.Context, v recvdVal, better bool) bool,
-) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
+	newVal func(ctx context.Context, v recvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:
 	for {
 		if aborted {
@@ -372,6 +372,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 				}
 			},
 		)
+
 		if err != nil {
 			return
 		}
@@ -576,6 +577,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -688,6 +690,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)
+
 	if err != nil {
 		return peer.AddrInfo{}, err
 	}

@@ -10,6 +10,8 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
+//go:generate go run ./gen.go
+
 // GenRandPeerID generates a random peerID for a given cpl
 // Ported from go-libp2p-kbucket
 func GenRandPeerID(k kadt.Key, cpl int) (kadt.PeerID, error) {

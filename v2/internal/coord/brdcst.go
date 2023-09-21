@@ -54,12 +54,12 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 	var cmd brdcst.PoolEvent
 	switch ev := ev.(type) {
 	case *EventStartBroadcast:
-		cmd = &brdcst.EventPoolAddBroadcast[kadt.Key, kadt.PeerID, *pb.Message]{
+		cmd = &brdcst.EventPoolStartBroadcast[kadt.Key, kadt.PeerID, *pb.Message]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
 			Message:           ev.Message,
 			KnownClosestNodes: ev.KnownClosestNodes,
-			Strategy:          ev.Strategy,
+			Config:            ev.Strategy,
 		}
 		if ev.Notify != nil {
 			b.waiters[ev.QueryID] = ev.Notify

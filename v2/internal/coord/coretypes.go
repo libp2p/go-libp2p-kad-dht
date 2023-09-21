@@ -8,6 +8,7 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 // Value is a value that may be stored in the DHT.
@@ -49,7 +50,7 @@ var (
 // Query stops entirely and returns that error.
 //
 // The stats argument contains statistics on the progress of the query so far.
-type QueryFunc func(ctx context.Context, node Node, stats QueryStats) error
+type QueryFunc func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats QueryStats) error
 
 type QueryStats struct {
 	Start     time.Time // Start is the time the query began executing.

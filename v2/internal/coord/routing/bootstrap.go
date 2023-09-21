@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
@@ -20,7 +20,7 @@ type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	self N
 
 	// qry is the query used by the bootstrap process
-	qry *query.Query[K, N]
+	qry *query.Query[K, N, any]
 
 	// cfg is a copy of the optional configuration supplied to the Bootstrap
 	cfg BootstrapConfig[K]
@@ -101,29 +101,29 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		// TODO: ignore start event if query is already in progress
 		iter := query.NewClosestNodesIter[K, N](b.self.Key())
 
-		qryCfg := query.DefaultQueryConfig[K]()
+		qryCfg := query.DefaultQueryConfig()
 		qryCfg.Clock = b.cfg.Clock
 		qryCfg.Concurrency = b.cfg.RequestConcurrency
 		qryCfg.RequestTimeout = b.cfg.RequestTimeout
 
 		queryID := query.QueryID("bootstrap")
 
-		qry, err := query.NewQuery[K, N](b.self, queryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
+		qry, err := query.NewFindCloserQuery[K, N, any](b.self, queryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
 		if err != nil {
 			// TODO: don't panic
 			panic(err)
 		}
 		b.qry = qry
-		return b.advanceQuery(ctx, nil)
+		return b.advanceQuery(ctx, &query.EventQueryPoll{})
 
 	case *EventBootstrapFindCloserResponse[K, N]:
-		return b.advanceQuery(ctx, &query.EventQueryFindCloserResponse[K, N]{
+		return b.advanceQuery(ctx, &query.EventQueryNodeResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventBootstrapFindCloserFailure[K, N]:
 		span.RecordError(tev.Error)
-		return b.advanceQuery(ctx, &query.EventQueryFindCloserFailure[K, N]{
+		return b.advanceQuery(ctx, &query.EventQueryNodeFailure[K, N]{
 			NodeID: tev.NodeID,
 			Error:  tev.Error,
 		})
@@ -135,7 +135,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 	}
 
 	if b.qry != nil {
-		return b.advanceQuery(ctx, nil)
+		return b.advanceQuery(ctx, &query.EventQueryPoll{})
 	}
 
 	return &StateBootstrapIdle{}
@@ -154,7 +154,7 @@ func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent
 			NodeID:  st.NodeID,
 			Target:  st.Target,
 		}
-	case *query.StateQueryFinished:
+	case *query.StateQueryFinished[K, N]:
 		span.SetAttributes(attribute.String("out_state", "StateBootstrapFinished"))
 		return &StateBootstrapFinished{
 			Stats: st.Stats,

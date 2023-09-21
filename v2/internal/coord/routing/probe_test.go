@@ -11,7 +11,7 @@ import (
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/tiny"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
 )
 
 var _ heap.Interface = (*nodeValuePendingList[tiny.Key, tiny.Node])(nil)

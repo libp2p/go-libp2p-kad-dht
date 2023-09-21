@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -19,8 +20,8 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
@@ -58,6 +59,15 @@ type Coordinator struct {
 
 	// tele provides tracing and metric reporting capabilities
 	tele *Telemetry
+
+	// routingNotifierMu guards access to routingNotifier which may be changed during coordinator operation
+	routingNotifierMu sync.RWMutex
+
+	// routingNotifier receives routing notifications
+	routingNotifier RoutingNotifier
+
+	// lastQueryID holds the last numeric query id generated
+	lastQueryID atomic.Uint64
 }
 
 type RoutingNotifier interface {
@@ -65,8 +75,6 @@ type RoutingNotifier interface {
 }
 
 type CoordinatorConfig struct {
-	PeerstoreTTL time.Duration // duration for which a peer is kept in the peerstore
-
 	Clock clock.Clock // a clock that may replaced by a mock when testing
 
 	QueryConcurrency int           // the maximum number of queries that may be waiting for message responses at any one time
@@ -79,8 +87,6 @@ type CoordinatorConfig struct {
 
 	MeterProvider  metric.MeterProvider // the meter provider to use when initialising metric instruments
 	TracerProvider trace.TracerProvider // the tracer provider to use when initialising tracing
-
-	RoutingNotifier RoutingNotifier // receives notifications of routing events
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -140,20 +146,12 @@ func (cfg *CoordinatorConfig) Validate() error {
 		}
 	}
 
-	if cfg.RoutingNotifier == nil {
-		return &kaderr.ConfigurationError{
-			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("routing notifier must not be nil"),
-		}
-	}
-
 	return nil
 }
 
 func DefaultCoordinatorConfig() *CoordinatorConfig {
 	return &CoordinatorConfig{
 		Clock:              clock.New(),
-		PeerstoreTTL:       10 * time.Minute,
 		QueryConcurrency:   3,
 		QueryTimeout:       5 * time.Minute,
 		RequestConcurrency: 3,
@@ -161,7 +159,6 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 		Logger:             slog.New(zapslog.NewHandler(logging.Logger("coord").Desugar().Core())),
 		MeterProvider:      otel.GetMeterProvider(),
 		TracerProvider:     otel.GetTracerProvider(),
-		RoutingNotifier:    nullRoutingNotifier{},
 	}
 }
 
@@ -185,7 +182,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 	qpCfg.QueryConcurrency = cfg.RequestConcurrency
 	qpCfg.RequestTimeout = cfg.RequestTimeout
 
-	qp, err := query.NewPool[kadt.Key](self, qpCfg)
+	qp, err := query.NewPool[kadt.Key, kadt.PeerID, *pb.Message](self, qpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
@@ -197,7 +194,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
 
-	bootstrap, err := routing.NewBootstrap[kadt.Key](kadt.PeerID(self), bootstrapCfg)
+	bootstrap, err := routing.NewBootstrap(kadt.PeerID(self), bootstrapCfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
@@ -245,6 +242,7 @@ func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Mess
 		networkBehaviour: networkBehaviour,
 		routingBehaviour: routingBehaviour,
 		queryBehaviour:   queryBehaviour,
+		routingNotifier:  nullRoutingNotifier{},
 	}
 
 	go d.eventLoop(ctx)
@@ -301,10 +299,19 @@ func (c *Coordinator) dispatchEvent(ctx context.Context, ev BehaviourEvent) {
 	case RoutingCommand:
 		c.routingBehaviour.Notify(ctx, ev)
 	case RoutingNotification:
-		c.cfg.RoutingNotifier.Notify(ctx, ev)
+		c.routingNotifierMu.RLock()
+		rn := c.routingNotifier
+		c.routingNotifierMu.RUnlock()
+		rn.Notify(ctx, ev)
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", ev))
 	}
+}
+
+func (c *Coordinator) SetRoutingNotifier(rn RoutingNotifier) {
+	c.routingNotifierMu.Lock()
+	c.routingNotifier = rn
+	c.routingNotifierMu.Unlock()
 }
 
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.
@@ -351,8 +358,18 @@ func (c *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
 	panic("not implemented")
 }
 
-// Query traverses the DHT calling fn for each node visited.
-func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) (QueryStats, error) {
+// QueryClosest starts a query that attempts to find the closest nodes to the target key.
+// It returns the closest nodes found to the target key and statistics on the actions of the query.
+//
+// The supplied [QueryFunc] is called after each successful request to a node with the ID of the node,
+// the response received from the find nodes request made to the node and the current query stats. The query
+// terminates when [QueryFunc] returns an error or when the query has visited the configured minimum number
+// of closest nodes (default 20)
+//
+// numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
+// The query is considered to be exhausted when it has received responses from at least this number of nodes
+// and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
+func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn QueryFunc, numResults int) ([]kadt.PeerID, QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 
@@ -360,6 +377,55 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 	defer cancel()
 
 	seeds, err := c.GetClosestNodes(ctx, target, 20)
+	if err != nil {
+		return nil, QueryStats{}, err
+	}
+
+	seedIDs := make([]kadt.PeerID, 0, len(seeds))
+	for _, s := range seeds {
+		seedIDs = append(seedIDs, kadt.PeerID(s.ID()))
+	}
+
+	waiter := NewWaiter[BehaviourEvent]()
+	queryID := c.newQueryID()
+
+	cmd := &EventStartFindCloserQuery{
+		QueryID:           queryID,
+		Target:            target,
+		KnownClosestNodes: seedIDs,
+		Notify:            waiter,
+		NumResults:        numResults,
+	}
+
+	// queue the start of the query
+	c.queryBehaviour.Notify(ctx, cmd)
+
+	return c.waitForQuery(ctx, queryID, waiter, fn)
+}
+
+// QueryMessage starts a query that iterates over the closest nodes to the target key in the supplied message.
+// The message is sent to each node that is visited.
+//
+// The supplied [QueryFunc] is called after each successful request to a node with the ID of the node,
+// the response received from the find nodes request made to the node and the current query stats. The query
+// terminates when [QueryFunc] returns an error or when the query has visited the configured minimum number
+// of closest nodes (default 20)
+//
+// numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
+// The query is considered to be exhausted when it has received responses from at least this number of nodes
+// and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
+func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn QueryFunc, numResults int) (QueryStats, error) {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
+	defer span.End()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if numResults < 1 {
+		numResults = 20
+	}
+
+	seeds, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
 	if err != nil {
 		return QueryStats{}, err
 	}
@@ -370,23 +436,30 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := query.QueryID("foo") // TODO: choose query ID
+	queryID := c.newQueryID()
 
-	cmd := &EventStartQuery{
+	cmd := &EventStartMessageQuery{
 		QueryID:           queryID,
-		Target:            target,
+		Target:            msg.Target(),
+		Message:           msg,
 		KnownClosestNodes: seedIDs,
 		Notify:            waiter,
+		NumResults:        numResults,
 	}
 
 	// queue the start of the query
 	c.queryBehaviour.Notify(ctx, cmd)
 
+	_, stats, err := c.waitForQuery(ctx, queryID, waiter, fn)
+	return stats, err
+}
+
+func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, waiter *Waiter[BehaviourEvent], fn QueryFunc) ([]kadt.PeerID, QueryStats, error) {
 	var lastStats QueryStats
 	for {
 		select {
 		case <-ctx.Done():
-			return lastStats, ctx.Err()
+			return nil, lastStats, ctx.Err()
 		case wev := <-waiter.Chan():
 			ctx, ev := wev.Ctx, wev.Event
 			switch ev := ev.(type) {
@@ -403,26 +476,22 @@ func (c *Coordinator) Query(ctx context.Context, target kadt.Key, fn QueryFunc) 
 					break
 				}
 
-				err = fn(ctx, nh, lastStats)
+				err = fn(ctx, nh.ID(), ev.Response, lastStats)
 				if errors.Is(err, ErrSkipRemaining) {
 					// done
 					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
-					return lastStats, nil
-				}
-				if errors.Is(err, ErrSkipNode) {
-					// TODO: don't add closer nodes from this node
-					break
+					return nil, lastStats, nil
 				}
 				if err != nil {
 					// user defined error that terminates the query
 					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
-					return lastStats, err
+					return nil, lastStats, err
 				}
 
 			case *EventQueryFinished:
 				// query is done
 				lastStats.Exhausted = true
-				return lastStats, nil
+				return ev.ClosestNodes, lastStats, nil
 
 			default:
 				panic(fmt.Sprintf("unexpected event: %T", ev))
@@ -488,6 +557,11 @@ func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID)
 	})
 
 	return nil
+}
+
+func (c *Coordinator) newQueryID() query.QueryID {
+	next := c.lastQueryID.Add(1)
+	return query.QueryID(fmt.Sprintf("%016x", next))
 }
 
 // A BufferedRoutingNotifier is a [RoutingNotifier] that buffers [RoutingNotification] events and provides methods

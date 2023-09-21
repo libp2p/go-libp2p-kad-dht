@@ -4,17 +4,15 @@ import (
 	"context"
 	"log"
 	"testing"
-	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/internal/nettest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
-
-const peerstoreTTL = 10 * time.Minute
 
 func TestConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
@@ -53,7 +51,7 @@ func TestConfigValidate(t *testing.T) {
 
 		cfg.RequestConcurrency = 0
 		require.Error(t, cfg.Validate())
-		cfg.QueryConcurrency = -1
+		cfg.RequestConcurrency = -1
 		require.Error(t, cfg.Validate())
 	})
 
@@ -84,12 +82,6 @@ func TestConfigValidate(t *testing.T) {
 		cfg.TracerProvider = nil
 		require.Error(t, cfg.Validate())
 	})
-
-	t.Run("routing notifier not nil", func(t *testing.T) {
-		cfg := DefaultCoordinatorConfig()
-		cfg.RoutingNotifier = nil
-		require.Error(t, cfg.Validate())
-	})
 }
 
 func TestExhaustiveQuery(t *testing.T) {
@@ -101,7 +93,6 @@ func TestExhaustiveQuery(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
 
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
@@ -115,13 +106,13 @@ func TestExhaustiveQuery(t *testing.T) {
 	visited := make(map[string]int)
 
 	// Record the nodes as they are visited
-	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
-		visited[node.ID().String()]++
+	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
+		visited[id.String()]++
 		return nil
 	}
 
 	// Run a query to find the value
-	_, err = c.Query(ctx, target, qfn)
+	_, _, err = c.QueryClosest(ctx, target, qfn, 20)
 	require.NoError(t, err)
 
 	require.Equal(t, 3, len(visited))
@@ -140,10 +131,6 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
-
-	rn := NewBufferedRoutingNotifier()
-	ccfg.RoutingNotifier = rn
 
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
@@ -154,13 +141,16 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
 	}
 
-	qfn := func(ctx context.Context, node Node, stats QueryStats) error {
+	rn := NewBufferedRoutingNotifier()
+	c.SetRoutingNotifier(rn)
+
+	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
 		return nil
 	}
 
 	// Run a query to find the value
 	target := nodes[3].NodeID.Key()
-	_, err = c.Query(ctx, target, qfn)
+	_, _, err = c.QueryClosest(ctx, target, qfn, 20)
 	require.NoError(t, err)
 
 	// the query run by the dht should have received a response from nodes[1] with closer nodes
@@ -201,14 +191,13 @@ func TestBootstrap(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
-
-	rn := NewBufferedRoutingNotifier()
-	ccfg.RoutingNotifier = rn
 
 	self := kadt.PeerID(nodes[0].NodeID)
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
+
+	rn := NewBufferedRoutingNotifier()
+	d.SetRoutingNotifier(rn)
 
 	seeds := []kadt.PeerID{nodes[1].NodeID}
 	err = d.Bootstrap(ctx, seeds)
@@ -253,10 +242,6 @@ func TestIncludeNode(t *testing.T) {
 	ccfg := DefaultCoordinatorConfig()
 
 	ccfg.Clock = clk
-	ccfg.PeerstoreTTL = peerstoreTTL
-
-	rn := NewBufferedRoutingNotifier()
-	ccfg.RoutingNotifier = rn
 
 	candidate := nodes[len(nodes)-1].NodeID // not in nodes[0] routing table
 
@@ -265,6 +250,8 @@ func TestIncludeNode(t *testing.T) {
 	if err != nil {
 		log.Fatalf("unexpected error creating dht: %v", err)
 	}
+	rn := NewBufferedRoutingNotifier()
+	d.SetRoutingNotifier(rn)
 
 	// the routing table should not contain the node yet
 	_, err = d.GetNode(ctx, candidate)

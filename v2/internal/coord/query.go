@@ -6,14 +6,15 @@ import (
 	"sync"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 )
 
 type PooledQueryBehaviour struct {
-	pool    *query.Pool[kadt.Key, kadt.PeerID]
+	pool    *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
 	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
@@ -24,7 +25,7 @@ type PooledQueryBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
@@ -44,10 +45,20 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 
 	var cmd query.PoolEvent
 	switch ev := ev.(type) {
-	case *EventStartQuery:
-		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID]{
+	case *EventStartFindCloserQuery:
+		cmd = &query.EventPoolAddFindCloserQuery[kadt.Key, kadt.PeerID]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
+			KnownClosestNodes: ev.KnownClosestNodes,
+		}
+		if ev.Notify != nil {
+			p.waiters[ev.QueryID] = ev.Notify
+		}
+	case *EventStartMessageQuery:
+		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID, *pb.Message]{
+			QueryID:           ev.QueryID,
+			Target:            ev.Target,
+			Message:           ev.Message,
 			KnownClosestNodes: ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
@@ -60,8 +71,6 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		}
 
 	case *EventGetCloserNodesSuccess:
-		// TODO: add addresses for discovered nodes in DHT
-
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
 			p.pending = append(p.pending, &EventAddNode{
@@ -77,7 +86,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 				// Stats:    stats,
 			})
 		}
-		cmd = &query.EventPoolFindCloserResponse[kadt.Key, kadt.PeerID]{
+		cmd = &query.EventPoolNodeResponse[kadt.Key, kadt.PeerID]{
 			NodeID:      ev.To,
 			QueryID:     ev.QueryID,
 			CloserNodes: ev.CloserNodes,
@@ -88,7 +97,38 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 			ev.To,
 		})
 
-		cmd = &query.EventPoolFindCloserFailure[kadt.Key, kadt.PeerID]{
+		cmd = &query.EventPoolNodeFailure[kadt.Key, kadt.PeerID]{
+			NodeID:  ev.To,
+			QueryID: ev.QueryID,
+			Error:   ev.Err,
+		}
+	case *EventSendMessageSuccess:
+		for _, info := range ev.CloserNodes {
+			// TODO: do this after advancing pool
+			p.pending = append(p.pending, &EventAddNode{
+				NodeID: info,
+			})
+		}
+		waiter, ok := p.waiters[ev.QueryID]
+		if ok {
+			waiter.Notify(ctx, &EventQueryProgressed{
+				NodeID:   ev.To,
+				QueryID:  ev.QueryID,
+				Response: ev.Response,
+			})
+		}
+		cmd = &query.EventPoolNodeResponse[kadt.Key, kadt.PeerID]{
+			NodeID:      ev.To,
+			QueryID:     ev.QueryID,
+			CloserNodes: ev.CloserNodes,
+		}
+	case *EventSendMessageFailure:
+		// queue an event that will notify the routing behaviour of a failed node
+		p.pending = append(p.pending, &EventNotifyNonConnectivity{
+			ev.To,
+		})
+
+		cmd = &query.EventPoolNodeFailure[kadt.Key, kadt.PeerID]{
 			NodeID:  ev.To,
 			QueryID: ev.QueryID,
 			Error:   ev.Err,
@@ -162,16 +202,24 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 			Target:  st.Target,
 			Notify:  p,
 		}, true
+	case *query.StatePoolSendMessage[kadt.Key, kadt.PeerID, *pb.Message]:
+		return &EventOutboundSendMessage{
+			QueryID: st.QueryID,
+			To:      st.NodeID,
+			Message: st.Message,
+			Notify:  p,
+		}, true
 	case *query.StatePoolWaitingAtCapacity:
 		// nothing to do except wait for message response or timeout
 	case *query.StatePoolWaitingWithCapacity:
 		// nothing to do except wait for message response or timeout
-	case *query.StatePoolQueryFinished:
+	case *query.StatePoolQueryFinished[kadt.Key, kadt.PeerID]:
 		waiter, ok := p.waiters[st.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventQueryFinished{
-				QueryID: st.QueryID,
-				Stats:   st.Stats,
+				QueryID:      st.QueryID,
+				Stats:        st.Stats,
+				ClosestNodes: st.ClosestNodes,
 			})
 			waiter.Close()
 		}

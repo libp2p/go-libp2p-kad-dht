@@ -44,8 +44,6 @@ func TestGetSetValueLocal(t *testing.T) {
 }
 
 func TestGetValueOnePeer(t *testing.T) {
-	t.Skip("not implemented yet")
-
 	ctx := kadtest.CtxShort(t)
 	top := NewTopology(t)
 	local := top.AddServer(nil)

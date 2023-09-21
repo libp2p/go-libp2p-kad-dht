@@ -29,9 +29,9 @@ type stateMachine = coordt.StateMachine[BroadcastEvent, BroadcastState]
 //
 // [Reprovide Sweep]: https://www.notion.so/pl-strflt/DHT-Reprovide-Sweep-3108adf04e9d4086bafb727b17ae033d?pvs=4
 type Pool[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	qp  *query.Pool[K, N, M]           // the query pool of "get closer peers" queries
-	bcs map[query.QueryID]stateMachine // all currently running broadcast operations
-	cfg ConfigPool                     // cfg is a copy of the optional configuration supplied to the Pool
+	qp  *query.Pool[K, N, M]            // the query pool of "get closer peers" queries
+	bcs map[coordt.QueryID]stateMachine // all currently running broadcast operations
+	cfg ConfigPool                      // cfg is a copy of the optional configuration supplied to the Pool
 }
 
 // NewPool manages all running broadcast operations.
@@ -39,7 +39,7 @@ func NewPool[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, cfg *Confi
 	if cfg == nil {
 		cfg = DefaultPoolConfig()
 	} else if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate pool config: %w", err)
 	}
 
 	qp, err := query.NewPool[K, N, M](self, cfg.pCfg)
@@ -49,12 +49,17 @@ func NewPool[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, cfg *Confi
 
 	return &Pool[K, N, M]{
 		qp:  qp,
-		bcs: map[query.QueryID]stateMachine{},
+		bcs: map[coordt.QueryID]stateMachine{},
 		cfg: *cfg,
 	}, nil
 }
 
-// Advance advances the state of the broadcast [Pool].
+// Advance advances the state of the broadcast [Pool]. It first handles the
+// event by extracting the broadcast state machine that should handle this event
+// from the [Pool.bcs] map and constructing the correct event for that broadcast
+// state machine. If either the state machine wasn't found (shouldn't happen) or
+// there's no corresponding broadcast event ([EventPoolPoll] for example) don't
+// do anything and instead try to advance the other broadcast state machines.
 func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolState) {
 	ctx, span := tele.StartSpan(ctx, "Pool.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
@@ -62,11 +67,31 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolStat
 		span.End()
 	}()
 
-	eventQueryID := query.InvalidQueryID
+	sm, bev := p.handleEvent(ctx, ev)
+	if sm != nil && bev != nil {
+		if state, terminal := p.advanceBroadcast(ctx, sm, bev); terminal {
+			return state
+		}
+	}
+
+	// advance other state machines until we have reached a terminal state in any
+	for _, bsm := range p.bcs {
+		if sm == bsm {
+			continue
+		}
+
+		state, terminal := p.advanceBroadcast(ctx, bsm, &EventBroadcastPoll{})
+		if terminal {
+			return state
+		}
+	}
+
+	return &StatePoolIdle{}
+}
+
+func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (stateMachine, BroadcastEvent) {
 	switch ev := ev.(type) {
 	case *EventPoolStartBroadcast[K, N, M]:
-		eventQueryID = ev.QueryID
-
 		// first initialize the state machine for the broadcast desired strategy
 		switch ev.Config.(type) {
 		case *ConfigFollowUp:
@@ -76,105 +101,43 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolStat
 		}
 
 		// start the new state machine
-		bev := &EventBroadcastStart[K, N]{
+		return p.bcs[ev.QueryID], &EventBroadcastStart[K, N]{
 			QueryID: ev.QueryID,
 			Target:  ev.Target,
 			Seed:    ev.Seed,
 		}
 
-		state := p.advanceBroadcast(ctx, p.bcs[ev.QueryID], bev)
-		if state != nil {
-			return state
-		}
-
 	case *EventPoolStopBroadcast:
-		b, ok := p.bcs[ev.QueryID]
-		if !ok {
-			break
-		}
-
-		eventQueryID = ev.QueryID
-		bev := &EventBroadcastStop{
-			QueryID: ev.QueryID,
-		}
-
-		state := p.advanceBroadcast(ctx, b, bev)
-		if state != nil {
-			return state
-		}
+		return p.bcs[ev.QueryID], &EventBroadcastStop{QueryID: ev.QueryID}
 
 	case *EventPoolGetCloserNodesSuccess[K, N]:
-		b, ok := p.bcs[ev.QueryID]
-		if !ok {
-			break
-		}
-
-		eventQueryID = ev.QueryID
-		bev := &EventBroadcastNodeResponse[K, N]{
+		return p.bcs[ev.QueryID], &EventBroadcastNodeResponse[K, N]{
 			QueryID:     ev.QueryID,
 			NodeID:      ev.NodeID,
 			CloserNodes: ev.CloserNodes,
 		}
 
-		state := p.advanceBroadcast(ctx, b, bev)
-		if state != nil {
-			return state
-		}
-
 	case *EventPoolGetCloserNodesFailure[K, N]:
-		b, ok := p.bcs[ev.QueryID]
-		if !ok {
-			break
-		}
-
-		eventQueryID = ev.QueryID
-		bev := &EventBroadcastNodeFailure[K, N]{
+		return p.bcs[ev.QueryID], &EventBroadcastNodeFailure[K, N]{
 			QueryID: ev.QueryID,
 			NodeID:  ev.NodeID,
 			Error:   ev.Error,
 		}
 
-		state := p.advanceBroadcast(ctx, b, bev)
-		if state != nil {
-			return state
-		}
-
 	case *EventPoolStoreRecordSuccess[K, N, M]:
-		b, ok := p.bcs[ev.QueryID]
-		if !ok {
-			break
-		}
-
-		eventQueryID = ev.QueryID
-		bev := &EventBroadcastStoreRecordSuccess[K, N, M]{
+		return p.bcs[ev.QueryID], &EventBroadcastStoreRecordSuccess[K, N, M]{
 			QueryID:  ev.QueryID,
 			NodeID:   ev.NodeID,
 			Request:  ev.Request,
 			Response: ev.Response,
 		}
 
-		state := p.advanceBroadcast(ctx, b, bev)
-		if state != nil {
-			return state
-		}
-
 	case *EventPoolStoreRecordFailure[K, N, M]:
-		b, ok := p.bcs[ev.QueryID]
-		if !ok {
-			break
-		}
-
-		eventQueryID = ev.QueryID
-		bev := &EventBroadcastStoreRecordFailure[K, N, M]{
+		return p.bcs[ev.QueryID], &EventBroadcastStoreRecordFailure[K, N, M]{
 			QueryID: ev.QueryID,
 			NodeID:  ev.NodeID,
 			Request: ev.Request,
 			Error:   ev.Error,
-		}
-
-		state := p.advanceBroadcast(ctx, b, bev)
-		if state != nil {
-			return state
 		}
 
 	case *EventPoolPoll:
@@ -184,25 +147,13 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolStat
 		panic(fmt.Sprintf("unexpected event: %T", ev))
 	}
 
-	if len(p.bcs) == 0 {
-		return &StatePoolIdle{}
-	}
-
-	for queryID, broadcast := range p.bcs {
-		if eventQueryID == queryID {
-			continue
-		}
-
-		state := p.advanceBroadcast(ctx, broadcast, &EventBroadcastPoll{})
-		if state != nil {
-			return state
-		}
-	}
-
-	return &StatePoolIdle{}
+	return nil, nil
 }
 
-func (p *Pool[K, N, M]) advanceBroadcast(ctx context.Context, sm coordt.StateMachine[BroadcastEvent, BroadcastState], bev BroadcastEvent) PoolState {
+// advanceBroadcast advances the given broadcast state machine ([FollowUp] or
+// [Optimistic]) and returns the new [Pool] state ([PoolState]). The additional
+// boolean value indicates whether the returned [PoolState] should be ignored.
+func (p *Pool[K, N, M]) advanceBroadcast(ctx context.Context, sm stateMachine, bev BroadcastEvent) (PoolState, bool) {
 	ctx, span := tele.StartSpan(ctx, "Pool.advanceBroadcast", trace.WithAttributes(tele.AttrInEvent(bev)))
 	defer span.End()
 
@@ -214,26 +165,25 @@ func (p *Pool[K, N, M]) advanceBroadcast(ctx context.Context, sm coordt.StateMac
 			Stats:   st.Stats,
 			NodeID:  st.NodeID,
 			Target:  st.Target,
-		}
+		}, true
 	case *StateBroadcastWaiting:
-		return &StatePoolWaiting{}
+		return &StatePoolWaiting{}, true
 	case *StateBroadcastStoreRecord[K, N, M]:
 		return &StatePoolStoreRecord[K, N, M]{
 			QueryID: st.QueryID,
 			NodeID:  st.NodeID,
 			Message: st.Message,
-		}
+		}, true
 	case *StateBroadcastFinished[K, N]:
 		delete(p.bcs, st.QueryID)
 		return &StatePoolBroadcastFinished[K, N]{
 			QueryID:   st.QueryID,
 			Contacted: st.Contacted,
 			Errors:    st.Errors,
-		}
-
+		}, true
 	}
 
-	return nil
+	return nil, false
 }
 
 // PoolState must be implemented by all states that a [Pool] can reach. States
@@ -244,24 +194,24 @@ type PoolState interface {
 }
 
 type StatePoolFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	Target  K // the key that the query wants to find closer nodes for
 	NodeID  N // the node to send the message to
 	Stats   query.QueryStats
 }
 
 type StatePoolWaiting struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 }
 
 type StatePoolStoreRecord[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	NodeID  N
 	Message M
 }
 
 type StatePoolBroadcastFinished[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID   query.QueryID
+	QueryID   coordt.QueryID
 	Contacted []N
 	Errors    map[string]struct {
 		Node N
@@ -292,44 +242,44 @@ type EventPoolPoll struct{}
 // EventPoolStartBroadcast is an event that attempts to start a new broadcast
 // operation. This is the entry point.
 type EventPoolStartBroadcast[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	QueryID query.QueryID // a unique ID for this operation
-	Target  K             // the key we want to store the record for
-	Message M             // the message that we want to send to the closest peers (this encapsulates the payload we want to store)
-	Seed    []N           // the closest nodes we know so far and from where we start the operation
-	Config  Config        // the configuration for this operation. Most importantly, this defines the broadcast strategy ([FollowUp] or [Optimistic])
+	QueryID coordt.QueryID // a unique ID for this operation
+	Target  K              // the key we want to store the record for
+	Message M              // the message that we want to send to the closest peers (this encapsulates the payload we want to store)
+	Seed    []N            // the closest nodes we know so far and from where we start the operation
+	Config  Config         // the configuration for this operation. Most importantly, this defines the broadcast strategy ([FollowUp] or [Optimistic])
 }
 
 // EventPoolStopBroadcast notifies a [Pool] to stop a query.
 type EventPoolStopBroadcast struct {
-	QueryID query.QueryID // the id of the query that should be stopped
+	QueryID coordt.QueryID // the id of the query that should be stopped
 }
 
 type EventPoolGetCloserNodesSuccess[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID     query.QueryID // the id of the query that sent the message
-	NodeID      N             // the node the message was sent to
+	QueryID     coordt.QueryID // the id of the query that sent the message
+	NodeID      N              // the node the message was sent to
 	Target      K
 	CloserNodes []N // the closer nodes sent by the node
 }
 
 // EventPoolGetCloserNodesFailure notifies a [Pool] that an attempt to contact a node has failed.
 type EventPoolGetCloserNodesFailure[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID query.QueryID // the id of the query that sent the message
-	NodeID  N             // the node the message was sent to
+	QueryID coordt.QueryID // the id of the query that sent the message
+	NodeID  N              // the node the message was sent to
 	Target  K
 	Error   error // the error that caused the failure, if any
 }
 
 type EventPoolStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	QueryID  query.QueryID // the id of the query that sent the message
-	NodeID   N             // the node the message was sent to
+	QueryID  coordt.QueryID // the id of the query that sent the message
+	NodeID   N              // the node the message was sent to
 	Request  M
 	Response M
 }
 
 // EventPoolStoreRecordFailure notifies a [Pool] that an attempt to contact a node has failed.
 type EventPoolStoreRecordFailure[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	QueryID query.QueryID // the id of the query that sent the message
-	NodeID  N             // the node the message was sent to
+	QueryID coordt.QueryID // the id of the query that sent the message
+	NodeID  N              // the node the message was sent to
 	Request M
 	Error   error // the error that caused the failure, if any
 }

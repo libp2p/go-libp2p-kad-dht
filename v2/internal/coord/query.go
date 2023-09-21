@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type PooledQueryBehaviour struct {
 	pool    *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
-	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
+	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -29,7 +30,7 @@ type PooledQueryBehaviour struct {
 func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
-		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
+		waiters: make(map[coordt.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
 		logger:  logger.With("behaviour", "query"),
 		tracer:  tracer,

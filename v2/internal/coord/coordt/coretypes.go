@@ -11,6 +11,11 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
+// TODO: rename to something like OperationID. This type isn't only used to identify queries but also other operations like broadcasts.
+type QueryID string
+
+const InvalidQueryID QueryID = ""
+
 type StateMachine[E any, S any] interface {
 	Advance(context.Context, E) S
 }

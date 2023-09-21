@@ -8,6 +8,7 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
 )
 
@@ -105,13 +106,13 @@ func TestPoolAddFindCloserQueryStartsIfCapacity(t *testing.T) {
 	target := tiny.Key(0b00000001)
 	a := tiny.NewNode(0b00000100) // 4
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	// first thing the new pool should do is start the query
 	state := p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a},
+		QueryID: queryID,
+		Target:  target,
+		Seed:    []tiny.Node{a},
 	})
 	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
 
@@ -145,14 +146,14 @@ func TestPoolAddQueryStartsIfCapacity(t *testing.T) {
 	target := tiny.Key(0b00000001)
 	a := tiny.NewNode(0b00000100) // 4
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 	msg := tiny.Message{Content: "msg"}
 	// first thing the new pool should do is start the query
 	state := p.Advance(ctx, &EventPoolAddQuery[tiny.Key, tiny.Node, tiny.Message]{
-		QueryID:           queryID,
-		Target:            target,
-		Message:           msg,
-		KnownClosestNodes: []tiny.Node{a},
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{a},
 	})
 	require.IsType(t, &StatePoolSendMessage[tiny.Key, tiny.Node, tiny.Message]{}, state)
 
@@ -186,13 +187,13 @@ func TestPoolNodeResponse(t *testing.T) {
 	target := tiny.Key(0b00000001)
 	a := tiny.NewNode(0b00000100) // 4
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	// first thing the new pool should do is start the query
 	state := p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a},
+		QueryID: queryID,
+		Target:  target,
+		Seed:    []tiny.Node{a},
 	})
 	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
 
@@ -234,11 +235,11 @@ func TestPoolPrefersRunningQueriesOverNewOnes(t *testing.T) {
 	d := tiny.NewNode(0b00100000) // 32
 
 	// Add the first query
-	queryID1 := QueryID("1")
+	queryID1 := coordt.QueryID("1")
 	state := p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID1,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a, b, c, d},
+		QueryID: queryID1,
+		Target:  target,
+		Seed:    []tiny.Node{a, b, c, d},
 	})
 	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
 
@@ -248,11 +249,11 @@ func TestPoolPrefersRunningQueriesOverNewOnes(t *testing.T) {
 	require.Equal(t, a, st.NodeID)
 
 	// Add the second query
-	queryID2 := QueryID("2")
+	queryID2 := coordt.QueryID("2")
 	state = p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID2,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a, b, c, d},
+		QueryID: queryID2,
+		Target:  target,
+		Seed:    []tiny.Node{a, b, c, d},
 	})
 
 	// the first query should continue its operation in preference to starting the new query
@@ -316,11 +317,11 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 	a := tiny.NewNode(0b00000100) // 4
 
 	// Add the first query
-	queryID1 := QueryID("1")
+	queryID1 := coordt.QueryID("1")
 	state := p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID1,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a},
+		QueryID: queryID1,
+		Target:  target,
+		Seed:    []tiny.Node{a},
 	})
 	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
 
@@ -330,11 +331,11 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 	require.Equal(t, a, st.NodeID)
 
 	// Add the second query
-	queryID2 := QueryID("2")
+	queryID2 := coordt.QueryID("2")
 	state = p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID2,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a},
+		QueryID: queryID2,
+		Target:  target,
+		Seed:    []tiny.Node{a},
 	})
 
 	// the second query should start since the first query has a request in flight
@@ -344,11 +345,11 @@ func TestPoolRespectsConcurrency(t *testing.T) {
 	require.Equal(t, a, st.NodeID)
 
 	// Add a third query
-	queryID3 := QueryID("3")
+	queryID3 := coordt.QueryID("3")
 	state = p.Advance(ctx, &EventPoolAddFindCloserQuery[tiny.Key, tiny.Node]{
-		QueryID:           queryID3,
-		Target:            target,
-		KnownClosestNodes: []tiny.Node{a},
+		QueryID: queryID3,
+		Target:  target,
+		Seed:    []tiny.Node{a},
 	})
 
 	// the third query should wait since the pool has reached maximum concurrency

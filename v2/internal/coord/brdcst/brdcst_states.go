@@ -13,24 +13,24 @@ type BroadcastState interface {
 }
 
 type StateBroadcastFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	Target  K // the key that the query wants to find closer nodes for
 	NodeID  N // the node to send the message to
 	Stats   query.QueryStats
 }
 
 type StateBroadcastStoreRecord[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	NodeID  N
 	Message M
 }
 
 type StateBroadcastWaiting struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 }
 
 type StateBroadcastFinished[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID   query.QueryID
+	QueryID   coordt.QueryID
 	Contacted []N
 	Errors    map[string]struct {
 		Node N

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+
 	"go.opentelemetry.io/otel"
 
 	"github.com/benbjohnson/clock"
@@ -13,7 +15,6 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -65,7 +66,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
-		QueryID:     query.QueryID("bootstrap"),
+		QueryID:     coordt.QueryID("bootstrap"),
 		To:          nodes[1].NodeID,
 		Target:      nodes[0].NodeID.Key(),
 		CloserNodes: []kadt.PeerID{nodes[2].NodeID},
@@ -99,7 +100,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
-		QueryID: query.QueryID("bootstrap"),
+		QueryID: coordt.QueryID("bootstrap"),
 		To:      nodes[1].NodeID,
 		Target:  nodes[0].NodeID.Key(),
 		Err:     failure,
@@ -163,7 +164,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
-		QueryID:     query.QueryID("include"),
+		QueryID:     coordt.QueryID("include"),
 		To:          nodes[1].NodeID,
 		Target:      nodes[0].NodeID.Key(),
 		CloserNodes: []kadt.PeerID{nodes[2].NodeID},
@@ -197,7 +198,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
-		QueryID: query.QueryID("include"),
+		QueryID: coordt.QueryID("include"),
 		To:      nodes[1].NodeID,
 		Target:  nodes[0].NodeID.Key(),
 		Err:     failure,
@@ -290,6 +291,6 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 
 	// confirm that the message is for the correct node
 	oev = dev.(*EventOutboundGetCloserNodes)
-	require.Equal(t, query.QueryID("probe"), oev.QueryID)
+	require.Equal(t, coordt.QueryID("probe"), oev.QueryID)
 	require.Equal(t, candidate, oev.To)
 }

@@ -233,7 +233,7 @@ func NewCoordinator(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 
-	b, err := brdcst.NewPool[kadt.Key, kadt.PeerID](qp, nil)
+	b, err := brdcst.NewPool[kadt.Key, kadt.PeerID, *pb.Message](self, nil)
 	if err != nil {
 		return nil, fmt.Errorf("broadcast: %w", err)
 	}
@@ -407,7 +407,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := c.newQueryID()
+	queryID := c.newOperationID()
 
 	cmd := &EventStartFindCloserQuery{
 		QueryID:           queryID,
@@ -456,7 +456,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := c.newQueryID()
+	queryID := c.newOperationID()
 
 	cmd := &EventStartMessageQuery{
 		QueryID:           queryID,
@@ -492,15 +492,15 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
-	queryID := c.newQueryID()
+	queryID := c.newOperationID()
 
 	cmd := &EventStartBroadcast{
-		QueryID:           queryID,
-		Target:            msg.Target(),
-		Message:           msg,
-		KnownClosestNodes: seedIDs,
-		Notify:            waiter,
-		Strategy:          brdcst.StrategyFollowUp,
+		QueryID: queryID,
+		Target:  msg.Target(),
+		Message: msg,
+		Seed:    seedIDs,
+		Notify:  waiter,
+		Config:  brdcst.DefaultConfigFollowUp(),
 	}
 
 	// queue the start of the query
@@ -513,7 +513,7 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	return err
 }
 
-func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, waiter *Waiter[BehaviourEvent], fn coordt.QueryFunc) ([]kadt.PeerID, coordt.QueryStats, error) {
+func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, waiter *Waiter[BehaviourEvent], fn coordt.QueryFunc) ([]kadt.PeerID, coordt.QueryStats, error) {
 	var lastStats coordt.QueryStats
 	for {
 		select {
@@ -640,9 +640,9 @@ func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID)
 	return nil
 }
 
-func (c *Coordinator) newQueryID() query.QueryID {
+func (c *Coordinator) newOperationID() coordt.QueryID {
 	next := c.lastQueryID.Add(1)
-	return query.QueryID(fmt.Sprintf("%016x", next))
+	return coordt.QueryID(fmt.Sprintf("%016x", next))
 }
 
 // A BufferedRoutingNotifier is a [RoutingNotifier] that buffers [RoutingNotification] events and provides methods

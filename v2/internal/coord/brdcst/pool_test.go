@@ -10,7 +10,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 )
 
 // Assert that Pool implements the common state machine interface
@@ -21,10 +20,8 @@ func TestPoolStopWhenNoQueries(t *testing.T) {
 	cfg := DefaultPoolConfig()
 
 	self := tiny.NewNode(0)
-	qp, err := query.NewPool[tiny.Key, tiny.Node, tiny.Message](self, nil)
-	require.NoError(t, err)
 
-	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](qp, cfg)
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
 	require.NoError(t, err)
 
 	state := p.Advance(ctx, &EventPoolPoll{})
@@ -43,10 +40,8 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 	cfg := DefaultPoolConfig()
 
 	self := tiny.NewNode(0)
-	qp, err := query.NewPool[tiny.Key, tiny.Node, tiny.Message](self, nil)
-	require.NoError(t, err)
 
-	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](qp, cfg)
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
 	require.NoError(t, err)
 
 	msg := tiny.Message{Content: "store this"}
@@ -55,14 +50,14 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 	b := tiny.NewNode(0b00000011) // 3
 	c := tiny.NewNode(0b00000010) // 2
 
-	queryID := query.QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
-		QueryID:           queryID,
-		Target:            target,
-		Message:           msg,
-		KnownClosestNodes: []tiny.Node{a},
-		Config:            StrategyFollowUp,
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{a},
+		Config:  DefaultConfigFollowUp(),
 	})
 
 	// the query should attempt to contact the node it was given

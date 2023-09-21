@@ -91,20 +91,22 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 		return nil
 	}
 
-	// construct Kademlia-key. Yes, we hash the complete key string which
-	// includes the namespace prefix.
+	// construct message
+	addrInfo := peer.AddrInfo{
+		ID:    d.host.ID(),
+		Addrs: d.host.Addrs(),
+	}
+
 	msg := &pb.Message{
 		Type: pb.Message_ADD_PROVIDER,
 		Key:  c.Hash(),
+		ProviderPeers: []*pb.Message_Peer{
+			pb.FromAddrInfo(addrInfo),
+		},
 	}
 
 	// finally, find the closest peers to the target key.
-	err = d.kad.BroadcastRecord(ctx, msg)
-	if err != nil {
-		return fmt.Errorf("query error: %w", err)
-	}
-
-	return nil
+	return d.kad.BroadcastRecord(ctx, msg)
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {

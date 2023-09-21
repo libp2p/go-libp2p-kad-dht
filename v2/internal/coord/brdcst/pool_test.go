@@ -2,6 +2,7 @@ package brdcst
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/plprobelab/go-kademlia/key"
@@ -27,9 +28,14 @@ func TestPoolStopWhenNoQueries(t *testing.T) {
 	require.IsType(t, &StatePoolIdle{}, state)
 }
 
-func TestPool_EventPoolAddBroadcast_FollowUp_happy_path(t *testing.T) {
+func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 	// This test attempts to cover the whole lifecycle of
 	// a follow-up broadcast operation.
+	//
+	// We have a network of three peers: a, b, and, c
+	// First, we query all three while peer c fails to respond
+	// Second, we store the record with the remaining a and b, while b fails to respond
+
 	ctx := context.Background()
 	cfg := DefaultPoolConfig()
 
@@ -43,7 +49,8 @@ func TestPool_EventPoolAddBroadcast_FollowUp_happy_path(t *testing.T) {
 	msg := tiny.Message{Content: "store this"}
 	target := tiny.Key(0b00000001)
 	a := tiny.NewNode(0b00000100) // 4
-	b := tiny.NewNode(0b00000010) // 3
+	b := tiny.NewNode(0b00000011) // 3
+	c := tiny.NewNode(0b00000010) // 2
 
 	queryID := query.QueryID("test")
 
@@ -71,6 +78,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_happy_path(t *testing.T) {
 	// with a single closer node.
 	state = p.Advance(ctx, &EventPoolGetCloserNodesSuccess[tiny.Key, tiny.Node]{
 		QueryID:     queryID,
+		Target:      target,
 		NodeID:      a,
 		CloserNodes: []tiny.Node{a, b},
 	})
@@ -87,12 +95,29 @@ func TestPool_EventPoolAddBroadcast_FollowUp_happy_path(t *testing.T) {
 	// with no new node.
 	state = p.Advance(ctx, &EventPoolGetCloserNodesSuccess[tiny.Key, tiny.Node]{
 		QueryID:     queryID,
+		Target:      target,
 		NodeID:      b,
-		CloserNodes: []tiny.Node{a, b},
+		CloserNodes: []tiny.Node{b, c}, // returns additional node
+	})
+
+	// the query should attempt to contact the newly closer node it has found
+	st, ok = state.(*StatePoolFindCloser[tiny.Key, tiny.Node])
+	require.True(t, ok)
+
+	require.Equal(t, queryID, st.QueryID)         // the query should be the same
+	require.Equal(t, c, st.NodeID)                // the query should attempt to contact the newly discovered node
+	require.True(t, key.Equal(target, st.Target)) // with the correct target
+
+	// this last node times out -> start contacting the other two
+	timeoutErr := fmt.Errorf("timeout")
+	state = p.Advance(ctx, &EventPoolGetCloserNodesFailure[tiny.Key, tiny.Node]{
+		QueryID: queryID,
+		NodeID:  c,
+		Target:  target,
+		Error:   timeoutErr,
 	})
 
 	// This means we should start the follow-up phase
-	// pool should respond that query has finished
 	srState, ok := state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
 	require.True(t, ok)
 
@@ -112,6 +137,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_happy_path(t *testing.T) {
 	require.NotEqual(t, firstContactedNode, srState.NodeID)     // should be the other one now
 	require.Equal(t, msg.Content, srState.Message.Content)
 
+	// since we have two requests in-flight, polling should return a waiting state machine
 	state = p.Advance(ctx, &EventPoolPoll{})
 	require.IsType(t, &StatePoolWaiting{}, state)
 
@@ -123,16 +149,23 @@ func TestPool_EventPoolAddBroadcast_FollowUp_happy_path(t *testing.T) {
 	})
 	require.IsType(t, &StatePoolWaiting{}, state)
 
-	// second response from storing the record comes back
-	state = p.Advance(ctx, &EventPoolStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{
+	// second response from storing the record comes back and it failed!
+	state = p.Advance(ctx, &EventPoolStoreRecordFailure[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
 		NodeID:  b,
 		Request: msg,
+		Error:   timeoutErr,
 	})
-	finishState, ok := state.(*StatePoolBroadcastFinished)
+
+	// since we have contacted all nodes we knew, the broadcast has finished
+	finishState, ok := state.(*StatePoolBroadcastFinished[tiny.Key, tiny.Node])
 	require.True(t, ok)
 
 	require.Equal(t, queryID, finishState.QueryID)
+	require.Len(t, finishState.Contacted, 2)
+	require.Len(t, finishState.Errors, 1)
+	require.Equal(t, finishState.Errors[b.String()].Node, b)
+	require.Equal(t, finishState.Errors[b.String()].Err, timeoutErr)
 
 	state = p.Advance(ctx, &EventPoolPoll{})
 	require.IsType(t, &StatePoolIdle{}, state)

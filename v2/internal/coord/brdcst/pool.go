@@ -206,10 +206,12 @@ func (p *Pool[K, N, M]) advanceBroadcast(ctx context.Context, sm coordt.StateMac
 			NodeID:  st.NodeID,
 			Message: st.Message,
 		}
-	case *StateBroadcastFinished:
+	case *StateBroadcastFinished[K, N]:
 		delete(p.broadcasts, st.QueryID)
-		return &StatePoolBroadcastFinished{
-			QueryID: st.QueryID,
+		return &StatePoolBroadcastFinished[K, N]{
+			QueryID:   st.QueryID,
+			Contacted: st.Contacted,
+			Errors:    st.Errors,
 		}
 
 	}

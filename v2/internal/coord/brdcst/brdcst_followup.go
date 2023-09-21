@@ -12,24 +12,20 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-type StrategyPhase string
-
-const (
-	StrategyPhaseWalk     StrategyPhase = "walk"
-	StrategyPhaseFollowUp StrategyPhase = "follow-up"
-)
-
 type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	queryID query.QueryID
 	pool    *query.Pool[K, N, M]
 	msg     M
-	qDone   bool // query done?
+	closest []N
 
 	// nodes we still need to store records with
 	todo    map[string]N
 	waiting map[string]N
 	success map[string]N
-	failed  map[string]N
+	failed  map[string]struct {
+		Node N
+		Err  error
+	}
 }
 
 func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid query.QueryID, pool *query.Pool[K, N, M], msg M) *FollowUp[K, N, M] {
@@ -37,11 +33,13 @@ func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid query.Quer
 		queryID: qid,
 		pool:    pool,
 		msg:     msg,
-		qDone:   false,
 		todo:    map[string]N{},
 		waiting: map[string]N{},
 		success: map[string]N{},
-		failed:  map[string]N{},
+		failed: map[string]struct {
+			Node N
+			Err  error
+		}{},
 	}
 }
 
@@ -81,7 +79,10 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 		f.success[ev.NodeID.String()] = ev.NodeID
 	case *EventBroadcastStoreRecordFailure[K, N, M]:
 		delete(f.waiting, ev.NodeID.String())
-		f.failed[ev.NodeID.String()] = ev.NodeID
+		f.failed[ev.NodeID.String()] = struct {
+			Node N
+			Err  error
+		}{Node: ev.NodeID, Err: ev.Error}
 	case *EventBroadcastPoll:
 		// ignore, nothing to do
 		return f.advancePool(ctx, &query.EventPoolPoll{})
@@ -104,9 +105,11 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 		return &StateBroadcastWaiting{}
 	}
 
-	if len(f.todo) == 0 && f.qDone {
-		return &StateBroadcastFinished{
-			QueryID: f.queryID,
+	if len(f.todo) == 0 && len(f.closest) != 0 {
+		return &StateBroadcastFinished[K, N]{
+			QueryID:   f.queryID,
+			Contacted: f.closest,
+			Errors:    f.failed,
 		}
 	}
 
@@ -135,15 +138,20 @@ func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, qev query.PoolEvent
 			QueryID: f.queryID,
 		}
 	case *query.StatePoolQueryFinished[K, N]:
-		f.qDone = true
+		f.closest = st.ClosestNodes
 
 		for _, n := range st.ClosestNodes {
 			f.todo[n.String()] = n
 		}
 
 	case *query.StatePoolQueryTimeout:
-		return &StateBroadcastFinished{
-			QueryID: st.QueryID,
+		return &StateBroadcastFinished[K, N]{
+			QueryID:   st.QueryID,
+			Contacted: make([]N, 0),
+			Errors: map[string]struct {
+				Node N
+				Err  error
+			}{},
 		}
 	case *query.StatePoolIdle:
 		// nothing to do
@@ -165,12 +173,13 @@ func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, qev query.PoolEvent
 		return &StateBroadcastWaiting{}
 	}
 
-	if len(f.todo) == 0 && f.qDone {
-		return &StateBroadcastFinished{
-			QueryID: f.queryID,
+	if len(f.todo) == 0 && len(f.closest) != 0 {
+		return &StateBroadcastFinished[K, N]{
+			QueryID:   f.queryID,
+			Contacted: f.closest,
+			Errors:    f.failed,
 		}
 	}
 
-	// TODO: capacity handling
 	return &StateBroadcastIdle{}
 }

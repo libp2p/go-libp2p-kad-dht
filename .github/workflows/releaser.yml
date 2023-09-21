@@ -1,0 +1,17 @@
+name: Releaser
+
+on:
+  push:
+    paths: [ 'version.json' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  releaser:
+    uses: pl-strflt/uci/.github/workflows/releaser.yml@v0.0

@@ -47,8 +47,7 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 	// cfg is a copy of the optional configuration supplied to the Explore
 	cfg ExploreConfig
 
-	// schedule is a list of cpls ordered by the time the next explore is due
-	schedule *exploreList
+	schedule ExploreSchedule
 }
 
 // NodeIDForCplFunc is a function that given a cpl generates a [kad.NodeID] with a key that has
@@ -56,30 +55,21 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 // Invariant: CommonPrefixLength(k, node.Key()) = cpl
 type NodeIDForCplFunc[K kad.Key[K], N kad.NodeID[K]] func(k K, cpl int) (N, error)
 
+// An ExploreSchedule provides an ordering for explorations of each cpl in a routing table.
+type ExploreSchedule interface {
+	// NextCpl returns the first cpl to be explored whose due time is before or equal to the given time.
+	// The due time of the cpl should be updated by its designated interval so that its next due time is increased.
+	// If no cpl is due at the given time NextCpl should return -1, false
+	NextCpl(ts time.Time) (int, bool)
+}
+
 // ExploreConfig specifies optional configuration for an [Explore]
 type ExploreConfig struct {
 	// Clock is  a clock that may replaced by a mock when testing
 	Clock clock.Clock
 
-	// MaximumCpl is the maximum CPL (common prefix length) that will be explored. This is roughly
-	// equivalent to a Kademlia bucket.
-	MaximumCpl int
-
-	// Interval is the minimum time interval between exploring each CPL.
-	Interval time.Duration
-
 	// Timeout is maximum time to allow for performing an explore for a CPL.
 	Timeout time.Duration
-
-	// IntervalMultiplier is a factor that is applied to Interval for CPLs lower than the maximum
-	// to determine the time of the next explore operation. The interval to the next explore is calculated
-	// using the following formula: Interval x (MaximumCpl - CPL) x IntervalMultiplier x (1 + rand(IntervalJitter))
-	// IntervalMultiplier must be 1 or greater.
-	IntervalMultiplier float64
-
-	// IntervalJitter is a factor that is used to increase the calculated interval for the next explore
-	// operation by a small random amount. It must be between 0 and 0.05. When zero, no jitter is applied.
-	IntervalJitter float64
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -88,28 +78,8 @@ func (cfg *ExploreConfig) Validate() error {
 		return fmt.Errorf("clock must not be nil")
 	}
 
-	if cfg.MaximumCpl < 1 {
-		return fmt.Errorf("maximum cpl must be greater than zero")
-	}
-
-	if cfg.Interval < 1 {
-		return fmt.Errorf("interval must be greater than zero")
-	}
-
 	if cfg.Timeout < 1 {
 		return fmt.Errorf("timeout must be greater than zero")
-	}
-
-	if cfg.IntervalMultiplier < 1 {
-		return fmt.Errorf("interval multiplier must be greater than or equal to one")
-	}
-
-	if cfg.IntervalJitter < 0 {
-		return fmt.Errorf("interval jitter must not be negative")
-	}
-
-	if cfg.IntervalJitter > 0.05 {
-		return fmt.Errorf("interval jitter must not be greater than 0.05")
 	}
 
 	return nil
@@ -119,16 +89,12 @@ func (cfg *ExploreConfig) Validate() error {
 // Options may be overridden before passing to [NewExplore].
 func DefaultExploreConfig() *ExploreConfig {
 	return &ExploreConfig{
-		Clock:              clock.New(), // use standard time
-		MaximumCpl:         14,
-		Interval:           time.Hour,        // TODO: review default
-		Timeout:            10 * time.Minute, // MAGIC
-		IntervalMultiplier: 1,
-		IntervalJitter:     0, // no jitter by default
+		Clock:   clock.New(),      // use standard time
+		Timeout: 10 * time.Minute, // MAGIC
 	}
 }
 
-func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N], cplFn NodeIDForCplFunc[K, N], cfg *ExploreConfig) (*Explore[K, N], error) {
+func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N], cplFn NodeIDForCplFunc[K, N], schedule ExploreSchedule, cfg *ExploreConfig) (*Explore[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultExploreConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -141,26 +107,10 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 		rt:       rt,
 		cfg:      *cfg,
 		qryCpl:   -1,
-		schedule: new(exploreList),
+		schedule: schedule,
 	}
-
-	// build the initial schedule
-	for cpl := cfg.MaximumCpl; cpl >= 0; cpl-- {
-		*e.schedule = append(*e.schedule, &exploreEntry{
-			Cpl: cpl,
-			Due: e.cfg.Clock.Now().Add(e.interval(cpl)),
-		})
-	}
-	heap.Init(e.schedule)
 
 	return e, nil
-}
-
-// interval calculates the explore interval for a given cpl
-func (e *Explore[K, N]) interval(cpl int) time.Duration {
-	interval := float64(e.cfg.Interval) + float64(e.cfg.Interval)*float64(e.cfg.MaximumCpl-cpl)*e.cfg.IntervalMultiplier
-	interval *= 1 + rand.Float64()*e.cfg.IntervalJitter
-	return time.Duration(interval)
 }
 
 // Advance advances the state of the explore by attempting to advance its query if running.
@@ -186,50 +136,41 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
 
-	if len(*e.schedule) == 0 {
-		return &StateExploreIdle{}
-	}
-
-	// TODO: check if a query is running
-
+	// if query is running, give it a chance to advance
 	if e.qry != nil {
 		return e.advanceQuery(ctx, &query.EventQueryPoll{})
 	}
 
 	// is an explore due yet?
-	next := (*e.schedule)[0]
-	if e.cfg.Clock.Now().After(next.Due) {
-		// start an explore query
-		node, err := e.cplFn(e.self.Key(), next.Cpl)
-		if err != nil {
-			// TODO: don't panic
-			panic(err)
-		}
-		seeds := e.rt.NearestNodes(node.Key(), 20)
-
-		iter := query.NewClosestNodesIter[K, N](e.self.Key())
-
-		qryCfg := query.DefaultQueryConfig()
-		qryCfg.Clock = e.cfg.Clock
-		// qryCfg.Concurrency = b.cfg.RequestConcurrency
-		// qryCfg.RequestTimeout = b.cfg.RequestTimeout
-
-		qry, err := query.NewFindCloserQuery[K, N, any](e.self, ExploreQueryID, e.self.Key(), iter, seeds, qryCfg)
-		if err != nil {
-			// TODO: don't panic
-			panic(err)
-		}
-		e.qry = qry
-		e.qryCpl = next.Cpl
-
-		// reschedule the explore for next time
-		next.Due = e.cfg.Clock.Now().Add(e.interval(next.Cpl))
-		heap.Fix(e.schedule, 0) // update the heap
-
-		return e.advanceQuery(ctx, &query.EventQueryPoll{})
+	next, ok := e.schedule.NextCpl(e.cfg.Clock.Now())
+	if !ok {
+		return &StateExploreIdle{}
 	}
 
-	return &StateExploreIdle{}
+	// start an explore query
+	node, err := e.cplFn(e.self.Key(), next)
+	if err != nil {
+		// TODO: don't panic
+		panic(err)
+	}
+	seeds := e.rt.NearestNodes(node.Key(), 20)
+
+	iter := query.NewClosestNodesIter[K, N](e.self.Key())
+
+	qryCfg := query.DefaultQueryConfig()
+	qryCfg.Clock = e.cfg.Clock
+	// qryCfg.Concurrency = b.cfg.RequestConcurrency
+	// qryCfg.RequestTimeout = b.cfg.RequestTimeout
+
+	qry, err := query.NewFindCloserQuery[K, N, any](e.self, ExploreQueryID, e.self.Key(), iter, seeds, qryCfg)
+	if err != nil {
+		// TODO: don't panic
+		panic(err)
+	}
+	e.qry = qry
+	e.qryCpl = next
+
+	return e.advanceQuery(ctx, &query.EventQueryPoll{})
 }
 
 func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) ExploreState {
@@ -395,4 +336,141 @@ func (l *exploreList) Pop() any {
 	old[n-1] = nil
 	*l = old[0 : n-1]
 	return v
+}
+
+// A DynamicExploreSchedule calculates an explore schedule dynamically
+type DynamicExploreSchedule struct {
+	// maxCpl is the maximum CPL (common prefix length) that will be scheduled.
+	maxCpl int
+
+	// interval is the minimum time interval to leave between explorations of the same CPL.
+	interval time.Duration
+
+	// multiplier is a factor that is applied to interval for CPLs lower than the maximum
+	multiplier float64
+
+	// jitter is a factor that is used to increase the calculated interval for the next explore
+	// operation by a small random amount.
+	jitter float64
+
+	// cpls is a list of cpls ordered by the time the next explore is due
+	cpls *exploreList
+}
+
+// NewDynamicExploreSchedule creates a new dynamic explore schedule.
+//
+// maxCpl is the maximum CPL (common prefix length) that will be scheduled.
+// interval is the base time interval to leave between explorations of the same CPL.
+// multiplier is a factor that is applied to interval for CPLs lower than the maximum to increase the interval between
+// explorations for lower CPLs (which contain nodes that are more distant).
+// jitter is a factor that is used to increase the calculated interval for the next explore
+// operation by a small random amount. It must be between 0 and 0.05. When zero, no jitter is applied.
+//
+// The interval to the next explore is calculated using the following formula:
+//
+//	interval + (maxCpl - CPL) x interval x multiplier + interval * rand(jitter)
+//
+// For example, given an a max CPL of 14, an interval of 1 hour, a multiplier of 1 and 0 jitter the following
+// schedule will be created:
+//
+//	CPL 14 explored every hour
+//	CPL 13 explored every two hours
+//	CPL 12 explored every three hours
+//	...
+//	CPL 0 explored every 14 hours
+//
+// For example, given an a max CPL of 14, an interval of 1 hour, a multiplier of 1.5 and 0.01 jitter the following
+// schedule will be created:
+//
+//	CPL 14 explored every 1 hour + up to 6 minutes random jitter
+//	CPL 13 explored every 2.5 hours + up to 6 minutes random jitter
+//	CPL 12 explored every 4 hours + up to 6 minutes random jitter
+//	...
+//	CPL 0 explored every 22 hours + up to 6 minutes random jitter
+func NewDynamicExploreSchedule(maxCpl int, start time.Time, interval time.Duration, multiplier float64, jitter float64) (*DynamicExploreSchedule, error) {
+	if maxCpl < 1 {
+		return nil, fmt.Errorf("maximum cpl must be greater than zero")
+	}
+
+	if interval < 1 {
+		return nil, fmt.Errorf("interval must be greater than zero")
+	}
+
+	if multiplier < 1 {
+		return nil, fmt.Errorf("interval multiplier must be greater than or equal to one")
+	}
+
+	if jitter < 0 {
+		return nil, fmt.Errorf("interval jitter must not be negative")
+	}
+
+	if jitter > 0.05 {
+		return nil, fmt.Errorf("interval jitter must not be greater than 0.05")
+	}
+
+	s := &DynamicExploreSchedule{
+		maxCpl:     maxCpl,
+		interval:   interval,
+		multiplier: multiplier,
+		jitter:     jitter,
+		cpls:       new(exploreList),
+	}
+
+	// build the initial schedule
+	for cpl := maxCpl; cpl >= 0; cpl-- {
+		*s.cpls = append(*s.cpls, &exploreEntry{
+			Cpl: cpl,
+			Due: start.Add(s.cplInterval(cpl)),
+		})
+	}
+	heap.Init(s.cpls)
+
+	return s, nil
+}
+
+func (s *DynamicExploreSchedule) NextCpl(ts time.Time) (int, bool) {
+	// is an explore due yet?
+	next := (*s.cpls)[0]
+	if !next.Due.After(ts) {
+		// update its schedule
+
+		interval := float64(s.interval) + float64(s.interval)*float64(s.maxCpl-next.Cpl)*s.multiplier
+		interval *= 1 + rand.Float64()*s.jitter
+
+		next.Due = ts.Add(s.cplInterval(next.Cpl))
+		heap.Fix(s.cpls, 0) // update the heap
+		return next.Cpl, true
+	}
+
+	return -1, false
+}
+
+// cplInterval calculates the explore interval for a given cpl
+func (s *DynamicExploreSchedule) cplInterval(cpl int) time.Duration {
+	interval := float64(s.interval)
+	interval += float64(s.interval) * float64(s.maxCpl-cpl) * s.multiplier
+	interval += float64(s.interval) * s.jitter * rand.Float64()
+	return time.Duration(interval)
+}
+
+// A NoWaitExploreSchedule implements an explore schedule that cycles through each cpl without delays
+type NoWaitExploreSchedule struct {
+	maxCpl  int
+	nextCpl int
+}
+
+func NewNoWaitExploreSchedule(maxCpl int) *NoWaitExploreSchedule {
+	return &NoWaitExploreSchedule{
+		maxCpl:  maxCpl,
+		nextCpl: maxCpl,
+	}
+}
+
+func (n *NoWaitExploreSchedule) NextCpl(ts time.Time) (int, bool) {
+	next := n.nextCpl
+	n.nextCpl--
+	if n.nextCpl < 0 {
+		n.nextCpl = n.maxCpl
+	}
+	return next, true
 }

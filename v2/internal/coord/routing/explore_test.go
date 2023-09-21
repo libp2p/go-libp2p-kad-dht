@@ -33,53 +33,17 @@ func TestExploreConfigValidate(t *testing.T) {
 		cfg.Timeout = -1
 		require.Error(t, cfg.Validate())
 	})
-
-	t.Run("interval positive", func(t *testing.T) {
-		cfg := DefaultExploreConfig()
-		cfg.Interval = 0
-		require.Error(t, cfg.Validate())
-		cfg.Interval = -1
-		require.Error(t, cfg.Validate())
-	})
-
-	t.Run("interval multiplier greater or equal one", func(t *testing.T) {
-		cfg := DefaultExploreConfig()
-		cfg.IntervalMultiplier = 0
-		require.Error(t, cfg.Validate())
-		cfg.IntervalMultiplier = -1
-		require.Error(t, cfg.Validate())
-		cfg.IntervalMultiplier = 0.99
-		require.Error(t, cfg.Validate())
-	})
-
-	t.Run("interval jitter between 0 and 0.05", func(t *testing.T) {
-		cfg := DefaultExploreConfig()
-		cfg.IntervalJitter = 0
-		require.NoError(t, cfg.Validate())
-		cfg.IntervalJitter = -1
-		require.Error(t, cfg.Validate())
-		cfg.IntervalJitter = 0.06
-		require.Error(t, cfg.Validate())
-	})
 }
 
-func TestExploreStartsIdle(t *testing.T) {
-	ctx := context.Background()
-	clk := clock.NewMock()
-	cfg := DefaultExploreConfig()
-	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
-
-	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+func DefaultDynamicSchedule(t *testing.T, clk clock.Clock) *DynamicExploreSchedule {
+	t.Helper()
+	// maxCpl is 7 since we are using tiny 8-bit keys
+	s, err := NewDynamicExploreSchedule(7, clk.Now(), time.Hour, 1, 0)
 	require.NoError(t, err)
-
-	state := ex.Advance(ctx, &EventExplorePoll{})
-	require.IsType(t, &StateExploreIdle{}, state)
+	return s
 }
 
-func TestExploreIntervalCalc(t *testing.T) {
+func TestDynamicExploreSchedule(t *testing.T) {
 	testCases := []struct {
 		interval   time.Duration
 		multiplier float64
@@ -100,20 +64,16 @@ func TestExploreIntervalCalc(t *testing.T) {
 
 	// test invariants
 	for _, tc := range testCases {
-		cfg := DefaultExploreConfig()
-		cfg.Interval = tc.interval
-		cfg.IntervalMultiplier = tc.multiplier
-		cfg.MaximumCpl = 20
+		clk := clock.NewMock()
+		maxCpl := 20
 
-		self := tiny.NewNode(128)
-		rt := simplert.New[tiny.Key, tiny.Node](self, 5)
-		ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+		s, err := NewDynamicExploreSchedule(maxCpl, clk.Now(), tc.interval, tc.multiplier, 0)
 		require.NoError(t, err)
 
-		intervals := make([]time.Duration, 0, cfg.MaximumCpl+1)
-		cpl := cfg.MaximumCpl
+		intervals := make([]time.Duration, 0, maxCpl+1)
+		cpl := maxCpl
 		for cpl >= 0 {
-			intervals = append(intervals, ex.interval(cpl))
+			intervals = append(intervals, s.cplInterval(cpl))
 			cpl--
 		}
 
@@ -130,12 +90,27 @@ func TestExploreIntervalCalc(t *testing.T) {
 	}
 }
 
+func TestExploreStartsIdle(t *testing.T) {
+	ctx := context.Background()
+	clk := clock.NewMock()
+	cfg := DefaultExploreConfig()
+	cfg.Clock = clk
+
+	self := tiny.NewNode(128)
+	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	schedule := DefaultDynamicSchedule(t, clk)
+	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
+	require.NoError(t, err)
+
+	state := ex.Advance(ctx, &EventExplorePoll{})
+	require.IsType(t, &StateExploreIdle{}, state)
+}
+
 func TestExploreFirstQueriesForMaximumCpl(t *testing.T) {
 	ctx := context.Background()
 	clk := clock.NewMock()
 	cfg := DefaultExploreConfig()
 	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
 
 	self := tiny.NewNode(128)
 	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
@@ -144,15 +119,15 @@ func TestExploreFirstQueriesForMaximumCpl(t *testing.T) {
 	a := tiny.NewNode(4)
 	rt.AddNode(a)
 
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+	schedule := DefaultDynamicSchedule(t, clk)
+	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
 	require.NoError(t, err)
 
 	state := ex.Advance(ctx, &EventExplorePoll{})
 	require.IsType(t, &StateExploreIdle{}, state)
 
-	// advance the clock to just past the due time of the first explore that should be started
-	interval := ex.interval(cfg.MaximumCpl) + time.Millisecond
-	clk.Add(interval)
+	// advance the clock to the due time of the first explore that should be started
+	clk.Add(schedule.cplInterval(schedule.maxCpl))
 
 	// explore should now start the explore query
 	state = ex.Advance(ctx, &EventExplorePoll{})
@@ -165,7 +140,7 @@ func TestExploreFirstQueriesForMaximumCpl(t *testing.T) {
 	require.Equal(t, ExploreQueryID, st.QueryID)
 
 	// with the correct cpl
-	require.Equal(t, cfg.MaximumCpl, st.Cpl)
+	require.Equal(t, schedule.maxCpl, st.Cpl)
 
 	// the query should attempt to look for nodes near a key with the maximum cpl
 	require.True(t, key.Equal(self.Key(), st.Target))
@@ -184,7 +159,6 @@ func TestExploreFindCloserResponse(t *testing.T) {
 
 	cfg := DefaultExploreConfig()
 	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
 
 	self := tiny.NewNode(128)
 	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
@@ -195,15 +169,16 @@ func TestExploreFindCloserResponse(t *testing.T) {
 
 	start := clk.Now()
 
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+	schedule := DefaultDynamicSchedule(t, clk)
+	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
 	require.NoError(t, err)
 
 	state := ex.Advance(ctx, &EventExplorePoll{})
 	require.IsType(t, &StateExploreIdle{}, state)
 
-	// advance the clock to just past the due time of the first explore that should be started
-	interval1 := ex.interval(cfg.MaximumCpl)
-	clk.Set(start.Add(interval1 + time.Millisecond))
+	// advance the clock to the due time of the first explore that should be started
+	interval1 := schedule.cplInterval(schedule.maxCpl)
+	clk.Set(start.Add(interval1))
 
 	// explore should now start the explore query
 	state = ex.Advance(ctx, &EventExplorePoll{})
@@ -226,7 +201,6 @@ func TestExploreFindCloserFailure(t *testing.T) {
 
 	cfg := DefaultExploreConfig()
 	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
 
 	self := tiny.NewNode(128)
 	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
@@ -237,15 +211,16 @@ func TestExploreFindCloserFailure(t *testing.T) {
 
 	start := clk.Now()
 
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+	schedule := DefaultDynamicSchedule(t, clk)
+	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
 	require.NoError(t, err)
 
 	state := ex.Advance(ctx, &EventExplorePoll{})
 	require.IsType(t, &StateExploreIdle{}, state)
 
-	// advance the clock to just past the due time of the first explore that should be started
-	interval1 := ex.interval(cfg.MaximumCpl)
-	clk.Set(start.Add(interval1 + time.Millisecond))
+	// advance the clock to the due time of the first explore that should be started
+	interval1 := schedule.cplInterval(schedule.maxCpl)
+	clk.Set(start.Add(interval1))
 
 	// explore should now start the explore query
 	state = ex.Advance(ctx, &EventExplorePoll{})
@@ -268,7 +243,6 @@ func TestExploreProgress(t *testing.T) {
 
 	cfg := DefaultExploreConfig()
 	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
 
 	self := tiny.NewNode(128)
 	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
@@ -286,15 +260,16 @@ func TestExploreProgress(t *testing.T) {
 
 	start := clk.Now()
 
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+	schedule := DefaultDynamicSchedule(t, clk)
+	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
 	require.NoError(t, err)
 
 	state := ex.Advance(ctx, &EventExplorePoll{})
 	require.IsType(t, &StateExploreIdle{}, state)
 
-	// advance the clock to just past the due time of the first explore that should be started
-	interval1 := ex.interval(cfg.MaximumCpl)
-	clk.Set(start.Add(interval1 + time.Millisecond))
+	// advance the clock to the due time of the first explore that should be started
+	interval1 := schedule.cplInterval(schedule.maxCpl)
+	clk.Set(start.Add(interval1))
 
 	// explore should now start the explore query
 	state = ex.Advance(ctx, &EventExplorePoll{})
@@ -343,7 +318,6 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 
 	cfg := DefaultExploreConfig()
 	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
 
 	self := tiny.NewNode(128)
 	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
@@ -354,15 +328,16 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 
 	start := clk.Now()
 
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
+	schedule := DefaultDynamicSchedule(t, clk)
+	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
 	require.NoError(t, err)
 
 	state := ex.Advance(ctx, &EventExplorePoll{})
 	require.IsType(t, &StateExploreIdle{}, state)
 
-	// advance the clock to just past the due time of the first explore that should be started
-	interval1 := ex.interval(cfg.MaximumCpl)
-	clk.Set(start.Add(interval1 + time.Millisecond))
+	// advance the clock to the due time of the first explore that should be started
+	interval1 := schedule.cplInterval(schedule.maxCpl)
+	clk.Set(start.Add(interval1))
 
 	// explore should now start the explore query
 	state = ex.Advance(ctx, &EventExplorePoll{})
@@ -373,7 +348,7 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 	require.Equal(t, ExploreQueryID, st.QueryID)
 
 	// with the correct cpl
-	require.Equal(t, cfg.MaximumCpl, st.Cpl)
+	require.Equal(t, schedule.maxCpl, st.Cpl)
 
 	// the query should attempt to look for nodes near a key with the maximum cpl
 	require.True(t, key.Equal(self.Key(), st.Target))
@@ -391,9 +366,9 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 	})
 	require.IsType(t, &StateExploreQueryFinished{}, state)
 
-	// advance the clock to just past the due time of the second cpl explore that should be started
-	interval2 := ex.interval(cfg.MaximumCpl - 1)
-	clk.Set(start.Add(interval2 + time.Millisecond))
+	// advance the clock to the due time of the second cpl explore that should be started
+	interval2 := schedule.cplInterval(schedule.maxCpl - 1)
+	clk.Set(start.Add(interval2))
 
 	// explore should now start another explore query
 	state = ex.Advance(ctx, &EventExplorePoll{})
@@ -401,78 +376,11 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 	st = state.(*StateExploreFindCloser[tiny.Key, tiny.Node])
 
 	// with the correct cpl
-	require.Equal(t, cfg.MaximumCpl-1, st.Cpl)
+	require.Equal(t, schedule.maxCpl-1, st.Cpl)
 
 	// the query should attempt to look for nodes near a key with the maximum cpl
 	require.True(t, key.Equal(self.Key(), st.Target))
 
 	// the query should be contacting the nearest known node
 	require.Equal(t, a, st.NodeID)
-}
-
-func TestExploreQueriesFrequencyDistribution(t *testing.T) {
-	ctx := context.Background()
-	clk := clock.NewMock()
-
-	cfg := DefaultExploreConfig()
-	cfg.Clock = clk
-	cfg.MaximumCpl = 7 // since we are using tiny 8-bit keys
-
-	// make sure schedule is fully deterministic
-	cfg.Interval = time.Hour
-	cfg.IntervalMultiplier = 1
-	cfg.IntervalJitter = 0
-
-	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
-
-	// populate the routing table with at least one node
-	a := tiny.NewNode(4)
-	rt.AddNode(a)
-
-	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, cfg)
-	require.NoError(t, err)
-
-	cplDistribution := make(map[int]float64) // float64 for fractional comparison later
-
-	// advance the clock a little so advances don't fall on exact interval boundaries
-	clk.Add(time.Minute)
-
-	for i := 0; i < 24*4; i++ {
-		// advance the clock in 15 minute steps
-		clk.Add(15 * time.Minute)
-
-		// explore should now start an explore query
-		state := ex.Advance(ctx, &EventExplorePoll{})
-		switch st := state.(type) {
-		case *StateExploreFindCloser[tiny.Key, tiny.Node]:
-			cplDistribution[st.Cpl]++
-			// notify explore that node was contacted successfully, but no closer nodes
-			state = ex.Advance(ctx, &EventExploreFindCloserResponse[tiny.Key, tiny.Node]{
-				NodeID: a,
-			})
-			require.IsType(t, &StateExploreQueryFinished{}, state)
-		}
-
-	}
-
-	// ensure every cpl was explored at least once in the time period
-	for cpl := cfg.MaximumCpl; cpl >= 0; cpl-- {
-		assert.GreaterOrEqual(t, cplDistribution[cpl], 1.0)
-	}
-
-	// cpl 6 should be explored roughly half as many times as cpl 7
-	assert.InDelta(t, cplDistribution[7]/2, cplDistribution[6], 1.5)
-
-	// cpl 5 should be explored roughly a third as many times as cpl 7
-	assert.InDelta(t, cplDistribution[7]/3, cplDistribution[5], 1.5)
-
-	// cpl 4 should be explored roughly a fourth as many times as cpl 7
-	assert.InDelta(t, cplDistribution[7]/4, cplDistribution[4], 1.5)
-
-	// cpl 3 should be explored roughly a fifth as many times as cpl 7
-	assert.InDelta(t, cplDistribution[7]/5, cplDistribution[4], 1.5)
-
-	// accuracy for smaller cpls is too low given the number of samples
-	// simulating for a longer time period would improve accuracy, but the mock clock is very slow at increasing time
 }

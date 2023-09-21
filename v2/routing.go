@@ -6,12 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -20,6 +16,10 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 var _ routing.Routing = (*DHT)(nil)

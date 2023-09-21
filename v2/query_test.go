@@ -3,10 +3,9 @@ package dht
 import (
 	"testing"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )

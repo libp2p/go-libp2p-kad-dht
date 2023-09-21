@@ -38,9 +38,9 @@ type RoutingTableCpl[K kad.Key[K], N kad.NodeID[K]] interface {
 // returns at least one node in the list of closer nodes. The state machine emits the [StateProbeConnectivityCheck]
 // state when it wants to check the status of a node.
 //
-// The state machine expects to be notified either with the [EventProbeMessageResponse] or the
-// [EventProbeMessageFailure] events to determine the outcome of the check. If neither are received within a
-// configurable timeout the node is marked as failed.
+// The state machine expects to be notified either with the [EventProbeConnectivityCheckSuccess] or the
+// [EventProbeConnectivityCheckSuccessFailure] events to determine the outcome of the check. If neither are received
+// within a configurable timeout the node is marked as failed.
 //
 // Nodes that receive a successful response have their next check time updated to the current time plus the configured
 // [ProbeConfig.CheckInterval].

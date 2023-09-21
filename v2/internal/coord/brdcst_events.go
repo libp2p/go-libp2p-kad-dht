@@ -18,3 +18,17 @@ type EventStartBroadcast struct {
 }
 
 func (*EventStartBroadcast) behaviourEvent() {}
+
+// EventBroadcastFinished is emitted by the coordinator when a broadcasting
+// a record to the network has finished, either through running to completion or
+// by being canceled.
+type EventBroadcastFinished struct {
+	QueryID   query.QueryID
+	Contacted []kadt.PeerID
+	Errors    map[string]struct {
+		Node kadt.PeerID
+		Err  error
+	}
+}
+
+func (*EventBroadcastFinished) behaviourEvent() {}

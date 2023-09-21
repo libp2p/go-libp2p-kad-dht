@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync"
 
-	ct "github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
@@ -16,7 +16,7 @@ import (
 )
 
 type PooledBroadcastBehaviour struct {
-	pool    ct.StateMachine[brdcst.PoolEvent, brdcst.PoolState]
+	pool    coordt.StateMachine[brdcst.PoolEvent, brdcst.PoolState]
 	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex

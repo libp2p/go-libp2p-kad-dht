@@ -4,13 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )

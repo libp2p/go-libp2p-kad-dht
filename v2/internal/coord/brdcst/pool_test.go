@@ -6,11 +6,10 @@ import (
 	"testing"
 
 	"github.com/plprobelab/go-kademlia/key"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/stretchr/testify/require"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
-	"github.com/stretchr/testify/require"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 )
 
 func TestPoolStopWhenNoQueries(t *testing.T) {

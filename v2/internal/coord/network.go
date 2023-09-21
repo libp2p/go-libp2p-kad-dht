@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
@@ -211,7 +210,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 	w := NewWaiter[BehaviourEvent]()
 
 	ev := &EventOutboundGetCloserNodes{
-		QueryID: query.QueryID(key.HexString(k)),
+		QueryID: coordt.QueryID(key.HexString(k)),
 		To:      h.self,
 		Target:  k,
 		Notify:  w,

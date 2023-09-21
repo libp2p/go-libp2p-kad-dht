@@ -15,10 +15,6 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-type QueryID string
-
-const InvalidQueryID QueryID = ""
-
 type QueryStats struct {
 	Start    time.Time
 	End      time.Time
@@ -77,7 +73,7 @@ func DefaultQueryConfig() *QueryConfig {
 
 type Query[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	self N
-	id   QueryID
+	id   coordt.QueryID
 
 	// cfg is a copy of the optional configuration supplied to the query
 	cfg QueryConfig
@@ -100,7 +96,7 @@ type Query[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	inFlight int
 }
 
-func NewFindCloserQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id QueryID, target K, iter NodeIter[K, N], knownClosestNodes []N, cfg *QueryConfig) (*Query[K, N, M], error) {
+func NewFindCloserQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt.QueryID, target K, iter NodeIter[K, N], knownClosestNodes []N, cfg *QueryConfig) (*Query[K, N, M], error) {
 	var empty M
 	q, err := NewQuery[K, N, M](self, id, target, empty, iter, knownClosestNodes, cfg)
 	if err != nil {
@@ -110,7 +106,7 @@ func NewFindCloserQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N,
 	return q, nil
 }
 
-func NewQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id QueryID, target K, msg M, iter NodeIter[K, N], knownClosestNodes []N, cfg *QueryConfig) (*Query[K, N, M], error) {
+func NewQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt.QueryID, target K, msg M, iter NodeIter[K, N], knownClosestNodes []N, cfg *QueryConfig) (*Query[K, N, M], error) {
 	if cfg == nil {
 		cfg = DefaultQueryConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -386,14 +382,14 @@ type QueryState interface {
 
 // StateQueryFinished indicates that the [Query] has finished.
 type StateQueryFinished[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID      QueryID
+	QueryID      coordt.QueryID
 	Stats        QueryStats
 	ClosestNodes []N // contains the closest nodes to the target key that were found
 }
 
 // StateQueryFindCloser indicates that the [Query] wants to send a find closer nodes message to a node.
 type StateQueryFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID QueryID
+	QueryID coordt.QueryID
 	Target  K // the key that the query wants to find closer nodes for
 	NodeID  N // the node to send the message to
 	Stats   QueryStats
@@ -401,7 +397,7 @@ type StateQueryFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 
 // StateQuerySendMessage indicates that the [Query] wants to send a message to a node.
 type StateQuerySendMessage[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	QueryID QueryID
+	QueryID coordt.QueryID
 	NodeID  N // the node to send the message to
 	Message M
 	Stats   QueryStats
@@ -409,13 +405,13 @@ type StateQuerySendMessage[K kad.Key[K], N kad.NodeID[K], M coordt.Message] stru
 
 // StateQueryWaitingAtCapacity indicates that the [Query] is waiting for results and is at capacity.
 type StateQueryWaitingAtCapacity struct {
-	QueryID QueryID
+	QueryID coordt.QueryID
 	Stats   QueryStats
 }
 
 // StateQueryWaitingWithCapacity indicates that the [Query] is waiting for results but has no further nodes to contact.
 type StateQueryWaitingWithCapacity struct {
-	QueryID QueryID
+	QueryID coordt.QueryID
 	Stats   QueryStats
 }
 

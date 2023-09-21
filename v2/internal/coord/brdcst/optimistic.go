@@ -13,7 +13,7 @@ import (
 )
 
 type Optimistic[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	queryID query.QueryID
+	queryID coordt.QueryID
 	pool    *query.Pool[K, N, M]
 	msg     M
 	closest []N
@@ -28,7 +28,7 @@ type Optimistic[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	}
 }
 
-func NewOptimistic[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid query.QueryID, pool *query.Pool[K, N, M], msg M) *Optimistic[K, N, M] {
+func NewOptimistic[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, pool *query.Pool[K, N, M], msg M) *Optimistic[K, N, M] {
 	return &Optimistic[K, N, M]{
 		queryID: qid,
 		pool:    pool,
@@ -53,9 +53,9 @@ func (f *Optimistic[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (o
 	switch ev := ev.(type) {
 	case *EventBroadcastStart[K, N]:
 		cmd := &query.EventPoolAddFindCloserQuery[K, N]{
-			QueryID:           ev.QueryID,
-			Target:            ev.Target,
-			KnownClosestNodes: ev.KnownClosestNodes,
+			QueryID: ev.QueryID,
+			Target:  ev.Target,
+			Seed:    ev.Seed,
 		}
 		return f.advancePool(ctx, cmd)
 	case *EventBroadcastStop:

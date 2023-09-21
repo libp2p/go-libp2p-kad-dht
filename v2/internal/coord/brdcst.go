@@ -9,7 +9,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
@@ -17,7 +16,7 @@ import (
 
 type PooledBroadcastBehaviour struct {
 	pool    coordt.StateMachine[brdcst.PoolEvent, brdcst.PoolState]
-	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
+	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -32,7 +31,7 @@ var _ Behaviour[BehaviourEvent, BehaviourEvent] = (*PooledBroadcastBehaviour)(ni
 func NewPooledBroadcastBehaviour(brdcstPool *brdcst.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledBroadcastBehaviour {
 	b := &PooledBroadcastBehaviour{
 		pool:    brdcstPool,
-		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
+		waiters: make(map[coordt.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
 		logger:  logger.With("behaviour", "pooledBroadcast"),
 		tracer:  tracer,
@@ -55,11 +54,11 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 	switch ev := ev.(type) {
 	case *EventStartBroadcast:
 		cmd = &brdcst.EventPoolStartBroadcast[kadt.Key, kadt.PeerID, *pb.Message]{
-			QueryID:           ev.QueryID,
-			Target:            ev.Target,
-			Message:           ev.Message,
-			KnownClosestNodes: ev.KnownClosestNodes,
-			Config:            ev.Strategy,
+			QueryID: ev.QueryID,
+			Target:  ev.Target,
+			Message: ev.Message,
+			Seed:    ev.Seed,
+			Config:  ev.Config,
 		}
 		if ev.Notify != nil {
 			b.waiters[ev.QueryID] = ev.Notify

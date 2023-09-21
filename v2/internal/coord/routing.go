@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	ct "github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
@@ -19,16 +20,16 @@ type RoutingBehaviour struct {
 	self kadt.PeerID
 
 	// bootstrap is the bootstrap state machine, responsible for bootstrapping the routing table
-	bootstrap SM[routing.BootstrapEvent, routing.BootstrapState]
+	bootstrap ct.StateMachine[routing.BootstrapEvent, routing.BootstrapState]
 
 	// include is the inclusion state machine, responsible for vetting nodes before including them in the routing table
-	include SM[routing.IncludeEvent, routing.IncludeState]
+	include ct.StateMachine[routing.IncludeEvent, routing.IncludeState]
 
 	// probe is the node probing state machine, responsible for periodically checking connectivity of nodes in the routing table
-	probe SM[routing.ProbeEvent, routing.ProbeState]
+	probe ct.StateMachine[routing.ProbeEvent, routing.ProbeState]
 
 	// probe is the routing table explore state machine, responsible for increasing the occupanct of the routing table
-	explore SM[routing.ExploreEvent, routing.ExploreState]
+	explore ct.StateMachine[routing.ExploreEvent, routing.ExploreState]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -38,7 +39,7 @@ type RoutingBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewRoutingBehaviour(self kadt.PeerID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], explore SM[routing.ExploreEvent, routing.ExploreState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
+func NewRoutingBehaviour(self kadt.PeerID, bootstrap ct.StateMachine[routing.BootstrapEvent, routing.BootstrapState], include ct.StateMachine[routing.IncludeEvent, routing.IncludeState], probe ct.StateMachine[routing.ProbeEvent, routing.ProbeState], explore ct.StateMachine[routing.ExploreEvent, routing.ExploreState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
 	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,

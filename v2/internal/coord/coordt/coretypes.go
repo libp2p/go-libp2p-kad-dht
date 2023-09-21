@@ -1,4 +1,4 @@
-package coord
+package coordt
 
 import (
 	"context"
@@ -10,6 +10,10 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
+
+type StateMachine[E any, S any] interface {
+	Advance(context.Context, E) S
+}
 
 // Value is a value that may be stored in the DHT.
 type Value interface {

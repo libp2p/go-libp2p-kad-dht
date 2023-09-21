@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -13,7 +15,6 @@ import (
 	"github.com/libp2p/go-msgio/pbio"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
@@ -26,7 +27,7 @@ type router struct {
 	ProtocolID protocol.ID
 }
 
-var _ coord.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*router)(nil)
+var _ coordt.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*router)(nil)
 
 func FindKeyRequest(k kadt.Key) *pb.Message {
 	marshalledKey, _ := k.MarshalBinary()

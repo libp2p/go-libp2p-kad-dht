@@ -237,7 +237,6 @@ func (*EventNotifyNonConnectivity) routingCommand() {}
 // by being canceled.
 type EventBroadcastFinished struct {
 	QueryID query.QueryID
-	Stats   query.QueryStats
 }
 
 func (*EventBroadcastFinished) behaviourEvent() {}

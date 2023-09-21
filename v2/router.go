@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -15,6 +13,7 @@ import (
 	"github.com/libp2p/go-msgio/pbio"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
@@ -28,14 +27,6 @@ type router struct {
 }
 
 var _ coordt.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*router)(nil)
-
-func FindKeyRequest(k kadt.Key) *pb.Message {
-	marshalledKey, _ := k.MarshalBinary()
-	return &pb.Message{
-		Type: pb.Message_FIND_NODE,
-		Key:  marshalledKey,
-	}
-}
 
 func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Message) (*pb.Message, error) {
 	// TODO: what to do with addresses in peer.AddrInfo?
@@ -85,7 +76,12 @@ func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 }
 
 func (r *router) GetClosestNodes(ctx context.Context, to kadt.PeerID, target kadt.Key) ([]kadt.PeerID, error) {
-	resp, err := r.SendMessage(ctx, to, FindKeyRequest(target))
+	req := &pb.Message{
+		Type: pb.Message_FIND_NODE,
+		Key:  target.MsgKey(),
+	}
+
+	resp, err := r.SendMessage(ctx, to, req)
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"sync"
@@ -13,7 +12,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
@@ -337,13 +335,6 @@ func (d *DHT) AddAddresses(ctx context.Context, ais []peer.AddrInfo, ttl time.Du
 	}
 
 	return d.kad.AddNodes(ctx, ids)
-}
-
-// newSHA256Key returns a [kadt.KadKey] that conforms to the [kad.Key] interface by
-// SHA256 hashing the given bytes and wrapping them in a [kadt.KadKey].
-func newSHA256Key(data []byte) kadt.Key {
-	h := sha256.Sum256(data)
-	return key.NewKey256(h[:])
 }
 
 // typedBackend returns the backend at the given namespace. It is casted to the

@@ -3,6 +3,7 @@ package dht
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -204,7 +205,8 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 }
 
 func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-chan recvdVal, stopCh chan struct{},
-	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
+	out chan<- []byte, nvals int,
+) ([]byte, map[peer.ID]struct{}, bool) {
 	numResponses := 0
 	return dht.processValues(ctx, key, valCh,
 		func(ctx context.Context, v recvdVal, better bool) bool {
@@ -226,7 +228,8 @@ func (dht *IpfsDHT) searchValueQuorum(ctx context.Context, key string, valCh <-c
 }
 
 func (dht *IpfsDHT) processValues(ctx context.Context, key string, vals <-chan recvdVal,
-	newVal func(ctx context.Context, v recvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
+	newVal func(ctx context.Context, v recvdVal, better bool) bool,
+) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:
 	for {
 		if aborted {
@@ -372,7 +375,6 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 				}
 			},
 		)
-
 		if err != nil {
 			return
 		}
@@ -450,6 +452,7 @@ func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihas
 	}
 
 	var exceededDeadline bool
+	fmt.Println("1: GetClosestPeers " + hex.EncodeToString(keyMH))
 	peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
 	switch err {
 	case context.DeadlineExceeded:
@@ -471,6 +474,7 @@ func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihas
 		go func(p peer.ID) {
 			defer wg.Done()
 			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			fmt.Println("1: PutProvider: " + p.String())
 			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
 			if err != nil {
 				logger.Debug(err)
@@ -577,7 +581,6 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 	lookupRes, err := dht.runLookupWithFollowup(ctx, string(key),
 		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
-
 			// For DHT query command
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type: routing.SendingQuery,
@@ -690,7 +693,6 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, 
 			return dht.host.Network().Connectedness(id) == network.Connected
 		},
 	)
-
 	if err != nil {
 		return peer.AddrInfo{}, err
 	}

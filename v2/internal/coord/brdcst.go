@@ -215,11 +215,13 @@ func (b *PooledBroadcastBehaviour) advancePool(ctx context.Context, ev brdcst.Po
 			Message: st.Message,
 			Notify:  b,
 		}, true
-	case *brdcst.StatePoolBroadcastFinished:
+	case *brdcst.StatePoolBroadcastFinished[kadt.Key, kadt.PeerID]:
 		waiter, ok := b.waiters[st.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventBroadcastFinished{
-				QueryID: st.QueryID,
+				QueryID:   st.QueryID,
+				Contacted: st.Contacted,
+				Errors:    st.Errors,
 			})
 			waiter.Close()
 		}

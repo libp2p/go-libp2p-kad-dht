@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -19,7 +18,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
-	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 )
@@ -93,8 +91,20 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 		return nil
 	}
 
-	// TODO reach out to Zikade
-	panic("implement me")
+	// construct Kademlia-key. Yes, we hash the complete key string which
+	// includes the namespace prefix.
+	msg := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  c.Hash(),
+	}
+
+	// finally, find the closest peers to the target key.
+	err = d.kad.BroadcastRecord(ctx, msg)
+	if err != nil {
+		return fmt.Errorf("query error: %w", err)
+	}
+
+	return nil
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
@@ -141,24 +151,19 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 
 	// construct Kademlia-key. Yes, we hash the complete key string which
 	// includes the namespace prefix.
-	h := sha256.Sum256([]byte(keyStr))
-	kadKey := key.NewKey256(h[:])
-
-	// define the query function that will be called after each request to a
-	// remote peer.
-	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
-		return nil
+	msg := &pb.Message{
+		Type:   pb.Message_PUT_VALUE,
+		Key:    []byte(keyStr),
+		Record: record.MakePutRecord(keyStr, value),
 	}
 
 	// finally, find the closest peers to the target key.
-	closest, _, err := d.kad.QueryClosest(ctx, kadKey, fn, 20)
+	err := d.kad.BroadcastRecord(ctx, msg)
 	if err != nil {
 		return fmt.Errorf("query error: %w", err)
 	}
 
-	_ = closest
-
-	panic("implement me")
+	return nil
 }
 
 // putValueLocal stores a value in the local datastore without querying the network.

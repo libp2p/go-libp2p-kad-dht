@@ -490,7 +490,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	return stats, err
 }
 
-func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc) error {
+func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
 	defer span.End()
 
@@ -520,10 +520,12 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, fn c
 	}
 
 	// queue the start of the query
-	c.queryBehaviour.Notify(ctx, cmd)
+	c.brdcstBehaviour.Notify(ctx, cmd)
 
-	// TODO: change to waitForBroadcast
-	_, _, err = c.waitForQuery(ctx, queryID, waiter, fn)
+	contacted, errs, err := c.waitForBroadcast(ctx, waiter)
+	fmt.Println(contacted)
+	fmt.Println(errs)
+
 	return err
 }
 
@@ -565,6 +567,28 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, w
 				// query is done
 				lastStats.Exhausted = true
 				return ev.ClosestNodes, lastStats, nil
+
+			default:
+				panic(fmt.Sprintf("unexpected event: %T", ev))
+			}
+		}
+	}
+}
+
+func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *Waiter[BehaviourEvent]) ([]kadt.PeerID, map[string]struct {
+	Node kadt.PeerID
+	Err  error
+}, error,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case wev := <-waiter.Chan():
+			switch ev := wev.Event.(type) {
+			case *EventQueryProgressed:
+			case *EventBroadcastFinished:
+				return ev.Contacted, ev.Errors, nil
 
 			default:
 				panic(fmt.Sprintf("unexpected event: %T", ev))

@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	record "github.com/libp2p/go-libp2p-record"
@@ -45,10 +46,10 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 	target := kadt.PeerID(id)
 
 	var foundPeer peer.ID
-	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coord.QueryStats) error {
+	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
 		if peer.ID(visited) == id {
 			foundPeer = peer.ID(visited)
-			return coord.ErrSkipRemaining
+			return coordt.ErrSkipRemaining
 		}
 		return nil
 	}
@@ -145,7 +146,7 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 
 	// define the query function that will be called after each request to a
 	// remote peer.
-	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coord.QueryStats) error {
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		return nil
 	}
 
@@ -205,7 +206,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 
 	// TODO: quorum
 	var value []byte
-	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coord.QueryStats) error {
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		if resp == nil {
 			return nil
 		}
@@ -220,7 +221,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 
 		value = resp.GetRecord().GetValue()
 
-		return coord.ErrSkipRemaining
+		return coordt.ErrSkipRemaining
 	}
 
 	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)

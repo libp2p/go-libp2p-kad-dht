@@ -5,6 +5,8 @@ import (
 	"log"
 	"testing"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+
 	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
 
@@ -106,7 +108,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	visited := make(map[string]int)
 
 	// Record the nodes as they are visited
-	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
+	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
 		visited[id.String()]++
 		return nil
 	}
@@ -144,7 +146,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	rn := NewBufferedRoutingNotifier()
 	c.SetRoutingNotifier(rn)
 
-	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats QueryStats) error {
+	qfn := func(ctx context.Context, id kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
 		return nil
 	}
 
@@ -255,7 +257,7 @@ func TestIncludeNode(t *testing.T) {
 
 	// the routing table should not contain the node yet
 	_, err = d.GetNode(ctx, candidate)
-	require.ErrorIs(t, err, ErrNodeNotFound)
+	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
 
 	// inject a new node
 	err = d.AddNodes(ctx, []kadt.PeerID{candidate})

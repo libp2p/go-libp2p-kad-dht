@@ -9,8 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
-
 	"github.com/benbjohnson/clock"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/plprobelab/go-kademlia/kad"
@@ -22,6 +20,8 @@ import (
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -48,7 +48,7 @@ type Coordinator struct {
 	rt kad.RoutingTable[kadt.Key, kadt.PeerID]
 
 	// rtr is the message router used to send messages
-	rtr Router[kadt.Key, kadt.PeerID, *pb.Message]
+	rtr coordt.Router[kadt.Key, kadt.PeerID, *pb.Message]
 
 	// networkBehaviour is the behaviour responsible for communicating with the network
 	networkBehaviour *NetworkBehaviour
@@ -167,7 +167,7 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 	}
 }
 
-func NewCoordinator(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Message], rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
+func NewCoordinator(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *pb.Message], rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
 	if cfg == nil {
 		cfg = DefaultCoordinatorConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -336,11 +336,11 @@ func (c *Coordinator) SetRoutingNotifier(rn RoutingNotifier) {
 
 // GetNode retrieves the node associated with the given node id from the DHT's local routing table.
 // If the node isn't found in the table, it returns ErrNodeNotFound.
-func (c *Coordinator) GetNode(ctx context.Context, id kadt.PeerID) (Node, error) {
+func (c *Coordinator) GetNode(ctx context.Context, id kadt.PeerID) (coordt.Node, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetNode")
 	defer span.End()
 	if _, exists := c.rt.GetNode(id.Key()); !exists {
-		return nil, ErrNodeNotFound
+		return nil, coordt.ErrNodeNotFound
 	}
 
 	nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
@@ -351,11 +351,11 @@ func (c *Coordinator) GetNode(ctx context.Context, id kadt.PeerID) (Node, error)
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
-func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
+func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]coordt.Node, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetClosestNodes")
 	defer span.End()
 	closest := c.rt.NearestNodes(k, n)
-	nodes := make([]Node, 0, len(closest))
+	nodes := make([]coordt.Node, 0, len(closest))
 	for _, id := range closest {
 		nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
 		if err != nil {
@@ -368,13 +368,13 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (c *Coordinator) GetValue(ctx context.Context, k kadt.Key) (Value, error) {
+func (c *Coordinator) GetValue(ctx context.Context, k kadt.Key) (coordt.Value, error) {
 	panic("not implemented")
 }
 
 // PutValue requests that the node stores a value to be associated with the supplied key.
 // If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
-func (c *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
+func (c *Coordinator) PutValue(ctx context.Context, r coordt.Value, q int) error {
 	panic("not implemented")
 }
 
@@ -389,7 +389,7 @@ func (c *Coordinator) PutValue(ctx context.Context, r Value, q int) error {
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn QueryFunc, numResults int) ([]kadt.PeerID, QueryStats, error) {
+func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 
@@ -398,7 +398,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn Quer
 
 	seeds, err := c.GetClosestNodes(ctx, target, 20)
 	if err != nil {
-		return nil, QueryStats{}, err
+		return nil, coordt.QueryStats{}, err
 	}
 
 	seedIDs := make([]kadt.PeerID, 0, len(seeds))
@@ -434,7 +434,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn Quer
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn QueryFunc, numResults int) (QueryStats, error) {
+func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) (coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
 
@@ -447,7 +447,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn Quer
 
 	seeds, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
 	if err != nil {
-		return QueryStats{}, err
+		return coordt.QueryStats{}, err
 	}
 
 	seedIDs := make([]kadt.PeerID, 0, len(seeds))
@@ -474,7 +474,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn Quer
 	return stats, err
 }
 
-func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, fn QueryFunc) error {
+func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
 	defer span.End()
 
@@ -511,8 +511,8 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, fn Q
 	return err
 }
 
-func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, waiter *Waiter[BehaviourEvent], fn QueryFunc) ([]kadt.PeerID, QueryStats, error) {
-	var lastStats QueryStats
+func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, waiter *Waiter[BehaviourEvent], fn coordt.QueryFunc) ([]kadt.PeerID, coordt.QueryStats, error) {
+	var lastStats coordt.QueryStats
 	for {
 		select {
 		case <-ctx.Done():
@@ -521,7 +521,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, w
 			ctx, ev := wev.Ctx, wev.Event
 			switch ev := ev.(type) {
 			case *EventQueryProgressed:
-				lastStats = QueryStats{
+				lastStats = coordt.QueryStats{
 					Start:    ev.Stats.Start,
 					Requests: ev.Stats.Requests,
 					Success:  ev.Stats.Success,
@@ -534,7 +534,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID query.QueryID, w
 				}
 
 				err = fn(ctx, nh.ID(), ev.Response, lastStats)
-				if errors.Is(err, ErrSkipRemaining) {
+				if errors.Is(err, coordt.ErrSkipRemaining) {
 					// done
 					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
 					return nil, lastStats, nil

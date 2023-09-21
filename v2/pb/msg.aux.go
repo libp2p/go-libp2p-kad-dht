@@ -20,6 +20,10 @@ func (m *Message) Target() kadt.Key {
 	return key.NewKey256(b[:])
 }
 
+// ExpectResponse returns true if we expect a response from the remote peer if
+// we sent a message with the given type to them. For example, when a peer sends
+// a PUT_VALUE message to another peer, that other peer won't respond with
+// anything.
 func (m *Message) ExpectResponse() bool {
 	switch m.Type {
 	case Message_PUT_VALUE:

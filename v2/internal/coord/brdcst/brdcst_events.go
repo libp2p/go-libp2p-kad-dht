@@ -1,6 +1,7 @@
 package brdcst
 
 import (
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/plprobelab/go-kademlia/kad"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
@@ -20,7 +21,6 @@ type EventBroadcastStart[K kad.Key[K], N kad.NodeID[K]] struct {
 	QueryID           query.QueryID
 	Target            K
 	KnownClosestNodes []N
-	Strategy          Strategy
 }
 
 // EventBroadcastStop notifies a [Broadcast] to stop a query.
@@ -41,9 +41,26 @@ type EventBroadcastNodeFailure[K kad.Key[K], N kad.NodeID[K]] struct {
 	Error   error         // the error that caused the failure, if any
 }
 
+type EventBroadcastStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
+	QueryID  query.QueryID // the id of the query that sent the message
+	NodeID   N             // the node the message was sent to
+	Request  M
+	Response M
+}
+
+// EventBroadcastStoreRecordFailure notifies a [Pool] that an attempt to contact a node has failed.
+type EventBroadcastStoreRecordFailure[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
+	QueryID query.QueryID // the id of the query that sent the message
+	NodeID  N             // the node the message was sent to
+	Request M
+	Error   error // the error that caused the failure, if any
+}
+
 // broadcastEvent() ensures that only events accepted by a [Broadcast] can be assigned to the [BroadcastEvent] interface.
-func (*EventBroadcastStop) broadcastEvent()               {}
-func (*EventBroadcastPoll) broadcastEvent()               {}
-func (*EventBroadcastStart[K, N]) broadcastEvent()        {}
-func (*EventBroadcastNodeResponse[K, N]) broadcastEvent() {}
-func (*EventBroadcastNodeFailure[K, N]) broadcastEvent()  {}
+func (*EventBroadcastStop) broadcastEvent()                        {}
+func (*EventBroadcastPoll) broadcastEvent()                        {}
+func (*EventBroadcastStart[K, N]) broadcastEvent()                 {}
+func (*EventBroadcastNodeResponse[K, N]) broadcastEvent()          {}
+func (*EventBroadcastNodeFailure[K, N]) broadcastEvent()           {}
+func (*EventBroadcastStoreRecordSuccess[K, N, M]) broadcastEvent() {}
+func (*EventBroadcastStoreRecordFailure[K, N, M]) broadcastEvent() {}

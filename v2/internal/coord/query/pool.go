@@ -9,12 +9,11 @@ import (
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/kaderr"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-type Message interface{}
-
-type Pool[K kad.Key[K], N kad.NodeID[K], M Message] struct {
+type Pool[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	// self is the node id of the system the pool is running on
 	self       N
 	queries    []*Query[K, N, M]
@@ -94,7 +93,7 @@ func DefaultPoolConfig() *PoolConfig {
 	}
 }
 
-func NewPool[K kad.Key[K], N kad.NodeID[K], M Message](self N, cfg *PoolConfig) (*Pool[K, N, M], error) {
+func NewPool[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, cfg *PoolConfig) (*Pool[K, N, M], error) {
 	if cfg == nil {
 		cfg = DefaultPoolConfig()
 	} else if err := cfg.Validate(); err != nil {
@@ -329,7 +328,7 @@ type StatePoolFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 // StatePoolSendMessage indicates that a pool query wants to send a message to a node.
-type StatePoolSendMessage[K kad.Key[K], N kad.NodeID[K], M Message] struct {
+type StatePoolSendMessage[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID QueryID
 	NodeID  N // the node to send the message to
 	Message M
@@ -380,7 +379,7 @@ type EventPoolAddFindCloserQuery[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 // EventPoolAddQuery is an event that attempts to add a new query that sends a message.
-type EventPoolAddQuery[K kad.Key[K], N kad.NodeID[K], M Message] struct {
+type EventPoolAddQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID           QueryID // the id to use for the new query
 	Target            K       // the target key for the query
 	Message           M       // message to be sent to each node

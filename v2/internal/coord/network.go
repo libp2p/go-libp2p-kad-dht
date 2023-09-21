@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+
 	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
@@ -16,7 +18,7 @@ import (
 
 type NetworkBehaviour struct {
 	// rtr is the message router used to send messages
-	rtr Router[kadt.Key, kadt.PeerID, *pb.Message]
+	rtr coordt.Router[kadt.Key, kadt.PeerID, *pb.Message]
 
 	nodeHandlersMu sync.Mutex
 	nodeHandlers   map[kadt.PeerID]*NodeHandler // TODO: garbage collect node handlers
@@ -29,7 +31,7 @@ type NetworkBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewNetworkBehaviour(rtr Router[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
+func NewNetworkBehaviour(rtr coordt.Router[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *NetworkBehaviour {
 	b := &NetworkBehaviour{
 		rtr:          rtr,
 		nodeHandlers: make(map[kadt.PeerID]*NodeHandler),
@@ -120,13 +122,13 @@ func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (
 
 type NodeHandler struct {
 	self   kadt.PeerID
-	rtr    Router[kadt.Key, kadt.PeerID, *pb.Message]
+	rtr    coordt.Router[kadt.Key, kadt.PeerID, *pb.Message]
 	queue  *WorkQueue[NodeHandlerRequest]
 	logger *slog.Logger
 	tracer trace.Tracer
 }
 
-func NewNodeHandler(self kadt.PeerID, rtr Router[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
+func NewNodeHandler(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *NodeHandler {
 	h := &NodeHandler{
 		self:   self,
 		rtr:    rtr,
@@ -203,7 +205,7 @@ func (h *NodeHandler) ID() kadt.PeerID {
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 // The node may return fewer nodes than requested.
-func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]Node, error) {
+func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]coordt.Node, error) {
 	ctx, span := h.tracer.Start(ctx, "NodeHandler.GetClosestNodes")
 	defer span.End()
 	w := NewWaiter[BehaviourEvent]()
@@ -224,7 +226,7 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 
 		switch res := we.Event.(type) {
 		case *EventGetCloserNodesSuccess:
-			nodes := make([]Node, 0, len(res.CloserNodes))
+			nodes := make([]coordt.Node, 0, len(res.CloserNodes))
 			for _, info := range res.CloserNodes {
 				// TODO use a global registry of node handlers
 				nodes = append(nodes, NewNodeHandler(info, h.rtr, h.logger, h.tracer))
@@ -245,12 +247,12 @@ func (h *NodeHandler) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 
 // GetValue requests that the node return any value associated with the supplied key.
 // If the node does not have a value for the key it returns ErrValueNotFound.
-func (h *NodeHandler) GetValue(ctx context.Context, key kadt.Key) (Value, error) {
+func (h *NodeHandler) GetValue(ctx context.Context, key kadt.Key) (coordt.Value, error) {
 	panic("not implemented")
 }
 
 // PutValue requests that the node stores a value to be associated with the supplied key.
 // If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
-func (h *NodeHandler) PutValue(ctx context.Context, r Value, q int) error {
+func (h *NodeHandler) PutValue(ctx context.Context, r coordt.Value, q int) error {
 	panic("not implemented")
 }

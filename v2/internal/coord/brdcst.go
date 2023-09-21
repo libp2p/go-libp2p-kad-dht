@@ -4,17 +4,19 @@ import (
 	"context"
 	"sync"
 
+	ct "github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type PooledBroadcastBehaviour struct {
-	pool    SM[brdcst.PoolEvent, brdcst.PoolState]
+	pool    ct.StateMachine[brdcst.PoolEvent, brdcst.PoolState]
 	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
@@ -27,7 +29,7 @@ type PooledBroadcastBehaviour struct {
 
 var _ Behaviour[BehaviourEvent, BehaviourEvent] = (*PooledBroadcastBehaviour)(nil)
 
-func NewPooledBroadcastBehaviour(brdcstPool *brdcst.Pool[kadt.Key, kadt.PeerID], logger *slog.Logger, tracer trace.Tracer) *PooledBroadcastBehaviour {
+func NewPooledBroadcastBehaviour(brdcstPool *brdcst.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledBroadcastBehaviour {
 	b := &PooledBroadcastBehaviour{
 		pool:    brdcstPool,
 		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
@@ -52,9 +54,10 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 	var cmd brdcst.PoolEvent
 	switch ev := ev.(type) {
 	case *EventStartBroadcast:
-		cmd = &brdcst.EventPoolAddBroadcast[kadt.Key, kadt.PeerID]{
+		cmd = &brdcst.EventPoolAddBroadcast[kadt.Key, kadt.PeerID, *pb.Message]{
 			QueryID:           ev.QueryID,
 			Target:            ev.Target,
+			Message:           ev.Message,
 			KnownClosestNodes: ev.KnownClosestNodes,
 			Strategy:          ev.Strategy,
 		}
@@ -77,9 +80,10 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 			})
 		}
 
-		cmd = &brdcst.EventPoolNodeResponse[kadt.Key, kadt.PeerID]{
+		cmd = &brdcst.EventPoolGetCloserNodesSuccess[kadt.Key, kadt.PeerID]{
 			NodeID:      ev.To,
 			QueryID:     ev.QueryID,
+			Target:      ev.Target,
 			CloserNodes: ev.CloserNodes,
 		}
 
@@ -89,9 +93,10 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 			ev.To,
 		})
 
-		cmd = &brdcst.EventPoolNodeFailure[kadt.Key, kadt.PeerID]{
+		cmd = &brdcst.EventPoolGetCloserNodesFailure[kadt.Key, kadt.PeerID]{
 			NodeID:  ev.To,
 			QueryID: ev.QueryID,
+			Target:  ev.Target,
 			Error:   ev.Err,
 		}
 
@@ -109,10 +114,12 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 				Response: ev.Response,
 			})
 		}
-		cmd = &brdcst.EventPoolNodeResponse[kadt.Key, kadt.PeerID]{
-			NodeID:      ev.To,
-			QueryID:     ev.QueryID,
-			CloserNodes: ev.CloserNodes,
+		// TODO: How do we know it's a StoreRecord response?
+		cmd = &brdcst.EventPoolStoreRecordSuccess[kadt.Key, kadt.PeerID, *pb.Message]{
+			QueryID:  ev.QueryID,
+			NodeID:   ev.To,
+			Request:  ev.Request,
+			Response: ev.Response,
 		}
 
 	case *EventSendMessageFailure:
@@ -121,9 +128,11 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 			ev.To,
 		})
 
-		cmd = &brdcst.EventPoolNodeFailure[kadt.Key, kadt.PeerID]{
+		// TODO: How do we know it's a StoreRecord response?
+		cmd = &brdcst.EventPoolStoreRecordFailure[kadt.Key, kadt.PeerID, *pb.Message]{
 			NodeID:  ev.To,
 			QueryID: ev.QueryID,
+			Request: ev.Request,
 			Error:   ev.Err,
 		}
 
@@ -133,7 +142,7 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 		}
 	}
 
-	// attempt to advance the ...
+	// attempt to advance the broadcast pool
 	ev, ok := b.advancePool(ctx, cmd)
 	if ok {
 		b.pending = append(b.pending, ev)
@@ -199,19 +208,18 @@ func (b *PooledBroadcastBehaviour) advancePool(ctx context.Context, ev brdcst.Po
 			Target:  st.Target,
 			Notify:  b,
 		}, true
-	case *brdcst.StatePoolStoreRecord[kadt.Key, kadt.PeerID]:
+	case *brdcst.StatePoolStoreRecord[kadt.Key, kadt.PeerID, *pb.Message]:
 		return &EventOutboundSendMessage{
 			QueryID: st.QueryID,
 			To:      st.NodeID,
-			Message: nil, // TODO
+			Message: st.Message,
 			Notify:  b,
 		}, true
-	case *brdcst.StatePoolFinished:
+	case *brdcst.StatePoolBroadcastFinished:
 		waiter, ok := b.waiters[st.QueryID]
 		if ok {
 			waiter.Notify(ctx, &EventBroadcastFinished{
 				QueryID: st.QueryID,
-				Stats:   st.Stats,
 			})
 			waiter.Close()
 		}

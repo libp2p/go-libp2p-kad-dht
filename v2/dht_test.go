@@ -4,12 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
@@ -82,7 +83,7 @@ func TestAddAddresses(t *testing.T) {
 
 	// local routing table should not contain the node
 	_, err := local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
-	require.ErrorIs(t, err, coord.ErrNodeNotFound)
+	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
 
 	remoteAddrInfo := peer.AddrInfo{
 		ID:    remote.host.ID(),

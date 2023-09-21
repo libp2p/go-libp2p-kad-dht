@@ -37,10 +37,6 @@ type Behaviour[I BehaviourEvent, O BehaviourEvent] interface {
 	Perform(ctx context.Context) (O, bool)
 }
 
-type SM[E any, S any] interface {
-	Advance(context.Context, E) S
-}
-
 type WorkQueueFunc[E BehaviourEvent] func(context.Context, E) bool
 
 // WorkQueue is buffered queue of work to be performed.

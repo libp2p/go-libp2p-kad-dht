@@ -18,9 +18,9 @@ type EventBroadcastPoll struct{}
 
 // EventBroadcastStart is an event that attempts to start a new broadcast
 type EventBroadcastStart[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID           query.QueryID
-	Target            K
-	KnownClosestNodes []N
+	QueryID query.QueryID
+	Target  K
+	Seed    []N
 }
 
 // EventBroadcastStop notifies a [Broadcast] to stop a query.

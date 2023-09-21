@@ -8,9 +8,13 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 )
+
+// Assert that Pool implements the common state machine interface
+var _ coordt.StateMachine[PoolEvent, PoolState] = (*Pool[tiny.Key, tiny.Node, tiny.Message])(nil)
 
 func TestPoolStopWhenNoQueries(t *testing.T) {
 	ctx := context.Background()
@@ -53,12 +57,12 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 
 	queryID := query.QueryID("test")
 
-	state := p.Advance(ctx, &EventPoolAddBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID:           queryID,
 		Target:            target,
 		Message:           msg,
 		KnownClosestNodes: []tiny.Node{a},
-		Strategy:          StrategyFollowUp,
+		Config:            StrategyFollowUp,
 	})
 
 	// the query should attempt to contact the node it was given

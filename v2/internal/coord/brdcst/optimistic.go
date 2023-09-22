@@ -62,16 +62,14 @@ func (f *Optimistic[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (o
 		// TODO: ...
 	case *EventBroadcastNodeResponse[K, N]:
 		cmd := &query.EventPoolNodeResponse[K, N]{
-			QueryID:     ev.QueryID,
 			NodeID:      ev.NodeID,
 			CloserNodes: ev.CloserNodes,
 		}
 		return f.advancePool(ctx, cmd)
 	case *EventBroadcastNodeFailure[K, N]:
 		cmd := &query.EventPoolNodeFailure[K, N]{
-			QueryID: ev.QueryID,
-			NodeID:  ev.NodeID,
-			Error:   ev.Error,
+			NodeID: ev.NodeID,
+			Error:  ev.Error,
 		}
 		return f.advancePool(ctx, cmd)
 	case *EventBroadcastStoreRecordSuccess[K, N, M]:
@@ -127,7 +125,6 @@ func (f *Optimistic[K, N, M]) advancePool(ctx context.Context, qev query.PoolEve
 			QueryID: st.QueryID,
 			NodeID:  st.NodeID,
 			Target:  st.Target,
-			Stats:   st.Stats,
 		}
 	case *query.StatePoolWaitingAtCapacity:
 		return &StateBroadcastWaiting{

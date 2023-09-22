@@ -182,6 +182,21 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 
+		case routing.ExploreQueryID:
+			for _, info := range ev.CloserNodes {
+				r.pending = append(r.pending, &EventAddNode{
+					NodeID: info,
+				})
+			}
+			cmd := &routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID]{
+				NodeID:      ev.To,
+				CloserNodes: ev.CloserNodes,
+			}
+			next, ok := r.advanceExplore(ctx, cmd)
+			if ok {
+				r.pending = append(r.pending, next)
+			}
+
 		default:
 			panic(fmt.Sprintf("unexpected query id: %s", ev.QueryID))
 		}
@@ -216,6 +231,16 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
+			if ok {
+				r.pending = append(r.pending, next)
+			}
+		case routing.ExploreQueryID:
+			cmd := &routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID]{
+				NodeID: ev.To,
+				Error:  ev.Err,
+			}
+			// attempt to advance the explore
+			next, ok := r.advanceExplore(ctx, cmd)
 			if ok {
 				r.pending = append(r.pending, next)
 			}
@@ -257,6 +282,8 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		if ok {
 			r.pending = append(r.pending, nextProbe)
 		}
+	case *EventRoutingPoll:
+		r.pollChildren(ctx)
 
 	default:
 		panic(fmt.Sprintf("unexpected dht event: %T", ev))
@@ -298,26 +325,35 @@ func (r *RoutingBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 		}
 
 		// poll the child state machines in priority order to give each an opportunity to perform work
-
-		ev, ok := r.advanceBootstrap(ctx, &routing.EventBootstrapPoll{})
-		if ok {
-			return ev, true
-		}
-
-		ev, ok = r.advanceInclude(ctx, &routing.EventIncludePoll{})
-		if ok {
-			return ev, true
-		}
-
-		ev, ok = r.advanceProbe(ctx, &routing.EventProbePoll{})
-		if ok {
-			return ev, true
-		}
+		r.pollChildren(ctx)
 
 		// finally check if any pending events were accumulated in the meantime
 		if len(r.pending) == 0 {
 			return nil, false
 		}
+	}
+}
+
+// pollChildren must only be called while r.pendingMu is locked
+func (r *RoutingBehaviour) pollChildren(ctx context.Context) {
+	ev, ok := r.advanceBootstrap(ctx, &routing.EventBootstrapPoll{})
+	if ok {
+		r.pending = append(r.pending, ev)
+	}
+
+	ev, ok = r.advanceInclude(ctx, &routing.EventIncludePoll{})
+	if ok {
+		r.pending = append(r.pending, ev)
+	}
+
+	ev, ok = r.advanceProbe(ctx, &routing.EventProbePoll{})
+	if ok {
+		r.pending = append(r.pending, ev)
+	}
+
+	ev, ok = r.advanceExplore(ctx, &routing.EventExplorePoll{})
+	if ok {
+		r.pending = append(r.pending, ev)
 	}
 }
 
@@ -329,7 +365,7 @@ func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.Boot
 
 	case *routing.StateBootstrapFindCloser[kadt.Key, kadt.PeerID]:
 		return &EventOutboundGetCloserNodes{
-			QueryID: "bootstrap",
+			QueryID: routing.BootstrapQueryID,
 			To:      st.NodeID,
 			Target:  st.Target,
 			Notify:  r,
@@ -430,6 +466,37 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 		// nothing to do except wait for message response or timeout
 	default:
 		panic(fmt.Sprintf("unexpected include state: %T", st))
+	}
+
+	return nil, false
+}
+
+func (r *RoutingBehaviour) advanceExplore(ctx context.Context, ev routing.ExploreEvent) (BehaviourEvent, bool) {
+	ctx, span := r.tracer.Start(ctx, "RoutingBehaviour.advanceExplore")
+	defer span.End()
+	bstate := r.explore.Advance(ctx, ev)
+	switch st := bstate.(type) {
+
+	case *routing.StateExploreFindCloser[kadt.Key, kadt.PeerID]:
+		return &EventOutboundGetCloserNodes{
+			QueryID: routing.ExploreQueryID,
+			To:      st.NodeID,
+			Target:  st.Target,
+			Notify:  r,
+		}, true
+
+	case *routing.StateExploreWaiting:
+		// explore waiting for a message response, nothing to do
+	case *routing.StateExploreQueryFinished:
+		// nothing to do except notify via telemetry
+	case *routing.StateExploreQueryTimeout:
+		// nothing to do except notify via telemetry
+	case *routing.StateExploreFailure:
+		r.logger.Warn("explore failure", "cpl", st.Cpl, "error", st.Error)
+	case *routing.StateExploreIdle:
+		// bootstrap not running, nothing to do
+	default:
+		panic(fmt.Sprintf("unexpected explore state: %T", st))
 	}
 
 	return nil, false

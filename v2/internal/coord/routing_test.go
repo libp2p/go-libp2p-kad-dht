@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/cplutil"
 
 	"go.opentelemetry.io/otel"
 
@@ -20,6 +21,26 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
+// idleBootstrap returns a bootstrap state machine that is always idle
+func idleBootstrap() *RecordingSM[routing.BootstrapEvent, routing.BootstrapState] {
+	return NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
+}
+
+// idleInclude returns an include state machine that is always idle
+func idleInclude() *RecordingSM[routing.IncludeEvent, routing.IncludeState] {
+	return NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
+}
+
+// idleProbe returns a probe state machine that is always idle
+func idleProbe() *RecordingSM[routing.ProbeEvent, routing.ProbeState] {
+	return NewRecordingSM[routing.ProbeEvent, routing.ProbeState](&routing.StateProbeIdle{})
+}
+
+// idleExplore returns an explore state machine that is always idle
+func idleExplore() *RecordingSM[routing.ExploreEvent, routing.ExploreState] {
+	return NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
+}
+
 func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
@@ -31,11 +52,8 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
-	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
-	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	ev := &EventStartBootstrap{
 		SeedNodes: []kadt.PeerID{nodes[1].NodeID},
@@ -61,14 +79,11 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
-	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
-	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
-		QueryID:     coordt.QueryID("bootstrap"),
+		QueryID:     routing.BootstrapQueryID,
 		To:          nodes[1].NodeID,
 		Target:      nodes[0].NodeID.Key(),
 		CloserNodes: []kadt.PeerID{nodes[2].NodeID},
@@ -95,15 +110,12 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
-	include := new(NullSM[routing.IncludeEvent, routing.IncludeState])
-	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
-		QueryID: coordt.QueryID("bootstrap"),
+		QueryID: routing.BootstrapQueryID,
 		To:      nodes[1].NodeID,
 		Target:  nodes[0].NodeID.Key(),
 		Err:     failure,
@@ -131,11 +143,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
 
-	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
-	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
-
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	ev := &EventAddNode{
 		NodeID: nodes[2].NodeID,
@@ -162,11 +170,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
 
-	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
-	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
-
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     coordt.QueryID("include"),
@@ -196,11 +200,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
 
-	bootstrap := new(NullSM[routing.BootstrapEvent, routing.BootstrapState])
-	probe := new(NullSM[routing.ProbeEvent, routing.ProbeState])
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
-
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -241,11 +241,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	probe, err := routing.NewProbe[kadt.Key](rt, probeCfg)
 	require.NoError(t, err)
 
-	// ensure bootstrap is always idle
-	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
-	explore := new(NullSM[routing.ExploreEvent, routing.ExploreState])
-
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, slog.Default(), otel.Tracer("test"))
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, probe, idleExplore(), slog.Default(), otel.Tracer("test"))
 
 	// a new node to be included
 	candidate := nodes[len(nodes)-1].NodeID
@@ -300,4 +296,103 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	oev = dev.(*EventOutboundGetCloserNodes)
 	require.Equal(t, coordt.QueryID("probe"), oev.QueryID)
 	require.Equal(t, candidate, oev.To)
+}
+
+func TestRoutingExploreSendsEvent(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
+
+	self := nodes[0].NodeID
+	rt := nodes[0].RoutingTable
+
+	exploreCfg := routing.DefaultExploreConfig()
+	exploreCfg.Clock = clk
+
+	// make sure the explore starts as soon as the explore state machine is polled
+	schedule := routing.NewNoWaitExploreSchedule(14)
+
+	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
+	require.NoError(t, err)
+
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, slog.Default(), otel.Tracer("test"))
+
+	routingBehaviour.Notify(ctx, &EventRoutingPoll{})
+
+	// collect the result of the notify
+	dev, ok := routingBehaviour.Perform(ctx)
+	require.True(t, ok)
+
+	// include should be asking to send a message to the node
+	require.IsType(t, &EventOutboundGetCloserNodes{}, dev)
+	gcl := dev.(*EventOutboundGetCloserNodes)
+
+	require.Equal(t, routing.ExploreQueryID, gcl.QueryID)
+
+	// the message should be looking for nodes closer to a key that occupies cpl 14
+	require.Equal(t, 14, self.Key().CommonPrefixLength(gcl.Target))
+}
+
+func TestRoutingExploreGetClosestNodesSuccess(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
+
+	self := nodes[0].NodeID
+
+	// records the event passed to explore
+	explore := NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
+
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, slog.Default(), otel.Tracer("test"))
+
+	ev := &EventGetCloserNodesSuccess{
+		QueryID:     routing.ExploreQueryID,
+		To:          nodes[1].NodeID,
+		Target:      nodes[0].NodeID.Key(),
+		CloserNodes: []kadt.PeerID{nodes[2].NodeID},
+	}
+	routingBehaviour.Notify(ctx, ev)
+
+	// explore should receive message response event
+	require.IsType(t, &routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID]{}, explore.Received)
+
+	rev := explore.Received.(*routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID])
+	require.True(t, nodes[1].NodeID.Equal(rev.NodeID))
+	require.Equal(t, ev.CloserNodes, rev.CloserNodes)
+}
+
+func TestRoutingExploreGetClosestNodesFailure(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
+
+	self := nodes[0].NodeID
+
+	// records the event passed to explore
+	explore := NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
+
+	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, slog.Default(), otel.Tracer("test"))
+
+	failure := errors.New("failed")
+	ev := &EventGetCloserNodesFailure{
+		QueryID: routing.ExploreQueryID,
+		To:      nodes[1].NodeID,
+		Target:  nodes[0].NodeID.Key(),
+		Err:     failure,
+	}
+
+	routingBehaviour.Notify(ctx, ev)
+
+	// bootstrap should receive message response event
+	require.IsType(t, &routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID]{}, explore.Received)
+
+	rev := explore.Received.(*routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID])
+	require.Equal(t, peer.ID(nodes[1].NodeID), peer.ID(rev.NodeID))
+	require.Equal(t, failure, rev.Error)
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/key"
 	"github.com/plprobelab/go-kademlia/routing/simplert"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,10 +34,12 @@ func TestExploreConfigValidate(t *testing.T) {
 	})
 }
 
+// maxCpl is 7 since we are using tiny 8-bit keys
+const maxCplTinyKeys = 7
+
 func DefaultDynamicSchedule(t *testing.T, clk clock.Clock) *DynamicExploreSchedule {
 	t.Helper()
-	// maxCpl is 7 since we are using tiny 8-bit keys
-	s, err := NewDynamicExploreSchedule(7, clk.Now(), time.Hour, 1, 0)
+	s, err := NewDynamicExploreSchedule(maxCplTinyKeys, clk.Now(), time.Hour, 1, 0)
 	require.NoError(t, err)
 	return s
 }
@@ -143,7 +144,7 @@ func TestExploreFirstQueriesForMaximumCpl(t *testing.T) {
 	require.Equal(t, schedule.maxCpl, st.Cpl)
 
 	// the query should attempt to look for nodes near a key with the maximum cpl
-	require.True(t, key.Equal(self.Key(), st.Target))
+	require.Equal(t, schedule.maxCpl, self.Key().CommonPrefixLength(st.Target))
 
 	// the query should be contacting the nearest known node
 	require.Equal(t, a, st.NodeID)
@@ -351,7 +352,7 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 	require.Equal(t, schedule.maxCpl, st.Cpl)
 
 	// the query should attempt to look for nodes near a key with the maximum cpl
-	require.True(t, key.Equal(self.Key(), st.Target))
+	require.Equal(t, schedule.maxCpl, self.Key().CommonPrefixLength(st.Target))
 
 	// the query should be contacting the nearest known node
 	require.Equal(t, a, st.NodeID)
@@ -379,7 +380,7 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 	require.Equal(t, schedule.maxCpl-1, st.Cpl)
 
 	// the query should attempt to look for nodes near a key with the maximum cpl
-	require.True(t, key.Equal(self.Key(), st.Target))
+	require.Equal(t, schedule.maxCpl-1, self.Key().CommonPrefixLength(st.Target))
 
 	// the query should be contacting the nearest known node
 	require.Equal(t, a, st.NodeID)

@@ -144,16 +144,18 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 	}
 
 	// is an explore due yet?
-	next, ok := e.schedule.NextCpl(e.cfg.Clock.Now())
+	cpl, ok := e.schedule.NextCpl(e.cfg.Clock.Now())
 	if !ok {
 		return &StateExploreIdle{}
 	}
 
-	// start an explore query
-	node, err := e.cplFn(e.self.Key(), next)
+	// start an explore query by synthesizing a node whose key has the appropriate cpl
+	node, err := e.cplFn(e.self.Key(), cpl)
 	if err != nil {
-		// TODO: don't panic
-		panic(err)
+		return &StateExploreFailure{
+			Cpl:   cpl,
+			Error: fmt.Errorf("synthesize random node for cpl %d: %w", cpl, err),
+		}
 	}
 	seeds := e.rt.NearestNodes(node.Key(), 20)
 
@@ -164,13 +166,15 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 	// qryCfg.Concurrency = b.cfg.RequestConcurrency
 	// qryCfg.RequestTimeout = b.cfg.RequestTimeout
 
-	qry, err := query.NewFindCloserQuery[K, N, any](e.self, ExploreQueryID, e.self.Key(), iter, seeds, qryCfg)
+	qry, err := query.NewFindCloserQuery[K, N, any](e.self, ExploreQueryID, node.Key(), iter, seeds, qryCfg)
 	if err != nil {
-		// TODO: don't panic
-		panic(err)
+		return &StateExploreFailure{
+			Cpl:   cpl,
+			Error: fmt.Errorf("start explore query for cpl %d: %w", cpl, err),
+		}
 	}
 	e.qry = qry
-	e.qryCpl = next
+	e.qryCpl = cpl
 
 	return e.advanceQuery(ctx, &query.EventQueryPoll{})
 }
@@ -268,12 +272,20 @@ type StateExploreQueryTimeout struct {
 	Stats query.QueryStats
 }
 
+// StateExploreFailure indicates that the explore state machine encountered a failure condition when
+// attempting to explore a cpl.
+type StateExploreFailure struct {
+	Cpl   int // the cpl being explored
+	Error error
+}
+
 // exploreState() ensures that only [Explore] states can be assigned to an [ExploreState].
 func (*StateExploreIdle) exploreState()             {}
 func (*StateExploreFindCloser[K, N]) exploreState() {}
 func (*StateExploreWaiting) exploreState()          {}
 func (*StateExploreQueryFinished) exploreState()    {}
 func (*StateExploreQueryTimeout) exploreState()     {}
+func (*StateExploreFailure) exploreState()          {}
 
 // ExploreEvent is an event intended to advance the state of an [Explore].
 type ExploreEvent interface {

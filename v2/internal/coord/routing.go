@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
@@ -17,11 +17,11 @@ import (
 const (
 	// IncludeQueryID is the id for connectivity checks performed by the include state machine.
 	// This identifier used for routing network responses to the state machine.
-	IncludeQueryID = query.QueryID("include")
+	IncludeQueryID = coordt.QueryID("include")
 
 	// ProbeQueryID is the id for connectivity checks performed by the probe state machine
 	// This identifier used for routing network responses to the state machine.
-	ProbeQueryID = query.QueryID("probe")
+	ProbeQueryID = coordt.QueryID("probe")
 )
 
 // A RoutingBehaviour provides the behaviours for bootstrapping and maintaining a DHT's routing table.
@@ -30,16 +30,16 @@ type RoutingBehaviour struct {
 	self kadt.PeerID
 
 	// bootstrap is the bootstrap state machine, responsible for bootstrapping the routing table
-	bootstrap SM[routing.BootstrapEvent, routing.BootstrapState]
+	bootstrap coordt.StateMachine[routing.BootstrapEvent, routing.BootstrapState]
 
 	// include is the inclusion state machine, responsible for vetting nodes before including them in the routing table
-	include SM[routing.IncludeEvent, routing.IncludeState]
+	include coordt.StateMachine[routing.IncludeEvent, routing.IncludeState]
 
 	// probe is the node probing state machine, responsible for periodically checking connectivity of nodes in the routing table
-	probe SM[routing.ProbeEvent, routing.ProbeState]
+	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState]
 
 	// probe is the routing table explore state machine, responsible for increasing the occupanct of the routing table
-	explore SM[routing.ExploreEvent, routing.ExploreState]
+	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -49,7 +49,15 @@ type RoutingBehaviour struct {
 	tracer trace.Tracer
 }
 
-func NewRoutingBehaviour(self kadt.PeerID, bootstrap SM[routing.BootstrapEvent, routing.BootstrapState], include SM[routing.IncludeEvent, routing.IncludeState], probe SM[routing.ProbeEvent, routing.ProbeState], explore SM[routing.ExploreEvent, routing.ExploreState], logger *slog.Logger, tracer trace.Tracer) *RoutingBehaviour {
+func NewRoutingBehaviour(
+	self kadt.PeerID,
+	bootstrap coordt.StateMachine[routing.BootstrapEvent, routing.BootstrapState],
+	include coordt.StateMachine[routing.IncludeEvent, routing.IncludeState],
+	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState],
+	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState],
+	logger *slog.Logger,
+	tracer trace.Tracer,
+) *RoutingBehaviour {
 	r := &RoutingBehaviour{
 		self:      self,
 		bootstrap: bootstrap,

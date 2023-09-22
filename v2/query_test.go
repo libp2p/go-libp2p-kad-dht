@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
@@ -22,11 +22,11 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 
 	// d3 does not know about d1
 	_, err := d3.kad.GetNode(ctx, kadt.PeerID(d1.host.ID()))
-	require.ErrorIs(t, err, coord.ErrNodeNotFound)
+	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
 
 	// d1 does not know about d3
 	_, err = d1.kad.GetNode(ctx, kadt.PeerID(d3.host.ID()))
-	require.ErrorIs(t, err, coord.ErrNodeNotFound)
+	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
 
 	// // but when d3 queries d2, d1 and d3 discover each other
 	_, _ = d3.FindPeer(ctx, "something")

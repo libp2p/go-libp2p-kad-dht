@@ -12,7 +12,7 @@ import (
 
 //go:generate go run ./gen.go
 
-// GenRandPeerID generates a random peerID for a given cpl
+// GenRandPeerID generates a random [kadt.PeerID] whose key has a common prefix length of exactly cpl with the supplied key.
 // Ported from go-libp2p-kbucket
 func GenRandPeerID(k kadt.Key, cpl int) (kadt.PeerID, error) {
 	if cpl > 15 {
@@ -28,8 +28,12 @@ func GenRandPeerID(k kadt.Key, cpl int) (kadt.PeerID, error) {
 	return kadt.PeerID(string(id[:])), nil
 }
 
+type keybit interface {
+	Bit(i int) uint
+}
+
 // prefix generates random bits that have a common prefix length of exactly cpl with the supplied key.
-func prefix(k kadt.Key, cpl int) uint16 {
+func prefix(k keybit, cpl int) uint16 {
 	var p uint16
 	// copy the first cpl+1 bits so we can flip the last one
 	for i := 0; i < cpl+1; i++ {

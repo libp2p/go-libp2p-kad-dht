@@ -9,6 +9,7 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
 )
 
@@ -65,7 +66,7 @@ func TestQueryMessagesNode(t *testing.T) {
 	cfg := DefaultQueryConfig()
 	cfg.Clock = clk
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -114,7 +115,7 @@ func TestQueryFindCloserNearest(t *testing.T) {
 	cfg := DefaultQueryConfig()
 	cfg.Clock = clk
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -145,7 +146,7 @@ func TestQueryCancelFinishesQuery(t *testing.T) {
 	cfg := DefaultQueryConfig()
 	cfg.Clock = clk
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -188,7 +189,7 @@ func TestQueryNoClosest(t *testing.T) {
 	cfg := DefaultQueryConfig()
 	cfg.Clock = clk
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -232,7 +233,7 @@ func TestQueryWaitsAtCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -286,7 +287,7 @@ func TestQueryTimedOutNodeMakesCapacity(t *testing.T) {
 	cfg.RequestTimeout = 3 * time.Minute
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -391,7 +392,7 @@ func TestQueryFindCloserResponseMakesCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -475,7 +476,7 @@ func TestQueryCloserNodesAreAddedToIteration(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -531,7 +532,7 @@ func TestQueryCloserNodesIgnoresDuplicates(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -585,7 +586,7 @@ func TestQueryCancelFinishesIteration(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -623,7 +624,7 @@ func TestQueryFinishedIgnoresLaterEvents(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -680,7 +681,7 @@ func TestQueryWithCloserIterIgnoresMessagesFromUnknownNodes(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -732,7 +733,7 @@ func TestQueryWithCloserIterFinishesWhenNumResultsReached(t *testing.T) {
 	cfg.Concurrency = 4
 	cfg.NumResults = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -792,7 +793,7 @@ func TestQueryWithCloserIterContinuesUntilNumResultsReached(t *testing.T) {
 	cfg.Concurrency = 4
 	cfg.NumResults = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -864,7 +865,7 @@ func TestQueryNotContactedMakesCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -922,7 +923,7 @@ func TestFindCloserQueryAllNotContactedFinishes(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) // allow all to be contacted at once
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -981,7 +982,7 @@ func TestQueryAllContactedFinishes(t *testing.T) {
 	cfg.Concurrency = len(knownNodes)    // allow all to be contacted at once
 	cfg.NumResults = len(knownNodes) + 1 // one more than the size of the network
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -1040,7 +1041,7 @@ func TestQueryNeverMessagesSelf(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := a
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)
@@ -1090,7 +1091,7 @@ func TestQueryMessagesNearest(t *testing.T) {
 	cfg := DefaultQueryConfig()
 	cfg.Clock = clk
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	msg := tiny.Message{Content: "msg"}
@@ -1131,7 +1132,7 @@ func TestQueryMessageResponseMakesCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) - 1 // one less than the number of initial nodes
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	msg := tiny.Message{Content: "msg"}
@@ -1206,7 +1207,7 @@ func TestQueryAllNotContactedFinishes(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = len(knownNodes) // allow all to be contacted at once
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	msg := tiny.Message{Content: "msg"}
@@ -1269,7 +1270,7 @@ func TestFindCloserQueryIncludesPartialClosestNodesWhenCancelled(t *testing.T) {
 	cfg.Concurrency = 4
 	cfg.NumResults = 4
 
-	queryID := QueryID("test")
+	queryID := coordt.QueryID("test")
 
 	self := tiny.NewNode(0)
 	qry, err := NewFindCloserQuery[tiny.Key, tiny.Node, tiny.Message](self, queryID, target, iter, knownNodes, cfg)

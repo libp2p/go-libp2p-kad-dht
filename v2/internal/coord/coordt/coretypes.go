@@ -1,4 +1,4 @@
-package coord
+package coordt
 
 import (
 	"context"
@@ -10,6 +10,15 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
+
+// TODO: rename to something like OperationID. This type isn't only used to identify queries but also other operations like broadcasts.
+type QueryID string
+
+const InvalidQueryID QueryID = ""
+
+type StateMachine[E any, S any] interface {
+	Advance(context.Context, E) S
+}
 
 // Value is a value that may be stored in the DHT.
 type Value interface {

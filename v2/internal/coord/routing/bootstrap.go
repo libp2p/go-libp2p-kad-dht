@@ -11,12 +11,13 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // BootstrapQueryID is the id for the query operated by the bootstrap process
-const BootstrapQueryID = query.QueryID("bootstrap")
+const BootstrapQueryID = coordt.QueryID("bootstrap")
 
 type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	// self is the node id of the system the bootstrap is running on
@@ -196,7 +197,7 @@ type BootstrapState interface {
 
 // StateBootstrapFindCloser indicates that the bootstrap query wants to send a find closer nodes message to a node.
 type StateBootstrapFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	Target  K // the key that the query wants to find closer nodes for
 	NodeID  N // the node to send the message to
 	Stats   query.QueryStats

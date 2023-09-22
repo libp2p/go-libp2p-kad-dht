@@ -83,7 +83,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 
 	// the query should attempt to contact the single closer node it has found
 	st, ok = state.(*StatePoolFindCloser[tiny.Key, tiny.Node])
-	require.True(t, ok)
+	require.True(t, ok, "state is %T", state)
 
 	require.Equal(t, queryID, st.QueryID)         // the query should be the same
 	require.Equal(t, b, st.NodeID)                // the query should attempt to contact the newly discovered node

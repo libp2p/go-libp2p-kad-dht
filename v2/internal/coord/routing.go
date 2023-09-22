@@ -9,11 +9,22 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
-// A RoutingBehaviour provices the behaviours for bootstrapping and maintaining a DHT's routing table.
+const (
+	// IncludeQueryID is the id for connectivity checks performed by the include state machine.
+	// This identifier used for routing network responses to the state machine.
+	IncludeQueryID = query.QueryID("include")
+
+	// ProbeQueryID is the id for connectivity checks performed by the probe state machine
+	// This identifier used for routing network responses to the state machine.
+	ProbeQueryID = query.QueryID("probe")
+)
+
+// A RoutingBehaviour provides the behaviours for bootstrapping and maintaining a DHT's routing table.
 type RoutingBehaviour struct {
 	// self is the peer id of the system the dht is running on
 	self kadt.PeerID
@@ -108,7 +119,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 	case *EventGetCloserNodesSuccess:
 		span.SetAttributes(attribute.String("event", "EventGetCloserNodesSuccess"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", ev.To.String()))
 		switch ev.QueryID {
-		case "bootstrap":
+		case routing.BootstrapQueryID:
 			for _, info := range ev.CloserNodes {
 				// TODO: do this after advancing bootstrap
 				r.pending = append(r.pending, &EventAddNode{
@@ -125,7 +136,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 
-		case "include":
+		case IncludeQueryID:
 			var cmd routing.IncludeEvent
 			// require that the node responded with at least one closer node
 			if len(ev.CloserNodes) > 0 {
@@ -144,7 +155,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 				r.pending = append(r.pending, next)
 			}
 
-		case "probe":
+		case ProbeQueryID:
 			var cmd routing.ProbeEvent
 			// require that the node responded with at least one closer node
 			if len(ev.CloserNodes) > 0 {
@@ -170,7 +181,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		span.SetAttributes(attribute.String("event", "EventGetCloserNodesFailure"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", ev.To.String()))
 		span.RecordError(ev.Err)
 		switch ev.QueryID {
-		case "bootstrap":
+		case routing.BootstrapQueryID:
 			cmd := &routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID]{
 				NodeID: ev.To,
 				Error:  ev.Err,
@@ -180,7 +191,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			if ok {
 				r.pending = append(r.pending, next)
 			}
-		case "include":
+		case IncludeQueryID:
 			cmd := &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
 				NodeID: ev.To,
 				Error:  ev.Err,
@@ -190,7 +201,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			if ok {
 				r.pending = append(r.pending, next)
 			}
-		case "probe":
+		case ProbeQueryID:
 			cmd := &routing.EventProbeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
 				NodeID: ev.To,
 				Error:  ev.Err,
@@ -341,7 +352,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 		span.SetAttributes(attribute.String("out_event", "EventOutboundGetCloserNodes"))
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{
-			QueryID: "include",
+			QueryID: IncludeQueryID,
 			To:      st.NodeID,
 			Target:  st.NodeID.Key(),
 			Notify:  r,
@@ -383,7 +394,7 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 	case *routing.StateProbeConnectivityCheck[kadt.Key, kadt.PeerID]:
 		// include wants to send a find node message to a node
 		return &EventOutboundGetCloserNodes{
-			QueryID: "probe",
+			QueryID: ProbeQueryID,
 			To:      st.NodeID,
 			Target:  st.NodeID.Key(),
 			Notify:  r,

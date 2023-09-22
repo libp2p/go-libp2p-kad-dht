@@ -15,6 +15,9 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
+// BootstrapQueryID is the id for the query operated by the bootstrap process
+const BootstrapQueryID = query.QueryID("bootstrap")
+
 type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	// self is the node id of the system the bootstrap is running on
 	self N
@@ -106,9 +109,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		qryCfg.Concurrency = b.cfg.RequestConcurrency
 		qryCfg.RequestTimeout = b.cfg.RequestTimeout
 
-		queryID := query.QueryID("bootstrap")
-
-		qry, err := query.NewFindCloserQuery[K, N, any](b.self, queryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
+		qry, err := query.NewFindCloserQuery[K, N, any](b.self, BootstrapQueryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
 		if err != nil {
 			// TODO: don't panic
 			panic(err)

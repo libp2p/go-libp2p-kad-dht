@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
+// ExploreQueryID is the id for the query operated by the explore process
 const ExploreQueryID = query.QueryID("explore")
 
 // The Explore state machine is used to discover new nodes at various distances from the local node in order to improve

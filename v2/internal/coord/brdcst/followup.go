@@ -141,7 +141,13 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 // pool event ([query.PoolEvent]). Some [BroadcastEvent] events don't map to
 // a query pool event, in which case this method handles that event and returns
 // nil.
-func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) query.PoolEvent {
+func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) (out query.PoolEvent) {
+	ctx, span := tele.StartSpan(ctx, "FollowUp.handleEvent", trace.WithAttributes(tele.AttrInEvent(ev)))
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
+
 	switch ev := ev.(type) {
 	case *EventBroadcastStart[K, N]:
 		return &query.EventPoolAddFindCloserQuery[K, N]{

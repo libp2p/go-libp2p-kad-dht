@@ -21,6 +21,9 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	// the unique ID for this broadcast operation
 	queryID coordt.QueryID
 
+	// a struct holding configuration options
+	cfg *ConfigFollowUp
+
 	// a reference to the query pool in which the "get closer nodes" queries
 	// will be spawned. This pool is governed by the broadcast [Pool].
 	// Unfortunately, having a reference here breaks the hierarchy but it makes
@@ -53,9 +56,10 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 }
 
 // NewFollowUp initializes a new [FollowUp] struct.
-func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, pool *query.Pool[K, N, M], msg M) *FollowUp[K, N, M] {
+func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, pool *query.Pool[K, N, M], msg M, cfg *ConfigFollowUp) *FollowUp[K, N, M] {
 	return &FollowUp[K, N, M]{
 		queryID: qid,
+		cfg:     cfg,
 		pool:    pool,
 		msg:     msg,
 		todo:    map[string]N{},

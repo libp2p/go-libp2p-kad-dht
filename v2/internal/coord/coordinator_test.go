@@ -99,11 +99,11 @@ func TestExhaustiveQuery(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := kadt.PeerID(nodes[0].NodeID)
+	self := nodes[0].NodeID
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 
-	target := kadt.PeerID(nodes[3].NodeID).Key()
+	target := nodes[3].NodeID.Key()
 
 	visited := make(map[string]int)
 
@@ -137,7 +137,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 	// A (ids[0]) is looking for D (ids[3])
 	// A will first ask B, B will reply with C's address (and A's address)
 	// A will then ask C, C will reply with D's address (and B's address)
-	self := kadt.PeerID(nodes[0].NodeID)
+	self := nodes[0].NodeID
 	c, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	if err != nil {
 		log.Fatalf("unexpected error creating coordinator: %v", err)
@@ -194,7 +194,7 @@ func TestBootstrap(t *testing.T) {
 
 	ccfg.Clock = clk
 
-	self := kadt.PeerID(nodes[0].NodeID)
+	self := nodes[0].NodeID
 	d, err := NewCoordinator(self, nodes[0].Router, nodes[0].RoutingTable, ccfg)
 	require.NoError(t, err)
 

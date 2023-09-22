@@ -276,7 +276,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 
 		// tell the probe state machine to remove the node from the routing table and probe list
 		cmdProbe := &routing.EventProbeRemove[kadt.Key, kadt.PeerID]{
-			NodeID: kadt.PeerID(ev.NodeID),
+			NodeID: ev.NodeID,
 		}
 		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
 		if ok {

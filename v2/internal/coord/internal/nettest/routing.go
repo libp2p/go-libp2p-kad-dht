@@ -69,7 +69,7 @@ func NewRouter(self kadt.PeerID, top *Topology) *Router {
 }
 
 func (r *Router) NodeID() kad.NodeID[kadt.Key] {
-	return kadt.PeerID(r.self)
+	return r.self
 }
 
 func (r *Router) handleMessage(ctx context.Context, n kadt.PeerID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {

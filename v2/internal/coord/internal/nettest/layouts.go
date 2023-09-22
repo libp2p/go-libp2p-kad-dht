@@ -44,11 +44,11 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Peer, error) {
 	for i := 0; i < len(nodes); i++ {
 		if i > 0 {
 			nodes[i].Router.AddToPeerStore(context.Background(), nodes[i-1].NodeID)
-			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i-1].NodeID))
+			nodes[i].RoutingTable.AddNode(nodes[i-1].NodeID)
 		}
 		if i < len(nodes)-1 {
 			nodes[i].Router.AddToPeerStore(context.Background(), nodes[i+1].NodeID)
-			nodes[i].RoutingTable.AddNode(kadt.PeerID(nodes[i+1].NodeID))
+			nodes[i].RoutingTable.AddNode(nodes[i+1].NodeID)
 		}
 	}
 

@@ -108,7 +108,13 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolStat
 // state machine. If any return parameter is nil, either the pool event was for
 // an unknown query or the event doesn't need to be forwarded to the state
 // machine.
-func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (Broadcast, BroadcastEvent) {
+func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broadcast, out BroadcastEvent) {
+	ctx, span := tele.StartSpan(ctx, "Pool.handleEvent", trace.WithAttributes(tele.AttrInEvent(ev)))
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
+
 	switch ev := ev.(type) {
 	case *EventPoolStartBroadcast[K, N, M]:
 		// first initialize the state machine for the broadcast desired strategy

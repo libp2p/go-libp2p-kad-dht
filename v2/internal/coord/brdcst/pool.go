@@ -109,7 +109,7 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolStat
 // an unknown query or the event doesn't need to be forwarded to the state
 // machine.
 func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broadcast, out BroadcastEvent) {
-	ctx, span := tele.StartSpan(ctx, "Pool.handleEvent", trace.WithAttributes(tele.AttrInEvent(ev)))
+	_, span := tele.StartSpan(ctx, "Pool.handleEvent", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()

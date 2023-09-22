@@ -12,11 +12,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
-const ExploreQueryID = query.QueryID("explore")
+const ExploreQueryID = coordt.QueryID("explore")
 
 // The Explore state machine is used to discover new nodes at various distances from the local node in order to improve
 // the occupancy of routing table buckets.
@@ -242,7 +243,7 @@ type StateExploreIdle struct{}
 // StateExploreFindCloser indicates that the explore query wants to send a find closer nodes message to a node.
 type StateExploreFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 	Cpl     int // the cpl being explored
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	Target  K // the key that the query wants to find closer nodes for
 	NodeID  N // the node to send the message to
 	Stats   query.QueryStats

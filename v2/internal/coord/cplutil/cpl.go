@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/plprobelab/go-kademlia/kad"
+
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -14,7 +16,7 @@ import (
 
 // GenRandPeerID generates a random peerID for a given cpl
 // Ported from go-libp2p-kbucket
-func GenRandPeerID(k kadt.Key, cpl int) (kadt.PeerID, error) {
+func GenRandPeerID[K kad.Key[K]](k K, cpl int) (kadt.PeerID, error) {
 	if cpl > 15 {
 		return "", fmt.Errorf("cannot generate peer ID for Cpl greater than 15")
 	}
@@ -29,7 +31,7 @@ func GenRandPeerID(k kadt.Key, cpl int) (kadt.PeerID, error) {
 }
 
 // prefix generates random bits that have a common prefix length of exactly cpl with the supplied key.
-func prefix(k kadt.Key, cpl int) uint16 {
+func prefix[K kad.Key[K]](k K, cpl int) uint16 {
 	var p uint16
 	// copy the first cpl+1 bits so we can flip the last one
 	for i := 0; i < cpl+1; i++ {

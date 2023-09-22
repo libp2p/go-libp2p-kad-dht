@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,13 +39,13 @@ func TestPrefix(t *testing.T) {
 }
 
 func TestGenRandPeerID(t *testing.T) {
-	randomKey := func() key.Key256 {
+	randomKey := func() kadt.Key {
 		var buf [32]byte
 		_, _ = rand.Read(buf[:])
-		return key.NewKey256(buf[:])
+		return kadt.NewKey(buf[:])
 	}
 
-	keys := make([]key.Key256, 20)
+	keys := make([]kadt.Key, 20)
 	for i := range keys {
 		keys[i] = randomKey()
 	}

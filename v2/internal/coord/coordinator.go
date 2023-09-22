@@ -240,7 +240,7 @@ func NewCoordinator(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *
 	}
 
 	// TODO: expose more config
-	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
+	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID[kadt.Key], schedule, exploreCfg)
 	if err != nil {
 		return nil, fmt.Errorf("explore: %w", err)
 	}

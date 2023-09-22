@@ -28,7 +28,7 @@ func TestPoolStopWhenNoQueries(t *testing.T) {
 	require.IsType(t, &StatePoolIdle{}, state)
 }
 
-func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
+func TestPool_FollowUp_lifecycle(t *testing.T) {
 	// This test attempts to cover the whole lifecycle of
 	// a follow-up broadcast operation.
 	//
@@ -167,6 +167,109 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 
 	state = p.Advance(ctx, &EventPoolPoll{})
 	require.IsType(t, &StatePoolIdle{}, state)
+
+	require.Nil(t, p.bcs[queryID]) // should have been removed
+}
+
+func TestPool_FollowUp_stop_during_query(t *testing.T) {
+	// This test attempts to cover the case where a followup broadcast operation
+	// is cancelled during the query phase
+
+	ctx := context.Background()
+	cfg := DefaultConfigPool()
+
+	self := tiny.NewNode(0)
+
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
+	require.NoError(t, err)
+
+	msg := tiny.Message{Content: "store this"}
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(0b00000100) // 4
+
+	queryID := coordt.QueryID("test")
+
+	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{a},
+		Config:  DefaultConfigFollowUp(),
+	})
+
+	// the query should attempt to contact the node it was given
+	st, ok := state.(*StatePoolFindCloser[tiny.Key, tiny.Node])
+	require.True(t, ok, "state is %T", state)
+
+	require.Equal(t, queryID, st.QueryID)         // the query should be the one just added
+	require.Equal(t, a, st.NodeID)                // the query should attempt to contact the node it was given
+	require.True(t, key.Equal(target, st.Target)) // with the correct target
+
+	// polling the state machine returns waiting
+	state = p.Advance(ctx, &EventPoolPoll{})
+	require.IsType(t, &StatePoolWaiting{}, state)
+
+	state = p.Advance(ctx, &EventPoolStopBroadcast{
+		QueryID: queryID,
+	})
+	finish, ok := state.(*StatePoolBroadcastFinished[tiny.Key, tiny.Node])
+	require.True(t, ok, "state is %T", state)
+	require.Len(t, finish.Contacted, 0)
+}
+
+func TestPool_FollowUp_stop_during_followup_phase(t *testing.T) {
+	ctx := context.Background()
+	cfg := DefaultConfigPool()
+
+	self := tiny.NewNode(0)
+
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
+	require.NoError(t, err)
+
+	msg := tiny.Message{Content: "store this"}
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00000011) // 3
+
+	queryID := coordt.QueryID("test")
+
+	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{a, b},
+		Config:  DefaultConfigFollowUp(),
+	})
+
+	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
+	state = p.Advance(ctx, &EventPoolPoll{})
+	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
+
+	state = p.Advance(ctx, &EventPoolGetCloserNodesSuccess[tiny.Key, tiny.Node]{
+		QueryID:     queryID,
+		Target:      target,
+		NodeID:      a,
+		CloserNodes: []tiny.Node{a, b},
+	})
+	require.IsType(t, &StatePoolWaiting{}, state)
+
+	state = p.Advance(ctx, &EventPoolGetCloserNodesSuccess[tiny.Key, tiny.Node]{
+		QueryID:     queryID,
+		Target:      target,
+		NodeID:      b,
+		CloserNodes: []tiny.Node{a, b},
+	})
+	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
+
+	state = p.Advance(ctx, &EventPoolStopBroadcast{
+		QueryID: queryID,
+	})
+
+	st, ok := state.(*StatePoolBroadcastFinished[tiny.Key, tiny.Node])
+	require.True(t, ok, "state is %T", state)
+	require.Equal(t, st.QueryID, queryID)
+	require.Len(t, st.Contacted, 2)
+	require.Len(t, st.Errors, 2)
 }
 
 func TestPoolState_interface_conformance(t *testing.T) {

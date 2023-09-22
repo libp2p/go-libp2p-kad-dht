@@ -93,6 +93,25 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 		}
 	}
 
+	_, isStopEvent := ev.(*EventBroadcastStop)
+	if isStopEvent {
+		for _, n := range f.todo {
+			delete(f.todo, n.String())
+			f.failed[n.String()] = struct {
+				Node N
+				Err  error
+			}{Node: n, Err: fmt.Errorf("cancelled")}
+		}
+
+		for _, n := range f.waiting {
+			delete(f.waiting, n.String())
+			f.failed[n.String()] = struct {
+				Node N
+				Err  error
+			}{Node: n, Err: fmt.Errorf("cancelled")}
+		}
+	}
+
 	for k, n := range f.todo {
 		delete(f.todo, k)
 		f.waiting[k] = n
@@ -107,7 +126,7 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 		return &StateBroadcastWaiting{}
 	}
 
-	if len(f.todo) == 0 && len(f.closest) != 0 {
+	if isStopEvent || (len(f.todo) == 0 && len(f.closest) != 0) {
 		return &StateBroadcastFinished[K, N]{
 			QueryID:   f.queryID,
 			Contacted: f.closest,
@@ -131,7 +150,10 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 			Seed:    ev.Seed,
 		}
 	case *EventBroadcastStop:
-		// TODO: stop outstanding storage requests
+		if f.isQueryDone() {
+			return nil
+		}
+
 		return &query.EventPoolStopQuery{
 			QueryID: f.queryID,
 		}
@@ -201,7 +223,7 @@ func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, ev query.PoolEvent)
 
 	case *query.StatePoolQueryTimeout:
 		return &StateBroadcastFinished[K, N]{
-			QueryID:   st.QueryID,
+			QueryID:   f.queryID,
 			Contacted: make([]N, 0),
 			Errors: map[string]struct {
 				Node N
@@ -215,4 +237,10 @@ func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, ev query.PoolEvent)
 	}
 
 	return nil, false
+}
+
+// isQueryDone returns true if the DHT walk/ query phase has finished.
+// This is indicated by the fact that the [FollowUp.closest] slice is filled.
+func (f *FollowUp[K, N, M]) isQueryDone() bool {
+	return len(f.closest) != 0
 }

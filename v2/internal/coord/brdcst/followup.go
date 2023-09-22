@@ -12,22 +12,47 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
+// FollowUp is a [Broadcast] state machine and encapsulates the logic around
+// doing a "classic" put operation. This mimics the algorithm employed in the
+// original go-libp2p-kad-dht v1 code base. It first queries the closest nodes
+// to a certain target key, and after they were discovered, it "follows up" with
+// storing the record with these closest nodes.
 type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
+	// the unique ID for this broadcast operation
 	queryID coordt.QueryID
-	pool    *query.Pool[K, N, M]
-	msg     M
+
+	// a reference to the query pool in which the "get closer nodes" queries
+	// will be spawned. This pool is governed by the broadcast [Pool].
+	// Unfortunately, having a reference here breaks the hierarchy but it makes
+	// the logic much easier to implement.
+	pool *query.Pool[K, N, M]
+
+	// the message that we will send to the closest nodes in the follow-up phase
+	msg M
+
+	// the closest nodes to the target key. This will be filled after the query
+	// for the closest nodes has finished (when the query pool emits a
+	// [query.StatePoolQueryFinished] event).
 	closest []N
 
-	// nodes we still need to store records with
-	todo    map[string]N
+	// nodes we still need to store records with. This map will be filled with
+	// all the closest nodes after the query has finished.
+	todo map[string]N
+
+	// nodes we have contacted to store the record but haven't heard a response yet
 	waiting map[string]N
+
+	// nodes that successfully hold the record for us
 	success map[string]N
-	failed  map[string]struct {
+
+	// nodes that failed to hold the record for us
+	failed map[string]struct {
 		Node N
 		Err  error
 	}
 }
 
+// NewFollowUp initializes a new [FollowUp] struct.
 func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, pool *query.Pool[K, N, M], msg M) *FollowUp[K, N, M] {
 	return &FollowUp[K, N, M]{
 		queryID: qid,
@@ -43,6 +68,13 @@ func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Que
 	}
 }
 
+// Advance advances the state of the [FollowUp] [Broadcast] state machine. It
+// first handles the event by mapping it to a potential event for the query
+// pool. If the [BroadcastEvent] maps to a [query.PoolEvent], it gets forwarded
+// to the query pool and handled in [FollowUp.advancePool]. If it doesn't map to
+// a query pool event, we check if there are any nodes we should contact to hold
+// the record for us and emit that instruction instead. Similarly, if we're
+// waiting on responses or are completely finished, we return that as well.
 func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out BroadcastState) {
 	ctx, span := tele.StartSpan(ctx, "FollowUp.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
@@ -82,6 +114,10 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 	return &StateBroadcastIdle{}
 }
 
+// handleEvent receives a [BroadcastEvent] and returns the corresponding query
+// pool event ([query.PoolEvent]). Some [BroadcastEvent] events don't map to
+// a query pool event, in which case this method handles that event and returns
+// nil.
 func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) query.PoolEvent {
 	switch ev := ev.(type) {
 	case *EventBroadcastStart[K, N]:
@@ -92,20 +128,16 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 		}
 	case *EventBroadcastStop:
 		// TODO: stop outstanding storage requests
-		return &query.EventPoolStopQuery{
-			QueryID: ev.QueryID,
-		}
+		return &query.EventPoolStopQuery{}
 	case *EventBroadcastNodeResponse[K, N]:
 		return &query.EventPoolNodeResponse[K, N]{
-			QueryID:     ev.QueryID,
 			NodeID:      ev.NodeID,
 			CloserNodes: ev.CloserNodes,
 		}
 	case *EventBroadcastNodeFailure[K, N]:
 		return &query.EventPoolNodeFailure[K, N]{
-			QueryID: ev.QueryID,
-			NodeID:  ev.NodeID,
-			Error:   ev.Error,
+			NodeID: ev.NodeID,
+			Error:  ev.Error,
 		}
 	case *EventBroadcastStoreRecordSuccess[K, N, M]:
 		delete(f.waiting, ev.NodeID.String())
@@ -126,6 +158,9 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 	return nil
 }
 
+// advancePool advances the query pool with the given query pool event that was
+// returned by [FollowUp.handleEvent]. The additional boolean value indicates
+// whether the returned [BroadcastState] should be ignored.
 func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, ev query.PoolEvent) (out BroadcastState, term bool) {
 	ctx, span := tele.StartSpan(ctx, "FollowUp.advanceQuery", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
@@ -140,7 +175,6 @@ func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, ev query.PoolEvent)
 			QueryID: st.QueryID,
 			NodeID:  st.NodeID,
 			Target:  st.Target,
-			Stats:   st.Stats,
 		}, true
 	case *query.StatePoolWaitingAtCapacity:
 		return &StateBroadcastWaiting{

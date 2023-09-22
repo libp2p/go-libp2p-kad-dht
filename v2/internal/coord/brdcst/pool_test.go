@@ -17,7 +17,7 @@ var _ coordt.StateMachine[PoolEvent, PoolState] = (*Pool[tiny.Key, tiny.Node, ti
 
 func TestPoolStopWhenNoQueries(t *testing.T) {
 	ctx := context.Background()
-	cfg := DefaultPoolConfig()
+	cfg := DefaultConfigPool()
 
 	self := tiny.NewNode(0)
 
@@ -37,7 +37,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 	// Second, we store the record with the remaining a and b, while b fails to respond
 
 	ctx := context.Background()
-	cfg := DefaultPoolConfig()
+	cfg := DefaultConfigPool()
 
 	self := tiny.NewNode(0)
 
@@ -117,7 +117,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 
 	// This means we should start the follow-up phase
 	srState, ok := state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
-	require.True(t, ok)
+	require.True(t, ok, "state is %T", state)
 
 	require.Equal(t, queryID, srState.QueryID)
 	firstContactedNode := srState.NodeID
@@ -128,7 +128,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 	// the second node
 	state = p.Advance(ctx, &EventPoolPoll{})
 	srState, ok = state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
-	require.True(t, ok)
+	require.True(t, ok, "state is %T", state)
 
 	require.Equal(t, queryID, srState.QueryID)
 	require.True(t, a == srState.NodeID || b == srState.NodeID) // we should contact either node - there's no inherent order
@@ -157,7 +157,7 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 
 	// since we have contacted all nodes we knew, the broadcast has finished
 	finishState, ok := state.(*StatePoolBroadcastFinished[tiny.Key, tiny.Node])
-	require.True(t, ok)
+	require.True(t, ok, "state is %T", state)
 
 	require.Equal(t, queryID, finishState.QueryID)
 	require.Len(t, finishState.Contacted, 2)
@@ -167,4 +167,32 @@ func TestPool_EventPoolAddBroadcast_FollowUp_lifecycle(t *testing.T) {
 
 	state = p.Advance(ctx, &EventPoolPoll{})
 	require.IsType(t, &StatePoolIdle{}, state)
+}
+
+func TestPoolState_interface_conformance(t *testing.T) {
+	states := []PoolState{
+		&StatePoolIdle{},
+		&StatePoolWaiting{},
+		&StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{},
+		&StatePoolFindCloser[tiny.Key, tiny.Node]{},
+		&StatePoolBroadcastFinished[tiny.Key, tiny.Node]{},
+	}
+	for _, st := range states {
+		st.poolState() // drives test coverage
+	}
+}
+
+func TestPoolEvent_interface_conformance(t *testing.T) {
+	events := []PoolEvent{
+		&EventPoolStopBroadcast{},
+		&EventPoolPoll{},
+		&EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{},
+		&EventPoolGetCloserNodesSuccess[tiny.Key, tiny.Node]{},
+		&EventPoolGetCloserNodesFailure[tiny.Key, tiny.Node]{},
+		&EventPoolStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{},
+		&EventPoolStoreRecordFailure[tiny.Key, tiny.Node, tiny.Message]{},
+	}
+	for _, ev := range events {
+		ev.poolEvent() // drives test coverage
+	}
 }

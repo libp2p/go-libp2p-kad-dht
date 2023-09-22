@@ -40,7 +40,7 @@ type Pool[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 }
 
 // NewPool initializes a new broadcast pool. If cfg is nil, the
-// [DefaultPoolConfig] will be used. Each broadcast pool creates its own query
+// [DefaultConfigPool] will be used. Each broadcast pool creates its own query
 // pool ([query.Pool]). A query pool limits the number of concurrent queries
 // and already exists "stand-alone" beneath the [coord.PooledQueryBehaviour].
 // We are initializing a new one in here because:
@@ -51,7 +51,7 @@ type Pool[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 //     4.
 func NewPool[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, cfg *ConfigPool) (*Pool[K, N, M], error) {
 	if cfg == nil {
-		cfg = DefaultPoolConfig()
+		cfg = DefaultConfigPool()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate pool config: %w", err)
 	}
@@ -112,9 +112,9 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (Broadcas
 	switch ev := ev.(type) {
 	case *EventPoolStartBroadcast[K, N, M]:
 		// first initialize the state machine for the broadcast desired strategy
-		switch ev.Config.(type) {
+		switch cfg := ev.Config.(type) {
 		case *ConfigFollowUp:
-			p.bcs[ev.QueryID] = NewFollowUp(ev.QueryID, p.qp, ev.Message)
+			p.bcs[ev.QueryID] = NewFollowUp(ev.QueryID, p.qp, ev.Message, cfg)
 		case *ConfigOptimistic:
 			panic("implement me")
 		}

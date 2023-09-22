@@ -21,9 +21,9 @@ func (cfg *ConfigPool) Validate() error {
 	return nil
 }
 
-// DefaultPoolConfig returns the default configuration options for a Pool.
+// DefaultConfigPool returns the default configuration options for a Pool.
 // Options may be overridden before passing to NewPool
-func DefaultPoolConfig() *ConfigPool {
+func DefaultConfigPool() *ConfigPool {
 	return &ConfigPool{
 		pCfg: query.DefaultPoolConfig(),
 	}

@@ -121,9 +121,8 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (Broadcas
 
 		// start the new state machine
 		return p.bcs[ev.QueryID], &EventBroadcastStart[K, N]{
-			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Seed:    ev.Seed,
+			Target: ev.Target,
+			Seed:   ev.Seed,
 		}
 
 	case *EventPoolStopBroadcast:

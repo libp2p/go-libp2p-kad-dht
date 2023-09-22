@@ -49,19 +49,19 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventStartFindCloserQuery:
 		cmd = &query.EventPoolAddFindCloserQuery[kadt.Key, kadt.PeerID]{
-			QueryID:           ev.QueryID,
-			Target:            ev.Target,
-			KnownClosestNodes: ev.KnownClosestNodes,
+			QueryID: ev.QueryID,
+			Target:  ev.Target,
+			Seed:    ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
 		}
 	case *EventStartMessageQuery:
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID, *pb.Message]{
-			QueryID:           ev.QueryID,
-			Target:            ev.Target,
-			Message:           ev.Message,
-			KnownClosestNodes: ev.KnownClosestNodes,
+			QueryID: ev.QueryID,
+			Target:  ev.Target,
+			Message: ev.Message,
+			Seed:    ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify

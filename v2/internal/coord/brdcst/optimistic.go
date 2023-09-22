@@ -53,9 +53,8 @@ func (f *Optimistic[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (o
 	switch ev := ev.(type) {
 	case *EventBroadcastStart[K, N]:
 		cmd := &query.EventPoolAddFindCloserQuery[K, N]{
-			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Seed:    ev.Seed,
+			Target: ev.Target,
+			Seed:   ev.Seed,
 		}
 		return f.advancePool(ctx, cmd)
 	case *EventBroadcastStop:

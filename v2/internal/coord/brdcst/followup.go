@@ -122,22 +122,26 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 	switch ev := ev.(type) {
 	case *EventBroadcastStart[K, N]:
 		return &query.EventPoolAddFindCloserQuery[K, N]{
-			QueryID: ev.QueryID,
+			QueryID: f.queryID,
 			Target:  ev.Target,
 			Seed:    ev.Seed,
 		}
 	case *EventBroadcastStop:
 		// TODO: stop outstanding storage requests
-		return &query.EventPoolStopQuery{}
+		return &query.EventPoolStopQuery{
+			QueryID: f.queryID,
+		}
 	case *EventBroadcastNodeResponse[K, N]:
 		return &query.EventPoolNodeResponse[K, N]{
+			QueryID:     f.queryID,
 			NodeID:      ev.NodeID,
 			CloserNodes: ev.CloserNodes,
 		}
 	case *EventBroadcastNodeFailure[K, N]:
 		return &query.EventPoolNodeFailure[K, N]{
-			NodeID: ev.NodeID,
-			Error:  ev.Error,
+			QueryID: f.queryID,
+			NodeID:  ev.NodeID,
+			Error:   ev.Error,
 		}
 	case *EventBroadcastStoreRecordSuccess[K, N, M]:
 		delete(f.waiting, ev.NodeID.String())

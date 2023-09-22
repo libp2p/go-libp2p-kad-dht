@@ -11,7 +11,9 @@ import (
 )
 
 // Key is a type alias for the type of key that's used with this DHT
-// implementation.
+// implementation. In the Amino DHT, we are sending around the preimage
+// of the actual key that's used for calculating Kademlia distance. That's
+// why this Key struct also holds the preimage bytes.
 type Key struct {
 	key      key.Key256
 	preimage []byte
@@ -19,6 +21,9 @@ type Key struct {
 
 var _ kad.Key[Key] = (*Key)(nil)
 
+// NewKey initializes a new key struct based on the given preimage bytes. These
+// bytes are SHA256 hashed and stored as the actual Kademlia key that's used
+// to calculate distances in the XOR keyspace.
 func NewKey(preimage []byte) Key {
 	h := sha256.Sum256(preimage)
 	return Key{
@@ -27,6 +32,9 @@ func NewKey(preimage []byte) Key {
 	}
 }
 
+// MsgKey returns the bytes that should be used inside Kademlia RPC messages.
+// The returned value is the preimage to the actual Kademlia key. To arrive
+// at the Kademlia key, these MsgKey bytes must be SHA256 hashed
 func (k Key) MsgKey() []byte {
 	return k.preimage
 }

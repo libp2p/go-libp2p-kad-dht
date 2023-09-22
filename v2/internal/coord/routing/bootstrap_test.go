@@ -4,12 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
 )
 

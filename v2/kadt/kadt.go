@@ -11,8 +11,58 @@ import (
 )
 
 // Key is a type alias for the type of key that's used with this DHT
-// implementation.
-type Key = key.Key256
+// implementation. In the Amino DHT, we are sending around the preimage
+// of the actual key that's used for calculating Kademlia distance. That's
+// why this Key struct also holds the preimage bytes.
+type Key struct {
+	key      key.Key256
+	preimage []byte
+}
+
+var _ kad.Key[Key] = (*Key)(nil)
+
+// NewKey initializes a new key struct based on the given preimage bytes. These
+// bytes are SHA256 hashed and stored as the actual Kademlia key that's used
+// to calculate distances in the XOR keyspace.
+func NewKey(preimage []byte) Key {
+	h := sha256.Sum256(preimage)
+	return Key{
+		key:      key.NewKey256(h[:]),
+		preimage: preimage,
+	}
+}
+
+// MsgKey returns the bytes that should be used inside Kademlia RPC messages.
+// The returned value is the preimage to the actual Kademlia key. To arrive
+// at the Kademlia key, these MsgKey bytes must be SHA256 hashed
+func (k Key) MsgKey() []byte {
+	return k.preimage
+}
+
+func (k Key) BitLen() int {
+	return k.key.BitLen()
+}
+
+func (k Key) Bit(i int) uint {
+	return k.key.Bit(i)
+}
+
+func (k Key) Xor(other Key) Key {
+	return Key{key: k.key.Xor(other.key)}
+}
+
+func (k Key) CommonPrefixLength(other Key) int {
+	return k.key.CommonPrefixLength(other.key)
+}
+
+func (k Key) Compare(other Key) int {
+	return k.key.Compare(other.key)
+}
+
+// HexString returns a string containing the hexadecimal representation of the key.
+func (k Key) HexString() string {
+	return k.key.HexString()
+}
 
 // PeerID is a type alias for [peer.ID] that implements the [kad.NodeID]
 // interface. This means we can use PeerID for any operation that interfaces
@@ -26,8 +76,7 @@ var _ kad.NodeID[Key] = PeerID("")
 // SHA256 hashes of, in this case, peer.IDs. This means this Key method takes
 // the [peer.ID], hashes it and constructs a 256-bit key.
 func (p PeerID) Key() Key {
-	h := sha256.Sum256([]byte(p))
-	return key.NewKey256(h[:])
+	return NewKey([]byte(p))
 }
 
 // String calls String on the underlying [peer.ID] and returns a string like

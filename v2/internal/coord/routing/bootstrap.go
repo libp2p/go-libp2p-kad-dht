@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
@@ -106,7 +107,7 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		qryCfg.Concurrency = b.cfg.RequestConcurrency
 		qryCfg.RequestTimeout = b.cfg.RequestTimeout
 
-		queryID := query.QueryID("bootstrap")
+		queryID := coordt.QueryID("bootstrap")
 
 		qry, err := query.NewFindCloserQuery[K, N, any](b.self, queryID, b.self.Key(), iter, tev.KnownClosestNodes, qryCfg)
 		if err != nil {
@@ -195,7 +196,7 @@ type BootstrapState interface {
 
 // StateBootstrapFindCloser indicates that the bootstrap query wants to send a find closer nodes message to a node.
 type StateBootstrapFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID query.QueryID
+	QueryID coordt.QueryID
 	Target  K // the key that the query wants to find closer nodes for
 	NodeID  N // the node to send the message to
 	Stats   query.QueryStats

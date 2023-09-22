@@ -8,16 +8,18 @@ import (
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 )
 
 var _ routing.Routing = (*DHT)(nil)
@@ -42,10 +44,10 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 	target := kadt.PeerID(id)
 
 	var foundPeer peer.ID
-	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coord.QueryStats) error {
+	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
 		if peer.ID(visited) == id {
 			foundPeer = peer.ID(visited)
-			return coord.ErrSkipRemaining
+			return coordt.ErrSkipRemaining
 		}
 		return nil
 	}
@@ -89,8 +91,22 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 		return nil
 	}
 
-	// TODO reach out to Zikade
-	panic("implement me")
+	// construct message
+	addrInfo := peer.AddrInfo{
+		ID:    d.host.ID(),
+		Addrs: d.host.Addrs(),
+	}
+
+	msg := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  c.Hash(),
+		ProviderPeers: []*pb.Message_Peer{
+			pb.FromAddrInfo(addrInfo),
+		},
+	}
+
+	// finally, find the closest peers to the target key.
+	return d.kad.BroadcastRecord(ctx, msg)
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
@@ -110,15 +126,46 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 	panic("implement me")
 }
 
-func (d *DHT) PutValue(ctx context.Context, key string, value []byte, option ...routing.Option) error {
+// PutValue satisfies the [routing.Routing] interface and will add the given
+// value to the k-closest nodes to keyStr. The parameter keyStr should have the
+// format `/$namespace/$binary_id`. Namespace examples are `pk` or `ipns`. To
+// identify the closest peers to keyStr, that complete string will be SHA256
+// hashed.
+func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ...routing.Option) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
 	defer span.End()
 
-	if err := d.putValueLocal(ctx, key, value); err != nil {
+	// first parse the routing options
+	rOpt := routing.Options{} // routing config
+	if err := rOpt.Apply(opts...); err != nil {
+		return fmt.Errorf("apply routing options: %w", err)
+	}
+
+	// then always store the given value locally
+	if err := d.putValueLocal(ctx, keyStr, value); err != nil {
 		return fmt.Errorf("put value locally: %w", err)
 	}
 
-	panic("implement me")
+	// if the routing system should operate in offline mode, stop here
+	if rOpt.Offline {
+		return nil
+	}
+
+	// construct Kademlia-key. Yes, we hash the complete key string which
+	// includes the namespace prefix.
+	msg := &pb.Message{
+		Type:   pb.Message_PUT_VALUE,
+		Key:    []byte(keyStr),
+		Record: record.MakePutRecord(keyStr, value),
+	}
+
+	// finally, find the closest peers to the target key.
+	err := d.kad.BroadcastRecord(ctx, msg)
+	if err != nil {
+		return fmt.Errorf("query error: %w", err)
+	}
+
+	return nil
 }
 
 // putValueLocal stores a value in the local datastore without querying the network.
@@ -166,7 +213,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 
 	// TODO: quorum
 	var value []byte
-	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coord.QueryStats) error {
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		if resp == nil {
 			return nil
 		}
@@ -181,7 +228,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option
 
 		value = resp.GetRecord().GetValue()
 
-		return coord.ErrSkipRemaining
+		return coordt.ErrSkipRemaining
 	}
 
 	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
@@ -216,6 +263,7 @@ func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
 	}
+
 	return rec.GetValue(), nil
 }
 
@@ -233,7 +281,10 @@ func (d *DHT) Bootstrap(ctx context.Context) error {
 	seed := make([]kadt.PeerID, len(d.cfg.BootstrapPeers))
 	for i, addrInfo := range d.cfg.BootstrapPeers {
 		seed[i] = kadt.PeerID(addrInfo.ID)
-		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour) // TODO: TTL
+		// TODO: how to handle TTL if BootstrapPeers become dynamic and don't
+		// point to stable peers or consist of ephemeral peers that we have
+		// observed during a previous run.
+		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
 	}
 
 	return d.kad.Bootstrap(ctx, seed)

@@ -2,12 +2,11 @@ package pb
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"fmt"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/key"
 	"golang.org/x/exp/slog"
 )
 
@@ -15,8 +14,30 @@ import (
 // It is used to let these types conform to interfaces or add convenience methods.
 
 func (m *Message) Target() kadt.Key {
-	b := sha256.Sum256(m.Key)
-	return key.NewKey256(b[:])
+	return kadt.NewKey(m.Key)
+}
+
+// ExpectResponse returns true if we expect a response from the remote peer if
+// we sent a message with the given type to them. For example, when a peer sends
+// a PUT_VALUE message to another peer, that other peer won't respond with
+// anything.
+func (m *Message) ExpectResponse() bool {
+	switch m.Type {
+	case Message_PUT_VALUE:
+		return false
+	case Message_GET_VALUE:
+		return true
+	case Message_ADD_PROVIDER:
+		return false
+	case Message_GET_PROVIDERS:
+		return true
+	case Message_FIND_NODE:
+		return true
+	case Message_PING:
+		return true
+	default:
+		panic(fmt.Sprintf("unexpected message type %d", m.Type))
+	}
 }
 
 // FromAddrInfo constructs a [Message_Peer] from the given [peer.AddrInfo].

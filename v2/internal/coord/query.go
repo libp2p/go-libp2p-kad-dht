@@ -5,17 +5,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 type PooledQueryBehaviour struct {
 	pool    *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
-	waiters map[query.QueryID]NotifyCloser[BehaviourEvent]
+	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -28,7 +30,7 @@ type PooledQueryBehaviour struct {
 func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
 	h := &PooledQueryBehaviour{
 		pool:    pool,
-		waiters: make(map[query.QueryID]NotifyCloser[BehaviourEvent]),
+		waiters: make(map[coordt.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
 		logger:  logger.With("behaviour", "query"),
 		tracer:  tracer,
@@ -47,29 +49,27 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	switch ev := ev.(type) {
 	case *EventStartFindCloserQuery:
 		cmd = &query.EventPoolAddFindCloserQuery[kadt.Key, kadt.PeerID]{
-			QueryID:           ev.QueryID,
-			Target:            ev.Target,
-			KnownClosestNodes: ev.KnownClosestNodes,
+			QueryID: ev.QueryID,
+			Target:  ev.Target,
+			Seed:    ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
 		}
 	case *EventStartMessageQuery:
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID, *pb.Message]{
-			QueryID:           ev.QueryID,
-			Target:            ev.Target,
-			Message:           ev.Message,
-			KnownClosestNodes: ev.KnownClosestNodes,
+			QueryID: ev.QueryID,
+			Target:  ev.Target,
+			Message: ev.Message,
+			Seed:    ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
 			p.waiters[ev.QueryID] = ev.Notify
 		}
-
 	case *EventStopQuery:
 		cmd = &query.EventPoolStopQuery{
 			QueryID: ev.QueryID,
 		}
-
 	case *EventGetCloserNodesSuccess:
 		for _, info := range ev.CloserNodes {
 			// TODO: do this after advancing pool
@@ -189,9 +189,12 @@ func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 	}
 }
 
-func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (BehaviourEvent, bool) {
-	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.advancePool")
-	defer span.End()
+func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (out BehaviourEvent, term bool) {
+	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.advancePool", trace.WithAttributes(tele.AttrInEvent(ev)))
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	pstate := p.pool.Advance(ctx, ev)
 	switch st := pstate.(type) {

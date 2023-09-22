@@ -8,8 +8,8 @@ import (
 	"github.com/plprobelab/go-kademlia/key"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 )
 
 func TestBootstrapConfigValidate(t *testing.T) {
@@ -85,7 +85,7 @@ func TestBootstrapStart(t *testing.T) {
 	st := state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
 
 	// the query should be the one just added
-	require.Equal(t, query.QueryID("bootstrap"), st.QueryID)
+	require.Equal(t, coordt.QueryID("bootstrap"), st.QueryID)
 
 	// the query should attempt to contact the node it was given
 	require.Equal(t, a, st.NodeID)
@@ -118,7 +118,7 @@ func TestBootstrapMessageResponse(t *testing.T) {
 
 	// the bootstrap should attempt to contact the node it was given
 	st := state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
-	require.Equal(t, query.QueryID("bootstrap"), st.QueryID)
+	require.Equal(t, coordt.QueryID("bootstrap"), st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
 	// notify bootstrap that node was contacted successfully, but no closer nodes
@@ -163,7 +163,7 @@ func TestBootstrapProgress(t *testing.T) {
 	// the bootstrap should attempt to contact the closest node it was given
 	require.IsType(t, &StateBootstrapFindCloser[tiny.Key, tiny.Node]{}, state)
 	st := state.(*StateBootstrapFindCloser[tiny.Key, tiny.Node])
-	require.Equal(t, query.QueryID("bootstrap"), st.QueryID)
+	require.Equal(t, coordt.QueryID("bootstrap"), st.QueryID)
 	require.Equal(t, a, st.NodeID)
 
 	// next the bootstrap attempts to contact second nearest node

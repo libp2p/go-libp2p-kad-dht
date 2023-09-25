@@ -16,11 +16,11 @@ import (
 
 const (
 	// IncludeQueryID is the id for connectivity checks performed by the include state machine.
-	// This identifier used for routing network responses to the state machine.
+	// This identifier is used for routing network responses to the state machine.
 	IncludeQueryID = coordt.QueryID("include")
 
 	// ProbeQueryID is the id for connectivity checks performed by the probe state machine
-	// This identifier used for routing network responses to the state machine.
+	// This identifier is used for routing network responses to the state machine.
 	ProbeQueryID = coordt.QueryID("probe")
 )
 
@@ -38,7 +38,7 @@ type RoutingBehaviour struct {
 	// probe is the node probing state machine, responsible for periodically checking connectivity of nodes in the routing table
 	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState]
 
-	// probe is the routing table explore state machine, responsible for increasing the occupanct of the routing table
+	// explore is the routing table explore state machine, responsible for increasing the occupanct of the routing table
 	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState]
 
 	pendingMu sync.Mutex

@@ -445,18 +445,13 @@ func NewDynamicExploreSchedule(maxCpl int, start time.Time, interval time.Durati
 func (s *DynamicExploreSchedule) NextCpl(ts time.Time) (int, bool) {
 	// is an explore due yet?
 	next := (*s.cpls)[0]
-	if !next.Due.After(ts) {
-		// update its schedule
-
-		interval := float64(s.interval) + float64(s.interval)*float64(s.maxCpl-next.Cpl)*s.multiplier
-		interval *= 1 + rand.Float64()*s.jitter
-
-		next.Due = ts.Add(s.cplInterval(next.Cpl))
-		heap.Fix(s.cpls, 0) // update the heap
-		return next.Cpl, true
+	if next.Due.After(ts) {
+		return -1, false
 	}
-
-	return -1, false
+	// update its schedule
+	next.Due = ts.Add(s.cplInterval(next.Cpl))
+	heap.Fix(s.cpls, 0) // update the heap
+	return next.Cpl, true
 }
 
 // cplInterval calculates the explore interval for a given cpl

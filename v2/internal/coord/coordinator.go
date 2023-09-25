@@ -385,7 +385,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	defer cancel()
 
 	if numResults < 1 {
-		numResults = 20
+		numResults = 20 // TODO: parameterize
 	}
 
 	seeds, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
@@ -424,7 +424,7 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20)
+	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
 	if err != nil {
 		return err
 	}
@@ -449,9 +449,7 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	// queue the start of the query
 	c.brdcstBehaviour.Notify(ctx, cmd)
 
-	contacted, errs, err := c.waitForBroadcast(ctx, waiter)
-	fmt.Println(contacted)
-	fmt.Println(errs)
+	_, _, err = c.waitForBroadcast(ctx, waiter)
 
 	return err
 }

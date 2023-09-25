@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -110,20 +111,82 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.FindProvidersAsync", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
+	peerOut := make(chan peer.AddrInfo)
+	go d.findProvidersAsyncRoutine(ctx, c, count, peerOut)
+	return peerOut
+}
+
+func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan peer.AddrInfo) {
+	_, span := d.tele.Tracer.Start(ctx, "DHT.findProvidersAsyncRoutine", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
-	// verify if this DHT supports provider records by checking if a "providers"
-	// backend is registered.
-	_, found := d.backends[namespaceProviders]
+	defer close(out)
+
+	// verify if this DHT supports provider records by checking
+	// if a "providers" backend is registered.
+	b, found := d.backends[namespaceProviders]
 	if !found || !c.Defined() {
-		peerOut := make(chan peer.AddrInfo)
-		close(peerOut)
-		return peerOut
+		return
 	}
 
-	// TODO reach out to Zikade
-	panic("implement me")
+	// first fetch the record locally
+	stored, err := b.Fetch(ctx, string(c.Hash()))
+	if err != nil {
+		span.RecordError(err)
+		d.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
+		return
+	}
+
+	ps, ok := stored.(*providerSet)
+	if !ok {
+		span.RecordError(err)
+		d.log.Warn("Stored value is not a provider set", slog.String("cid", c.String()), slog.String("type", fmt.Sprintf("%T", stored)))
+		return
+	}
+
+	// send all providers onto the out channel until the desired count
+	// was reached. If no count was specified, continue with network lookup.
+	providers := map[peer.ID]struct{}{}
+	for _, provider := range ps.providers {
+		providers[provider.ID] = struct{}{}
+		out <- provider // TODO: select on context
+
+		if count != 0 && len(providers) == count {
+			return
+		}
+	}
+
+	// Craft message to send to other peers
+	msg := &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  c.Hash(),
+	}
+
+	// handle node response
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
+		for _, provider := range resp.ProviderAddrInfos() {
+			if _, found := providers[provider.ID]; found {
+				continue
+			}
+
+			providers[provider.ID] = struct{}{}
+			out <- provider // TODO: select on context
+		}
+
+		if count != 0 && len(providers) == count {
+			// TODO: does this guarantee no new calls to queryFn?
+			return coordt.ErrSkipRemaining
+		}
+
+		return nil
+	}
+
+	_, err = d.kad.QueryMessage(ctx, msg, fn, count) // TODO: is count correct here?
+	if err != nil {
+		span.RecordError(err)
+		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
+		return
+	}
 }
 
 // PutValue satisfies the [routing.Routing] interface and will add the given

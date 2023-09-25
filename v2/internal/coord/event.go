@@ -232,3 +232,9 @@ type EventNotifyNonConnectivity struct {
 
 func (*EventNotifyNonConnectivity) behaviourEvent() {}
 func (*EventNotifyNonConnectivity) routingCommand() {}
+
+// EventRoutingPoll notifies a routing behaviour that it may proceed with any pending work.
+type EventRoutingPoll struct{}
+
+func (*EventRoutingPoll) behaviourEvent() {}
+func (*EventRoutingPoll) routingCommand() {}

@@ -7,10 +7,10 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/kaderr"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
@@ -27,11 +27,11 @@ type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	qry *query.Query[K, N, any]
 
 	// cfg is a copy of the optional configuration supplied to the Bootstrap
-	cfg BootstrapConfig[K]
+	cfg BootstrapConfig
 }
 
 // BootstrapConfig specifies optional configuration for a Bootstrap
-type BootstrapConfig[K kad.Key[K]] struct {
+type BootstrapConfig struct {
 	Timeout            time.Duration // the time to wait before terminating a query that is not making progress
 	RequestConcurrency int           // the maximum number of concurrent requests that each query may have in flight
 	RequestTimeout     time.Duration // the timeout queries should use for contacting a single node
@@ -39,30 +39,30 @@ type BootstrapConfig[K kad.Key[K]] struct {
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
-func (cfg *BootstrapConfig[K]) Validate() error {
+func (cfg *BootstrapConfig) Validate() error {
 	if cfg.Clock == nil {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "BootstrapConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
 		}
 	}
 
 	if cfg.Timeout < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "BootstrapConfig",
 			Err:       fmt.Errorf("timeout must be greater than zero"),
 		}
 	}
 
 	if cfg.RequestConcurrency < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "BootstrapConfig",
 			Err:       fmt.Errorf("request concurrency must be greater than zero"),
 		}
 	}
 
 	if cfg.RequestTimeout < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "BootstrapConfig",
 			Err:       fmt.Errorf("request timeout must be greater than zero"),
 		}
@@ -73,18 +73,18 @@ func (cfg *BootstrapConfig[K]) Validate() error {
 
 // DefaultBootstrapConfig returns the default configuration options for a Bootstrap.
 // Options may be overridden before passing to NewBootstrap
-func DefaultBootstrapConfig[K kad.Key[K]]() *BootstrapConfig[K] {
-	return &BootstrapConfig[K]{
-		Clock:              clock.New(), // use standard time
-		Timeout:            5 * time.Minute,
-		RequestConcurrency: 3,
-		RequestTimeout:     time.Minute,
+func DefaultBootstrapConfig() *BootstrapConfig {
+	return &BootstrapConfig{
+		Clock:              clock.New(),     // use standard time
+		Timeout:            5 * time.Minute, // MAGIC
+		RequestConcurrency: 3,               // MAGIC
+		RequestTimeout:     time.Minute,     // MAGIC
 	}
 }
 
-func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig[K]) (*Bootstrap[K, N], error) {
+func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (*Bootstrap[K, N], error) {
 	if cfg == nil {
-		cfg = DefaultBootstrapConfig[K]()
+		cfg = DefaultBootstrapConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

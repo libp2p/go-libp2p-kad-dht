@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
@@ -72,16 +73,39 @@ type ExploreConfig struct {
 
 	// Timeout is maximum time to allow for performing an explore for a CPL.
 	Timeout time.Duration
+
+	RequestConcurrency int           // the maximum number of concurrent requests that each query may have in flight
+	RequestTimeout     time.Duration // the timeout queries should use for contacting a single node
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
 func (cfg *ExploreConfig) Validate() error {
 	if cfg.Clock == nil {
-		return fmt.Errorf("clock must not be nil")
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("clock must not be nil"),
+		}
 	}
 
 	if cfg.Timeout < 1 {
-		return fmt.Errorf("timeout must be greater than zero")
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("timeout must be greater than zero"),
+		}
+	}
+
+	if cfg.RequestConcurrency < 1 {
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("request concurrency must be greater than zero"),
+		}
+	}
+
+	if cfg.RequestTimeout < 1 {
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("request timeout must be greater than zero"),
+		}
 	}
 
 	return nil
@@ -91,8 +115,10 @@ func (cfg *ExploreConfig) Validate() error {
 // Options may be overridden before passing to [NewExplore].
 func DefaultExploreConfig() *ExploreConfig {
 	return &ExploreConfig{
-		Clock:   clock.New(),      // use standard time
-		Timeout: 10 * time.Minute, // MAGIC
+		Clock:              clock.New(),      // use standard time
+		Timeout:            10 * time.Minute, // MAGIC
+		RequestConcurrency: 3,                // MAGIC
+		RequestTimeout:     time.Minute,      // MAGIC
 	}
 }
 
@@ -163,8 +189,8 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 
 	qryCfg := query.DefaultQueryConfig()
 	qryCfg.Clock = e.cfg.Clock
-	// qryCfg.Concurrency = b.cfg.RequestConcurrency
-	// qryCfg.RequestTimeout = b.cfg.RequestTimeout
+	qryCfg.Concurrency = e.cfg.RequestConcurrency
+	qryCfg.RequestTimeout = e.cfg.RequestTimeout
 
 	qry, err := query.NewFindCloserQuery[K, N, any](e.self, ExploreQueryID, node.Key(), iter, seeds, qryCfg)
 	if err != nil {

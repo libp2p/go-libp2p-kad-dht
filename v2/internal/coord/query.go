@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/benbjohnson/clock"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -15,31 +18,135 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
+type PooledQueryConfig struct {
+	// Clock is a clock that may replaced by a mock when testing
+	Clock clock.Clock
+
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
+
+	// Tracer is the tracer that should be used to trace execution.
+	Tracer trace.Tracer
+
+	// Concurrency is the maximum number of queries that may be waiting for message responses at any one time.
+	Concurrency int
+
+	// Timeout the time to wait before terminating a query that is not making progress.
+	Timeout time.Duration
+
+	// RequestConcurrency is the maximum number of concurrent requests that each query may have in flight.
+	RequestConcurrency int
+
+	// RequestTimeout is the timeout queries should use for contacting a single node
+	RequestTimeout time.Duration
+}
+
+// Validate checks the configuration options and returns an error if any have invalid values.
+func (cfg *PooledQueryConfig) Validate() error {
+	if cfg.Clock == nil {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("clock must not be nil"),
+		}
+	}
+
+	if cfg.Logger == nil {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("logger must not be nil"),
+		}
+	}
+
+	if cfg.Tracer == nil {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("tracer must not be nil"),
+		}
+	}
+
+	if cfg.Concurrency < 1 {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("query concurrency must be greater than zero"),
+		}
+	}
+	if cfg.Timeout < 1 {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("query timeout must be greater than zero"),
+		}
+	}
+
+	if cfg.RequestConcurrency < 1 {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("request concurrency must be greater than zero"),
+		}
+	}
+
+	if cfg.RequestTimeout < 1 {
+		return &errs.ConfigurationError{
+			Component: "PooledQueryConfig",
+			Err:       fmt.Errorf("request timeout must be greater than zero"),
+		}
+	}
+
+	return nil
+}
+
+func DefaultPooledQueryConfig() *PooledQueryConfig {
+	return &PooledQueryConfig{
+		Clock:              clock.New(),
+		Logger:             tele.DefaultLogger("coord"),
+		Tracer:             tele.NoopTracer(),
+		Concurrency:        3,               // MAGIC
+		Timeout:            5 * time.Minute, // MAGIC
+		RequestConcurrency: 3,               // MAGIC
+		RequestTimeout:     time.Minute,     // MAGIC
+
+	}
+}
+
 type PooledQueryBehaviour struct {
+	cfg     PooledQueryConfig
 	pool    *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
 	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
 	ready     chan struct{}
-
-	logger *slog.Logger
-	tracer trace.Tracer
 }
 
-func NewPooledQueryBehaviour(pool *query.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledQueryBehaviour {
+func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQueryBehaviour, error) {
+	if cfg == nil {
+		cfg = DefaultPooledQueryConfig()
+	} else if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	qpCfg := query.DefaultPoolConfig()
+	qpCfg.Clock = cfg.Clock
+	qpCfg.Concurrency = cfg.Concurrency
+	qpCfg.Timeout = cfg.Timeout
+	qpCfg.QueryConcurrency = cfg.RequestConcurrency
+	qpCfg.RequestTimeout = cfg.RequestTimeout
+
+	pool, err := query.NewPool[kadt.Key, kadt.PeerID, *pb.Message](self, qpCfg)
+	if err != nil {
+		return nil, fmt.Errorf("query pool: %w", err)
+	}
+
 	h := &PooledQueryBehaviour{
+		cfg:     *cfg,
 		pool:    pool,
 		waiters: make(map[coordt.QueryID]NotifyCloser[BehaviourEvent]),
 		ready:   make(chan struct{}, 1),
-		logger:  logger.With("behaviour", "query"),
-		tracer:  tracer,
 	}
-	return h
+	return h, err
 }
 
 func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.Notify")
+	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.Notify")
 	defer span.End()
 
 	p.pendingMu.Lock()
@@ -155,7 +262,7 @@ func (p *PooledQueryBehaviour) Ready() <-chan struct{} {
 }
 
 func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
-	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.Perform")
+	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.Perform")
 	defer span.End()
 
 	// No inbound work can be done until Perform is complete
@@ -190,7 +297,7 @@ func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 }
 
 func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (out BehaviourEvent, term bool) {
-	ctx, span := p.tracer.Start(ctx, "PooledQueryBehaviour.advancePool", trace.WithAttributes(tele.AttrInEvent(ev)))
+	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.advancePool", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()

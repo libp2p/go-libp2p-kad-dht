@@ -32,6 +32,22 @@ func TestExploreConfigValidate(t *testing.T) {
 		cfg.Timeout = -1
 		require.Error(t, cfg.Validate())
 	})
+
+	t.Run("request concurrency positive", func(t *testing.T) {
+		cfg := DefaultExploreConfig()
+		cfg.RequestConcurrency = 0
+		require.Error(t, cfg.Validate())
+		cfg.RequestConcurrency = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("request timeout positive", func(t *testing.T) {
+		cfg := DefaultExploreConfig()
+		cfg.RequestTimeout = 0
+		require.Error(t, cfg.Validate())
+		cfg.RequestTimeout = -1
+		require.Error(t, cfg.Validate())
+	})
 }
 
 // maxCpl is 7 since we are using tiny 8-bit keys

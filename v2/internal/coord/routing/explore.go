@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
@@ -47,10 +49,28 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 	// qryCpl is the cpl the current query is exploring for
 	qryCpl int
 
+	// cplAttributeSet holds the current cpl being explored in an attribute that may be used with metrics
+	cplAttributeSet attribute.Set
+
+	// qryMu guards access to qry, qryCpl and cplAttributeSet
+	qryMu sync.RWMutex
+
 	// cfg is a copy of the optional configuration supplied to the Explore
 	cfg ExploreConfig
 
 	schedule ExploreSchedule
+
+	// counterFindSent is a counter that tracks the number of requests to find closer nodes sent.
+	counterFindSent metric.Int64Counter
+
+	// counterFindSucceeded is a counter that tracks the number of requests to find closer nodes that succeeded.
+	counterFindSucceeded metric.Int64Counter
+
+	// counterFindFailed is a counter that tracks the number of requests to find closer nodes that failed.
+	counterFindFailed metric.Int64Counter
+
+	// gaugeRunning is a gauge that tracks whether an explore is running.
+	gaugeRunning metric.Int64ObservableGauge
 }
 
 // NodeIDForCplFunc is a function that given a cpl generates a [kad.NodeID] with a key that has
@@ -71,6 +91,12 @@ type ExploreConfig struct {
 	// Clock is  a clock that may replaced by a mock when testing
 	Clock clock.Clock
 
+	// Tracer is the tracer that should be used to trace execution.
+	Tracer trace.Tracer
+
+	// Meter is the meter that should be used to record metrics.
+	Meter metric.Meter
+
 	// Timeout is maximum time to allow for performing an explore for a CPL.
 	Timeout time.Duration
 
@@ -84,6 +110,20 @@ func (cfg *ExploreConfig) Validate() error {
 		return &errs.ConfigurationError{
 			Component: "ExploreConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
+		}
+	}
+
+	if cfg.Tracer == nil {
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("tracer must not be nil"),
+		}
+	}
+
+	if cfg.Meter == nil {
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("meter must not be nil"),
 		}
 	}
 
@@ -115,7 +155,10 @@ func (cfg *ExploreConfig) Validate() error {
 // Options may be overridden before passing to [NewExplore].
 func DefaultExploreConfig() *ExploreConfig {
 	return &ExploreConfig{
-		Clock:              clock.New(),      // use standard time
+		Clock:  clock.New(), // use standard time
+		Tracer: tele.NoopTracer(),
+		Meter:  tele.NoopMeter(),
+
 		Timeout:            10 * time.Minute, // MAGIC
 		RequestConcurrency: 3,                // MAGIC
 		RequestTimeout:     time.Minute,      // MAGIC
@@ -138,23 +181,78 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 		schedule: schedule,
 	}
 
+	var err error
+	e.counterFindSent, err = cfg.Meter.Int64Counter(
+		"explore_find_sent",
+		metric.WithDescription("Total number of find closer nodes requests sent by the explore state machine"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create explore_find_sent counter: %w", err)
+	}
+
+	e.counterFindSucceeded, err = cfg.Meter.Int64Counter(
+		"explore_find_succeeded",
+		metric.WithDescription("Total number of find closer nodes requests sent by the explore state machine that were successful"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create explore_find_succeeded counter: %w", err)
+	}
+
+	e.counterFindFailed, err = cfg.Meter.Int64Counter(
+		"explore_find_failed",
+		metric.WithDescription("Total number of find closer nodes requests sent by the explore state machine that failed"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create explore_find_failed counter: %w", err)
+	}
+
+	e.gaugeRunning, err = cfg.Meter.Int64ObservableGauge(
+		"explore_running",
+		metric.WithDescription("Whether or not the an explore is running for a cpl"),
+		metric.WithUnit("1"),
+		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
+			e.qryMu.RLock()
+			defer e.qryMu.RUnlock()
+			if e.qry == nil {
+				o.Observe(0)
+			} else {
+				o.Observe(1, metric.WithAttributeSet(e.cplAttributeSet))
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create explore_running gauge: %w", err)
+	}
+
 	return e, nil
 }
 
 // Advance advances the state of the explore by attempting to advance its query if running.
 func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreState {
-	ctx, span := tele.StartSpan(ctx, "Explore.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	ctx, span := e.cfg.Tracer.Start(ctx, "Explore.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer span.End()
 
 	switch tev := ev.(type) {
 	case *EventExplorePoll:
 		// ignore, nothing to do
 	case *EventExploreFindCloserResponse[K, N]:
+		e.qryMu.RLock()
+		defer e.qryMu.RUnlock()
+
+		e.counterFindSucceeded.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
 		return e.advanceQuery(ctx, &query.EventQueryNodeResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventExploreFindCloserFailure[K, N]:
+		e.qryMu.RLock()
+		defer e.qryMu.RUnlock()
+
+		e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
 		span.RecordError(tev.Error)
 		return e.advanceQuery(ctx, &query.EventQueryNodeFailure[K, N]{
 			NodeID: tev.NodeID,
@@ -163,6 +261,9 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
+
+	e.qryMu.Lock()
+	defer e.qryMu.Unlock()
 
 	// if query is running, give it a chance to advance
 	if e.qry != nil {
@@ -201,16 +302,21 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 	}
 	e.qry = qry
 	e.qryCpl = cpl
+	e.cplAttributeSet = attribute.NewSet(attribute.Int("cpl", cpl))
 
 	return e.advanceQuery(ctx, &query.EventQueryPoll{})
 }
 
 func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) ExploreState {
-	ctx, span := tele.StartSpan(ctx, "Explore.advanceQuery")
+	ctx, span := e.cfg.Tracer.Start(ctx, "Explore.advanceQuery")
 	defer span.End()
+
+	// e.qryMu is held by Advance
+
 	state := e.qry.Advance(ctx, qev)
 	switch st := state.(type) {
 	case *query.StateQueryFindCloser[K, N]:
+		e.counterFindSent.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
 		return &StateExploreFindCloser[K, N]{
 			Cpl:     e.qryCpl,
 			QueryID: st.QueryID,
@@ -222,6 +328,7 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 		span.SetAttributes(attribute.String("out_state", "StateExploreFinished"))
 		e.qry = nil
 		e.qryCpl = -1
+		e.cplAttributeSet = attribute.NewSet()
 		return &StateExploreQueryFinished{
 			Cpl:   e.qryCpl,
 			Stats: st.Stats,
@@ -229,9 +336,11 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 	case *query.StateQueryWaitingAtCapacity:
 		elapsed := e.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > e.cfg.Timeout {
+			e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
 			span.SetAttributes(attribute.String("out_state", "StateExploreTimeout"))
 			e.qry = nil
 			e.qryCpl = -1
+			e.cplAttributeSet = attribute.NewSet()
 			return &StateExploreQueryTimeout{
 				Cpl:   e.qryCpl,
 				Stats: st.Stats,
@@ -245,9 +354,11 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 	case *query.StateQueryWaitingWithCapacity:
 		elapsed := e.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > e.cfg.Timeout {
+			e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
 			span.SetAttributes(attribute.String("out_state", "StateExploreTimeout"))
 			e.qry = nil
 			e.qryCpl = -1
+			e.cplAttributeSet = attribute.NewSet()
 			return &StateExploreQueryTimeout{
 				Cpl:   e.qryCpl,
 				Stats: st.Stats,

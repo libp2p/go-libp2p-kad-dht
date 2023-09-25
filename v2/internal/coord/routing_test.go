@@ -63,6 +63,12 @@ func TestRoutingConfigValidate(t *testing.T) {
 		require.Error(t, cfg.Validate())
 	})
 
+	t.Run("meter is not nil", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.Meter = nil
+		require.Error(t, cfg.Validate())
+	})
+
 	t.Run("bootstrap timeout positive", func(t *testing.T) {
 		cfg := DefaultRoutingConfig()
 		cfg.BootstrapTimeout = 0

@@ -3,11 +3,13 @@ package routing
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
@@ -26,8 +28,23 @@ type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	// qry is the query used by the bootstrap process
 	qry *query.Query[K, N, any]
 
+	// qryMu guards access to qry
+	qryMu sync.RWMutex
+
 	// cfg is a copy of the optional configuration supplied to the Bootstrap
 	cfg BootstrapConfig
+
+	// counterFindSent is a counter that tracks the number of requests to find closer nodes sent.
+	counterFindSent metric.Int64Counter
+
+	// counterFindSucceeded is a counter that tracks the number of requests to find closer nodes that succeeded.
+	counterFindSucceeded metric.Int64Counter
+
+	// counterFindFailed is a counter that tracks the number of requests to find closer nodes that failed.
+	counterFindFailed metric.Int64Counter
+
+	// gaugeRunning is a gauge that tracks whether the bootstrap is running.
+	gaugeRunning metric.Int64ObservableGauge
 }
 
 // BootstrapConfig specifies optional configuration for a Bootstrap
@@ -36,6 +53,12 @@ type BootstrapConfig struct {
 	RequestConcurrency int           // the maximum number of concurrent requests that each query may have in flight
 	RequestTimeout     time.Duration // the timeout queries should use for contacting a single node
 	Clock              clock.Clock   // a clock that may replaced by a mock when testing
+
+	// Tracer is the tracer that should be used to trace execution.
+	Tracer trace.Tracer
+
+	// Meter is the meter that should be used to record metrics.
+	Meter metric.Meter
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -44,6 +67,20 @@ func (cfg *BootstrapConfig) Validate() error {
 		return &errs.ConfigurationError{
 			Component: "BootstrapConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
+		}
+	}
+
+	if cfg.Tracer == nil {
+		return &errs.ConfigurationError{
+			Component: "BootstrapConfig",
+			Err:       fmt.Errorf("tracer must not be nil"),
+		}
+	}
+
+	if cfg.Meter == nil {
+		return &errs.ConfigurationError{
+			Component: "BootstrapConfig",
+			Err:       fmt.Errorf("meter must not be nil"),
 		}
 	}
 
@@ -75,7 +112,10 @@ func (cfg *BootstrapConfig) Validate() error {
 // Options may be overridden before passing to NewBootstrap
 func DefaultBootstrapConfig() *BootstrapConfig {
 	return &BootstrapConfig{
-		Clock:              clock.New(),     // use standard time
+		Clock:  clock.New(), // use standard time
+		Tracer: tele.NoopTracer(),
+		Meter:  tele.NoopMeter(),
+
 		Timeout:            5 * time.Minute, // MAGIC
 		RequestConcurrency: 3,               // MAGIC
 		RequestTimeout:     time.Minute,     // MAGIC
@@ -89,20 +129,75 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 		return nil, err
 	}
 
-	return &Bootstrap[K, N]{
+	b := &Bootstrap[K, N]{
 		self: self,
 		cfg:  *cfg,
-	}, nil
+	}
+
+	var err error
+	b.counterFindSent, err = cfg.Meter.Int64Counter(
+		"bootstrap_find_sent",
+		metric.WithDescription("Total number of find closer nodes requests sent by the bootstrap state machine"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create bootstrap_find_sent counter: %w", err)
+	}
+
+	b.counterFindSucceeded, err = cfg.Meter.Int64Counter(
+		"bootstrap_find_succeeded",
+		metric.WithDescription("Total number of find closer nodes requests sent by the bootstrap state machine that were successful"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create bootstrap_find_succeeded counter: %w", err)
+	}
+
+	b.counterFindFailed, err = cfg.Meter.Int64Counter(
+		"bootstrap_find_failed",
+		metric.WithDescription("Total number of find closer nodes requests sent by the bootstrap state machine that failed"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create bootstrap_find_failed counter: %w", err)
+	}
+
+	b.gaugeRunning, err = cfg.Meter.Int64ObservableGauge(
+		"bootstrap_running",
+		metric.WithDescription("Whether or not the bootstrap is running"),
+		metric.WithUnit("1"),
+		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
+			b.qryMu.RLock()
+			defer b.qryMu.RUnlock()
+			if b.qry == nil {
+				o.Observe(0)
+			} else {
+				o.Observe(1)
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create bootstrap_running gauge: %w", err)
+	}
+
+	return b, nil
 }
 
 // Advance advances the state of the bootstrap by attempting to advance its query if running.
 func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) BootstrapState {
-	ctx, span := tele.StartSpan(ctx, "Bootstrap.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	ctx, span := b.cfg.Tracer.Start(ctx, "Bootstrap.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer span.End()
 
 	switch tev := ev.(type) {
 	case *EventBootstrapStart[K, N]:
-		// TODO: ignore start event if query is already in progress
+		b.qryMu.Lock()
+		defer b.qryMu.Unlock()
+
+		if b.qry != nil {
+			return b.advanceQuery(ctx, &query.EventQueryPoll{})
+		}
+
 		iter := query.NewClosestNodesIter[K, N](b.self.Key())
 
 		qryCfg := query.DefaultQueryConfig()
@@ -119,11 +214,13 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		return b.advanceQuery(ctx, &query.EventQueryPoll{})
 
 	case *EventBootstrapFindCloserResponse[K, N]:
+		b.counterFindSucceeded.Add(ctx, 1)
 		return b.advanceQuery(ctx, &query.EventQueryNodeResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventBootstrapFindCloserFailure[K, N]:
+		b.counterFindFailed.Add(ctx, 1)
 		span.RecordError(tev.Error)
 		return b.advanceQuery(ctx, &query.EventQueryNodeFailure[K, N]{
 			NodeID: tev.NodeID,
@@ -136,6 +233,8 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
 
+	b.qryMu.Lock()
+	defer b.qryMu.Unlock()
 	if b.qry != nil {
 		return b.advanceQuery(ctx, &query.EventQueryPoll{})
 	}
@@ -144,11 +243,12 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 }
 
 func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) BootstrapState {
-	ctx, span := tele.StartSpan(ctx, "Bootstrap.advanceQuery")
+	ctx, span := b.cfg.Tracer.Start(ctx, "Bootstrap.advanceQuery")
 	defer span.End()
 	state := b.qry.Advance(ctx, qev)
 	switch st := state.(type) {
 	case *query.StateQueryFindCloser[K, N]:
+		b.counterFindSent.Add(ctx, 1)
 		span.SetAttributes(attribute.String("out_state", "StateQueryFindCloser"))
 		return &StateBootstrapFindCloser[K, N]{
 			QueryID: st.QueryID,
@@ -164,6 +264,7 @@ func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent
 	case *query.StateQueryWaitingAtCapacity:
 		elapsed := b.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > b.cfg.Timeout {
+			b.counterFindFailed.Add(ctx, 1)
 			span.SetAttributes(attribute.String("out_state", "StateBootstrapTimeout"))
 			return &StateBootstrapTimeout{
 				Stats: st.Stats,
@@ -176,6 +277,7 @@ func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent
 	case *query.StateQueryWaitingWithCapacity:
 		elapsed := b.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > b.cfg.Timeout {
+			b.counterFindFailed.Add(ctx, 1)
 			span.SetAttributes(attribute.String("out_state", "StateBootstrapTimeout"))
 			return &StateBootstrapTimeout{
 				Stats: st.Stats,

@@ -5,11 +5,10 @@ import (
 	"log"
 	"testing"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-
 	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -27,42 +26,6 @@ func TestConfigValidate(t *testing.T) {
 		cfg := DefaultCoordinatorConfig()
 
 		cfg.Clock = nil
-		require.Error(t, cfg.Validate())
-	})
-
-	t.Run("query concurrency positive", func(t *testing.T) {
-		cfg := DefaultCoordinatorConfig()
-
-		cfg.QueryConcurrency = 0
-		require.Error(t, cfg.Validate())
-		cfg.QueryConcurrency = -1
-		require.Error(t, cfg.Validate())
-	})
-
-	t.Run("query timeout positive", func(t *testing.T) {
-		cfg := DefaultCoordinatorConfig()
-
-		cfg.QueryTimeout = 0
-		require.Error(t, cfg.Validate())
-		cfg.QueryTimeout = -1
-		require.Error(t, cfg.Validate())
-	})
-
-	t.Run("request concurrency positive", func(t *testing.T) {
-		cfg := DefaultCoordinatorConfig()
-
-		cfg.RequestConcurrency = 0
-		require.Error(t, cfg.Validate())
-		cfg.RequestConcurrency = -1
-		require.Error(t, cfg.Validate())
-	})
-
-	t.Run("request timeout positive", func(t *testing.T) {
-		cfg := DefaultCoordinatorConfig()
-
-		cfg.RequestTimeout = 0
-		require.Error(t, cfg.Validate())
-		cfg.RequestTimeout = -1
 		require.Error(t, cfg.Validate())
 	})
 

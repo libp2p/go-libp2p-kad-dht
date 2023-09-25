@@ -20,6 +20,11 @@ const (
 	TracerName = "go-libp2p-kad-dht"
 )
 
+// NoopTracer returns a tracer that does not emit traces.
+func NoopTracer() trace.Tracer {
+	return trace.NewNoopTracerProvider().Tracer("")
+}
+
 // attrsCtxKey is the actual context key value that's used as a key for
 // metric values that are attached to a context.
 var attrsCtxKey = ctxKey{}

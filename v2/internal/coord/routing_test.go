@@ -5,16 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/cplutil"
-
-	"go.opentelemetry.io/otel"
-
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/cplutil"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/nettest"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
@@ -41,6 +37,174 @@ func idleExplore() *RecordingSM[routing.ExploreEvent, routing.ExploreState] {
 	return NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
 }
 
+func TestRoutingConfigValidate(t *testing.T) {
+	t.Run("default is valid", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("clock is not nil", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.Clock = nil
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("logger not nil", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.Logger = nil
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("tracer not nil", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.Tracer = nil
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("bootstrap timeout positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.BootstrapTimeout = 0
+		require.Error(t, cfg.Validate())
+		cfg.BootstrapTimeout = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("bootstrap request concurrency positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.BootstrapRequestConcurrency = 0
+		require.Error(t, cfg.Validate())
+		cfg.BootstrapRequestConcurrency = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("bootstrap request timeout positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.BootstrapRequestTimeout = 0
+		require.Error(t, cfg.Validate())
+		cfg.BootstrapRequestTimeout = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("connectivity check timeout positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.ConnectivityCheckTimeout = 0
+		require.Error(t, cfg.Validate())
+		cfg.ConnectivityCheckTimeout = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("probe request concurrency positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ProbeRequestConcurrency = 0
+		require.Error(t, cfg.Validate())
+		cfg.ProbeRequestConcurrency = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("probe check interval positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+		cfg.ProbeCheckInterval = 0
+		require.Error(t, cfg.Validate())
+		cfg.ProbeCheckInterval = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("include request concurrency positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.IncludeRequestConcurrency = 0
+		require.Error(t, cfg.Validate())
+		cfg.IncludeRequestConcurrency = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("include queue capacity positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.IncludeQueueCapacity = 0
+		require.Error(t, cfg.Validate())
+		cfg.IncludeQueueCapacity = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore timeout positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreTimeout = 0
+		require.Error(t, cfg.Validate())
+		cfg.ExploreTimeout = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore request concurrency positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreRequestConcurrency = 0
+		require.Error(t, cfg.Validate())
+		cfg.ExploreRequestConcurrency = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore request timeout positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreRequestTimeout = 0
+		require.Error(t, cfg.Validate())
+		cfg.ExploreRequestTimeout = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore maximum cpl positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreMaximumCpl = 0
+		require.Error(t, cfg.Validate())
+		cfg.ExploreMaximumCpl = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore maximum 15 or less", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreMaximumCpl = 16
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore interval positive", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreInterval = 0
+		require.Error(t, cfg.Validate())
+		cfg.ExploreInterval = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore interval multiplier at least 1", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreIntervalMultiplier = 0
+		require.Error(t, cfg.Validate())
+		cfg.ExploreIntervalMultiplier = 0.9
+		require.Error(t, cfg.Validate())
+		cfg.ExploreIntervalMultiplier = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("explore interval between 0 and 0.05", func(t *testing.T) {
+		cfg := DefaultRoutingConfig()
+
+		cfg.ExploreIntervalJitter = 0.1
+		require.Error(t, cfg.Validate())
+		cfg.ExploreIntervalJitter = 0.05001
+		require.Error(t, cfg.Validate())
+		cfg.ExploreIntervalJitter = -0.1
+		require.Error(t, cfg.Validate())
+	})
+}
+
 func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
@@ -53,7 +217,10 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), cfg)
+	require.NoError(t, err)
 
 	ev := &EventStartBootstrap{
 		SeedNodes: []kadt.PeerID{nodes[1].NodeID},
@@ -80,7 +247,10 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), cfg)
+	require.NoError(t, err)
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     routing.BootstrapQueryID,
@@ -111,7 +281,10 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	// records the event passed to bootstrap
 	bootstrap := NewRecordingSM[routing.BootstrapEvent, routing.BootstrapState](&routing.StateBootstrapIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), cfg)
+	require.NoError(t, err)
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -143,7 +316,10 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), cfg)
+	require.NoError(t, err)
 
 	ev := &EventAddNode{
 		NodeID: nodes[2].NodeID,
@@ -170,7 +346,10 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), cfg)
+	require.NoError(t, err)
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     coordt.QueryID("include"),
@@ -200,7 +379,10 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	// records the event passed to include
 	include := NewRecordingSM[routing.IncludeEvent, routing.IncludeState](&routing.StateIncludeIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), cfg)
+	require.NoError(t, err)
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{
@@ -241,7 +423,10 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 	probe, err := routing.NewProbe[kadt.Key](rt, probeCfg)
 	require.NoError(t, err)
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), include, probe, idleExplore(), slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, probe, idleExplore(), cfg)
+	require.NoError(t, err)
 
 	// a new node to be included
 	candidate := nodes[len(nodes)-1].NodeID
@@ -317,7 +502,10 @@ func TestRoutingExploreSendsEvent(t *testing.T) {
 	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
 	require.NoError(t, err)
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, cfg)
+	require.NoError(t, err)
 
 	routingBehaviour.Notify(ctx, &EventRoutingPoll{})
 
@@ -347,7 +535,10 @@ func TestRoutingExploreGetClosestNodesSuccess(t *testing.T) {
 	// records the event passed to explore
 	explore := NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, cfg)
+	require.NoError(t, err)
 
 	ev := &EventGetCloserNodesSuccess{
 		QueryID:     routing.ExploreQueryID,
@@ -377,7 +568,10 @@ func TestRoutingExploreGetClosestNodesFailure(t *testing.T) {
 	// records the event passed to explore
 	explore := NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
 
-	routingBehaviour := NewRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, slog.Default(), otel.Tracer("test"))
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, cfg)
+	require.NoError(t, err)
 
 	failure := errors.New("failed")
 	ev := &EventGetCloserNodesFailure{

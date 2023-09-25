@@ -7,26 +7,22 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/benbjohnson/clock"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/kaderr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/brdcst"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/cplutil"
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/query"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // A Coordinator coordinates the state machines that comprise a Kademlia DHT
@@ -81,72 +77,50 @@ type RoutingNotifier interface {
 }
 
 type CoordinatorConfig struct {
-	Clock clock.Clock // a clock that may replaced by a mock when testing
+	// Clock is a clock that may replaced by a mock when testing
+	Clock clock.Clock
 
-	QueryConcurrency int           // the maximum number of queries that may be waiting for message responses at any one time
-	QueryTimeout     time.Duration // the time to wait before terminating a query that is not making progress
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
 
-	RequestConcurrency int           // the maximum number of concurrent requests that each query may have in flight
-	RequestTimeout     time.Duration // the timeout queries should use for contacting a single node
+	// MeterProvider is the the meter provider to use when initialising metric instruments.
+	MeterProvider metric.MeterProvider
 
-	Logger *slog.Logger // a structured logger that should be used when logging.
+	// TracerProvider is the tracer provider to use when initialising tracing
+	TracerProvider trace.TracerProvider
 
-	MeterProvider  metric.MeterProvider // the meter provider to use when initialising metric instruments
-	TracerProvider trace.TracerProvider // the tracer provider to use when initialising tracing
+	// Routing is the configuration used for the [RoutingBehaviour] which maintains the health of the routing table.
+	Routing RoutingConfig
+
+	// Query is the configuration used for the [PooledQueryBehaviour] which manages the execution of user queries.
+	Query PooledQueryConfig
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
 func (cfg *CoordinatorConfig) Validate() error {
 	if cfg.Clock == nil {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
 		}
 	}
 
-	if cfg.QueryConcurrency < 1 {
-		return &kaderr.ConfigurationError{
-			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("query concurrency must be greater than zero"),
-		}
-	}
-	if cfg.QueryTimeout < 1 {
-		return &kaderr.ConfigurationError{
-			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("query timeout must be greater than zero"),
-		}
-	}
-
-	if cfg.RequestConcurrency < 1 {
-		return &kaderr.ConfigurationError{
-			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("request concurrency must be greater than zero"),
-		}
-	}
-
-	if cfg.RequestTimeout < 1 {
-		return &kaderr.ConfigurationError{
-			Component: "CoordinatorConfig",
-			Err:       fmt.Errorf("request timeout must be greater than zero"),
-		}
-	}
-
 	if cfg.Logger == nil {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("logger must not be nil"),
 		}
 	}
 
 	if cfg.MeterProvider == nil {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("meter provider must not be nil"),
 		}
 	}
 
 	if cfg.TracerProvider == nil {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "CoordinatorConfig",
 			Err:       fmt.Errorf("tracer provider must not be nil"),
 		}
@@ -156,16 +130,25 @@ func (cfg *CoordinatorConfig) Validate() error {
 }
 
 func DefaultCoordinatorConfig() *CoordinatorConfig {
-	return &CoordinatorConfig{
-		Clock:              clock.New(),
-		QueryConcurrency:   3,
-		QueryTimeout:       5 * time.Minute,
-		RequestConcurrency: 3,
-		RequestTimeout:     time.Minute,
-		Logger:             slog.New(zapslog.NewHandler(logging.Logger("coord").Desugar().Core())),
-		MeterProvider:      otel.GetMeterProvider(),
-		TracerProvider:     otel.GetTracerProvider(),
+	cfg := &CoordinatorConfig{
+		Clock: clock.New(),
+
+		Logger:         tele.DefaultLogger("coord"),
+		MeterProvider:  otel.GetMeterProvider(),
+		TracerProvider: otel.GetTracerProvider(),
 	}
+
+	cfg.Query = *DefaultPooledQueryConfig()
+	cfg.Query.Clock = cfg.Clock
+	cfg.Query.Logger = cfg.Logger.With("behaviour", "pooledquery")
+	cfg.Query.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
+
+	cfg.Routing = *DefaultRoutingConfig()
+	cfg.Routing.Clock = cfg.Clock
+	cfg.Routing.Logger = cfg.Logger.With("behaviour", "routing")
+	cfg.Routing.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
+
+	return cfg
 }
 
 func NewCoordinator(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *pb.Message], rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *CoordinatorConfig) (*Coordinator, error) {
@@ -181,71 +164,15 @@ func NewCoordinator(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *
 		return nil, fmt.Errorf("init telemetry: %w", err)
 	}
 
-	qpCfg := query.DefaultPoolConfig()
-	qpCfg.Clock = cfg.Clock
-	qpCfg.Concurrency = cfg.QueryConcurrency
-	qpCfg.Timeout = cfg.QueryTimeout
-	qpCfg.QueryConcurrency = cfg.RequestConcurrency
-	qpCfg.RequestTimeout = cfg.RequestTimeout
-
-	qp, err := query.NewPool[kadt.Key, kadt.PeerID, *pb.Message](self, qpCfg)
+	queryBehaviour, err := NewPooledQueryBehaviour(self, &cfg.Query)
 	if err != nil {
-		return nil, fmt.Errorf("query pool: %w", err)
-	}
-	queryBehaviour := NewPooledQueryBehaviour(qp, cfg.Logger, tele.Tracer)
-
-	bootstrapCfg := routing.DefaultBootstrapConfig[kadt.Key]()
-	bootstrapCfg.Clock = cfg.Clock
-	bootstrapCfg.Timeout = cfg.QueryTimeout
-	bootstrapCfg.RequestConcurrency = cfg.RequestConcurrency
-	bootstrapCfg.RequestTimeout = cfg.RequestTimeout
-
-	bootstrap, err := routing.NewBootstrap(self, bootstrapCfg)
-	if err != nil {
-		return nil, fmt.Errorf("bootstrap: %w", err)
+		return nil, fmt.Errorf("query behaviour: %w", err)
 	}
 
-	includeCfg := routing.DefaultIncludeConfig()
-	includeCfg.Clock = cfg.Clock
-	includeCfg.Timeout = cfg.QueryTimeout
-
-	// TODO: expose config
-	// includeCfg.QueueCapacity = cfg.IncludeQueueCapacity
-	// includeCfg.Concurrency = cfg.IncludeConcurrency
-	// includeCfg.Timeout = cfg.IncludeTimeout
-
-	include, err := routing.NewInclude[kadt.Key, kadt.PeerID](rt, includeCfg)
+	routingBehaviour, err := NewRoutingBehaviour(self, rt, &cfg.Routing)
 	if err != nil {
-		return nil, fmt.Errorf("include: %w", err)
+		return nil, fmt.Errorf("routing behaviour: %w", err)
 	}
-
-	probeCfg := routing.DefaultProbeConfig()
-	probeCfg.Clock = cfg.Clock
-	probeCfg.Timeout = cfg.QueryTimeout
-
-	// TODO: expose config
-	// probeCfg.Concurrency = cfg.ProbeConcurrency
-	probe, err := routing.NewProbe[kadt.Key](rt, probeCfg)
-	if err != nil {
-		return nil, fmt.Errorf("probe: %w", err)
-	}
-
-	exploreCfg := routing.DefaultExploreConfig()
-	exploreCfg.Clock = cfg.Clock
-	exploreCfg.Timeout = cfg.QueryTimeout
-
-	schedule, err := routing.NewDynamicExploreSchedule(14, cfg.Clock.Now(), time.Hour, 1, 0)
-	if err != nil {
-		return nil, fmt.Errorf("explore schedule: %w", err)
-	}
-
-	// TODO: expose more config
-	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
-	if err != nil {
-		return nil, fmt.Errorf("explore: %w", err)
-	}
-
-	routingBehaviour := NewRoutingBehaviour(self, bootstrap, include, probe, explore, cfg.Logger, tele.Tracer)
 
 	networkBehaviour := NewNetworkBehaviour(rtr, cfg.Logger, tele.Tracer)
 

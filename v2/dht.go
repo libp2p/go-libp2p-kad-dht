@@ -106,10 +106,10 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 
 	// instantiate a new Kademlia DHT coordinator.
 	coordCfg := coord.DefaultCoordinatorConfig()
-	coordCfg.QueryConcurrency = cfg.Query.Concurrency
-	coordCfg.QueryTimeout = cfg.Query.Timeout
-	coordCfg.RequestConcurrency = cfg.Query.RequestConcurrency
-	coordCfg.RequestTimeout = cfg.Query.RequestTimeout
+	coordCfg.Query.Concurrency = cfg.Query.Concurrency
+	coordCfg.Query.Timeout = cfg.Query.Timeout
+	coordCfg.Query.RequestConcurrency = cfg.Query.RequestConcurrency
+	coordCfg.Query.RequestTimeout = cfg.Query.RequestTimeout
 	coordCfg.Clock = cfg.Clock
 	coordCfg.MeterProvider = cfg.MeterProvider
 	coordCfg.TracerProvider = cfg.TracerProvider

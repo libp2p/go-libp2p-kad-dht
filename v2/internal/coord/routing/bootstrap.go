@@ -3,7 +3,7 @@ package routing
 import (
 	"context"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -28,9 +28,6 @@ type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 	// qry is the query used by the bootstrap process
 	qry *query.Query[K, N, any]
 
-	// qryMu guards access to qry
-	qryMu sync.RWMutex
-
 	// cfg is a copy of the optional configuration supplied to the Bootstrap
 	cfg BootstrapConfig
 
@@ -45,6 +42,9 @@ type Bootstrap[K kad.Key[K], N kad.NodeID[K]] struct {
 
 	// gaugeRunning is a gauge that tracks whether the bootstrap is running.
 	gaugeRunning metric.Int64ObservableGauge
+
+	// running records whether the bootstrap is running after the last state change so that it can be read asynchronously by gaugeRunning
+	running atomic.Bool
 }
 
 // BootstrapConfig specifies optional configuration for a Bootstrap
@@ -167,12 +167,10 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 		metric.WithDescription("Whether or not the bootstrap is running"),
 		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
-			b.qryMu.RLock()
-			defer b.qryMu.RUnlock()
-			if b.qry == nil {
-				o.Observe(0)
-			} else {
+			if b.running.Load() {
 				o.Observe(1)
+			} else {
+				o.Observe(0)
 			}
 			return nil
 		}),
@@ -185,15 +183,16 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 }
 
 // Advance advances the state of the bootstrap by attempting to advance its query if running.
-func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) BootstrapState {
+func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) (out BootstrapState) {
 	ctx, span := b.cfg.Tracer.Start(ctx, "Bootstrap.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
-	defer span.End()
+	defer func() {
+		b.running.Store(b.qry != nil) // record whether the bootstrap is still running for metrics
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	switch tev := ev.(type) {
 	case *EventBootstrapStart[K, N]:
-		b.qryMu.Lock()
-		defer b.qryMu.Unlock()
-
 		if b.qry != nil {
 			return b.advanceQuery(ctx, &query.EventQueryPoll{})
 		}
@@ -233,8 +232,6 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) Bootst
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
 
-	b.qryMu.Lock()
-	defer b.qryMu.Unlock()
 	if b.qry != nil {
 		return b.advanceQuery(ctx, &query.EventQueryPoll{})
 	}

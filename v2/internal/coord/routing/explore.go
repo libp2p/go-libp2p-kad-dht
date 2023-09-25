@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -49,12 +49,6 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 	// qryCpl is the cpl the current query is exploring for
 	qryCpl int
 
-	// cplAttributeSet holds the current cpl being explored in an attribute that may be used with metrics
-	cplAttributeSet attribute.Set
-
-	// qryMu guards access to qry, qryCpl and cplAttributeSet
-	qryMu sync.RWMutex
-
 	// cfg is a copy of the optional configuration supplied to the Explore
 	cfg ExploreConfig
 
@@ -71,6 +65,12 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 
 	// gaugeRunning is a gauge that tracks whether an explore is running.
 	gaugeRunning metric.Int64ObservableGauge
+
+	// running records whether an explore is running after the last state change so that it can be read asynchronously by gaugeRunning
+	running atomic.Bool
+
+	// cplAttributeSet holds the current cpl being explored in an attribute that may be used with metrics
+	cplAttributeSet atomic.Value // holds a [attribute.Set]
 }
 
 // NodeIDForCplFunc is a function that given a cpl generates a [kad.NodeID] with a key that has
@@ -180,6 +180,7 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 		qryCpl:   -1,
 		schedule: schedule,
 	}
+	e.cplAttributeSet.Store(attribute.NewSet())
 
 	var err error
 	e.counterFindSent, err = cfg.Meter.Int64Counter(
@@ -214,12 +215,10 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 		metric.WithDescription("Whether or not the an explore is running for a cpl"),
 		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
-			e.qryMu.RLock()
-			defer e.qryMu.RUnlock()
-			if e.qry == nil {
-				o.Observe(0)
+			if e.running.Load() {
+				o.Observe(1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))
 			} else {
-				o.Observe(1, metric.WithAttributeSet(e.cplAttributeSet))
+				o.Observe(0)
 			}
 			return nil
 		}),
@@ -232,27 +231,25 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 }
 
 // Advance advances the state of the explore by attempting to advance its query if running.
-func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreState {
+func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) (out ExploreState) {
 	ctx, span := e.cfg.Tracer.Start(ctx, "Explore.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
-	defer span.End()
+	defer func() {
+		e.running.Store(e.qry != nil)
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	switch tev := ev.(type) {
 	case *EventExplorePoll:
 		// ignore, nothing to do
 	case *EventExploreFindCloserResponse[K, N]:
-		e.qryMu.RLock()
-		defer e.qryMu.RUnlock()
-
-		e.counterFindSucceeded.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
+		e.counterFindSucceeded.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))
 		return e.advanceQuery(ctx, &query.EventQueryNodeResponse[K, N]{
 			NodeID:      tev.NodeID,
 			CloserNodes: tev.CloserNodes,
 		})
 	case *EventExploreFindCloserFailure[K, N]:
-		e.qryMu.RLock()
-		defer e.qryMu.RUnlock()
-
-		e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
+		e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))
 		span.RecordError(tev.Error)
 		return e.advanceQuery(ctx, &query.EventQueryNodeFailure[K, N]{
 			NodeID: tev.NodeID,
@@ -261,9 +258,6 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
-
-	e.qryMu.Lock()
-	defer e.qryMu.Unlock()
 
 	// if query is running, give it a chance to advance
 	if e.qry != nil {
@@ -302,7 +296,7 @@ func (e *Explore[K, N]) Advance(ctx context.Context, ev ExploreEvent) ExploreSta
 	}
 	e.qry = qry
 	e.qryCpl = cpl
-	e.cplAttributeSet = attribute.NewSet(attribute.Int("cpl", cpl))
+	e.cplAttributeSet.Store(attribute.NewSet(attribute.Int("cpl", cpl)))
 
 	return e.advanceQuery(ctx, &query.EventQueryPoll{})
 }
@@ -311,12 +305,10 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 	ctx, span := e.cfg.Tracer.Start(ctx, "Explore.advanceQuery")
 	defer span.End()
 
-	// e.qryMu is held by Advance
-
 	state := e.qry.Advance(ctx, qev)
 	switch st := state.(type) {
 	case *query.StateQueryFindCloser[K, N]:
-		e.counterFindSent.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
+		e.counterFindSent.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))
 		return &StateExploreFindCloser[K, N]{
 			Cpl:     e.qryCpl,
 			QueryID: st.QueryID,
@@ -326,9 +318,7 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 		}
 	case *query.StateQueryFinished[K, N]:
 		span.SetAttributes(attribute.String("out_state", "StateExploreFinished"))
-		e.qry = nil
-		e.qryCpl = -1
-		e.cplAttributeSet = attribute.NewSet()
+		e.clearQuery()
 		return &StateExploreQueryFinished{
 			Cpl:   e.qryCpl,
 			Stats: st.Stats,
@@ -336,11 +326,9 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 	case *query.StateQueryWaitingAtCapacity:
 		elapsed := e.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > e.cfg.Timeout {
-			e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
+			e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))
 			span.SetAttributes(attribute.String("out_state", "StateExploreTimeout"))
-			e.qry = nil
-			e.qryCpl = -1
-			e.cplAttributeSet = attribute.NewSet()
+			e.clearQuery()
 			return &StateExploreQueryTimeout{
 				Cpl:   e.qryCpl,
 				Stats: st.Stats,
@@ -354,11 +342,9 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 	case *query.StateQueryWaitingWithCapacity:
 		elapsed := e.cfg.Clock.Since(st.Stats.Start)
 		if elapsed > e.cfg.Timeout {
-			e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet))
+			e.counterFindFailed.Add(ctx, 1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))
 			span.SetAttributes(attribute.String("out_state", "StateExploreTimeout"))
-			e.qry = nil
-			e.qryCpl = -1
-			e.cplAttributeSet = attribute.NewSet()
+			e.clearQuery()
 			return &StateExploreQueryTimeout{
 				Cpl:   e.qryCpl,
 				Stats: st.Stats,
@@ -372,6 +358,12 @@ func (e *Explore[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent) 
 	default:
 		panic(fmt.Sprintf("unexpected state: %T", st))
 	}
+}
+
+func (e *Explore[K, N]) clearQuery() {
+	e.qry = nil
+	e.qryCpl = -1
+	e.cplAttributeSet.Store(attribute.NewSet())
 }
 
 // ExploreState is the state of an [Explore].

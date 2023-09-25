@@ -3,7 +3,7 @@ package routing
 import (
 	"context"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -30,9 +30,6 @@ type Include[K kad.Key[K], N kad.NodeID[K]] struct {
 	// candidates is a list of nodes that are candidates for adding to the routing table
 	candidates *nodeQueue[K, N]
 
-	// candidatesMu guards access to candidates
-	candidatesMu sync.RWMutex
-
 	// cfg is a copy of the optional configuration supplied to the Include
 	cfg IncludeConfig
 
@@ -53,6 +50,9 @@ type Include[K kad.Key[K], N kad.NodeID[K]] struct {
 
 	// gaugeCandidateCount is a gauge that tracks the number of nodes in the probe's pending queue of scheduled checks.
 	gaugeCandidateCount metric.Int64ObservableGauge
+
+	// candidateCount holds the number of candidate nodes after the last state change so that it can be read asynchronously by gaugeCandidateCount
+	candidateCount atomic.Int64
 }
 
 // IncludeConfig specifies optional configuration for an Include
@@ -187,9 +187,7 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 		metric.WithDescription("Total number of nodes in the include state machine's candidate queue"),
 		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
-			in.candidatesMu.RLock()
-			defer in.candidatesMu.RUnlock()
-			o.Observe(int64(in.candidates.Len()))
+			o.Observe(in.candidateCount.Load())
 			return nil
 		}),
 	)
@@ -204,6 +202,7 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out IncludeState) {
 	ctx, span := in.cfg.Tracer.Start(ctx, "Include.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
+		in.candidateCount.Store(int64(in.candidates.Len()))
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()
 	}()
@@ -222,14 +221,11 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 		}
 
 		// TODO: potentially time out a check and make room in the queue
-		in.candidatesMu.Lock()
 		if !in.candidates.HasCapacity() {
-			in.candidatesMu.Unlock()
 			in.counterCandidatesDroppedCapacity.Add(ctx, 1)
 			return &StateIncludeWaitingFull{}
 		}
 		in.candidates.Enqueue(ctx, tev.NodeID)
-		in.candidatesMu.Unlock()
 
 	case *EventIncludeConnectivityCheckSuccess[K, N]:
 		in.counterChecksPassed.Add(ctx, 1)
@@ -252,9 +248,6 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
-
-	in.candidatesMu.Lock()
-	defer in.candidatesMu.Unlock()
 
 	if len(in.checks) == in.cfg.Concurrency {
 		if !in.candidates.HasCapacity() {

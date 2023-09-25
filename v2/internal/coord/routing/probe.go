@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -79,6 +79,9 @@ type Probe[K kad.Key[K], N kad.NodeID[K]] struct {
 
 	// gaugePendingCount is a gauge that tracks the number of nodes in the probe's pending queue of scheduled checks.
 	gaugePendingCount metric.Int64ObservableGauge
+
+	// pendingCount holds the number of pending nodes after the last state change so that it can be read asynchronously by gaugePendingCount
+	pendingCount atomic.Int64
 }
 
 // ProbeConfig specifies optional configuration for a Probe
@@ -203,7 +206,7 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 		metric.WithDescription("Total number of nodes being monitored by the probe state machine"),
 		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
-			o.Observe(int64(p.nvl.pendingCount()))
+			o.Observe(p.pendingCount.Load())
 			return nil
 		}),
 	)
@@ -218,6 +221,8 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeState) {
 	_, span := p.cfg.Tracer.Start(ctx, "Probe.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
+		// update the pending count so gauge can read it asynchronously
+		p.pendingCount.Store(int64(p.nvl.pendingCount()))
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()
 	}()
@@ -424,9 +429,6 @@ type nodeValueEntry[K kad.Key[K], N kad.NodeID[K]] struct {
 type nodeValueList[K kad.Key[K], N kad.NodeID[K]] struct {
 	nodes map[string]*nodeValueEntry[K, N]
 
-	// pendingMu guards access to pending
-	pendingMu sync.RWMutex
-
 	// pending is a list of nodes ordered by the time of the next check
 	pending *nodeValuePendingList[K, N]
 
@@ -459,12 +461,10 @@ func (l *nodeValueList[K, N]) Put(nv *nodeValue[K, N]) {
 
 	// nve.index is -1 when the node is not already in the pending list
 	// this could be because it is new or if there is an ongoing check
-	l.pendingMu.Lock()
 	if nve.index == -1 {
 		heap.Push(l.pending, nve)
 	}
 	heap.Fix(l.pending, nve.index)
-	l.pendingMu.Unlock()
 
 	l.removeFromOngoing(nv.NodeID)
 }
@@ -479,8 +479,6 @@ func (l *nodeValueList[K, N]) Get(n N) (*nodeValue[K, N], bool) {
 }
 
 func (l *nodeValueList[K, N]) pendingCount() int {
-	l.pendingMu.RLock()
-	defer l.pendingMu.RUnlock()
 	return len(*l.pending)
 }
 
@@ -502,9 +500,7 @@ func (l *nodeValueList[K, N]) Remove(n N) {
 	}
 	delete(l.nodes, mk)
 	if nve.index >= 0 {
-		l.pendingMu.Lock()
 		heap.Remove(l.pending, nve.index)
-		l.pendingMu.Unlock()
 	}
 	l.removeFromOngoing(n)
 }
@@ -548,8 +544,6 @@ func (l *nodeValueList[K, N]) removeFromOngoing(n N) {
 // PeekNext returns the next node that is due a connectivity check without removing it
 // from the pending list.
 func (l *nodeValueList[K, N]) PeekNext(ts time.Time) (*nodeValue[K, N], bool) {
-	l.pendingMu.Lock()
-	defer l.pendingMu.Unlock()
 	if len(*l.pending) == 0 {
 		return nil, false
 	}
@@ -574,9 +568,7 @@ func (l *nodeValueList[K, N]) MarkOngoing(n N, deadline time.Time) {
 	}
 	nve.nv.CheckDeadline = deadline
 	l.nodes[mk] = nve
-	l.pendingMu.Lock()
 	heap.Remove(l.pending, nve.index)
-	l.pendingMu.Unlock()
 	l.ongoing = append(l.ongoing, nve.nv.NodeID)
 }
 

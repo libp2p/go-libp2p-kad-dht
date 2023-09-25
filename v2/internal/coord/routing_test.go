@@ -169,7 +169,7 @@ func TestRoutingConfigValidate(t *testing.T) {
 	t.Run("explore maximum 15 or less", func(t *testing.T) {
 		cfg := DefaultRoutingConfig()
 
-		cfg.ExploreMaximumCpl = 15
+		cfg.ExploreMaximumCpl = 16
 		require.Error(t, cfg.Validate())
 	})
 

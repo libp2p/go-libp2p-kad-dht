@@ -84,7 +84,7 @@ type Query[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	findCloser bool
 	stats      QueryStats
 
-	// finished indicates that that the query has completed its work or has been stopped.
+	// finished indicates that the query has completed its work or has been stopped.
 	finished bool
 
 	// targetNodes is the set of responsive nodes thought to be closest to the target.

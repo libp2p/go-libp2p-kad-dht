@@ -78,6 +78,33 @@ func TestConfig_Validate(t *testing.T) {
 		assert.Error(t, cfg.Validate())
 	})
 
+	t.Run("backends for ipfs protocol (public key missing)", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ProtocolID = ProtocolIPFS
+		cfg.Backends[namespaceProviders] = &RecordBackend{}
+		cfg.Backends[namespaceIPNS] = &RecordBackend{}
+		cfg.Backends["another"] = &RecordBackend{}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("backends for ipfs protocol (ipns missing)", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ProtocolID = ProtocolIPFS
+		cfg.Backends[namespaceProviders] = &RecordBackend{}
+		cfg.Backends["another"] = &RecordBackend{}
+		cfg.Backends[namespacePublicKey] = &RecordBackend{}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("backends for ipfs protocol (providers missing)", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ProtocolID = ProtocolIPFS
+		cfg.Backends["another"] = &RecordBackend{}
+		cfg.Backends[namespaceIPNS] = &RecordBackend{}
+		cfg.Backends[namespacePublicKey] = &RecordBackend{}
+		assert.Error(t, cfg.Validate())
+	})
+
 	t.Run("nil address filter", func(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.AddressFilter = nil

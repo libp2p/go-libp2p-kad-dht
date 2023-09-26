@@ -52,7 +52,8 @@ type Backend interface {
 	Store(ctx context.Context, key string, value any) (any, error)
 
 	// Fetch returns the record for the given path or a [ds.ErrNotFound] if it
-	// wasn't found or another error if any occurred.
+	// wasn't found or another error if any occurred. key won't contain the
+	// namespace prefix.
 	Fetch(ctx context.Context, key string) (any, error)
 }
 

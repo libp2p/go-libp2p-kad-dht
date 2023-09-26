@@ -34,6 +34,7 @@ var rng = rand.New(rand.NewSource(1337))
 
 func newTestDHT(t testing.TB) *DHT {
 	cfg := DefaultConfig()
+	cfg.Logger = devnull
 
 	return newTestDHTWithConfig(t, cfg)
 }

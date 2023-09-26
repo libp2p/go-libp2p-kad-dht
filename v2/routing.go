@@ -126,6 +126,7 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 	// if a "providers" backend is registered.
 	b, found := d.backends[namespaceProviders]
 	if !found || !c.Defined() {
+		span.RecordError(fmt.Errorf("no providers backend registered or CID undefined"))
 		return
 	}
 
@@ -149,7 +150,12 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 	providers := map[peer.ID]struct{}{}
 	for _, provider := range ps.providers {
 		providers[provider.ID] = struct{}{}
-		out <- provider // TODO: select on context
+
+		select {
+		case <-ctx.Done():
+			return
+		case out <- provider:
+		}
 
 		if count != 0 && len(providers) == count {
 			return
@@ -164,24 +170,36 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 
 	// handle node response
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
+		// loop through all providers that the remote peer returned
 		for _, provider := range resp.ProviderAddrInfos() {
+
+			// if we had already sent that peer on the channel -> do nothing
 			if _, found := providers[provider.ID]; found {
 				continue
 			}
 
+			// keep track that we will have sent this peer on the channel
 			providers[provider.ID] = struct{}{}
-			out <- provider // TODO: select on context
-		}
 
-		if count != 0 && len(providers) == count {
-			// TODO: does this guarantee no new calls to queryFn?
-			return coordt.ErrSkipRemaining
+			// actually send the provider information to the user
+			select {
+			case <-ctx.Done():
+				return coordt.ErrSkipRemaining
+			case out <- provider:
+			}
+
+			// if count is 0, we will wait until the query has exhausted the keyspace
+			// if count isn't 0, we will stop if the number of providers we have sent
+			// equals the number that the user has requested.
+			if count != 0 && len(providers) == count {
+				return coordt.ErrSkipRemaining
+			}
 		}
 
 		return nil
 	}
 
-	_, err = d.kad.QueryMessage(ctx, msg, fn, count) // TODO: is count correct here?
+	_, err = d.kad.QueryMessage(ctx, msg, fn, 20) // TODO: parameterize
 	if err != nil {
 		span.RecordError(err)
 		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))

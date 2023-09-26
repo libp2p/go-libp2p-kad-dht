@@ -439,3 +439,7 @@ func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+func TestDHT_SearchValue(t *testing.T) {
+	// 1.
+}

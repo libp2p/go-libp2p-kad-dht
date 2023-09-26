@@ -19,6 +19,21 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 )
 
+// newRandomContent reads 1024 bytes from crypto/rand and builds a content struct.
+func newRandomContent(t testing.TB) cid.Cid {
+	raw := make([]byte, 1024)
+	_, err := rand.Read(raw)
+	require.NoError(t, err)
+
+	hash := sha256.New()
+	hash.Write(raw)
+
+	mhash, err := mh.Encode(hash.Sum(nil), mh.SHA2_256)
+	require.NoError(t, err)
+
+	return cid.NewCidV0(mhash)
+}
+
 func makePkKeyValue(t *testing.T) (string, []byte) {
 	t.Helper()
 
@@ -101,19 +116,72 @@ func TestGetValueOnePeer(t *testing.T) {
 	require.Equal(t, v, val)
 }
 
-// NewRandomContent reads 1024 bytes from crypto/rand and builds a content struct.
-func newRandomContent(t testing.TB) cid.Cid {
-	raw := make([]byte, 1024)
-	_, err := rand.Read(raw)
+func TestDHT_Provide_no_providers_backend_registered(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	delete(d.backends, namespaceProviders)
+	err := d.Provide(ctx, newRandomContent(t), true)
+	assert.ErrorIs(t, err, routing.ErrNotSupported)
+}
+
+func TestDHT_Provide_undefined_cid(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	err := d.Provide(ctx, cid.Cid{}, true)
+	assert.ErrorContains(t, err, "invalid cid")
+}
+
+func TestDHT_Provide_erroneous_datastore(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	testErr := fmt.Errorf("some error")
+
+	// construct a datastore that fails for any operation
+	memStore, err := InMemoryDatastore()
 	require.NoError(t, err)
 
-	hash := sha256.New()
-	hash.Write(raw)
+	dstore := failstore.NewFailstore(memStore, func(s string) error {
+		return testErr
+	})
 
-	mhash, err := mh.Encode(hash.Sum(nil), mh.SHA2_256)
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
 	require.NoError(t, err)
 
-	return cid.NewCidV0(mhash)
+	be.datastore = dstore
+
+	err = d.Provide(ctx, newRandomContent(t), true)
+	assert.ErrorIs(t, err, testErr)
+}
+
+func TestDHT_Provide_does_nothing_if_broadcast_is_false(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t) // unconnected DHT
+
+	c := newRandomContent(t)
+	err := d.Provide(ctx, c, false)
+	assert.NoError(t, err)
+
+	// still stored locally
+	be, err := typedBackend[*ProvidersBackend](d, namespaceProviders)
+	require.NoError(t, err)
+	val, err := be.Fetch(ctx, string(c.Hash()))
+	require.NoError(t, err)
+
+	ps, ok := val.(*providerSet)
+	require.True(t, ok)
+	require.Len(t, ps.providers, 1)
+	assert.Equal(t, d.host.ID(), ps.providers[0].ID)
+}
+
+func TestDHT_Provide_fails_if_routing_table_is_empty(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	err := d.Provide(ctx, newRandomContent(t), true)
+	assert.Error(t, err)
 }
 
 func TestDHT_FindProvidersAsync_empty_routing_table(t *testing.T) {

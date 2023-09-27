@@ -226,7 +226,9 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 		out.addProvider(addrInfo, rec.expiry)
 	}
 
-	if len(out.providers) > 0 {
+	if len(out.providers) == 0 {
+		return nil, ds.ErrNotFound
+	} else {
 		p.cache.Add(qKey.String(), *out)
 	}
 

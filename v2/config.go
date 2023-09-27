@@ -171,6 +171,14 @@ type Config struct {
 	// used to filter out private addresses.
 	AddressFilter AddressFilter
 
+	// DefaultQuorum specifies the minimum number of identical responses before
+	// a SearchValue/GetValue operation returns. The responses must not only be
+	// identical, but the responses must also correspond to the "best" records
+	// we have observed in the network during the SearchValue/GetValue
+	// operation. A DefaultQuorum of 0 means that we search the network until
+	// we have exhausted the keyspace.
+	DefaultQuorum int // TODO: put on QueryConfig?
+
 	// MeterProvider provides access to named Meter instances. It's used to,
 	// e.g., expose prometheus metrics. Check out the [opentelemetry docs]:
 	//
@@ -201,6 +209,7 @@ func DefaultConfig() *Config {
 		Logger:            slog.New(zapslog.NewHandler(logging.Logger("dht").Desugar().Core())),
 		TimeoutStreamIdle: time.Minute, // MAGIC
 		AddressFilter:     AddrFilterPrivate,
+		DefaultQuorum:     0,
 		MeterProvider:     otel.GetMeterProvider(),
 		TracerProvider:    otel.GetTracerProvider(),
 		Query:             DefaultQueryConfig(),
@@ -338,6 +347,13 @@ func (c *Config) Validate() error {
 		return &ConfigurationError{
 			Component: "Config",
 			Err:       fmt.Errorf("opentelemetry tracer provider must not be nil"),
+		}
+	}
+
+	if c.DefaultQuorum < 0 {
+		return &ConfigurationError{
+			Component: "Config",
+			Err:       fmt.Errorf("default quorum must not be negative"),
 		}
 	}
 

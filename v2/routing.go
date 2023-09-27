@@ -3,8 +3,11 @@ package dht
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	ds "github.com/ipfs/go-datastore"
 
 	"github.com/ipfs/go-cid"
 	record "github.com/libp2p/go-libp2p-record"
@@ -129,12 +132,20 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return
 	}
 
+	// send all providers onto the out channel until the desired count
+	// was reached. If no count was specified, continue with network lookup.
+	providers := map[peer.ID]struct{}{}
+
 	// first fetch the record locally
 	stored, err := b.Fetch(ctx, string(c.Hash()))
 	if err != nil {
-		span.RecordError(err)
-		d.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
-		return
+		if !errors.Is(err, ds.ErrNotFound) {
+			span.RecordError(err)
+			d.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
+			return
+		}
+
+		stored = &providerSet{}
 	}
 
 	ps, ok := stored.(*providerSet)
@@ -144,9 +155,6 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return
 	}
 
-	// send all providers onto the out channel until the desired count
-	// was reached. If no count was specified, continue with network lookup.
-	providers := map[peer.ID]struct{}{}
 	for _, provider := range ps.providers {
 		providers[provider.ID] = struct{}{}
 
@@ -300,33 +308,6 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 	return best, nil
 }
 
-type quorumOptionKey struct{}
-
-func RoutingQuorum(n int) routing.Option {
-	return func(opts *routing.Options) error {
-		if n < 0 {
-			return fmt.Errorf("quorum must not be negative")
-		}
-
-		if opts.Other == nil {
-			opts.Other = make(map[interface{}]interface{}, 1)
-		}
-
-		opts.Other[quorumOptionKey{}] = n
-
-		return nil
-	}
-}
-
-// GetQuorum defaults to 0 if no option is found
-func GetQuorum(opts *routing.Options) int {
-	quorum, ok := opts.Other[quorumOptionKey{}].(int)
-	if !ok {
-		quorum = 0 // TODO: make configurable
-	}
-	return quorum
-}
-
 // SearchValue will search in the DHT for keyStr. keyStr must have the form
 // `/$namespace/$binary_id`
 func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing.Option) (<-chan []byte, error) {
@@ -352,6 +333,9 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 	if rOpt.Offline {
 		val, err := b.Fetch(ctx, path)
 		if err != nil {
+			if errors.Is(err, ds.ErrNotFound) {
+				return nil, routing.ErrNotFound
+			}
 			return nil, fmt.Errorf("fetch from backend: %w", err)
 		}
 
@@ -361,7 +345,7 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 		}
 
 		if rec == nil {
-			return nil, fmt.Errorf("not found locally")
+			return nil, routing.ErrNotFound
 		}
 
 		out := make(chan []byte, 1)
@@ -405,7 +389,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 	// The quorum that we require for terminating the query. This number tells
 	// us how many peers must have responded with the "best" value before we
 	// cancel the query.
-	quorum := GetQuorum(ropt)
+	quorum := d.getQuorum(ropt)
 
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		rec := resp.GetRecord()
@@ -448,6 +432,41 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 	if err != nil {
 		d.log.Warn("Search value query failed", slog.String("err", err.Error()))
 	}
+}
+
+// quorumOptionKey is a struct that is used as a routing options key to pass
+// the desired quorum value into, e.g., SearchValue or GetValue.
+type quorumOptionKey struct{}
+
+// RoutingQuorum accepts the desired quorum that is required to terminate the
+// search query. The quorum value must not be negative but can be 0 in which
+// case we continue the query until we have exhausted the keyspace. If no
+// quorum is specified, the [Config.DefaultQuorum] value will be used.
+func RoutingQuorum(n int) routing.Option {
+	return func(opts *routing.Options) error {
+		if n < 0 {
+			return fmt.Errorf("quorum must not be negative")
+		}
+
+		if opts.Other == nil {
+			opts.Other = make(map[interface{}]interface{}, 1)
+		}
+
+		opts.Other[quorumOptionKey{}] = n
+
+		return nil
+	}
+}
+
+// getQuorum extracts the quorum value from the given routing options and
+// returns [Config.DefaultQuorum] if no quorum value is present.
+func (d *DHT) getQuorum(opts *routing.Options) int {
+	quorum, ok := opts.Other[quorumOptionKey{}].(int)
+	if !ok {
+		quorum = d.cfg.DefaultQuorum
+	}
+
+	return quorum
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {

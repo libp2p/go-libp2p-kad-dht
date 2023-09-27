@@ -210,8 +210,17 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
 	}
 
+	resp := &pb.Message{
+		Type:        pb.Message_GET_PROVIDERS,
+		Key:         k,
+		CloserPeers: d.closerPeers(ctx, remote, kadt.NewKey(k)),
+	}
+
 	fetched, err := backend.Fetch(ctx, string(req.GetKey()))
 	if err != nil {
+		if errors.Is(err, ds.ErrNotFound) {
+			return resp, nil
+		}
 		return nil, fmt.Errorf("fetch providers from datastore: %w", err)
 	}
 
@@ -225,12 +234,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		pbProviders[i] = pb.FromAddrInfo(p)
 	}
 
-	resp := &pb.Message{
-		Type:          pb.Message_GET_PROVIDERS,
-		Key:           k,
-		CloserPeers:   d.closerPeers(ctx, remote, kadt.NewKey(k)),
-		ProviderPeers: pbProviders,
-	}
+	resp.ProviderPeers = pbProviders
 
 	return resp, nil
 }

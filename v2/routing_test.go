@@ -82,23 +82,6 @@ func TestDHT_PutValue_invalid_key(t *testing.T) {
 	})
 }
 
-//func TestGetSetValueLocal(t *testing.T) {
-//	ctx := kadtest.CtxShort(t)
-//
-//	top := NewTopology(t)
-//	d := top.AddServer(nil)
-//
-//	key, v := makePkKeyValue(t)
-//
-//	err := d.putValueLocal(ctx, key, v)
-//	require.NoError(t, err)
-//
-//	val, err := d.getValueLocal(ctx, key)
-//	require.NoError(t, err)
-//
-//	require.Equal(t, v, val)
-//}
-
 func TestGetValueOnePeer(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 	top := NewTopology(t)
@@ -219,17 +202,11 @@ func TestDHT_FindProvidersAsync_providers_stored_locally(t *testing.T) {
 	require.NoError(t, err)
 
 	out := d.FindProvidersAsync(ctx, c, 1)
-	for {
-		select {
-		case p, more := <-out:
-			if !more {
-				return
-			}
-			assert.Equal(t, provider.ID, p.ID)
-		case <-ctx.Done():
-			t.Fatal("timeout")
-		}
-	}
+
+	val := readItem(t, ctx, out)
+	assert.Equal(t, provider.ID, val.ID)
+
+	assertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_returns_only_count_from_local_store(t *testing.T) {
@@ -270,7 +247,7 @@ LOOP:
 }
 
 func TestDHT_FindProvidersAsync_queries_other_peers(t *testing.T) {
-	ctx := kadtest.CtxShort(t)
+	ctx := context.Background() // kadtest.CtxShort(t)
 
 	c := newRandomContent(t)
 
@@ -286,13 +263,9 @@ func TestDHT_FindProvidersAsync_queries_other_peers(t *testing.T) {
 	require.NoError(t, err)
 
 	out := d1.FindProvidersAsync(ctx, c, 1)
-	select {
-	case p, more := <-out:
-		require.True(t, more)
-		assert.Equal(t, provider.ID, p.ID)
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
+
+	val := readItem(t, ctx, out)
+	assert.Equal(t, provider.ID, val.ID)
 
 	assertClosed(t, ctx, out)
 }
@@ -419,7 +392,64 @@ func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
 	assertClosed(t, ctx, out)
 }
 
-func TestDHT_GetValue(t *testing.T) {
+func TestDHT_GetValue_happy_path(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	clk.Set(time.Now()) // needed because record validators don't use mock clocks
+
+	cfg := DefaultConfig()
+	cfg.Clock = clk
+
+	// generate new identity for the peer that issues the request
+	priv, _, err := crypto.GenerateEd25519Key(rng)
+	require.NoError(t, err)
+
+	key, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
+	key, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
+	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number means better value
+
+	top := NewTopology(t)
+	d1 := top.AddServer(cfg)
+	d2 := top.AddServer(cfg)
+	d3 := top.AddServer(cfg)
+	d4 := top.AddServer(cfg)
+	d5 := top.AddServer(cfg)
+
+	top.ConnectChain(ctx, d1, d2, d3, d4, d5)
+
+	err = d3.putValueLocal(ctx, key, validValue)
+	require.NoError(t, err)
+
+	err = d4.putValueLocal(ctx, key, worseValue)
+	require.NoError(t, err)
+
+	err = d5.putValueLocal(ctx, key, betterValue)
+	require.NoError(t, err)
+
+	val, err := d1.GetValue(ctx, key)
+	assert.NoError(t, err)
+	assert.Equal(t, betterValue, val)
+}
+
+func TestDHT_GetValue_returns_context_error(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	_, err := d.GetValue(cancelledCtx, "/"+namespaceIPNS+"/some-key")
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestDHT_GetValue_returns_not_found_error(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	valueChan, err := d.GetValue(ctx, "/"+namespaceIPNS+"/some-key")
+	assert.ErrorIs(t, err, routing.ErrNotFound)
+	assert.Nil(t, valueChan)
 }
 
 // assertClosed triggers a test failure if the given channel was not closed but
@@ -471,6 +501,47 @@ func TestDHT_SearchValue_simple(t *testing.T) {
 	assert.Equal(t, v, val)
 
 	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_offline(t *testing.T) {
+	// Test setup:
+	// There is just one other server that returns a valid value.
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	key, v := makePkKeyValue(t)
+	err := d.putValueLocal(ctx, key, v)
+	require.NoError(t, err)
+
+	valChan, err := d.SearchValue(ctx, key, routing.Offline)
+	require.NoError(t, err)
+
+	val := readItem(t, ctx, valChan)
+	assert.Equal(t, v, val)
+
+	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_offline_not_found_locally(t *testing.T) {
+	// Test setup:
+	// We are connected to a peer that holds the record but require an offline
+	// lookup. Assert that we don't receive the record
+	ctx := kadtest.CtxShort(t)
+
+	key, v := makePkKeyValue(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+
+	top.Connect(ctx, d1, d2)
+
+	err := d2.putValueLocal(ctx, key, v)
+	require.NoError(t, err)
+
+	valChan, err := d1.SearchValue(ctx, key, routing.Offline)
+	assert.ErrorIs(t, err, routing.ErrNotFound)
+	assert.Nil(t, valChan)
 }
 
 func TestDHT_SearchValue_returns_best_values(t *testing.T) {

@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"runtime/pprof"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
@@ -391,18 +389,8 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	// cancel the query.
 	quorum := d.getQuorum(ropt)
 
-	dumpCtx, dumpCancel := context.WithCancel(ctx)
-	defer dumpCancel()
-	go func() {
-		select {
-		case <-dumpCtx.Done():
-		case <-time.After(2 * time.Second):
-			fmt.Println("TIMED OUT:")
-			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		}
-	}()
-
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
+		fmt.Println(peer.ID(id).ShortString(), "Received response")
 		rec := resp.GetRecord()
 		if rec == nil {
 			return nil
@@ -414,6 +402,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		}
 
 		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
+		fmt.Println(peer.ID(id).ShortString(), "Value index:", idx)
 		switch idx {
 		case 0: // "best" is still the best value
 			if bytes.Equal(best, rec.GetValue()) {

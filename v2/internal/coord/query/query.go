@@ -135,8 +135,10 @@ func NewQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt
 }
 
 func (q *Query[K, N, M]) Advance(ctx context.Context, ev QueryEvent) (out QueryState) {
+	fmt.Printf("Advance query: %T\n", ev)
 	ctx, span := tele.StartSpan(ctx, "Query.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
+		fmt.Printf("Advanced: %T\n", out)
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()
 	}()
@@ -158,8 +160,10 @@ func (q *Query[K, N, M]) Advance(ctx context.Context, ev QueryEvent) (out QueryS
 			ClosestNodes: q.targetNodes,
 		}
 	case *EventQueryNodeResponse[K, N]:
+		fmt.Println("Node response from", tev.NodeID.String())
 		q.onNodeResponse(ctx, tev.NodeID, tev.CloserNodes)
 	case *EventQueryNodeFailure[K, N]:
+		fmt.Println("Node failure from", tev.NodeID.String())
 		span.RecordError(tev.Error)
 		q.onNodeFailure(ctx, tev.NodeID)
 	case *EventQueryPoll:

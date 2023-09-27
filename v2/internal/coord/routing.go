@@ -831,7 +831,7 @@ func (r *RoutingBehaviour) advanceExplore(ctx context.Context, ev routing.Explor
 	case *routing.StateExploreQueryTimeout:
 		// nothing to do except notify via telemetry
 	case *routing.StateExploreFailure:
-		r.cfg.Logger.Warn("explore failure", "cpl", st.Cpl, "error", st.Error)
+		r.cfg.Logger.Warn("explore failure", slog.Int("cpl", st.Cpl), tele.LogAttrError(st.Error))
 	case *routing.StateExploreIdle:
 		// bootstrap not running, nothing to do
 	default:

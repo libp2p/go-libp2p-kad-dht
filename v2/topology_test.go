@@ -61,10 +61,6 @@ func (t *Topology) AddServer(cfg *Config) *DHT {
 	rn := coord.NewBufferedRoutingNotifier()
 	d.kad.SetRoutingNotifier(rn)
 
-	// add at least 1 entry in the routing table so the server will pass connectivity checks
-	fillRoutingTable(t.tb, d, 1)
-	require.NotEmpty(t.tb, d.rt.NearestNodes(kadt.PeerID(d.host.ID()).Key(), 1))
-
 	t.tb.Cleanup(func() {
 		if err = d.Close(); err != nil {
 			t.tb.Logf("unexpected error when closing dht: %s", err)

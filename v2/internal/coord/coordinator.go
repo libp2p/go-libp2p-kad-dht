@@ -574,15 +574,13 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []kadt.PeerID) error 
 
 // NotifyConnectivity notifies the coordinator that a peer has passed a connectivity check
 // which means it is connected and supports finding closer nodes
-func (c *Coordinator) NotifyConnectivity(ctx context.Context, id kadt.PeerID) error {
+func (c *Coordinator) NotifyConnectivity(ctx context.Context, id kadt.PeerID) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
 	defer span.End()
 
 	c.routingBehaviour.Notify(ctx, &EventNotifyConnectivity{
 		NodeID: id,
 	})
-
-	return nil
 }
 
 // NotifyNonConnectivity notifies the coordinator that a peer has failed a connectivity check

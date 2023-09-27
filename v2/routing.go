@@ -304,10 +304,16 @@ type quorumOptionKey struct{}
 
 func RoutingQuorum(n int) routing.Option {
 	return func(opts *routing.Options) error {
+		if n < 0 {
+			return fmt.Errorf("quorum must not be negative")
+		}
+
 		if opts.Other == nil {
 			opts.Other = make(map[interface{}]interface{}, 1)
 		}
+
 		opts.Other[quorumOptionKey{}] = n
+
 		return nil
 	}
 }
@@ -370,6 +376,8 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 }
 
 func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routing.Options, out chan<- []byte) {
+	_, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
+	defer span.End()
 	defer close(out)
 
 	// TODO: remove below duplication
@@ -388,11 +396,17 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 		Key:  []byte(keyStr),
 	}
 
-	// TODO: get quorum from config
+	//  The currently known best value for keyStr
+	var best []byte
+
+	// The peers that returned the best value
+	quorumPeers := map[kadt.PeerID]struct{}{}
+
+	// The quorum that we require for terminating the query. This number tells
+	// us how many peers must have responded with the "best" value before we
+	// cancel the query.
 	quorum := GetQuorum(ropt)
 
-	var best []byte
-	quorumPeers := map[kadt.PeerID]struct{}{}
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		rec := resp.GetRecord()
 		if rec == nil {
@@ -400,6 +414,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 		}
 
 		if !bytes.Equal([]byte(keyStr), rec.GetKey()) {
+			d.log.Debug("record key mismatch")
 			return nil
 		}
 
@@ -417,6 +432,8 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 		case -1:
 			// no valid value found yet
 			return nil
+		default:
+			d.log.Warn("unexpected validate index", slog.Int("idx", idx))
 		}
 
 		// Check if we have reached the quorum

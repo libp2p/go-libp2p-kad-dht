@@ -419,6 +419,9 @@ func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
 	assertClosed(t, ctx, out)
 }
 
+func TestDHT_GetValue(t *testing.T) {
+}
+
 // assertClosed triggers a test failure if the given channel was not closed but
 // carried more values or a timeout occurs (given by the context).
 func assertClosed[T any](t testing.TB, ctx context.Context, c <-chan T) {
@@ -603,6 +606,10 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 		err = suite.servers[i].putValueLocal(ctx, suite.key, suite.betterValue)
 		require.NoError(t, err)
 	}
+
+	// one of the remaining returns and old record again
+	err = suite.servers[8].putValueLocal(ctx, suite.key, suite.betterValue)
+	require.NoError(t, err)
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
@@ -674,9 +681,18 @@ func TestDHT_SearchValue_routing_option_returns_error(t *testing.T) {
 		return fmt.Errorf("some error")
 	}
 
-	valueChan, err := d.SearchValue(ctx, "some-key", errOption)
+	valueChan, err := d.SearchValue(ctx, "/ipns/some-key", errOption)
 	assert.ErrorContains(t, err, "routing options")
 	assert.Nil(t, valueChan)
+}
+
+func TestDHT_SearchValue_quorum_negative(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	out, err := d.SearchValue(ctx, "/"+namespaceIPNS+"/some-key", RoutingQuorum(-1))
+	assert.ErrorContains(t, err, "quorum must not be negative")
+	assert.Nil(t, out)
 }
 
 func TestDHT_SearchValue_invalid_key(t *testing.T) {
@@ -697,11 +713,18 @@ func TestDHT_SearchValue_key_for_unsupported_namespace(t *testing.T) {
 	assert.Nil(t, valueChan)
 }
 
-func TestDHT_SearchValue_offline_quorum_mismatch(t *testing.T) {
-	t.Skip("not implemented")
-	// return an error if the error flag is set but the user requires a quorum
-}
+func TestDHT_SearchValue_stops_with_cancelled_context(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
 
-func TestDHT_SearchValue_peers_return_old_records(t *testing.T) {
-	t.Skip("not implemented")
+	// make sure we don't just stop because we don't know any other DHT server
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+	top.Connect(ctx, d1, d2)
+
+	valueChan, err := d1.SearchValue(cancelledCtx, "/"+namespaceIPNS+"/some-key")
+	assert.NoError(t, err)
+	assertClosed(t, ctx, valueChan)
 }

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime/pprof"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
@@ -389,6 +391,17 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	// cancel the query.
 	quorum := d.getQuorum(ropt)
 
+	dumpCtx, dumpCancel := context.WithCancel(ctx)
+	defer dumpCancel()
+	go func() {
+		select {
+		case <-dumpCtx.Done():
+		case <-time.After(2 * time.Second):
+			fmt.Println("TIMED OUT:")
+			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+		}
+	}()
+
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		rec := resp.GetRecord()
 		if rec == nil {
@@ -402,17 +415,16 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 
 		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
 		switch idx {
-		case 0:
+		case 0: // "best" is still the best value
 			if bytes.Equal(best, rec.GetValue()) {
 				quorumPeers[id] = struct{}{}
 			}
-		case 1:
+		case 1: // rec.GetValue() is better than our current "best"
 			best = rec.GetValue()
 			quorumPeers = map[kadt.PeerID]struct{}{}
 			quorumPeers[id] = struct{}{}
 			out <- rec.GetValue()
-		case -1:
-			// no valid value found yet
+		case -1: // "best" and rec.GetValue() are both invalid
 			return nil
 		default:
 			d.log.Warn("unexpected validate index", slog.Int("idx", idx))

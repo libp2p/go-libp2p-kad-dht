@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/benbjohnson/clock"
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore/failstore"
@@ -34,7 +37,7 @@ func newRandomContent(t testing.TB) cid.Cid {
 	return cid.NewCidV0(mhash)
 }
 
-func makePkKeyValue(t *testing.T) (string, []byte) {
+func makePkKeyValue(t testing.TB) (string, []byte) {
 	t.Helper()
 
 	_, pub, _ := crypto.GenerateEd25519Key(rng)
@@ -78,22 +81,22 @@ func TestDHT_PutValue_invalid_key(t *testing.T) {
 	})
 }
 
-func TestGetSetValueLocal(t *testing.T) {
-	ctx := kadtest.CtxShort(t)
-
-	top := NewTopology(t)
-	d := top.AddServer(nil)
-
-	key, v := makePkKeyValue(t)
-
-	err := d.putValueLocal(ctx, key, v)
-	require.NoError(t, err)
-
-	val, err := d.getValueLocal(ctx, key)
-	require.NoError(t, err)
-
-	require.Equal(t, v, val)
-}
+//func TestGetSetValueLocal(t *testing.T) {
+//	ctx := kadtest.CtxShort(t)
+//
+//	top := NewTopology(t)
+//	d := top.AddServer(nil)
+//
+//	key, v := makePkKeyValue(t)
+//
+//	err := d.putValueLocal(ctx, key, v)
+//	require.NoError(t, err)
+//
+//	val, err := d.getValueLocal(ctx, key)
+//	require.NoError(t, err)
+//
+//	require.Equal(t, v, val)
+//}
 
 func TestGetValueOnePeer(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
@@ -190,12 +193,7 @@ func TestDHT_FindProvidersAsync_empty_routing_table(t *testing.T) {
 	c := newRandomContent(t)
 
 	out := d.FindProvidersAsync(ctx, c, 1)
-	select {
-	case _, more := <-out:
-		require.False(t, more)
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
+	assertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_dht_does_not_support_providers(t *testing.T) {
@@ -206,12 +204,7 @@ func TestDHT_FindProvidersAsync_dht_does_not_support_providers(t *testing.T) {
 	delete(d.backends, namespaceProviders)
 
 	out := d.FindProvidersAsync(ctx, newRandomContent(t), 1)
-	select {
-	case _, more := <-out:
-		require.False(t, more)
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
+	assertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_providers_stored_locally(t *testing.T) {
@@ -300,12 +293,7 @@ func TestDHT_FindProvidersAsync_queries_other_peers(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	select {
-	case _, more := <-out:
-		assert.False(t, more)
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
+	assertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_respects_cancelled_context_for_local_query(t *testing.T) {
@@ -419,12 +407,7 @@ func TestDHT_FindProvidersAsync_datastore_error(t *testing.T) {
 	be.datastore = dstore
 
 	out := d.FindProvidersAsync(ctx, newRandomContent(t), 0)
-	select {
-	case _, more := <-out:
-		assert.False(t, more)
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
+	assertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
@@ -432,14 +415,149 @@ func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
 	d := newTestDHT(t)
 
 	out := d.FindProvidersAsync(ctx, cid.Cid{}, 0)
+	assertClosed(t, ctx, out)
+}
+
+// assertClosed triggers a test failure if the given channel was not closed but
+// carried more values or a timeout occurs (given by the context).
+func assertClosed[T any](t testing.TB, ctx context.Context, c <-chan T) {
+	t.Helper()
+
 	select {
-	case _, more := <-out:
+	case _, more := <-c:
 		assert.False(t, more)
 	case <-ctx.Done():
-		t.Fatal("timeout")
+		t.Fatal("timeout closing channel")
 	}
 }
 
-func TestDHT_SearchValue(t *testing.T) {
-	// 1.
+func readItem[T any](t testing.TB, ctx context.Context, c <-chan T) T {
+	t.Helper()
+
+	select {
+	case val, more := <-c:
+		require.True(t, more, "channel closed unexpectedly")
+		return val
+	case <-ctx.Done():
+		t.Fatal("timeout reading item")
+		return *new(T)
+	}
+}
+
+func TestDHT_SearchValue_simple(t *testing.T) {
+	// Test setup:
+	// There is just one other server that returns a valid value.
+	ctx := kadtest.CtxShort(t)
+
+	key, v := makePkKeyValue(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+
+	top.Connect(ctx, d1, d2)
+
+	err := d2.putValueLocal(ctx, key, v)
+	require.NoError(t, err)
+
+	valChan, err := d1.SearchValue(ctx, key)
+	require.NoError(t, err)
+
+	val := readItem(t, ctx, valChan)
+	assert.Equal(t, v, val)
+
+	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_returns_best_values(t *testing.T) {
+	// Test setup:
+	// d2 returns no value
+	// d3 returns valid value
+	// d4 returns worse value
+	// d5 returns better value
+	// assert that we receive two values on the channel
+	ctx := kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	clk.Set(time.Now()) // needed because record validators don't use mock clocks
+
+	cfg := DefaultConfig()
+	cfg.Clock = clk
+
+	// generate new identity for the peer that issues the request
+	priv, _, err := crypto.GenerateEd25519Key(rng)
+	require.NoError(t, err)
+
+	key, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
+	key, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
+	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number
+
+	top := NewTopology(t)
+	d1 := top.AddServer(cfg)
+	d2 := top.AddServer(cfg)
+	d3 := top.AddServer(cfg)
+	d4 := top.AddServer(cfg)
+	d5 := top.AddServer(cfg)
+
+	top.ConnectChain(ctx, d1, d2, d3, d4, d5)
+
+	err = d3.putValueLocal(ctx, key, validValue)
+	require.NoError(t, err)
+
+	err = d4.putValueLocal(ctx, key, worseValue)
+	require.NoError(t, err)
+
+	err = d5.putValueLocal(ctx, key, betterValue)
+	require.NoError(t, err)
+
+	valChan, err := d1.SearchValue(ctx, key)
+	require.NoError(t, err)
+
+	val := readItem(t, ctx, valChan)
+	assert.Equal(t, validValue, val)
+
+	val = readItem(t, ctx, valChan)
+	assert.Equal(t, betterValue, val)
+
+	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_routing_option_returns_error(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	errOption := func(opts *routing.Options) error {
+		return fmt.Errorf("some error")
+	}
+
+	valueChan, err := d.SearchValue(ctx, "some-key", errOption)
+	assert.ErrorContains(t, err, "routing options")
+	assert.Nil(t, valueChan)
+}
+
+func TestDHT_SearchValue_invalid_key(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	valueChan, err := d.SearchValue(ctx, "invalid-key")
+	assert.ErrorContains(t, err, "splitting key")
+	assert.Nil(t, valueChan)
+}
+
+func TestDHT_SearchValue_key_for_unsupported_namespace(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	valueChan, err := d.SearchValue(ctx, "/unsupported/key")
+	assert.ErrorIs(t, err, routing.ErrNotSupported)
+	assert.Nil(t, valueChan)
+}
+
+func TestDHT_SearchValue_offline_quorum_mismatch(t *testing.T) {
+	t.Skip("not implemented")
+	// return an error if the error flag is set but the user requires a quorum
+}
+
+func TestDHT_SearchValue_peers_return_old_records(t *testing.T) {
+	t.Skip("not implemented")
 }

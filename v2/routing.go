@@ -3,16 +3,10 @@ package dht
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
-
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-
 	"github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -121,7 +115,7 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 	return peerOut
 }
 
-func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan peer.AddrInfo) {
+func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan<- peer.AddrInfo) {
 	_, span := d.tele.Tracer.Start(ctx, "DHT.findProvidersAsyncRoutine", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
@@ -254,7 +248,8 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 	return nil
 }
 
-// putValueLocal stores a value in the local datastore without querying the network.
+// putValueLocal stores a value in the local datastore without reaching out to
+// the network.
 func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValueLocal")
 	defer span.End()
@@ -280,49 +275,29 @@ func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error
 	return nil
 }
 
-func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option) ([]byte, error) {
+func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
 	defer span.End()
 
-	v, err := d.getValueLocal(ctx, key)
-	if err == nil {
-		return v, nil
-	}
-	if !errors.Is(err, ds.ErrNotFound) {
-		return nil, fmt.Errorf("put value locally: %w", err)
-	}
-
-	req := &pb.Message{
-		Type: pb.Message_GET_VALUE,
-		Key:  []byte(key),
-	}
-
-	// TODO: quorum
-	var value []byte
-	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
-		if resp == nil {
-			return nil
-		}
-
-		if resp.GetType() != pb.Message_GET_VALUE {
-			return nil
-		}
-
-		if string(resp.GetKey()) != key {
-			return nil
-		}
-
-		value = resp.GetRecord().GetValue()
-
-		return coordt.ErrSkipRemaining
-	}
-
-	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
+	valueChan, err := d.SearchValue(ctx, key, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run query: %w", err)
+		return nil, err
 	}
 
-	return value, nil
+	var best []byte
+	for val := range valueChan {
+		best = val
+	}
+
+	if ctx.Err() != nil {
+		return best, ctx.Err()
+	}
+
+	if best == nil {
+		return nil, routing.ErrNotFound
+	}
+
+	return best, nil
 }
 
 type quorumOptionKey struct{}
@@ -332,7 +307,7 @@ func RoutingQuorum(n int) routing.Option {
 		if opts.Other == nil {
 			opts.Other = make(map[interface{}]interface{}, 1)
 		}
-		opts.Other[internalConfig.QuorumOptionKey{}] = n
+		opts.Other[quorumOptionKey{}] = n
 		return nil
 	}
 }
@@ -346,15 +321,15 @@ func GetQuorum(opts *routing.Options) int {
 	return quorum
 }
 
-// SearchValue will search in the DHT for keyStr. keyStr will have the form
+// SearchValue will search in the DHT for keyStr. keyStr must have the form
 // `/$namespace/$binary_id`
-func (d *DHT) SearchValue(ctx context.Context, keyStr string, opts ...routing.Option) (<-chan []byte, error) {
+func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing.Option) (<-chan []byte, error) {
 	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
 	defer span.End()
 
 	// first parse the routing options
 	rOpt := &routing.Options{} // routing config
-	if err := rOpt.Apply(opts...); err != nil {
+	if err := rOpt.Apply(options...); err != nil {
 		return nil, fmt.Errorf("apply routing options: %w", err)
 	}
 
@@ -363,12 +338,12 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, opts ...routing.Op
 		return nil, fmt.Errorf("splitting key: %w", err)
 	}
 
-	if rOpt.Offline {
-		b, found := d.backends[ns]
-		if !found {
-			return nil, routing.ErrNotSupported
-		}
+	b, found := d.backends[ns]
+	if !found {
+		return nil, routing.ErrNotSupported
+	}
 
+	if rOpt.Offline {
 		val, err := b.Fetch(ctx, path)
 		if err != nil {
 			return nil, fmt.Errorf("fetch from backend: %w", err)
@@ -383,12 +358,29 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, opts ...routing.Op
 			return nil, fmt.Errorf("not found locally")
 		}
 
-		out := make(chan []byte)
-		go func() {
-			defer close(out)
-			out <- rec.GetValue()
-		}()
+		out := make(chan []byte, 1)
+		defer close(out)
+		out <- rec.GetValue()
 		return out, nil
+	}
+
+	out := make(chan []byte)
+	go d.searchValueRoutine(ctx, keyStr, rOpt, out)
+	return out, nil
+}
+
+func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routing.Options, out chan<- []byte) {
+	defer close(out)
+
+	// TODO: remove below duplication
+	ns, path, err := record.SplitKey(keyStr)
+	if err != nil {
+		return
+	}
+
+	b, found := d.backends[ns]
+	if !found {
+		return
 	}
 
 	req := &pb.Message{
@@ -397,72 +389,33 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, opts ...routing.Op
 	}
 
 	// TODO: get quorum from config
-	quorum := GetQuorum(rOpt)
+	quorum := GetQuorum(ropt)
+	_ = quorum
 
+	var best []byte
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
-		if resp == nil {
-			return nil
-		}
-
-		if resp.GetType() != pb.Message_GET_VALUE {
-			return nil
-		}
-
 		rec := resp.GetRecord()
 		if rec == nil {
 			return nil
 		}
 
 		if !bytes.Equal([]byte(keyStr), rec.GetKey()) {
-			// logger.Debug("received incorrect record")
 			return nil
 		}
 
-		if string(resp.GetKey()) != key {
-			return nil
+		idx, _ := b.Validate(ctx, path, best, rec.GetValue())
+		if idx == 1 {
+			best = rec.GetValue()
+			out <- rec.GetValue()
 		}
 
-		if err := dht.Validator.Validate(key, val); err != nil {
-			// make sure record is valid
-			logger.Debugw("received invalid record (discarded)", "error", err)
-			return peers, nil
-		}
-
-		return coordt.ErrSkipRemaining
+		return nil
 	}
 
 	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run query: %w", err)
+		d.log.Warn("Search value query failed", slog.String("err", err.Error()))
 	}
-}
-
-// getValueLocal retrieves a value from the local datastore without querying the network.
-func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValueLocal")
-	defer span.End()
-
-	ns, path, err := record.SplitKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("splitting key: %w", err)
-	}
-
-	b, found := d.backends[ns]
-	if !found {
-		return nil, routing.ErrNotSupported
-	}
-
-	val, err := b.Fetch(ctx, path)
-	if err != nil {
-		return nil, fmt.Errorf("fetch from backend: %w", err)
-	}
-
-	rec, ok := val.(*recpb.Record)
-	if !ok {
-		return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
-	}
-
-	return rec.GetValue(), nil
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {

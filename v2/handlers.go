@@ -25,7 +25,7 @@ func (d *DHT) handleFindPeer(ctx context.Context, remote peer.ID, req *pb.Messag
 	}
 
 	// tell the coordinator that this peer supports finding closer nodes
-	d.kad.NotifyConnectivity(ctx, kadt.PeerID(remote))
+	d.kad.NotifyConnectivity(ctx, kadt.PeerID(remote)) // TODO: handle error
 
 	// "parse" requested peer ID from the key field
 	target := peer.ID(req.GetKey())
@@ -82,6 +82,8 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 	if !bytes.Equal(req.GetKey(), rec.GetKey()) {
 		return nil, fmt.Errorf("key doesn't match record key")
 	}
+
+	// TODO: use putValueLocal?
 
 	// key is /$namespace/$binary_id
 	ns, path, err := record.SplitKey(k) // get namespace (prefix of the key)

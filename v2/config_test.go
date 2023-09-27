@@ -140,14 +140,6 @@ func TestConfig_Validate(t *testing.T) {
 		cfg.BootstrapPeers = []peer.AddrInfo{}
 		assert.Error(t, cfg.Validate())
 	})
-
-	t.Run("negative default quorum", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.DefaultQuorum = 0
-		assert.NoError(t, cfg.Validate())
-		cfg.DefaultQuorum = -1
-		assert.Error(t, cfg.Validate())
-	})
 }
 
 func TestQueryConfig_Validate(t *testing.T) {
@@ -189,6 +181,15 @@ func TestQueryConfig_Validate(t *testing.T) {
 		cfg.RequestTimeout = 0
 		assert.Error(t, cfg.Validate())
 		cfg.RequestTimeout = -1
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("negative default quorum", func(t *testing.T) {
+		cfg := DefaultQueryConfig()
+
+		cfg.DefaultQuorum = 0
+		assert.NoError(t, cfg.Validate())
+		cfg.DefaultQuorum = -1
 		assert.Error(t, cfg.Validate())
 	})
 }

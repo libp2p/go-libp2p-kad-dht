@@ -463,7 +463,7 @@ func RoutingQuorum(n int) routing.Option {
 func (d *DHT) getQuorum(opts *routing.Options) int {
 	quorum, ok := opts.Other[quorumOptionKey{}].(int)
 	if !ok {
-		quorum = d.cfg.DefaultQuorum
+		quorum = d.cfg.Query.DefaultQuorum
 	}
 
 	return quorum

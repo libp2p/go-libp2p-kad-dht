@@ -390,7 +390,6 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	quorum := d.getQuorum(ropt)
 
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
-		fmt.Println(time.Now().Format(time.RFC3339Nano), peer.ID(id).ShortString(), "Received response")
 		rec := resp.GetRecord()
 		if rec == nil {
 			return nil
@@ -402,7 +401,6 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		}
 
 		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
-		fmt.Println(time.Now().Format(time.RFC3339Nano), peer.ID(id).ShortString(), "Value index:", idx)
 		switch idx {
 		case 0: // "best" is still the best value
 			if bytes.Equal(best, rec.GetValue()) {

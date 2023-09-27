@@ -255,6 +255,7 @@ func (b *Bootstrap[K, N]) advanceQuery(ctx context.Context, qev query.QueryEvent
 		}
 	case *query.StateQueryFinished[K, N]:
 		span.SetAttributes(attribute.String("out_state", "StateBootstrapFinished"))
+		b.qry = nil
 		return &StateBootstrapFinished{
 			Stats: st.Stats,
 		}

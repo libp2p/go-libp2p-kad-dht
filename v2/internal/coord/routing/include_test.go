@@ -24,6 +24,18 @@ func TestIncludeConfigValidate(t *testing.T) {
 		require.Error(t, cfg.Validate())
 	})
 
+	t.Run("tracer is not nil", func(t *testing.T) {
+		cfg := DefaultProbeConfig()
+		cfg.Tracer = nil
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("meter is not nil", func(t *testing.T) {
+		cfg := DefaultProbeConfig()
+		cfg.Meter = nil
+		require.Error(t, cfg.Validate())
+	})
+
 	t.Run("timeout positive", func(t *testing.T) {
 		cfg := DefaultIncludeConfig()
 		cfg.Timeout = 0

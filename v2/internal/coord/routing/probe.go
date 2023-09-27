@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-kademlia/kad"
 	"github.com/plprobelab/go-kademlia/key"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
@@ -65,6 +67,21 @@ type Probe[K kad.Key[K], N kad.NodeID[K]] struct {
 
 	// cfg is a copy of the optional configuration supplied to the Probe
 	cfg ProbeConfig
+
+	// counterChecksSent is a counter that tracks the number of connectivity checks sent.
+	counterChecksSent metric.Int64Counter
+
+	// counterChecksPassed is a counter that tracks the number of connectivity checks that have passed.
+	counterChecksPassed metric.Int64Counter
+
+	// counterChecksFailed is a counter that tracks the number of connectivity checks that have failed.
+	counterChecksFailed metric.Int64Counter
+
+	// gaugePendingCount is a gauge that tracks the number of nodes in the probe's pending queue of scheduled checks.
+	gaugePendingCount metric.Int64ObservableGauge
+
+	// pendingCount holds the number of pending nodes after the last state change so that it can be read asynchronously by gaugePendingCount
+	pendingCount atomic.Int64
 }
 
 // ProbeConfig specifies optional configuration for a Probe
@@ -73,6 +90,12 @@ type ProbeConfig struct {
 	Concurrency   int           // the maximum number of probe checks that may be in progress at any one time
 	Timeout       time.Duration // the time to wait before terminating a check that is not making progress
 	Clock         clock.Clock   // a clock that may be replaced by a mock when testing
+
+	// Tracer is the tracer that should be used to trace execution.
+	Tracer trace.Tracer
+
+	// Meter is the meter that should be used to record metrics.
+	Meter metric.Meter
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -81,6 +104,20 @@ func (cfg *ProbeConfig) Validate() error {
 		return &errs.ConfigurationError{
 			Component: "ProbeConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
+		}
+	}
+
+	if cfg.Tracer == nil {
+		return &errs.ConfigurationError{
+			Component: "ProbeConfig",
+			Err:       fmt.Errorf("tracer must not be nil"),
+		}
+	}
+
+	if cfg.Meter == nil {
+		return &errs.ConfigurationError{
+			Component: "ProbeConfig",
+			Err:       fmt.Errorf("meter must not be nil"),
 		}
 	}
 
@@ -112,7 +149,10 @@ func (cfg *ProbeConfig) Validate() error {
 // Options may be overridden before passing to NewProbe
 func DefaultProbeConfig() *ProbeConfig {
 	return &ProbeConfig{
-		Clock:         clock.New(),   // use standard time
+		Clock:  clock.New(), // use standard time
+		Tracer: tele.NoopTracer(),
+		Meter:  tele.NoopMeter(),
+
 		Concurrency:   3,             // MAGIC
 		Timeout:       time.Minute,   // MAGIC
 		CheckInterval: 6 * time.Hour, // MAGIC
@@ -126,17 +166,63 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 		return nil, err
 	}
 
-	return &Probe[K, N]{
+	p := &Probe[K, N]{
 		cfg: *cfg,
 		rt:  rt,
 		nvl: NewNodeValueList[K, N](),
-	}, nil
+	}
+
+	// initialise metrics
+	var err error
+	p.counterChecksSent, err = cfg.Meter.Int64Counter(
+		"probe_checks_sent",
+		metric.WithDescription("Total number of connectivity checks sent by the probe state machine"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create probe_checks_sent counter: %w", err)
+	}
+
+	p.counterChecksPassed, err = cfg.Meter.Int64Counter(
+		"probe_checks_passed",
+		metric.WithDescription("Total number of connectivity checks sent by the probe state machine that were successful"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create probe_checks_passed counter: %w", err)
+	}
+
+	p.counterChecksFailed, err = cfg.Meter.Int64Counter(
+		"probe_checks_failed",
+		metric.WithDescription("Total number of connectivity checks sent by the probe state machine that failed"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create probe_checks_failed counter: %w", err)
+	}
+
+	p.gaugePendingCount, err = cfg.Meter.Int64ObservableGauge(
+		"probe_pending_count",
+		metric.WithDescription("Total number of nodes being monitored by the probe state machine"),
+		metric.WithUnit("1"),
+		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
+			o.Observe(p.pendingCount.Load())
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create probe_pending_count gauge: %w", err)
+	}
+
+	return p, nil
 }
 
 // Advance advances the state of the probe state machine by attempting to advance its query if running.
 func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeState) {
-	_, span := tele.StartSpan(ctx, "Probe.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	_, span := p.cfg.Tracer.Start(ctx, "Probe.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
+		// update the pending count so gauge can read it asynchronously
+		p.pendingCount.Store(int64(p.nvl.pendingCount()))
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()
 	}()
@@ -171,6 +257,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeStat
 		}
 
 	case *EventProbeConnectivityCheckSuccess[K, N]:
+		p.counterChecksPassed.Add(ctx, 1)
 		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 		nv, found := p.nvl.Get(tev.NodeID)
 		if !found {
@@ -186,6 +273,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeStat
 
 	case *EventProbeConnectivityCheckFailure[K, N]:
 		// probe failed, so remove from routing table and from list
+		p.counterChecksFailed.Add(ctx, 1)
 		span.SetAttributes(attribute.String("nodeid", tev.NodeID.String()))
 		span.RecordError(tev.Error)
 
@@ -212,7 +300,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeStat
 	}
 
 	// Check if there is capacity
-	if p.cfg.Concurrency <= p.nvl.OngoingCount() {
+	if p.cfg.Concurrency <= p.nvl.ongoingCount() {
 		// see if a check can be timed out to free capacity
 		candidate, found := p.nvl.FindCheckPastDeadline(p.cfg.Clock.Now())
 		if !found {
@@ -232,7 +320,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeStat
 	// there is capacity to start a new check
 	next, ok := p.nvl.PeekNext(p.cfg.Clock.Now())
 	if !ok {
-		if p.nvl.OngoingCount() > 0 {
+		if p.nvl.ongoingCount() > 0 {
 			// waiting for a check but nothing else to do
 			return &StateProbeWaitingWithCapacity{}
 		}
@@ -243,6 +331,7 @@ func (p *Probe[K, N]) Advance(ctx context.Context, ev ProbeEvent) (out ProbeStat
 	p.nvl.MarkOngoing(next.NodeID, p.cfg.Clock.Now().Add(p.cfg.Timeout))
 
 	// Ask the node to find itself
+	p.counterChecksSent.Add(ctx, 1)
 	return &StateProbeConnectivityCheck[K, N]{
 		NodeID: next.NodeID,
 	}
@@ -339,8 +428,10 @@ type nodeValueEntry[K kad.Key[K], N kad.NodeID[K]] struct {
 
 type nodeValueList[K kad.Key[K], N kad.NodeID[K]] struct {
 	nodes map[string]*nodeValueEntry[K, N]
+
 	// pending is a list of nodes ordered by the time of the next check
 	pending *nodeValuePendingList[K, N]
+
 	// ongoing is a list of nodes with ongoing/in-progress probes, loosely ordered earliest to most recent
 	ongoing []N
 }
@@ -373,8 +464,8 @@ func (l *nodeValueList[K, N]) Put(nv *nodeValue[K, N]) {
 	if nve.index == -1 {
 		heap.Push(l.pending, nve)
 	}
-
 	heap.Fix(l.pending, nve.index)
+
 	l.removeFromOngoing(nv.NodeID)
 }
 
@@ -387,15 +478,15 @@ func (l *nodeValueList[K, N]) Get(n N) (*nodeValue[K, N], bool) {
 	return nve.nv, true
 }
 
-func (l *nodeValueList[K, N]) PendingCount() int {
+func (l *nodeValueList[K, N]) pendingCount() int {
 	return len(*l.pending)
 }
 
-func (l *nodeValueList[K, N]) OngoingCount() int {
+func (l *nodeValueList[K, N]) ongoingCount() int {
 	return len(l.ongoing)
 }
 
-func (l *nodeValueList[K, N]) NodeCount() int {
+func (l *nodeValueList[K, N]) nodeCount() int {
 	return len(l.nodes)
 }
 

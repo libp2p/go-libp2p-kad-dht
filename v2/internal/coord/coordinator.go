@@ -147,6 +147,7 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 	cfg.Routing.Clock = cfg.Clock
 	cfg.Routing.Logger = cfg.Logger.With("behaviour", "routing")
 	cfg.Routing.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
+	cfg.Routing.Meter = cfg.MeterProvider.Meter(tele.MeterName)
 
 	return cfg
 }

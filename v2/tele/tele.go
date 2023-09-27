@@ -6,6 +6,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	motel "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -23,6 +25,11 @@ const (
 // NoopTracer returns a tracer that does not emit traces.
 func NoopTracer() trace.Tracer {
 	return trace.NewNoopTracerProvider().Tracer("")
+}
+
+// NoopMeterProvider returns a meter provider that does not record or emit metrics.
+func NoopMeter() metric.Meter {
+	return noop.NewMeterProvider().Meter("")
 }
 
 // attrsCtxKey is the actual context key value that's used as a key for

@@ -28,6 +28,18 @@ func TestProbeConfigValidate(t *testing.T) {
 		require.Error(t, cfg.Validate())
 	})
 
+	t.Run("tracer is not nil", func(t *testing.T) {
+		cfg := DefaultProbeConfig()
+		cfg.Tracer = nil
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("meter is not nil", func(t *testing.T) {
+		cfg := DefaultProbeConfig()
+		cfg.Meter = nil
+		require.Error(t, cfg.Validate())
+	})
+
 	t.Run("timeout positive", func(t *testing.T) {
 		cfg := DefaultProbeConfig()
 		cfg.Timeout = 0
@@ -362,8 +374,8 @@ func TestNodeValueList(t *testing.T) {
 
 		l.Put(nv)
 
-		require.Equal(t, 1, l.PendingCount())
-		require.Equal(t, 1, l.NodeCount())
+		require.Equal(t, 1, l.pendingCount())
+		require.Equal(t, 1, l.nodeCount())
 
 		_, found := l.Get(tiny.NewNode(4))
 		require.True(t, found)
@@ -372,8 +384,8 @@ func TestNodeValueList(t *testing.T) {
 		_, found = l.Get(tiny.NewNode(4))
 		require.False(t, found)
 
-		require.Equal(t, 0, l.PendingCount())
-		require.Equal(t, 0, l.NodeCount())
+		require.Equal(t, 0, l.pendingCount())
+		require.Equal(t, 0, l.nodeCount())
 	})
 
 	t.Run("remove not-existing", func(t *testing.T) {
@@ -508,14 +520,14 @@ func TestNodeValueList(t *testing.T) {
 			NextCheckDue: clk.Now().Add(time.Minute),
 		}
 		l.Put(nv1)
-		require.Equal(t, 1, l.PendingCount())
-		require.Equal(t, 0, l.OngoingCount())
-		require.Equal(t, 1, l.NodeCount())
+		require.Equal(t, 1, l.pendingCount())
+		require.Equal(t, 0, l.ongoingCount())
+		require.Equal(t, 1, l.nodeCount())
 
 		l.MarkOngoing(nv1.NodeID, clk.Now().Add(time.Minute))
-		require.Equal(t, 0, l.PendingCount())
-		require.Equal(t, 1, l.OngoingCount())
-		require.Equal(t, 1, l.NodeCount())
+		require.Equal(t, 0, l.pendingCount())
+		require.Equal(t, 1, l.ongoingCount())
+		require.Equal(t, 1, l.nodeCount())
 	})
 
 	t.Run("mark ongoing changes next", func(t *testing.T) {
@@ -535,9 +547,9 @@ func TestNodeValueList(t *testing.T) {
 		}
 		l.Put(nv2)
 
-		require.Equal(t, 2, l.PendingCount())
-		require.Equal(t, 0, l.OngoingCount())
-		require.Equal(t, 2, l.NodeCount())
+		require.Equal(t, 2, l.pendingCount())
+		require.Equal(t, 0, l.ongoingCount())
+		require.Equal(t, 2, l.nodeCount())
 
 		// nv1 is the next node due
 		got, found := l.PeekNext(clk.Now())
@@ -545,9 +557,9 @@ func TestNodeValueList(t *testing.T) {
 		require.True(t, key.Equal(got.NodeID.Key(), nv1.NodeID.Key()))
 
 		l.MarkOngoing(nv1.NodeID, clk.Now().Add(time.Minute))
-		require.Equal(t, 1, l.PendingCount())
-		require.Equal(t, 1, l.OngoingCount())
-		require.Equal(t, 2, l.NodeCount())
+		require.Equal(t, 1, l.pendingCount())
+		require.Equal(t, 1, l.ongoingCount())
+		require.Equal(t, 2, l.nodeCount())
 
 		// nv2 is now the next node due
 		got, found = l.PeekNext(clk.Now())
@@ -566,21 +578,21 @@ func TestNodeValueList(t *testing.T) {
 		}
 		l.Put(nv1)
 
-		require.Equal(t, 1, l.PendingCount())
-		require.Equal(t, 0, l.OngoingCount())
-		require.Equal(t, 1, l.NodeCount())
+		require.Equal(t, 1, l.pendingCount())
+		require.Equal(t, 0, l.ongoingCount())
+		require.Equal(t, 1, l.nodeCount())
 
 		l.MarkOngoing(nv1.NodeID, clk.Now().Add(time.Minute))
 
-		require.Equal(t, 0, l.PendingCount())
-		require.Equal(t, 1, l.OngoingCount())
-		require.Equal(t, 1, l.NodeCount())
+		require.Equal(t, 0, l.pendingCount())
+		require.Equal(t, 1, l.ongoingCount())
+		require.Equal(t, 1, l.nodeCount())
 
 		l.Put(nv1)
 
-		require.Equal(t, 1, l.PendingCount())
-		require.Equal(t, 0, l.OngoingCount())
-		require.Equal(t, 1, l.NodeCount())
+		require.Equal(t, 1, l.pendingCount())
+		require.Equal(t, 0, l.ongoingCount())
+		require.Equal(t, 1, l.nodeCount())
 	})
 
 	t.Run("mark ongoing pending mixed", func(t *testing.T) {

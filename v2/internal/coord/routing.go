@@ -8,6 +8,7 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
@@ -38,6 +39,9 @@ type RoutingConfig struct {
 
 	// Tracer is the tracer that should be used to trace execution.
 	Tracer trace.Tracer
+
+	// Meter is the meter that should be used to record metrics.
+	Meter metric.Meter
 
 	// BootstrapTimeout is the time the behaviour should wait before terminating a bootstrap if it is not making progress.
 	BootstrapTimeout time.Duration
@@ -115,6 +119,13 @@ func (cfg *RoutingConfig) Validate() error {
 		return &errs.ConfigurationError{
 			Component: "RoutingConfig",
 			Err:       fmt.Errorf("tracer must not be nil"),
+		}
+	}
+
+	if cfg.Meter == nil {
+		return &errs.ConfigurationError{
+			Component: "RoutingConfig",
+			Err:       fmt.Errorf("meter must not be nil"),
 		}
 	}
 
@@ -246,6 +257,7 @@ func DefaultRoutingConfig() *RoutingConfig {
 		Clock:  clock.New(),
 		Logger: tele.DefaultLogger("coord"),
 		Tracer: tele.NoopTracer(),
+		Meter:  tele.NoopMeter(),
 
 		BootstrapTimeout:            5 * time.Minute, // MAGIC
 		BootstrapRequestConcurrency: 3,               // MAGIC
@@ -304,6 +316,8 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 
 	bootstrapCfg := routing.DefaultBootstrapConfig()
 	bootstrapCfg.Clock = cfg.Clock
+	bootstrapCfg.Tracer = cfg.Tracer
+	bootstrapCfg.Meter = cfg.Meter
 	bootstrapCfg.Timeout = cfg.BootstrapTimeout
 	bootstrapCfg.RequestConcurrency = cfg.BootstrapRequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.BootstrapRequestTimeout
@@ -315,6 +329,8 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 
 	includeCfg := routing.DefaultIncludeConfig()
 	includeCfg.Clock = cfg.Clock
+	includeCfg.Tracer = cfg.Tracer
+	includeCfg.Meter = cfg.Meter
 	includeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	includeCfg.QueueCapacity = cfg.IncludeQueueCapacity
 	includeCfg.Concurrency = cfg.IncludeRequestConcurrency
@@ -326,6 +342,8 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 
 	probeCfg := routing.DefaultProbeConfig()
 	probeCfg.Clock = cfg.Clock
+	probeCfg.Tracer = cfg.Tracer
+	probeCfg.Meter = cfg.Meter
 	probeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	probeCfg.Concurrency = cfg.ProbeRequestConcurrency
 	probeCfg.CheckInterval = cfg.ProbeCheckInterval
@@ -337,6 +355,8 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 
 	exploreCfg := routing.DefaultExploreConfig()
 	exploreCfg.Clock = cfg.Clock
+	exploreCfg.Tracer = cfg.Tracer
+	exploreCfg.Meter = cfg.Meter
 	exploreCfg.Timeout = cfg.ExploreTimeout
 	exploreCfg.RequestConcurrency = cfg.ExploreRequestConcurrency
 	exploreCfg.RequestTimeout = cfg.ExploreRequestTimeout

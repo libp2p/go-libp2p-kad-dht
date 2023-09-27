@@ -470,7 +470,10 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 		select {
 		case <-ctx.Done():
 			return nil, lastStats, ctx.Err()
-		case wev := <-waiter.Chan():
+		case wev, more := <-waiter.Chan():
+			if !more {
+				return nil, lastStats, ctx.Err()
+			}
 			ctx, ev := wev.Ctx, wev.Event
 			switch ev := ev.(type) {
 			case *EventQueryProgressed:
@@ -519,7 +522,11 @@ func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *Waiter[Behav
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
-		case wev := <-waiter.Chan():
+		case wev, more := <-waiter.Chan():
+			if !more {
+				return nil, nil, ctx.Err()
+			}
+
 			switch ev := wev.Event.(type) {
 			case *EventQueryProgressed:
 			case *EventBroadcastFinished:

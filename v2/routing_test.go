@@ -395,8 +395,7 @@ func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
 func TestDHT_GetValue_happy_path(t *testing.T) {
 	ctx := kadtest.CtxShort(t)
 
-	clk := clock.NewMock()
-	clk.Set(time.Now()) // needed because record validators don't use mock clocks
+	clk := clock.New()
 
 	cfg := DefaultConfig()
 	cfg.Clock = clk
@@ -552,9 +551,7 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	// d5 returns better value
 	// assert that we receive two values on the channel (valid + better)
 	ctx := kadtest.CtxShort(t)
-
-	clk := clock.NewMock()
-	clk.Set(time.Now()) // needed because record validators don't use mock clocks
+	clk := clock.New()
 
 	cfg := DefaultConfig()
 	cfg.Clock = clk
@@ -628,9 +625,7 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 	t := suite.T()
 	ctx := kadtest.CtxShort(t)
-
-	clk := clock.NewMock()
-	clk.Set(time.Now()) // needed because record validators don't use mock clocks
+	clk := clock.New()
 
 	cfg := DefaultConfig()
 	cfg.Clock = clk

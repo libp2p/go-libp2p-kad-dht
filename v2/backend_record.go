@@ -145,6 +145,7 @@ func (r *RecordBackend) Validate(ctx context.Context, key string, values ...any)
 		if err := r.validator.Validate(k, data); err != nil {
 			return -1, err
 		}
+
 		return 0, nil
 	}
 
@@ -169,6 +170,7 @@ func (r *RecordBackend) Validate(ctx context.Context, key string, values ...any)
 		origIdx[len(validValues)] = i
 		validValues = append(validValues, data)
 	}
+
 	if len(validValues) == 0 {
 		return -1, fmt.Errorf("no valid values")
 	}

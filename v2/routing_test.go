@@ -405,8 +405,8 @@ func TestDHT_GetValue_happy_path(t *testing.T) {
 	priv, _, err := crypto.GenerateEd25519Key(rng)
 	require.NoError(t, err)
 
-	key, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
-	key, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
+	_, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
+	_, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
 	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number means better value
 
 	top := NewTopology(t)
@@ -563,8 +563,8 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	priv, _, err := crypto.GenerateEd25519Key(rng)
 	require.NoError(t, err)
 
-	key, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
-	key, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
+	_, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
+	_, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
 	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number means better value
 
 	top := NewTopology(t)

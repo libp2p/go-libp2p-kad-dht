@@ -235,6 +235,10 @@ func (p *ProvidersBackend) Fetch(ctx context.Context, key string) (any, error) {
 	return out, nil
 }
 
+// Validate verifies that the given values are of type [peer.AddrInfo]. Then it
+// decides based on the number of attached multi addresses which value is
+// "better" than the other. If there is a tie, Validate will return the index
+// of the earliest occurrence.
 func (p *ProvidersBackend) Validate(ctx context.Context, key string, values ...any) (int, error) {
 	// short circuit if it's just a single value
 	if len(values) == 1 {
@@ -245,24 +249,25 @@ func (p *ProvidersBackend) Validate(ctx context.Context, key string, values ...a
 		return 0, nil
 	}
 
-	bestValueIdx := -1
+	bestIdx := -1
 	for i, value := range values {
 		addrInfo, ok := value.(peer.AddrInfo)
 		if !ok {
 			continue
 		}
-		if bestValueIdx == -1 {
-			bestValueIdx = i
-		} else if len(values[bestValueIdx].(peer.AddrInfo).Addrs) < len(addrInfo.Addrs) {
-			bestValueIdx = i
+
+		if bestIdx == -1 {
+			bestIdx = i
+		} else if len(values[bestIdx].(peer.AddrInfo).Addrs) < len(addrInfo.Addrs) {
+			bestIdx = i
 		}
 	}
 
-	if bestValueIdx == -1 {
+	if bestIdx == -1 {
 		return -1, fmt.Errorf("no value of correct type")
 	}
 
-	return bestValueIdx, nil
+	return bestIdx, nil
 }
 
 // Close is here to implement the [io.Closer] interface. This will get called

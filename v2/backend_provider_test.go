@@ -7,18 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/multiformats/go-multiaddr"
-
-	"github.com/libp2p/go-libp2p/core/peer"
-
-	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
-
 	"github.com/benbjohnson/clock"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slog"
+
+	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
 )
 
 var devnull = slog.New(slog.NewTextHandler(io.Discard, nil))

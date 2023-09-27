@@ -7,9 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
-
 	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/network"

@@ -450,9 +450,18 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	// queue the start of the query
 	c.brdcstBehaviour.Notify(ctx, cmd)
 
-	_, _, err = c.waitForBroadcast(ctx, waiter)
+	contacted, _, err := c.waitForBroadcast(ctx, waiter)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if len(contacted) == 0 {
+		return fmt.Errorf("no peers contacted")
+	}
+
+	// TODO: define threshold below which we consider the provide to have failed
+
+	return nil
 }
 
 func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, waiter *Waiter[BehaviourEvent], fn coordt.QueryFunc) ([]kadt.PeerID, coordt.QueryStats, error) {

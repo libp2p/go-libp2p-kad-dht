@@ -221,6 +221,17 @@ func (f *FollowUp[K, N, M]) advancePool(ctx context.Context, ev query.PoolEvent)
 			QueryID: f.queryID,
 		}, true
 	case *query.StatePoolQueryFinished[K, N]:
+		if len(st.ClosestNodes) == 0 {
+			return &StateBroadcastFinished[K, N]{
+				QueryID:   f.queryID,
+				Contacted: make([]N, 0),
+				Errors: map[string]struct {
+					Node N
+					Err  error
+				}{},
+			}, true
+		}
+
 		f.closest = st.ClosestNodes
 
 		for _, n := range st.ClosestNodes {

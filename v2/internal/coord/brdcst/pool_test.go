@@ -272,6 +272,33 @@ func TestPool_FollowUp_stop_during_followup_phase(t *testing.T) {
 	require.Len(t, st.Errors, 2)
 }
 
+func TestPool_FollowUp_empty_seed(t *testing.T) {
+	ctx := context.Background()
+	cfg := DefaultConfigPool()
+
+	self := tiny.NewNode(0)
+
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
+	require.NoError(t, err)
+
+	msg := tiny.Message{Content: "store this"}
+	target := tiny.Key(0b00000001)
+
+	queryID := coordt.QueryID("test")
+
+	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{},
+		Config:  DefaultConfigFollowUp(),
+	})
+	require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
+
+	state = p.Advance(ctx, &EventPoolPoll{})
+	require.IsType(t, &StatePoolIdle{}, state)
+}
+
 func TestPoolState_interface_conformance(t *testing.T) {
 	states := []PoolState{
 		&StatePoolIdle{},

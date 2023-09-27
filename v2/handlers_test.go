@@ -444,7 +444,7 @@ func newPutIPNSRequest(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq u
 		Record: &recpb.Record{
 			Key:          []byte(keyStr),
 			Value:        value,
-			TimeReceived: time.Now().Format(time.RFC3339Nano),
+			TimeReceived: clk.Now().Format(time.RFC3339Nano),
 		},
 	}
 

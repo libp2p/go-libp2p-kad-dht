@@ -61,7 +61,11 @@ type Backend interface {
 	// with a single value, it will return 0 and no error if it is valid or an
 	// error and -1 if it is invalid. For multiple values, it will select the
 	// "best" value based on user-defined logic and return its index in the
-	// original values list.
+	// original values list. If we receive a request for /ipns/$binary_id, the
+	// key parameter will be set to $binary_id. Decisions about which value is
+	// the "best" from the given list must be stable. So if there are two
+	// equally good values, the implementation must always return the same
+	// index.
 	Validate(ctx context.Context, key string, values ...any) (int, error)
 }
 

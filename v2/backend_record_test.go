@@ -105,4 +105,10 @@ func TestRecordBackend_Validate(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, -1, idx)
 	})
+
+	t.Run("identically good values", func(t *testing.T) {
+		idx, err := b.Validate(ctx, "some-key", []byte("valid-0"), []byte("valid-0"))
+		assert.NoError(t, err)
+		assert.Equal(t, 0, idx)
+	})
 }

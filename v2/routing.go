@@ -390,9 +390,9 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 
 	// TODO: get quorum from config
 	quorum := GetQuorum(ropt)
-	_ = quorum
 
 	var best []byte
+	quorumPeers := map[kadt.PeerID]struct{}{}
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		rec := resp.GetRecord()
 		if rec == nil {
@@ -404,9 +404,24 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 		}
 
 		idx, _ := b.Validate(ctx, path, best, rec.GetValue())
-		if idx == 1 {
+		switch idx {
+		case 0:
+			if bytes.Equal(best, rec.GetValue()) {
+				quorumPeers[id] = struct{}{}
+			}
+		case 1:
 			best = rec.GetValue()
+			quorumPeers = map[kadt.PeerID]struct{}{}
+			quorumPeers[id] = struct{}{}
 			out <- rec.GetValue()
+		case -1:
+			// no valid value found yet
+			return nil
+		}
+
+		// Check if we have reached the quorum
+		if len(quorumPeers) == quorum {
+			return coordt.ErrSkipRemaining
 		}
 
 		return nil

@@ -29,6 +29,8 @@ type router struct {
 var _ coordt.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*router)(nil)
 
 func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Message) (*pb.Message, error) {
+	// TODO: add tracing
+
 	// TODO: what to do with addresses in peer.AddrInfo?
 	if len(r.host.Peerstore().Addrs(peer.ID(to))) == 0 {
 		return nil, fmt.Errorf("no address for peer %s", to)

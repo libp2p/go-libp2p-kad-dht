@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore/failstore"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -475,7 +474,7 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	// d3 returns valid value
 	// d4 returns worse value
 	// d5 returns better value
-	// assert that we receive two values on the channel
+	// assert that we receive two values on the channel (valid + better)
 	ctx := kadtest.CtxShort(t)
 
 	clk := clock.NewMock()
@@ -490,7 +489,7 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 
 	key, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
 	key, worseValue := makeIPNSKeyValue(t, clk, priv, 0, time.Hour)
-	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number
+	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number means better value
 
 	top := NewTopology(t)
 	d1 := top.AddServer(cfg)
@@ -520,6 +519,104 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	assert.Equal(t, betterValue, val)
 
 	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_stop_query_after_quorum_reached(t *testing.T) {
+	// Test setup:
+	// we create 1 DHT server does searches for values
+	// we create 10 additional DHT servers and connect all of them in a chain
+	// the first server holds an invalid record
+	// the next three servers of the 10 DHT servers hold a valid record
+	// the remaining 6 servers of the 10 DHT servers hold a better record
+	// first test assertion: with quorum of 3 we expect the valid but old record
+	// second test assertion: with a quorum of 5 we expect to receive the valid but also better record.
+	ctx := context.Background() // kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	clk.Set(time.Now()) // needed because record validators don't use mock clocks
+
+	cfg := DefaultConfig()
+	cfg.Clock = clk
+	top := NewTopology(t)
+
+	// init privileged DHT server
+	d := top.AddServer(cfg)
+
+	// init remaining ones
+	servers := make([]*DHT, 10)
+	for i := 0; i < 10; i++ {
+		servers[i] = top.AddServer(cfg)
+	}
+
+	// generate records
+	remote, priv := newIdentity(t)
+	invalidPutReq := newPutIPNSRequest(t, clk, priv, 3, -time.Hour)
+	key, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
+	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour) // higher sequence number means better value
+
+	// store invalid (expired) record directly in the datastore of
+	// the respective DHT server (bypassing any validation).
+	invalidRec, err := invalidPutReq.Record.Marshal()
+	require.NoError(t, err)
+
+	rbe, err := typedBackend[*RecordBackend](servers[0], namespaceIPNS)
+	require.NoError(t, err)
+
+	dsKey := newDatastoreKey(namespaceIPNS, string(remote))
+	err = rbe.datastore.Put(context.Background(), dsKey, invalidRec)
+	require.NoError(t, err)
+
+	// The first four DHT servers hold a valid but old value
+	for i := 1; i < 4; i++ {
+		err = servers[i].putValueLocal(ctx, key, validValue)
+		require.NoError(t, err)
+	}
+
+	// The remaining six DHT servers hold a valid and newer record
+	for i := 4; i < 10; i++ {
+		err = servers[i].putValueLocal(ctx, key, betterValue)
+		require.NoError(t, err)
+	}
+
+	// connect all together
+	top.ConnectChain(ctx, append([]*DHT{d}, servers...)...)
+
+	t.Run("quorum reached prematurely", func(t *testing.T) {
+		out, err := d.SearchValue(ctx, key, RoutingQuorum(3))
+		require.NoError(t, err)
+
+		val := readItem(t, ctx, out)
+		assert.Equal(t, validValue, val)
+
+		assertClosed(t, ctx, out)
+	})
+
+	t.Run("quorum reached when better value discovered", func(t *testing.T) {
+		out, err := d.SearchValue(ctx, key, RoutingQuorum(5))
+		require.NoError(t, err)
+
+		val := readItem(t, ctx, out)
+		assert.Equal(t, validValue, val)
+
+		val = readItem(t, ctx, out)
+		assert.Equal(t, betterValue, val)
+
+		assertClosed(t, ctx, out)
+	})
+
+	//t.Run("zero quorum", func(t *testing.T) {
+	//	// search until query exhausted
+	//	out, err := d.SearchValue(ctx, key, RoutingQuorum(0))
+	//	require.NoError(t, err)
+	//
+	//	val := readItem(t, ctx, out)
+	//	assert.Equal(t, validValue, val)
+	//
+	//	val = readItem(t, ctx, out)
+	//	assert.Equal(t, betterValue, val)
+	//
+	//	assertClosed(t, ctx, out)
+	//})
 }
 
 func TestDHT_SearchValue_routing_option_returns_error(t *testing.T) {

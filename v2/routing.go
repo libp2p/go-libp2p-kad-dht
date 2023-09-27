@@ -206,7 +206,7 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return nil
 	}
 
-	_, err = d.kad.QueryMessage(ctx, msg, fn, 20) // TODO: parameterize
+	_, err = d.kad.QueryMessage(ctx, msg, fn, d.cfg.BucketSize)
 	if err != nil {
 		span.RecordError(err)
 		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))

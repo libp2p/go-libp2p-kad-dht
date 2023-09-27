@@ -114,7 +114,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	coordCfg.MeterProvider = cfg.MeterProvider
 	coordCfg.TracerProvider = cfg.TracerProvider
 
-	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &router{host: h, ProtocolID: cfg.ProtocolID}, d.rt, coordCfg)
+	rtr := &router{
+		host:       h,
+		protocolID: cfg.ProtocolID,
+		tracer:     d.tele.Tracer,
+	}
+	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), rtr, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}

@@ -42,18 +42,18 @@ func (d *DHT) streamHandler(s network.Stream) {
 
 	if err := s.Scope().SetService(ServiceName); err != nil {
 		d.log.LogAttrs(ctx, slog.LevelWarn, "error attaching stream to DHT service", slog.String("err", err.Error()))
-		d.logErr(s.Reset(), "failed to reset stream")
+		d.warnErr(s.Reset(), "failed to reset stream")
 		span.RecordError(err)
 		return
 	}
 
 	if err := d.handleNewStream(ctx, s); err != nil {
 		// If we exited with an error, let the remote peer know.
-		d.logErr(s.Reset(), "failed to reset stream")
+		d.warnErr(s.Reset(), "failed to reset stream")
 		span.RecordError(err)
 	} else {
 		// If we exited without an error, close gracefully.
-		d.logErr(s.Close(), "failed to close stream")
+		d.warnErr(s.Close(), "failed to close stream")
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.
@@ -202,11 +203,11 @@ func (d *DHT) initAminoBackends() (map[string]Backend, error) {
 // Close cleans up all resources associated with this DHT.
 func (d *DHT) Close() error {
 	if err := d.sub.Close(); err != nil {
-		d.log.With("err", err).Debug("failed closing event bus subscription")
+		d.debugErr(err, "failed closing event bus subscription")
 	}
 
 	if err := d.kad.Close(); err != nil {
-		d.log.With("err", err).Debug("failed closing coordinator")
+		d.debugErr(err, "failed closing coordinator")
 	}
 
 	for ns, b := range d.backends {
@@ -216,7 +217,7 @@ func (d *DHT) Close() error {
 		}
 
 		if err := closer.Close(); err != nil {
-			d.log.Warn("failed closing backend", "namespace", ns, "err", err.Error())
+			d.warnErr(err, "failed closing backend", "namespace", ns)
 		}
 	}
 
@@ -230,7 +231,7 @@ func (d *DHT) Close() error {
 	if d.cfg.ProtocolID == ProtocolIPFS && d.cfg.Datastore == nil {
 		if pbe, err := typedBackend[*ProvidersBackend](d, namespaceProviders); err == nil {
 			if err := pbe.datastore.Close(); err != nil {
-				d.log.Warn("failed closing in memory datastore", "err", err.Error())
+				d.warnErr(err, "failed closing in memory datastore")
 			}
 		}
 	}
@@ -244,7 +245,7 @@ func (d *DHT) Close() error {
 			}
 
 			if err := s.Reset(); err != nil {
-				d.log.With("err", err).Debug("failed closing stream")
+				d.debugErr(err, "failed closing stream")
 			}
 		}
 	}
@@ -302,21 +303,41 @@ func (d *DHT) setClientMode() {
 			}
 
 			if err := s.Reset(); err != nil {
-				d.log.With("err", err).Debug("failed closing stream")
+				d.debugErr(err, "failed closing stream")
 			}
 		}
 	}
 }
 
-// logErr is a helper method that uses the slogger of the DHT and writes a
-// warning log line with the given message alongside the error. If the error
+// warnErr is a helper method that uses the slogger of the DHT and writes a
+// warning log line with the given message alongside the error. args is a list of
+// key/value pairs or slog.Attrs that will be included with the log message. If the error
 // is nil, this method is a no-op.
-func (d *DHT) logErr(err error, msg string) {
+func (d *DHT) warnErr(err error, msg string, args ...any) {
 	if err == nil {
 		return
 	}
 
-	d.log.Warn(msg, "err", err.Error())
+	if len(args) == 0 {
+		d.log.Warn(msg, tele.LogAttrError(err))
+		return
+	}
+	d.log.With(args...).Warn(msg, tele.LogAttrError(err))
+}
+
+// debugErr is a helper method that uses the slogger of the DHT and writes a
+// debug log line with the given message alongside the error. args is a list of
+// key/value pairs or slog.Attrs that will be included with the log message. If the error
+// is nil, this method is a no-op.
+func (d *DHT) debugErr(err error, msg string, args ...any) {
+	if err == nil {
+		return
+	}
+	if len(args) == 0 {
+		d.log.Debug(msg, tele.LogAttrError(err))
+		return
+	}
+	d.log.With(args...).Debug(msg, tele.LogAttrError(err))
 }
 
 // AddAddresses suggests peers and their associated addresses to be added to the routing table.

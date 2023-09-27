@@ -221,8 +221,8 @@ type EventNotifyConnectivity struct {
 	NodeID kadt.PeerID
 }
 
-func (*EventNotifyConnectivity) behaviourEvent()      {}
-func (*EventNotifyConnectivity) routingNotification() {}
+func (*EventNotifyConnectivity) behaviourEvent() {}
+func (*EventNotifyConnectivity) routingCommand() {}
 
 // EventNotifyNonConnectivity notifies a behaviour that a peer does not have connectivity and/or does not support
 // finding closer nodes is known.

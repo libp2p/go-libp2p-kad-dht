@@ -107,13 +107,23 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 
 	// instantiate a new Kademlia DHT coordinator.
 	coordCfg := coord.DefaultCoordinatorConfig()
+	coordCfg.Clock = cfg.Clock
+	coordCfg.Logger = cfg.Logger
+	coordCfg.MeterProvider = cfg.MeterProvider
+	coordCfg.TracerProvider = cfg.TracerProvider
+
+	coordCfg.Query.Clock = cfg.Clock
+	coordCfg.Query.Logger = cfg.Logger.With("behaviour", "pooledquery")
+	coordCfg.Query.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
 	coordCfg.Query.Concurrency = cfg.Query.Concurrency
 	coordCfg.Query.Timeout = cfg.Query.Timeout
 	coordCfg.Query.RequestConcurrency = cfg.Query.RequestConcurrency
 	coordCfg.Query.RequestTimeout = cfg.Query.RequestTimeout
-	coordCfg.Clock = cfg.Clock
-	coordCfg.MeterProvider = cfg.MeterProvider
-	coordCfg.TracerProvider = cfg.TracerProvider
+
+	coordCfg.Routing.Clock = cfg.Clock
+	coordCfg.Routing.Logger = cfg.Logger.With("behaviour", "routing")
+	coordCfg.Routing.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
+	coordCfg.Routing.Meter = cfg.MeterProvider.Meter(tele.MeterName)
 
 	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &router{host: h, ProtocolID: cfg.ProtocolID}, d.rt, coordCfg)
 	if err != nil {

@@ -336,6 +336,7 @@ func (c *Coordinator) PutValue(ctx context.Context, r coordt.Value, q int) error
 func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
+	c.cfg.Logger.Debug("starting query for closest nodes", tele.LogAttrKey(target))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -381,6 +382,10 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) (coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
+	if msg == nil {
+		return coordt.QueryStats{}, fmt.Errorf("no message supplied for query")
+	}
+	c.cfg.Logger.Debug("starting query with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -421,6 +426,10 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
 	defer span.End()
+	if msg == nil {
+		return fmt.Errorf("no message supplied for broadcast")
+	}
+	c.cfg.Logger.Debug("starting broadcast with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

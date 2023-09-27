@@ -330,24 +330,27 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 		return nil, routing.ErrNotSupported
 	}
 
-	if rOpt.Offline {
-		val, err := b.Fetch(ctx, path)
-		if err != nil {
-			if errors.Is(err, ds.ErrNotFound) {
-				return nil, routing.ErrNotFound
-			}
+	val, err := b.Fetch(ctx, path)
+	if err != nil {
+		if !errors.Is(err, ds.ErrNotFound) {
 			return nil, fmt.Errorf("fetch from backend: %w", err)
 		}
 
-		rec, ok := val.(*recpb.Record)
-		if !ok {
-			return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
-		}
-
-		if rec == nil {
+		if rOpt.Offline {
 			return nil, routing.ErrNotFound
 		}
 
+		out := make(chan []byte)
+		go d.searchValueRoutine(ctx, b, ns, path, rOpt, out)
+		return out, nil
+	}
+
+	rec, ok := val.(*recpb.Record)
+	if !ok {
+		return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
+	}
+
+	if rOpt.Offline {
 		out := make(chan []byte, 1)
 		defer close(out)
 		out <- rec.GetValue()
@@ -355,29 +358,24 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 	}
 
 	out := make(chan []byte)
-	go d.searchValueRoutine(ctx, keyStr, rOpt, out)
+	go func() {
+		out <- rec.GetValue()
+		d.searchValueRoutine(ctx, b, ns, path, rOpt, out)
+	}()
+
 	return out, nil
 }
 
-func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routing.Options, out chan<- []byte) {
+func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string, path string, ropt *routing.Options, out chan<- []byte) {
 	_, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
 	defer span.End()
 	defer close(out)
 
-	// TODO: remove below duplication
-	ns, path, err := record.SplitKey(keyStr)
-	if err != nil {
-		return
-	}
-
-	b, found := d.backends[ns]
-	if !found {
-		return
-	}
+	routingKey := []byte(newRoutingKey(ns, path))
 
 	req := &pb.Message{
 		Type: pb.Message_GET_VALUE,
-		Key:  []byte(keyStr),
+		Key:  routingKey,
 	}
 
 	//  The currently known best value for keyStr
@@ -397,12 +395,12 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 			return nil
 		}
 
-		if !bytes.Equal([]byte(keyStr), rec.GetKey()) {
+		if !bytes.Equal(routingKey, rec.GetKey()) {
 			d.log.Debug("record key mismatch")
 			return nil
 		}
 
-		idx, _ := b.Validate(ctx, path, best, rec.GetValue())
+		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
 		switch idx {
 		case 0:
 			if bytes.Equal(best, rec.GetValue()) {
@@ -428,7 +426,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, keyStr string, ropt *routi
 		return nil
 	}
 
-	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
+	_, err := d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
 	if err != nil {
 		d.log.Warn("Search value query failed", slog.String("err", err.Error()))
 	}

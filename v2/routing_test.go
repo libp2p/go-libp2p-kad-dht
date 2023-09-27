@@ -502,47 +502,6 @@ func TestDHT_SearchValue_simple(t *testing.T) {
 	assertClosed(t, ctx, valChan)
 }
 
-func TestDHT_SearchValue_offline(t *testing.T) {
-	// Test setup:
-	// There is just one other server that returns a valid value.
-	ctx := kadtest.CtxShort(t)
-	d := newTestDHT(t)
-
-	key, v := makePkKeyValue(t)
-	err := d.putValueLocal(ctx, key, v)
-	require.NoError(t, err)
-
-	valChan, err := d.SearchValue(ctx, key, routing.Offline)
-	require.NoError(t, err)
-
-	val := readItem(t, ctx, valChan)
-	assert.Equal(t, v, val)
-
-	assertClosed(t, ctx, valChan)
-}
-
-func TestDHT_SearchValue_offline_not_found_locally(t *testing.T) {
-	// Test setup:
-	// We are connected to a peer that holds the record but require an offline
-	// lookup. Assert that we don't receive the record
-	ctx := kadtest.CtxShort(t)
-
-	key, v := makePkKeyValue(t)
-
-	top := NewTopology(t)
-	d1 := top.AddServer(nil)
-	d2 := top.AddServer(nil)
-
-	top.Connect(ctx, d1, d2)
-
-	err := d2.putValueLocal(ctx, key, v)
-	require.NoError(t, err)
-
-	valChan, err := d1.SearchValue(ctx, key, routing.Offline)
-	assert.ErrorIs(t, err, routing.ErrNotFound)
-	assert.Nil(t, valChan)
-}
-
 func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	// Test setup:
 	// d2 returns no value
@@ -793,4 +752,79 @@ func TestDHT_SearchValue_stops_with_cancelled_context(t *testing.T) {
 	valueChan, err := d1.SearchValue(cancelledCtx, "/"+namespaceIPNS+"/some-key")
 	assert.NoError(t, err)
 	assertClosed(t, ctx, valueChan)
+}
+
+func TestDHT_SearchValue_has_record_locally(t *testing.T) {
+	// Test setup:
+	// There is just one other server that returns a valid value.
+	ctx := kadtest.CtxShort(t)
+	clk := clock.New()
+
+	_, priv := newIdentity(t)
+	_, validValue := makeIPNSKeyValue(t, clk, priv, 1, time.Hour)
+	key, betterValue := makeIPNSKeyValue(t, clk, priv, 2, time.Hour)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+
+	top.Connect(ctx, d1, d2)
+
+	err := d1.putValueLocal(ctx, key, validValue)
+	require.NoError(t, err)
+
+	err = d2.putValueLocal(ctx, key, betterValue)
+	require.NoError(t, err)
+
+	valChan, err := d1.SearchValue(ctx, key)
+	require.NoError(t, err)
+
+	val := readItem(t, ctx, valChan) // from local store
+	assert.Equal(t, validValue, val)
+
+	val = readItem(t, ctx, valChan)
+	assert.Equal(t, betterValue, val)
+
+	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_offline(t *testing.T) {
+	// Test setup:
+	// There is just one other server that returns a valid value.
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	key, v := makePkKeyValue(t)
+	err := d.putValueLocal(ctx, key, v)
+	require.NoError(t, err)
+
+	valChan, err := d.SearchValue(ctx, key, routing.Offline)
+	require.NoError(t, err)
+
+	val := readItem(t, ctx, valChan)
+	assert.Equal(t, v, val)
+
+	assertClosed(t, ctx, valChan)
+}
+
+func TestDHT_SearchValue_offline_not_found_locally(t *testing.T) {
+	// Test setup:
+	// We are connected to a peer that holds the record but require an offline
+	// lookup. Assert that we don't receive the record
+	ctx := kadtest.CtxShort(t)
+
+	key, v := makePkKeyValue(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+
+	top.Connect(ctx, d1, d2)
+
+	err := d2.putValueLocal(ctx, key, v)
+	require.NoError(t, err)
+
+	valChan, err := d1.SearchValue(ctx, key, routing.Offline)
+	assert.ErrorIs(t, err, routing.ErrNotFound)
+	assert.Nil(t, valChan)
 }

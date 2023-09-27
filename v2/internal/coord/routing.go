@@ -585,6 +585,8 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		if r.self.Equal(ev.NodeID) {
 			break
 		}
+		r.cfg.Logger.Debug("peer has connectivity", tele.LogAttrPeerID(ev.NodeID))
+
 		// tell the include state machine in case this is a new peer that could be added to the routing table
 		cmd := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
 			NodeID: ev.NodeID,

@@ -474,6 +474,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 			ctx, ev := wev.Ctx, wev.Event
 			switch ev := ev.(type) {
 			case *EventQueryProgressed:
+				c.cfg.Logger.Debug("query made progress", "query_id", queryID, tele.LogAttrPeerID(ev.NodeID), slog.Duration("elapsed", c.cfg.Clock.Since(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
 				lastStats = coordt.QueryStats{
 					Start:    ev.Stats.Start,
 					Requests: ev.Stats.Requests,
@@ -483,12 +484,14 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 				nh, err := c.networkBehaviour.getNodeHandler(ctx, ev.NodeID)
 				if err != nil {
 					// ignore unknown node
+					c.cfg.Logger.Debug("node handler not found", "query_id", queryID, tele.LogAttrError, err)
 					break
 				}
 
 				err = fn(ctx, nh.ID(), ev.Response, lastStats)
 				if errors.Is(err, coordt.ErrSkipRemaining) {
 					// done
+					c.cfg.Logger.Debug("query done", "query_id", queryID)
 					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
 					return nil, lastStats, nil
 				}
@@ -501,6 +504,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 			case *EventQueryFinished:
 				// query is done
 				lastStats.Exhausted = true
+				c.cfg.Logger.Debug("query ran to exhaustion", "query_id", queryID, slog.Duration("elapsed", ev.Stats.End.Sub(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
 				return ev.ClosestNodes, lastStats, nil
 
 			default:
@@ -571,6 +575,7 @@ func (c *Coordinator) NotifyConnectivity(ctx context.Context, id kadt.PeerID) er
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
 	defer span.End()
 
+	c.cfg.Logger.Debug("peer has connectivity", tele.LogAttrPeerID(id), "source", "notify")
 	c.routingBehaviour.Notify(ctx, &EventNotifyConnectivity{
 		NodeID: id,
 	})
@@ -584,6 +589,7 @@ func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID)
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyNonConnectivity")
 	defer span.End()
 
+	c.cfg.Logger.Debug("peer has no connectivity", tele.LogAttrPeerID(id), "source", "notify")
 	c.routingBehaviour.Notify(ctx, &EventNotifyNonConnectivity{
 		NodeID: id,
 	})

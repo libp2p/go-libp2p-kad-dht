@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -469,4 +470,14 @@ func newDatastoreKey(namespace string, binStrs ...string) ds.Key {
 		elems[i+1] = base32.RawStdEncoding.EncodeToString([]byte(bin))
 	}
 	return ds.NewKey("/" + path.Join(elems...))
+}
+
+// newRoutingKey uses the given namespace and binary string key and constructs
+// a new string of the format: /$namespace/$binStr
+func newRoutingKey(namespace string, binStr string) string {
+	buf := make([]byte, 0, 2+len(namespace)+len(binStr))
+	buffer := bytes.NewBuffer(buf)
+	buffer.WriteString("/" + namespace + "/")
+	buffer.Write([]byte(binStr))
+	return buffer.String()
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -133,7 +132,7 @@ func (r *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 }
 
 func (r *RecordBackend) Validate(ctx context.Context, key string, values ...any) (int, error) {
-	k := "/" + path.Join(r.namespace, key)
+	k := newRoutingKey(r.namespace, key)
 
 	// short circuit if it's just a single value
 	if len(values) == 1 {

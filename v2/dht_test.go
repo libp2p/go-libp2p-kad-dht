@@ -103,3 +103,7 @@ func TestAddAddresses(t *testing.T) {
 	_, err = local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
 	require.NoError(t, err)
 }
+
+func TestDHT_Close_idempotent(t *testing.T) {
+	t.Skip("not implemented")
+}

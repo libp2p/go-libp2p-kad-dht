@@ -14,8 +14,9 @@ import (
 // TrieRT is a routing table backed by a XOR Trie which offers good scalablity and performance
 // for large networks.
 type TrieRT[K kad.Key[K], N kad.NodeID[K]] struct {
-	self      K
-	keyFilter KeyFilterFunc[K, N]
+	self       K
+	keyFilter  KeyFilterFunc[K, N]
+	nodeFilter NodeFilter[K, N]
 
 	mu   sync.Mutex   // held to synchronise mutations to the trie
 	trie atomic.Value // holds a *trie.Trie[K, N]
@@ -43,6 +44,7 @@ func (rt *TrieRT[K, N]) apply(cfg *Config[K, N]) error {
 	}
 
 	rt.keyFilter = cfg.KeyFilter
+	rt.nodeFilter = cfg.NodeFilter
 
 	return nil
 }
@@ -56,6 +58,9 @@ func (rt *TrieRT[K, N]) Self() K {
 func (rt *TrieRT[K, N]) AddNode(node N) bool {
 	kk := node.Key()
 	if rt.keyFilter != nil && !rt.keyFilter(rt, kk) {
+		return false
+	}
+	if rt.nodeFilter != nil && !rt.nodeFilter.TryAdd(rt, node) {
 		return false
 	}
 
@@ -81,6 +86,10 @@ func (rt *TrieRT[K, N]) RemoveKey(kk K) bool {
 		return false
 	}
 	rt.trie.Store(next)
+	if rt.nodeFilter != nil {
+		_, node := trie.Find(this, kk)
+		rt.nodeFilter.Remove(node)
+	}
 	return true
 }
 

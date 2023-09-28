@@ -314,6 +314,64 @@ func TestKeyFilter(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+var _ NodeFilter[kadtest.Key32, node[kadtest.Key32]] = (*nodeFilter)(nil)
+
+type nodeFilter struct {
+	state []node[kadtest.Key32]
+}
+
+func (f *nodeFilter) TryAdd(rt *TrieRT[kadtest.Key32, node[kadtest.Key32]],
+	n node[kadtest.Key32]) bool {
+	if n == node2 {
+		return false
+	}
+	f.state = append(f.state, n)
+	return true
+}
+
+func (f *nodeFilter) Remove(n node[kadtest.Key32]) {
+	for i, nn := range f.state {
+		if nn == n {
+			f.state = append(f.state[:i], f.state[i+1:]...)
+			return
+		}
+	}
+}
+
+func TestPeerFilter(t *testing.T) {
+	cfg := DefaultConfig[kadtest.Key32, node[kadtest.Key32]]()
+	filter := &nodeFilter{}
+	cfg.NodeFilter = filter
+	rt, err := New[kadtest.Key32](node0, cfg)
+	require.NoError(t, err)
+
+	// can't add node2
+	success := rt.AddNode(node2)
+	require.NoError(t, err)
+	require.False(t, success)
+	require.Empty(t, filter.state)
+
+	got, found := rt.GetNode(key2)
+	require.False(t, found)
+	require.Zero(t, got)
+
+	// can add other node
+	success = rt.AddNode(node1)
+	require.NoError(t, err)
+	require.True(t, success)
+	require.Equal(t, []node[kadtest.Key32]{node1}, filter.state)
+
+	want := node1
+	got, found = rt.GetNode(key1)
+	require.True(t, found)
+	require.Equal(t, want, got)
+
+	// remove node1
+	success = rt.RemoveKey(key1)
+	require.True(t, success)
+	require.Empty(t, filter.state)
+}
+
 func TestTableConcurrentReadWrite(t *testing.T) {
 	nodes := make([]*kadtest.ID[kadtest.Key32], 5000)
 	for i := range nodes {

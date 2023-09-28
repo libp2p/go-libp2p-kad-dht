@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -105,5 +106,15 @@ func TestAddAddresses(t *testing.T) {
 }
 
 func TestDHT_Close_idempotent(t *testing.T) {
-	t.Skip("not implemented")
+	d := newTestDHT(t)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			assert.NoError(t, d.Close())
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }

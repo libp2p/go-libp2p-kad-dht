@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ipfs/go-datastore/trace"
@@ -55,6 +56,9 @@ type DHT struct {
 
 	// tele holds a reference to a telemetry struct
 	tele *Telemetry
+
+	// indicates whether this DHT instance was stopped ([DHT.Close] was called).
+	stopped atomic.Bool
 }
 
 // New constructs a new [DHT] for the given underlying host and with the given
@@ -206,6 +210,10 @@ func (d *DHT) initAminoBackends() (map[string]Backend, error) {
 
 // Close cleans up all resources associated with this DHT.
 func (d *DHT) Close() error {
+	if d.stopped.Swap(true) {
+		return nil
+	}
+
 	if err := d.sub.Close(); err != nil {
 		d.log.With("err", err).Debug("failed closing event bus subscription")
 	}

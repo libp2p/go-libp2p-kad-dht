@@ -29,7 +29,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
 
 	// // but when d3 queries d2, d1 and d3 discover each other
-	_, _ = d3.FindPeer(ctx, "something")
+	_, _ = NewRouting(d3).FindPeer(ctx, "something")
 	// ignore the error
 
 	// d3 should update its routing table to include d1 during the query
@@ -74,7 +74,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	require.NoError(t, err)
 
 	// failed queries should remove the queried peers from the routing table
-	_, _ = d1.FindPeer(ctx, "test")
+	_, _ = NewRouting(d1).FindPeer(ctx, "test")
 
 	// d1 should update its routing table to remove d2 because of the failure
 	_, err = top.ExpectRoutingRemoved(ctx, d1, d2.host.ID())

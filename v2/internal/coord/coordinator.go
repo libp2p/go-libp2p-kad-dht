@@ -383,7 +383,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
 	if msg == nil {
-		return coordt.QueryStats{}, fmt.Errorf("no message supplied for query")
+		return nil, coordt.QueryStats{}, fmt.Errorf("no message supplied for query")
 	}
 	c.cfg.Logger.Debug("starting query with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
 

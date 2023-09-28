@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -102,4 +103,18 @@ func TestAddAddresses(t *testing.T) {
 	// the routing table should now contain the node
 	_, err = local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
 	require.NoError(t, err)
+}
+
+func TestDHT_Close_idempotent(t *testing.T) {
+	d := newTestDHT(t)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			assert.NoError(t, d.Close())
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }

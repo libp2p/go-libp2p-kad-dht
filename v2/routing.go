@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,10 +40,8 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 			return addrInfo, nil
 		}
 	default:
-		// we're
+		// we're not connected or were recently connected
 	}
-
-	target := kadt.PeerID(id)
 
 	var foundPeer peer.ID
 	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
@@ -53,7 +52,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return nil
 	}
 
-	_, _, err := d.kad.QueryClosest(ctx, target.Key(), fn, 20)
+	_, _, err := d.kad.QueryClosest(ctx, kadt.PeerID(id).Key(), fn, 20)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
@@ -116,7 +115,7 @@ func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-ch
 	return peerOut
 }
 
-func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan peer.AddrInfo) {
+func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan<- peer.AddrInfo) {
 	_, span := d.tele.Tracer.Start(ctx, "DHT.findProvidersAsyncRoutine", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
@@ -130,12 +129,20 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return
 	}
 
+	// send all providers onto the out channel until the desired count
+	// was reached. If no count was specified, continue with network lookup.
+	providers := map[peer.ID]struct{}{}
+
 	// first fetch the record locally
 	stored, err := b.Fetch(ctx, string(c.Hash()))
 	if err != nil {
-		span.RecordError(err)
-		d.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
-		return
+		if !errors.Is(err, ds.ErrNotFound) {
+			span.RecordError(err)
+			d.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
+			return
+		}
+
+		stored = &providerSet{}
 	}
 
 	ps, ok := stored.(*providerSet)
@@ -145,9 +152,6 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return
 	}
 
-	// send all providers onto the out channel until the desired count
-	// was reached. If no count was specified, continue with network lookup.
-	providers := map[peer.ID]struct{}{}
 	for _, provider := range ps.providers {
 		providers[provider.ID] = struct{}{}
 
@@ -199,7 +203,7 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return nil
 	}
 
-	_, err = d.kad.QueryMessage(ctx, msg, fn, 20) // TODO: parameterize
+	_, _, err = d.kad.QueryMessage(ctx, msg, fn, d.cfg.BucketSize)
 	if err != nil {
 		span.RecordError(err)
 		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
@@ -249,7 +253,8 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 	return nil
 }
 
-// putValueLocal stores a value in the local datastore without querying the network.
+// putValueLocal stores a value in the local datastore without reaching out to
+// the network.
 func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValueLocal")
 	defer span.End()
@@ -265,7 +270,7 @@ func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error
 	}
 
 	rec := record.MakePutRecord(key, value)
-	rec.TimeReceived = time.Now().UTC().Format(time.RFC3339Nano)
+	rec.TimeReceived = d.cfg.Clock.Now().UTC().Format(time.RFC3339Nano)
 
 	_, err = b.Store(ctx, path, rec)
 	if err != nil {
@@ -275,57 +280,44 @@ func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error
 	return nil
 }
 
-func (d *DHT) GetValue(ctx context.Context, key string, option ...routing.Option) ([]byte, error) {
+func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
 	defer span.End()
 
-	v, err := d.getValueLocal(ctx, key)
-	if err == nil {
-		return v, nil
-	}
-	if !errors.Is(err, ds.ErrNotFound) {
-		return nil, fmt.Errorf("put value locally: %w", err)
-	}
-
-	req := &pb.Message{
-		Type: pb.Message_GET_VALUE,
-		Key:  []byte(key),
-	}
-
-	// TODO: quorum
-	var value []byte
-	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
-		if resp == nil {
-			return nil
-		}
-
-		if resp.GetType() != pb.Message_GET_VALUE {
-			return nil
-		}
-
-		if string(resp.GetKey()) != key {
-			return nil
-		}
-
-		value = resp.GetRecord().GetValue()
-
-		return coordt.ErrSkipRemaining
-	}
-
-	_, err = d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
+	valueChan, err := d.SearchValue(ctx, key, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run query: %w", err)
+		return nil, err
 	}
 
-	return value, nil
+	var best []byte
+	for val := range valueChan {
+		best = val
+	}
+
+	if ctx.Err() != nil {
+		return best, ctx.Err()
+	}
+
+	if best == nil {
+		return nil, routing.ErrNotFound
+	}
+
+	return best, nil
 }
 
-// getValueLocal retrieves a value from the local datastore without querying the network.
-func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValueLocal")
+// SearchValue will search in the DHT for keyStr. keyStr must have the form
+// `/$namespace/$binary_id`
+func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing.Option) (<-chan []byte, error) {
+	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
 	defer span.End()
 
-	ns, path, err := record.SplitKey(key)
+	// first parse the routing options
+	rOpt := &routing.Options{} // routing config
+	if err := rOpt.Apply(options...); err != nil {
+		return nil, fmt.Errorf("apply routing options: %w", err)
+	}
+
+	ns, path, err := record.SplitKey(keyStr)
 	if err != nil {
 		return nil, fmt.Errorf("splitting key: %w", err)
 	}
@@ -337,7 +329,17 @@ func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
 
 	val, err := b.Fetch(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("fetch from backend: %w", err)
+		if !errors.Is(err, ds.ErrNotFound) {
+			return nil, fmt.Errorf("fetch from backend: %w", err)
+		}
+
+		if rOpt.Offline {
+			return nil, routing.ErrNotFound
+		}
+
+		out := make(chan []byte)
+		go d.searchValueRoutine(ctx, b, ns, path, rOpt, out)
+		return out, nil
 	}
 
 	rec, ok := val.(*recpb.Record)
@@ -345,14 +347,153 @@ func (d *DHT) getValueLocal(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("expected *recpb.Record from backend, got: %T", val)
 	}
 
-	return rec.GetValue(), nil
+	if rOpt.Offline {
+		out := make(chan []byte, 1)
+		defer close(out)
+		out <- rec.GetValue()
+		return out, nil
+	}
+
+	out := make(chan []byte)
+	go func() {
+		out <- rec.GetValue()
+		d.searchValueRoutine(ctx, b, ns, path, rOpt, out)
+	}()
+
+	return out, nil
 }
 
-func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Option) (<-chan []byte, error) {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
+func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string, path string, ropt *routing.Options, out chan<- []byte) {
+	_, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
 	defer span.End()
+	defer close(out)
 
-	panic("implement me")
+	routingKey := []byte(newRoutingKey(ns, path))
+
+	req := &pb.Message{
+		Type: pb.Message_GET_VALUE,
+		Key:  routingKey,
+	}
+
+	// The currently known best value for /$ns/$path
+	var best []byte
+
+	// Peers that we identified to hold stale records
+	var fixupPeers []kadt.PeerID
+
+	// The peers that returned the best value
+	quorumPeers := map[kadt.PeerID]struct{}{}
+
+	// The quorum that we require for terminating the query. This number tells
+	// us how many peers must have responded with the "best" value before we
+	// cancel the query.
+	quorum := d.getQuorum(ropt)
+
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
+		rec := resp.GetRecord()
+		if rec == nil {
+			return nil
+		}
+
+		if !bytes.Equal(routingKey, rec.GetKey()) {
+			return nil
+		}
+
+		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
+		switch idx {
+		case 0: // "best" is still the best value
+			if bytes.Equal(best, rec.GetValue()) {
+				quorumPeers[id] = struct{}{}
+			}
+
+		case 1: // rec.GetValue() is better than our current "best"
+
+			// We have identified a better record. All peers that were currently
+			// in our set of quorum peers need to be updated wit this new record
+			for p := range quorumPeers {
+				fixupPeers = append(fixupPeers, p)
+			}
+
+			// re-initialize the quorum peers set for this new record
+			quorumPeers = map[kadt.PeerID]struct{}{}
+			quorumPeers[id] = struct{}{}
+
+			// submit the new value to the user
+			best = rec.GetValue()
+			out <- best
+		case -1: // "best" and rec.GetValue() are both invalid
+			return nil
+
+		default:
+			d.log.Warn("unexpected validate index", slog.Int("idx", idx))
+		}
+
+		// Check if we have reached the quorum
+		if len(quorumPeers) == quorum {
+			return coordt.ErrSkipRemaining
+		}
+
+		return nil
+	}
+
+	_, _, err := d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
+	if err != nil {
+		d.logErr(err, "Search value query failed")
+		return
+	}
+
+	// check if we have peers that we found to hold stale records. If so,
+	// update them asynchronously.
+	if len(fixupPeers) == 0 {
+		return
+	}
+
+	go func() {
+		msg := &pb.Message{
+			Type:   pb.Message_PUT_VALUE,
+			Key:    routingKey,
+			Record: record.MakePutRecord(string(routingKey), best),
+		}
+
+		if err := d.kad.BroadcastStatic(ctx, msg, fixupPeers); err != nil {
+			d.log.Warn("Failed updating peer")
+		}
+	}()
+}
+
+// quorumOptionKey is a struct that is used as a routing options key to pass
+// the desired quorum value into, e.g., SearchValue or GetValue.
+type quorumOptionKey struct{}
+
+// RoutingQuorum accepts the desired quorum that is required to terminate the
+// search query. The quorum value must not be negative but can be 0 in which
+// case we continue the query until we have exhausted the keyspace. If no
+// quorum is specified, the [Config.DefaultQuorum] value will be used.
+func RoutingQuorum(n int) routing.Option {
+	return func(opts *routing.Options) error {
+		if n < 0 {
+			return fmt.Errorf("quorum must not be negative")
+		}
+
+		if opts.Other == nil {
+			opts.Other = make(map[interface{}]interface{}, 1)
+		}
+
+		opts.Other[quorumOptionKey{}] = n
+
+		return nil
+	}
+}
+
+// getQuorum extracts the quorum value from the given routing options and
+// returns [Config.DefaultQuorum] if no quorum value is present.
+func (d *DHT) getQuorum(opts *routing.Options) int {
+	quorum, ok := opts.Other[quorumOptionKey{}].(int)
+	if !ok {
+		quorum = d.cfg.Query.DefaultQuorum
+	}
+
+	return quorum
 }
 
 func (d *DHT) Bootstrap(ctx context.Context) error {

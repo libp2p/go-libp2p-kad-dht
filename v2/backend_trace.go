@@ -57,6 +57,21 @@ func (t *tracedBackend) Fetch(ctx context.Context, key string) (any, error) {
 	return result, err
 }
 
+func (t *tracedBackend) Validate(ctx context.Context, key string, values ...any) (int, error) {
+	ctx, span := t.tracer.Start(ctx, "Validate", t.traceAttributes(key))
+	defer span.End()
+
+	idx, err := t.backend.Validate(ctx, key, values...)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		span.SetAttributes(attribute.Int("idx", idx))
+	}
+
+	return idx, err
+}
+
 // traceAttributes is a helper to build the trace attributes.
 func (t *tracedBackend) traceAttributes(key string) trace.SpanStartEventOption {
 	return trace.WithAttributes(attribute.String("namespace", t.namespace), attribute.String("key", key))

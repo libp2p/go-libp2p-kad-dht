@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ipfs/go-datastore/trace"
@@ -56,6 +57,9 @@ type DHT struct {
 
 	// tele holds a reference to a telemetry struct
 	tele *Telemetry
+
+	// indicates whether this DHT instance was stopped ([DHT.Close] was called).
+	stopped atomic.Bool
 }
 
 // New constructs a new [DHT] for the given underlying host and with the given
@@ -125,7 +129,12 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	coordCfg.Routing.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
 	coordCfg.Routing.Meter = cfg.MeterProvider.Meter(tele.MeterName)
 
-	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), &router{host: h, ProtocolID: cfg.ProtocolID}, d.rt, coordCfg)
+	rtr := &router{
+		host:       h,
+		protocolID: cfg.ProtocolID,
+		tracer:     d.tele.Tracer,
+	}
+	d.kad, err = coord.NewCoordinator(kadt.PeerID(d.host.ID()), rtr, d.rt, coordCfg)
 	if err != nil {
 		return nil, fmt.Errorf("new coordinator: %w", err)
 	}
@@ -212,6 +221,10 @@ func (d *DHT) initAminoBackends() (map[string]Backend, error) {
 
 // Close cleans up all resources associated with this DHT.
 func (d *DHT) Close() error {
+	if d.stopped.Swap(true) {
+		return nil
+	}
+
 	if err := d.sub.Close(); err != nil {
 		d.debugErr(err, "failed closing event bus subscription")
 	}

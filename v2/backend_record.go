@@ -131,6 +131,57 @@ func (r *RecordBackend) Fetch(ctx context.Context, key string) (any, error) {
 	return rec, nil
 }
 
+func (r *RecordBackend) Validate(ctx context.Context, key string, values ...any) (int, error) {
+	k := newRoutingKey(r.namespace, key)
+
+	// short circuit if it's just a single value
+	if len(values) == 1 {
+		data, ok := values[0].([]byte)
+		if !ok {
+			return -1, fmt.Errorf("value not byte slice")
+		}
+
+		if err := r.validator.Validate(k, data); err != nil {
+			return -1, err
+		}
+
+		return 0, nil
+	}
+
+	// In case there are invalid values in the slice, we still want to return
+	// the index in the original list of values. The Select method below will
+	// return the index of the "best" value in the slice of valid values. This
+	// slice can have a different length and therefore that method will return
+	// an index that doesn't match the values slice that's passed into this
+	// method. origIdx stores the original index
+	origIdx := map[int]int{}
+	validValues := [][]byte{}
+	for i, value := range values {
+		data, ok := value.([]byte)
+		if !ok {
+			continue
+		}
+
+		if err := r.validator.Validate(k, data); err != nil {
+			continue
+		}
+
+		origIdx[len(validValues)] = i
+		validValues = append(validValues, data)
+	}
+
+	if len(validValues) == 0 {
+		return -1, fmt.Errorf("no valid values")
+	}
+
+	sel, err := r.validator.Select(k, validValues)
+	if err != nil {
+		return -1, err
+	}
+
+	return origIdx[sel], nil
+}
+
 // shouldReplaceExistingRecord returns true if the given record should replace any
 // existing one in the local datastore. It queries the datastore, unmarshalls
 // the record, validates it, and compares it to the incoming record. If the

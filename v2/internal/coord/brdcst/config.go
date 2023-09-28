@@ -31,16 +31,17 @@ func DefaultConfigPool() *ConfigPool {
 
 // Config is an interface that all broadcast configurations must implement.
 // Because we have multiple ways of broadcasting records to the network, like
-// [FollowUp] or [Optimistic], the [EventPoolStartBroadcast] has a configuration
+// [FollowUp] or [Static], the [EventPoolStartBroadcast] has a configuration
 // field that depending on the concrete type of [Config] initializes the
-// respective state machine. Then the broadcast operation will performed based
-// on the encoded rules in that state machine.
+// respective state machine. Then the broadcast operation will be performed
+// based on the encoded rules in that state machine.
 type Config interface {
 	broadcastConfig()
 }
 
 func (c *ConfigFollowUp) broadcastConfig()   {}
 func (c *ConfigOptimistic) broadcastConfig() {}
+func (c *ConfigStatic) broadcastConfig()     {}
 
 // ConfigFollowUp specifies the configuration for the [FollowUp] state machine.
 type ConfigFollowUp struct{}
@@ -71,4 +72,20 @@ func (c *ConfigOptimistic) Validate() error {
 // [Optimistic] state machine.
 func DefaultConfigOptimistic() *ConfigOptimistic {
 	return &ConfigOptimistic{}
+}
+
+// ConfigStatic specifies the configuration for the [Static] state
+// machine.
+type ConfigStatic struct{}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (c *ConfigStatic) Validate() error {
+	return nil
+}
+
+// DefaultConfigStatic returns the default configuration options for the
+// [Static] state machine.
+func DefaultConfigStatic() *ConfigStatic {
+	return &ConfigStatic{}
 }

@@ -269,6 +269,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, bp := range c.BootstrapPeers {
+		if len(bp.Addrs) == 0 {
+			return &ConfigurationError{
+				Component: "Config",
+				Err:       fmt.Errorf("bootstrap peer with no address"),
+			}
+		}
+	}
+
 	if c.ProtocolID == "" {
 		return &ConfigurationError{
 			Component: "Config",
@@ -378,6 +387,14 @@ type QueryConfig struct {
 
 	// RequestTimeout defines the time to wait before terminating a request to a node that has not responded.
 	RequestTimeout time.Duration
+
+	// DefaultQuorum specifies the minimum number of identical responses before
+	// a SearchValue/GetValue operation returns. The responses must not only be
+	// identical, but the responses must also correspond to the "best" records
+	// we have observed in the network during the SearchValue/GetValue
+	// operation. A DefaultQuorum of 0 means that we search the network until
+	// we have exhausted the keyspace.
+	DefaultQuorum int
 }
 
 // DefaultQueryConfig returns the default query configuration options for a DHT.
@@ -387,6 +404,7 @@ func DefaultQueryConfig() *QueryConfig {
 		Timeout:            5 * time.Minute, // MAGIC
 		RequestConcurrency: 3,               // MAGIC
 		RequestTimeout:     time.Minute,     // MAGIC
+		DefaultQuorum:      0,               // MAGIC
 	}
 }
 
@@ -416,6 +434,13 @@ func (cfg *QueryConfig) Validate() error {
 		return &ConfigurationError{
 			Component: "QueryConfig",
 			Err:       fmt.Errorf("request timeout must be greater than zero"),
+		}
+	}
+
+	if cfg.DefaultQuorum < 0 {
+		return &ConfigurationError{
+			Component: "QueryConfig",
+			Err:       fmt.Errorf("default quorum must not be negative"),
 		}
 	}
 

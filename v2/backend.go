@@ -55,6 +55,18 @@ type Backend interface {
 	// wasn't found or another error if any occurred. key won't contain the
 	// namespace prefix.
 	Fetch(ctx context.Context, key string) (any, error)
+
+	// Validate validates the given values and returns the index of the "best"
+	// value or an error and -1 if all values are invalid. If the method is used
+	// with a single value, it will return 0 and no error if it is valid or an
+	// error and -1 if it is invalid. For multiple values, it will select the
+	// "best" value based on user-defined logic and return its index in the
+	// original values list. If we receive a request for /ipns/$binary_id, the
+	// key parameter will be set to $binary_id. Decisions about which value is
+	// the "best" from the given list must be stable. So if there are multiple
+	// equally good values, the implementation must always return the same
+	// index - for example, always the first good or last good value.
+	Validate(ctx context.Context, key string, values ...any) (int, error)
 }
 
 // NewBackendIPNS initializes a new backend for the "ipns" namespace that can

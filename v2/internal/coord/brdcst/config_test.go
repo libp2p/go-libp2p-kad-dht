@@ -37,6 +37,7 @@ func TestConfig_interface_conformance(t *testing.T) {
 	configs := []Config{
 		&ConfigFollowUp{},
 		&ConfigOptimistic{},
+		&ConfigStatic{},
 	}
 	for _, c := range configs {
 		c.broadcastConfig() // drives test coverage

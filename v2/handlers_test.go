@@ -436,6 +436,24 @@ func BenchmarkDHT_handlePing(b *testing.B) {
 func newPutIPNSRequest(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq uint64, ttl time.Duration) *pb.Message {
 	t.Helper()
 
+	keyStr, value := makeIPNSKeyValue(t, clk, priv, seq, ttl)
+
+	req := &pb.Message{
+		Type: pb.Message_PUT_VALUE,
+		Key:  []byte(keyStr),
+		Record: &recpb.Record{
+			Key:          []byte(keyStr),
+			Value:        value,
+			TimeReceived: clk.Now().Format(time.RFC3339Nano),
+		},
+	}
+
+	return req
+}
+
+func makeIPNSKeyValue(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq uint64, ttl time.Duration) (string, []byte) {
+	t.Helper()
+
 	testPath := path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
 
 	rec, err := ipns.NewRecord(priv, testPath, seq, clk.Now().Add(ttl), ttl)
@@ -447,18 +465,7 @@ func newPutIPNSRequest(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq u
 	data, err := ipns.MarshalRecord(rec)
 	require.NoError(t, err)
 
-	key := ipns.NameFromPeer(remote).RoutingKey()
-	req := &pb.Message{
-		Type: pb.Message_PUT_VALUE,
-		Key:  key,
-		Record: &recpb.Record{
-			Key:          key,
-			Value:        data,
-			TimeReceived: time.Now().Format(time.RFC3339Nano),
-		},
-	}
-
-	return req
+	return string(ipns.NameFromPeer(remote).RoutingKey()), data
 }
 
 func BenchmarkDHT_handlePutValue_unique_peers(b *testing.B) {

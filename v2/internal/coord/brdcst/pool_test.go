@@ -272,7 +272,7 @@ func TestPool_FollowUp_stop_during_followup_phase(t *testing.T) {
 	require.Len(t, st.Errors, 2)
 }
 
-func TestPool_FollowUp_empty_seed(t *testing.T) {
+func TestPool_empty_seed(t *testing.T) {
 	ctx := context.Background()
 	cfg := DefaultConfigPool()
 
@@ -286,17 +286,121 @@ func TestPool_FollowUp_empty_seed(t *testing.T) {
 
 	queryID := coordt.QueryID("test")
 
-	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+	startEvt := &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
 		Target:  target,
 		Message: msg,
 		Seed:    []tiny.Node{},
-		Config:  DefaultConfigFollowUp(),
+	}
+
+	t.Run("follow up", func(t *testing.T) {
+		startEvt.Config = DefaultConfigFollowUp()
+
+		state := p.Advance(ctx, startEvt)
+		require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
+
+		state = p.Advance(ctx, &EventPoolPoll{})
+		require.IsType(t, &StatePoolIdle{}, state)
 	})
-	require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
+
+	t.Run("static", func(t *testing.T) {
+		startEvt.Config = DefaultConfigStatic()
+		state := p.Advance(ctx, startEvt)
+		require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
+
+		state = p.Advance(ctx, &EventPoolPoll{})
+		require.IsType(t, &StatePoolIdle{}, state)
+	})
+}
+
+func TestPool_Static_happy_path(t *testing.T) {
+	ctx := context.Background()
+	cfg := DefaultConfigPool()
+
+	self := tiny.NewNode(0)
+
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
+	require.NoError(t, err)
+
+	msg := tiny.Message{Content: "store this"}
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00000011) // 3
+	c := tiny.NewNode(0b00000010) // 2
+
+	queryID := coordt.QueryID("test")
+
+	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{a, b, c},
+		Config:  DefaultConfigStatic(),
+	})
+	spsr, ok := state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
+	require.True(t, ok, "state is %T", state)
+	first := spsr.NodeID
 
 	state = p.Advance(ctx, &EventPoolPoll{})
-	require.IsType(t, &StatePoolIdle{}, state)
+	spsr, ok = state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
+	require.True(t, ok, "state is %T", state)
+	second := spsr.NodeID
+
+	state = p.Advance(ctx, &EventPoolStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		NodeID:  first,
+		Request: msg,
+	})
+	spsr, ok = state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
+	require.True(t, ok, "state is %T", state)
+	third := spsr.NodeID
+
+	state = p.Advance(ctx, &EventPoolStoreRecordFailure[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		NodeID:  second,
+		Request: msg,
+	})
+	require.IsType(t, &StatePoolWaiting{}, state)
+
+	state = p.Advance(ctx, &EventPoolStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		NodeID:  third,
+		Request: msg,
+	})
+	require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
+}
+
+func TestPool_Static_stop_mid_flight(t *testing.T) {
+	ctx := context.Background()
+	cfg := DefaultConfigPool()
+
+	self := tiny.NewNode(0)
+
+	p, err := NewPool[tiny.Key, tiny.Node, tiny.Message](self, cfg)
+	require.NoError(t, err)
+
+	msg := tiny.Message{Content: "store this"}
+	target := tiny.Key(0b00000001)
+	a := tiny.NewNode(0b00000100) // 4
+	b := tiny.NewNode(0b00000011) // 3
+	c := tiny.NewNode(0b00000010) // 2
+
+	queryID := coordt.QueryID("test")
+
+	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
+		QueryID: queryID,
+		Target:  target,
+		Message: msg,
+		Seed:    []tiny.Node{a, b, c},
+		Config:  DefaultConfigStatic(),
+	})
+	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
+
+	state = p.Advance(ctx, &EventPoolPoll{})
+	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
+
+	state = p.Advance(ctx, &EventPoolStopBroadcast{QueryID: queryID})
+	require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
 }
 
 func TestPoolState_interface_conformance(t *testing.T) {

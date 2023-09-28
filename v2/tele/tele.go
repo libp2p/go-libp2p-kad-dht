@@ -27,7 +27,7 @@ func NoopTracer() trace.Tracer {
 	return trace.NewNoopTracerProvider().Tracer("")
 }
 
-// NoopMeterProvider returns a meter provider that does not record or emit metrics.
+// NoopMeter returns a meter provider that does not record or emit metrics.
 func NoopMeter() metric.Meter {
 	return noop.NewMeterProvider().Meter("")
 }

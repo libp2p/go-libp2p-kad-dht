@@ -75,7 +75,7 @@ func (*StateBroadcastIdle) broadcastState()                 {}
 // implement this interface. An "Event" is the opposite of a "State." An "Event"
 // flows into the state machine and a "State" flows out of it.
 //
-// Currently, there are the [FollowUp] and [Optimistic] state machines.
+// Currently, there are the [FollowUp] and [Static] state machines.
 type BroadcastEvent interface {
 	broadcastEvent()
 }

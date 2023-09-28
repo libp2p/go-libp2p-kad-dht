@@ -83,6 +83,8 @@ func (d *DHT) handlePutValue(ctx context.Context, remote peer.ID, req *pb.Messag
 		return nil, fmt.Errorf("key doesn't match record key")
 	}
 
+	// TODO: use putValueLocal?
+
 	// key is /$namespace/$binary_id
 	ns, path, err := record.SplitKey(k) // get namespace (prefix of the key)
 	if err != nil || len(path) == 0 {
@@ -208,8 +210,17 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		return nil, fmt.Errorf("unsupported record type: %s", namespaceProviders)
 	}
 
+	resp := &pb.Message{
+		Type:        pb.Message_GET_PROVIDERS,
+		Key:         k,
+		CloserPeers: d.closerPeers(ctx, remote, kadt.NewKey(k)),
+	}
+
 	fetched, err := backend.Fetch(ctx, string(req.GetKey()))
 	if err != nil {
+		if errors.Is(err, ds.ErrNotFound) {
+			return resp, nil
+		}
 		return nil, fmt.Errorf("fetch providers from datastore: %w", err)
 	}
 
@@ -223,12 +234,7 @@ func (d *DHT) handleGetProviders(ctx context.Context, remote peer.ID, req *pb.Me
 		pbProviders[i] = pb.FromAddrInfo(p)
 	}
 
-	resp := &pb.Message{
-		Type:          pb.Message_GET_PROVIDERS,
-		Key:           k,
-		CloserPeers:   d.closerPeers(ctx, remote, kadt.NewKey(k)),
-		ProviderPeers: pbProviders,
-	}
+	resp.ProviderPeers = pbProviders
 
 	return resp, nil
 }

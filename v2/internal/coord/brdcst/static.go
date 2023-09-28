@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/plprobelab/go-kademlia/kad"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
@@ -59,14 +60,21 @@ func NewStatic[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Query
 
 // Advance advances the state of the [Static] [Broadcast] state machine.
 func (f *Static[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out BroadcastState) {
-	ctx, span := tele.StartSpan(ctx, "Static.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	_, span := tele.StartSpan(ctx, "Static.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
-		span.SetAttributes(tele.AttrOutEvent(out))
+		span.SetAttributes(
+			tele.AttrOutEvent(out),
+			attribute.Int("todo", len(f.todo)),
+			attribute.Int("waiting", len(f.waiting)),
+			attribute.Int("success", len(f.success)),
+			attribute.Int("failed", len(f.failed)),
+		)
 		span.End()
 	}()
 
 	switch ev := ev.(type) {
 	case *EventBroadcastStart[K, N]:
+		span.SetAttributes(attribute.Int("seed", len(ev.Seed)))
 		for _, seed := range ev.Seed {
 			f.todo[seed.String()] = seed
 		}

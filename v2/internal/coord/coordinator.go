@@ -378,7 +378,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) (coordt.QueryStats, error) {
+func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
 
@@ -391,7 +391,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 
 	seeds, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
 	if err != nil {
-		return coordt.QueryStats{}, err
+		return nil, coordt.QueryStats{}, err
 	}
 
 	seedIDs := make([]kadt.PeerID, 0, len(seeds))
@@ -414,8 +414,8 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	// queue the start of the query
 	c.queryBehaviour.Notify(ctx, cmd)
 
-	_, stats, err := c.waitForQuery(ctx, queryID, waiter, fn)
-	return stats, err
+	closest, stats, err := c.waitForQuery(ctx, queryID, waiter, fn)
+	return closest, stats, err
 }
 
 func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) error {
@@ -425,15 +425,30 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
+	seedNodes, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
 	if err != nil {
 		return err
 	}
 
-	seedIDs := make([]kadt.PeerID, 0, len(seeds))
-	for _, s := range seeds {
-		seedIDs = append(seedIDs, s.ID())
+	seeds := make([]kadt.PeerID, 0, len(seedNodes))
+	for _, s := range seedNodes {
+		seeds = append(seeds, s.ID())
 	}
+	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigFollowUp())
+}
+
+func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seeds []kadt.PeerID) error {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastStatic")
+	defer span.End()
+	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigStatic())
+}
+
+func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []kadt.PeerID, cfg brdcst.Config) error {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.broadcast")
+	defer span.End()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	waiter := NewWaiter[BehaviourEvent]()
 	queryID := c.newOperationID()
@@ -442,9 +457,9 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 		QueryID: queryID,
 		Target:  msg.Target(),
 		Message: msg,
-		Seed:    seedIDs,
+		Seed:    seeds,
 		Notify:  waiter,
-		Config:  brdcst.DefaultConfigFollowUp(),
+		Config:  cfg,
 	}
 
 	// queue the start of the query

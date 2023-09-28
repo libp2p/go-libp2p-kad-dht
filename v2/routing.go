@@ -203,7 +203,7 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return nil
 	}
 
-	_, err = d.kad.QueryMessage(ctx, msg, fn, d.cfg.BucketSize)
+	_, _, err = d.kad.QueryMessage(ctx, msg, fn, d.cfg.BucketSize)
 	if err != nil {
 		span.RecordError(err)
 		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
@@ -378,6 +378,9 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	//  The currently known best value for keyStr
 	var best []byte
 
+	// Peers that we identified to hold stale records
+	var fixupPeers []kadt.PeerID
+
 	// The peers that returned the best value
 	quorumPeers := map[kadt.PeerID]struct{}{}
 
@@ -402,13 +405,25 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 			if bytes.Equal(best, rec.GetValue()) {
 				quorumPeers[id] = struct{}{}
 			}
+
 		case 1: // rec.GetValue() is better than our current "best"
-			best = rec.GetValue()
+
+			// We have identified a better record. All peers that were currently
+			// in our set of quorum peers need to be updated wit this new record
+			for p := range quorumPeers {
+				fixupPeers = append(fixupPeers, p)
+			}
+
+			// re-initialize the quorum peers set for this new record
 			quorumPeers = map[kadt.PeerID]struct{}{}
 			quorumPeers[id] = struct{}{}
-			out <- rec.GetValue()
+
+			// submit the new value to the user
+			best = rec.GetValue()
+			out <- best
 		case -1: // "best" and rec.GetValue() are both invalid
 			return nil
+
 		default:
 			d.log.Warn("unexpected validate index", slog.Int("idx", idx))
 		}
@@ -421,10 +436,29 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		return nil
 	}
 
-	_, err := d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
+	_, _, err := d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
 	if err != nil {
 		d.log.Warn("Search value query failed", slog.String("err", err.Error()))
+		return
 	}
+
+	// check if we have peers that we found to hold stale records. If so,
+	// update them asynchronously.
+	if len(fixupPeers) == 0 {
+		return
+	}
+
+	go func() {
+		msg := &pb.Message{
+			Type:   pb.Message_PUT_VALUE,
+			Key:    routingKey,
+			Record: record.MakePutRecord(string(routingKey), best),
+		}
+
+		if err := d.kad.BroadcastStatic(ctx, msg, fixupPeers); err != nil {
+			d.log.Warn("Failed updating peer")
+		}
+	}()
 }
 
 // quorumOptionKey is a struct that is used as a routing options key to pass

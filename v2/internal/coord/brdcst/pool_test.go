@@ -337,28 +337,34 @@ func TestPool_Static_happy_path(t *testing.T) {
 		Seed:    []tiny.Node{a, b, c},
 		Config:  DefaultConfigStatic(),
 	})
-	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
+	spsr, ok := state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
+	require.True(t, ok, "state is %T", state)
+	first := spsr.NodeID
 
 	state = p.Advance(ctx, &EventPoolPoll{})
-	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
+	spsr, ok = state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
+	require.True(t, ok, "state is %T", state)
+	second := spsr.NodeID
 
 	state = p.Advance(ctx, &EventPoolStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		NodeID:  a,
+		NodeID:  first,
 		Request: msg,
 	})
-	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
+	spsr, ok = state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
+	require.True(t, ok, "state is %T", state)
+	third := spsr.NodeID
 
 	state = p.Advance(ctx, &EventPoolStoreRecordFailure[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		NodeID:  b,
+		NodeID:  second,
 		Request: msg,
 	})
 	require.IsType(t, &StatePoolWaiting{}, state)
 
 	state = p.Advance(ctx, &EventPoolStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		NodeID:  c,
+		NodeID:  third,
 		Request: msg,
 	})
 	require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)

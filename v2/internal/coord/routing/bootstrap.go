@@ -213,19 +213,24 @@ func (b *Bootstrap[K, N]) Advance(ctx context.Context, ev BootstrapEvent) (out B
 		return b.advanceQuery(ctx, &query.EventQueryPoll{})
 
 	case *EventBootstrapFindCloserResponse[K, N]:
-		b.counterFindSucceeded.Add(ctx, 1)
-		return b.advanceQuery(ctx, &query.EventQueryNodeResponse[K, N]{
-			NodeID:      tev.NodeID,
-			CloserNodes: tev.CloserNodes,
-		})
+		// ignore late responses
+		if b.qry != nil {
+			b.counterFindSucceeded.Add(ctx, 1)
+			return b.advanceQuery(ctx, &query.EventQueryNodeResponse[K, N]{
+				NodeID:      tev.NodeID,
+				CloserNodes: tev.CloserNodes,
+			})
+		}
 	case *EventBootstrapFindCloserFailure[K, N]:
-		b.counterFindFailed.Add(ctx, 1)
-		span.RecordError(tev.Error)
-		return b.advanceQuery(ctx, &query.EventQueryNodeFailure[K, N]{
-			NodeID: tev.NodeID,
-			Error:  tev.Error,
-		})
-
+		// ignore late responses
+		if b.qry != nil {
+			b.counterFindFailed.Add(ctx, 1)
+			span.RecordError(tev.Error)
+			return b.advanceQuery(ctx, &query.EventQueryNodeFailure[K, N]{
+				NodeID: tev.NodeID,
+				Error:  tev.Error,
+			})
+		}
 	case *EventBootstrapPoll:
 		// ignore, nothing to do
 	default:

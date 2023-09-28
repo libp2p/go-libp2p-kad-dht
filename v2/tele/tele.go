@@ -79,11 +79,11 @@ func AttrInstanceID(instanceID string) attribute.KeyValue {
 }
 
 func AttrPeerID(pid string) attribute.KeyValue {
-	return attribute.String("peer_id", pid)
+	return attribute.String(AttrKeyPeerID, pid)
 }
 
 func AttrCacheHit(hit bool) attribute.KeyValue {
-	return attribute.Bool("hit", hit)
+	return attribute.Bool(AttrKeyCacheHit, hit)
 }
 
 // AttrRecordType is currently only used for the provider backend LRU cache
@@ -101,12 +101,12 @@ func AttrKey(val string) attribute.KeyValue {
 
 // AttrInEvent creates an attribute that records the type of an event
 func AttrInEvent(t any) attribute.KeyValue {
-	return attribute.String("in_event", fmt.Sprintf("%T", t))
+	return attribute.String(AttrKeyInEvent, fmt.Sprintf("%T", t))
 }
 
 // AttrOutEvent creates an attribute that records the type of an event being returned
 func AttrOutEvent(t any) attribute.KeyValue {
-	return attribute.String("out_event", fmt.Sprintf("%T", t))
+	return attribute.String(AttrKeyOutEvent, fmt.Sprintf("%T", t))
 }
 
 // WithAttributes is a function that attaches the provided attributes to the

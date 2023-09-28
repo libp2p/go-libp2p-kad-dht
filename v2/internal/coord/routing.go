@@ -585,6 +585,8 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		if r.self.Equal(ev.NodeID) {
 			break
 		}
+		r.cfg.Logger.Debug("peer has connectivity", tele.LogAttrPeerID(ev.NodeID))
+
 		// tell the include state machine in case this is a new peer that could be added to the routing table
 		cmd := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
 			NodeID: ev.NodeID,
@@ -705,6 +707,7 @@ func (r *RoutingBehaviour) advanceBootstrap(ctx context.Context, ev routing.Boot
 	case *routing.StateBootstrapWaiting:
 		// bootstrap waiting for a message response, nothing to do
 	case *routing.StateBootstrapFinished:
+		r.cfg.Logger.Debug("bootstrap finished", slog.Duration("elapsed", st.Stats.End.Sub(st.Stats.Start)), slog.Int("requests", st.Stats.Requests), slog.Int("failures", st.Stats.Failure))
 		return &EventBootstrapFinished{
 			Stats: st.Stats,
 		}, true
@@ -726,6 +729,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 	case *routing.StateIncludeConnectivityCheck[kadt.Key, kadt.PeerID]:
 		span.SetAttributes(attribute.String("out_event", "EventOutboundGetCloserNodes"))
 		// include wants to send a find node message to a node
+		r.cfg.Logger.Debug("starting connectivity check", tele.LogAttrPeerID(st.NodeID), "source", "include")
 		return &EventOutboundGetCloserNodes{
 			QueryID: IncludeQueryID,
 			To:      st.NodeID,
@@ -743,6 +747,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 
 		// return the event to notify outwards too
 		span.SetAttributes(attribute.String("out_event", "EventRoutingUpdated"))
+		r.cfg.Logger.Debug("peer added to routing table", tele.LogAttrPeerID(st.NodeID))
 		return &EventRoutingUpdated{
 			NodeID: st.NodeID,
 		}, true
@@ -768,6 +773,7 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 	switch st := st.(type) {
 	case *routing.StateProbeConnectivityCheck[kadt.Key, kadt.PeerID]:
 		// include wants to send a find node message to a node
+		r.cfg.Logger.Debug("starting connectivity check", tele.LogAttrPeerID(st.NodeID), "source", "probe")
 		return &EventOutboundGetCloserNodes{
 			QueryID: ProbeQueryID,
 			To:      st.NodeID,
@@ -778,6 +784,7 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 		// a node has failed a connectivity check and been removed from the routing table and the probe list
 
 		// emit an EventRoutingRemoved event to notify clients that the node has been removed
+		r.cfg.Logger.Debug("peer removed from routing table", tele.LogAttrPeerID(st.NodeID))
 		r.pending = append(r.pending, &EventRoutingRemoved{
 			NodeID: st.NodeID,
 		})
@@ -809,6 +816,7 @@ func (r *RoutingBehaviour) advanceExplore(ctx context.Context, ev routing.Explor
 	switch st := bstate.(type) {
 
 	case *routing.StateExploreFindCloser[kadt.Key, kadt.PeerID]:
+		r.cfg.Logger.Debug("starting explore", slog.Int("cpl", st.Cpl), tele.LogAttrPeerID(st.NodeID))
 		return &EventOutboundGetCloserNodes{
 			QueryID: routing.ExploreQueryID,
 			To:      st.NodeID,
@@ -823,7 +831,7 @@ func (r *RoutingBehaviour) advanceExplore(ctx context.Context, ev routing.Explor
 	case *routing.StateExploreQueryTimeout:
 		// nothing to do except notify via telemetry
 	case *routing.StateExploreFailure:
-		r.cfg.Logger.Warn("explore failure", "cpl", st.Cpl, "error", st.Error)
+		r.cfg.Logger.Warn("explore failure", slog.Int("cpl", st.Cpl), tele.LogAttrError(st.Error))
 	case *routing.StateExploreIdle:
 		// bootstrap not running, nothing to do
 	default:

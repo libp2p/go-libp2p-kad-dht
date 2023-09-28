@@ -358,6 +358,7 @@ func (d *DHT) SearchValue(ctx context.Context, s string, option ...routing.Optio
 func (d *DHT) Bootstrap(ctx context.Context) error {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
+	d.log.Info("Starting bootstrap")
 
 	seed := make([]kadt.PeerID, len(d.cfg.BootstrapPeers))
 	for i, addrInfo := range d.cfg.BootstrapPeers {

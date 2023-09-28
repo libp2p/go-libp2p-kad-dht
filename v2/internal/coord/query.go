@@ -200,6 +200,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		}
 	case *EventGetCloserNodesFailure:
 		// queue an event that will notify the routing behaviour of a failed node
+		p.cfg.Logger.Debug("peer has no connectivity", tele.LogAttrPeerID(ev.To), "source", "query")
 		p.pending = append(p.pending, &EventNotifyNonConnectivity{
 			ev.To,
 		})
@@ -231,6 +232,7 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 		}
 	case *EventSendMessageFailure:
 		// queue an event that will notify the routing behaviour of a failed node
+		p.cfg.Logger.Debug("peer has no connectivity", tele.LogAttrPeerID(ev.To), "source", "query")
 		p.pending = append(p.pending, &EventNotifyNonConnectivity{
 			ev.To,
 		})

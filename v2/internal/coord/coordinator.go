@@ -336,6 +336,7 @@ func (c *Coordinator) PutValue(ctx context.Context, r coordt.Value, q int) error
 func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
+	c.cfg.Logger.Debug("starting query for closest nodes", tele.LogAttrKey(target))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -381,6 +382,10 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) (coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
+	if msg == nil {
+		return coordt.QueryStats{}, fmt.Errorf("no message supplied for query")
+	}
+	c.cfg.Logger.Debug("starting query with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -421,6 +426,10 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
 	defer span.End()
+	if msg == nil {
+		return fmt.Errorf("no message supplied for broadcast")
+	}
+	c.cfg.Logger.Debug("starting broadcast with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -474,6 +483,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 			ctx, ev := wev.Ctx, wev.Event
 			switch ev := ev.(type) {
 			case *EventQueryProgressed:
+				c.cfg.Logger.Debug("query made progress", "query_id", queryID, tele.LogAttrPeerID(ev.NodeID), slog.Duration("elapsed", c.cfg.Clock.Since(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
 				lastStats = coordt.QueryStats{
 					Start:    ev.Stats.Start,
 					Requests: ev.Stats.Requests,
@@ -483,12 +493,14 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 				nh, err := c.networkBehaviour.getNodeHandler(ctx, ev.NodeID)
 				if err != nil {
 					// ignore unknown node
+					c.cfg.Logger.Debug("node handler not found", "query_id", queryID, tele.LogAttrError, err)
 					break
 				}
 
 				err = fn(ctx, nh.ID(), ev.Response, lastStats)
 				if errors.Is(err, coordt.ErrSkipRemaining) {
 					// done
+					c.cfg.Logger.Debug("query done", "query_id", queryID)
 					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
 					return nil, lastStats, nil
 				}
@@ -501,6 +513,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 			case *EventQueryFinished:
 				// query is done
 				lastStats.Exhausted = true
+				c.cfg.Logger.Debug("query ran to exhaustion", "query_id", queryID, slog.Duration("elapsed", ev.Stats.End.Sub(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
 				return ev.ClosestNodes, lastStats, nil
 
 			default:
@@ -571,6 +584,7 @@ func (c *Coordinator) NotifyConnectivity(ctx context.Context, id kadt.PeerID) er
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyConnectivity")
 	defer span.End()
 
+	c.cfg.Logger.Debug("peer has connectivity", tele.LogAttrPeerID(id), "source", "notify")
 	c.routingBehaviour.Notify(ctx, &EventNotifyConnectivity{
 		NodeID: id,
 	})
@@ -584,6 +598,7 @@ func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID)
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyNonConnectivity")
 	defer span.End()
 
+	c.cfg.Logger.Debug("peer has no connectivity", tele.LogAttrPeerID(id), "source", "notify")
 	c.routingBehaviour.Notify(ctx, &EventNotifyNonConnectivity{
 		NodeID: id,
 	})

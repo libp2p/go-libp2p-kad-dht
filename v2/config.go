@@ -269,6 +269,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, bp := range c.BootstrapPeers {
+		if len(bp.Addrs) == 0 {
+			return &ConfigurationError{
+				Component: "Config",
+				Err:       fmt.Errorf("bootstrap peer with no address"),
+			}
+		}
+	}
+
 	if c.ProtocolID == "" {
 		return &ConfigurationError{
 			Component: "Config",

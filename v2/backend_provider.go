@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -469,7 +468,8 @@ func newDatastoreKey(namespace string, binStrs ...string) ds.Key {
 	for i, bin := range binStrs {
 		elems[i+1] = base32.RawStdEncoding.EncodeToString([]byte(bin))
 	}
-	return ds.NewKey("/" + path.Join(elems...))
+
+	return ds.NewKey("/" + strings.Join(elems, "/"))
 }
 
 // newRoutingKey uses the given namespace and binary string key and constructs

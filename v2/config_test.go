@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfig_Validate(t *testing.T) {
@@ -139,6 +141,25 @@ func TestConfig_Validate(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.BootstrapPeers = []peer.AddrInfo{}
 		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("bootstrap peers no addresses", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.BootstrapPeers = []peer.AddrInfo{
+			{ID: newPeerID(t), Addrs: []ma.Multiaddr{}},
+		}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("bootstrap peers mixed no addresses", func(t *testing.T) {
+		cfg := DefaultConfig()
+		maddr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/1234")
+		require.NoError(t, err)
+		cfg.BootstrapPeers = []peer.AddrInfo{
+			{ID: newPeerID(t), Addrs: []ma.Multiaddr{}},
+			{ID: newPeerID(t), Addrs: []ma.Multiaddr{maddr}},
+		}
+		assert.Error(t, cfg.Validate()) // still an error
 	})
 }
 

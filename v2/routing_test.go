@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
 
 // newRandomContent reads 1024 bytes from crypto/rand and builds a content struct.
@@ -48,6 +49,87 @@ func makePkKeyValue(t testing.TB) (string, []byte) {
 	require.NoError(t, err)
 
 	return routing.KeyForPublicKey(id), v
+}
+
+func TestDHT_FindPeer_happy_path(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+	d3 := top.AddServer(nil)
+	d4 := top.AddServer(nil)
+	top.ConnectChain(ctx, d1, d2, d3, d4)
+
+	addrInfo, err := d1.FindPeer(ctx, d4.host.ID())
+	require.NoError(t, err)
+	assert.Equal(t, d4.host.ID(), addrInfo.ID)
+}
+
+func TestDHT_FindPeer_not_found(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+	d3 := top.AddServer(nil)
+	d4 := top.AddServer(nil)
+	top.ConnectChain(ctx, d1, d2, d3)
+
+	_, err := d1.FindPeer(ctx, d4.host.ID())
+	assert.Error(t, err)
+}
+
+func TestDHT_FindPeer_already_connected(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+	d3 := top.AddServer(nil)
+	d4 := top.AddServer(nil)
+	top.ConnectChain(ctx, d1, d2, d3)
+
+	err := d1.host.Connect(ctx, peer.AddrInfo{
+		ID:    d4.host.ID(),
+		Addrs: d4.host.Addrs(),
+	})
+	require.NoError(t, err)
+
+	_, err = d1.FindPeer(ctx, d4.host.ID())
+	assert.NoError(t, err)
+}
+
+func TestDHT_PutValue_happy_path(t *testing.T) {
+	// TIMING: this test is based on timeouts - so might become flaky!
+	ctx := kadtest.CtxShort(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+
+	top.ConnectChain(ctx, d1, d2)
+
+	k, v := makePkKeyValue(t)
+
+	err := d1.PutValue(ctx, k, v)
+	require.NoError(t, err)
+
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		deadline = time.Now().Add(5 * time.Second)
+	}
+
+	// putting data to a remote peer is an asynchronous operation. Even after
+	// PutValue returns, and although we have closed the stream on our end, an
+	// acknowledgement that the other peer has received the data is not
+	// guaranteed. The data will be flushed at this point, but the remote might
+	// not have handled it yet. Therefore, we use "EventuallyWithT" here.
+	assert.EventuallyWithT(t, func(t *assert.CollectT) {
+		val, err := d2.GetValue(ctx, k, routing.Offline)
+		assert.NoError(t, err)
+		assert.Equal(t, v, val)
+	}, time.Until(deadline), 10*time.Millisecond)
 }
 
 func TestDHT_PutValue_local_only(t *testing.T) {
@@ -79,6 +161,18 @@ func TestDHT_PutValue_invalid_key(t *testing.T) {
 		err := d.PutValue(ctx, "no namespace", v)
 		assert.ErrorContains(t, err, "splitting key")
 	})
+}
+
+func TestDHT_PutValue_routing_option_returns_error(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+	d := newTestDHT(t)
+
+	errOption := func(opts *routing.Options) error {
+		return fmt.Errorf("some error")
+	}
+
+	err := d.PutValue(ctx, "/ipns/some-key", []byte("some value"), errOption)
+	assert.ErrorContains(t, err, "routing options")
 }
 
 func TestGetValueOnePeer(t *testing.T) {
@@ -832,4 +926,41 @@ func TestDHT_SearchValue_offline_not_found_locally(t *testing.T) {
 	valChan, err := d1.SearchValue(ctx, key, routing.Offline)
 	assert.ErrorIs(t, err, routing.ErrNotFound)
 	assert.Nil(t, valChan)
+}
+
+func TestDHT_Bootstrap_no_peers_configured(t *testing.T) {
+	// TIMING: this test is based on timeouts - so might become flaky!
+	ctx := kadtest.CtxShort(t)
+
+	top := NewTopology(t)
+	d1 := top.AddServer(nil)
+	d2 := top.AddServer(nil)
+	d3 := top.AddServer(nil)
+
+	d1.cfg.BootstrapPeers = []peer.AddrInfo{
+		{ID: d2.host.ID(), Addrs: d2.host.Addrs()},
+		{ID: d3.host.ID(), Addrs: d3.host.Addrs()},
+	}
+
+	err := d1.Bootstrap(ctx)
+	assert.NoError(t, err)
+
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		deadline = time.Now().Add(5 * time.Second)
+	}
+
+	// bootstrapping is an asynchronous process, so we periodically check
+	// if the peers have each other in their routing tables
+	assert.EventuallyWithT(t, func(collect *assert.CollectT) {
+		_, found := d1.rt.GetNode(kadt.PeerID(d2.host.ID()).Key())
+		assert.True(collect, found)
+		_, found = d1.rt.GetNode(kadt.PeerID(d3.host.ID()).Key())
+		assert.True(collect, found)
+
+		_, found = d2.rt.GetNode(kadt.PeerID(d1.host.ID()).Key())
+		assert.True(collect, found)
+		_, found = d3.rt.GetNode(kadt.PeerID(d1.host.ID()).Key())
+		assert.True(collect, found)
+	}, time.Until(deadline), 10*time.Millisecond)
 }

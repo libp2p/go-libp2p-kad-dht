@@ -40,10 +40,8 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 			return addrInfo, nil
 		}
 	default:
-		// we're
+		// we're not connected or were recently connected
 	}
-
-	target := kadt.PeerID(id)
 
 	var foundPeer peer.ID
 	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
@@ -54,7 +52,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return nil
 	}
 
-	_, _, err := d.kad.QueryClosest(ctx, target.Key(), fn, 20)
+	_, _, err := d.kad.QueryClosest(ctx, kadt.PeerID(id).Key(), fn, 20)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
@@ -272,7 +270,7 @@ func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error
 	}
 
 	rec := record.MakePutRecord(key, value)
-	rec.TimeReceived = time.Now().UTC().Format(time.RFC3339Nano)
+	rec.TimeReceived = d.cfg.Clock.Now().UTC().Format(time.RFC3339Nano)
 
 	_, err = b.Store(ctx, path, rec)
 	if err != nil {
@@ -395,7 +393,6 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		}
 
 		if !bytes.Equal(routingKey, rec.GetKey()) {
-			d.log.Debug("record key mismatch")
 			return nil
 		}
 

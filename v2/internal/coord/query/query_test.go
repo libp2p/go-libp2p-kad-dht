@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-libdht/kad/key"
 	"github.com/stretchr/testify/require"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"

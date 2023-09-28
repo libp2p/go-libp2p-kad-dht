@@ -4,11 +4,12 @@ package tiny
 import (
 	"fmt"
 
-	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad/kadtest"
+	"github.com/plprobelab/go-libdht/kad/key"
 )
 
-type Key = key.Key8
+type Key = kadtest.Key8
 
 type Node struct {
 	key Key

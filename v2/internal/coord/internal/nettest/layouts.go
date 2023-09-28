@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/routing/simplert"
+	"github.com/plprobelab/go-libdht/kad/triert"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 )
@@ -26,10 +26,15 @@ func LinearTopology(n int, clk clock.Clock) (*Topology, []*Peer, error) {
 			return nil, nil, err
 		}
 
+		rt, err := triert.New[kadt.Key, kadt.PeerID](id, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		nodes[i] = &Peer{
 			NodeID:       id,
 			Router:       NewRouter(id, top),
-			RoutingTable: simplert.New[kadt.Key, kadt.PeerID](id, 20),
+			RoutingTable: rt,
 		}
 	}
 

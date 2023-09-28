@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/routing/simplert"
+	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/plprobelab/go-libdht/kad/triert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/internal/tiny"
@@ -67,7 +67,8 @@ func TestIncludeStartsIdle(t *testing.T) {
 	cfg := DefaultIncludeConfig()
 	cfg.Clock = clk
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
 
 	bs, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -83,7 +84,8 @@ func TestIncludeAddCandidateStartsCheckIfCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 1
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
 
 	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -117,7 +119,8 @@ func TestIncludeAddCandidateReportsCapacity(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
 	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
 
@@ -143,7 +146,8 @@ func TestIncludeAddCandidateOverQueueLength(t *testing.T) {
 	cfg.QueueCapacity = 2 // only allow two candidates in the queue
 	cfg.Concurrency = 3
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
 
 	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -215,7 +219,8 @@ func TestIncludeConnectivityCheckSuccess(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
 
 	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)
@@ -258,7 +263,8 @@ func TestIncludeConnectivityCheckFailure(t *testing.T) {
 	cfg.Clock = clk
 	cfg.Concurrency = 2
 
-	rt := simplert.New[tiny.Key, tiny.Node](tiny.NewNode(128), 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
 
 	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
 	require.NoError(t, err)

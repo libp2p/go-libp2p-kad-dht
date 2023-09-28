@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/kaderr"
+	"github.com/plprobelab/go-libdht/kad"
 
+	"github.com/libp2p/go-libp2p-kad-dht/v2/errs"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/coordt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/tele"
 )
@@ -39,39 +39,39 @@ type PoolConfig struct {
 // Validate checks the configuration options and returns an error if any have invalid values.
 func (cfg *PoolConfig) Validate() error {
 	if cfg.Clock == nil {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "PoolConfig",
 			Err:       fmt.Errorf("clock must not be nil"),
 		}
 	}
 	if cfg.Concurrency < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "PoolConfig",
 			Err:       fmt.Errorf("concurrency must be greater than zero"),
 		}
 	}
 	if cfg.Timeout < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "PoolConfig",
 			Err:       fmt.Errorf("timeout must be greater than zero"),
 		}
 	}
 	if cfg.Replication < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "PoolConfig",
 			Err:       fmt.Errorf("replication must be greater than zero"),
 		}
 	}
 
 	if cfg.QueryConcurrency < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "PoolConfig",
 			Err:       fmt.Errorf("query concurrency must be greater than zero"),
 		}
 	}
 
 	if cfg.RequestTimeout < 1 {
-		return &kaderr.ConfigurationError{
+		return &errs.ConfigurationError{
 			Component: "PoolConfig",
 			Err:       fmt.Errorf("request timeout must be greater than zero"),
 		}

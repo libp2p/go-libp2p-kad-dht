@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-kademlia/routing/simplert"
+	"github.com/plprobelab/go-libdht/kad/triert"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -126,7 +126,9 @@ func TestExploreStartsIdle(t *testing.T) {
 	cfg.Clock = clk
 
 	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](self, nil)
+	require.NoError(t, err)
+
 	schedule := DefaultDynamicSchedule(t, clk)
 	ex, err := NewExplore[tiny.Key, tiny.Node](self, rt, tiny.NodeWithCpl, schedule, cfg)
 	require.NoError(t, err)
@@ -142,7 +144,8 @@ func TestExploreFirstQueriesForMaximumCpl(t *testing.T) {
 	cfg.Clock = clk
 
 	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](self, nil)
+	require.NoError(t, err)
 
 	// populate the routing table with at least one node
 	a := tiny.NewNode(4)
@@ -190,7 +193,8 @@ func TestExploreFindCloserResponse(t *testing.T) {
 	cfg.Clock = clk
 
 	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](self, nil)
+	require.NoError(t, err)
 
 	// populate the routing table with at least one node
 	a := tiny.NewNode(4)
@@ -232,7 +236,8 @@ func TestExploreFindCloserFailure(t *testing.T) {
 	cfg.Clock = clk
 
 	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](self, nil)
+	require.NoError(t, err)
 
 	// populate the routing table with at least one node
 	a := tiny.NewNode(4)
@@ -274,7 +279,8 @@ func TestExploreProgress(t *testing.T) {
 	cfg.Clock = clk
 
 	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](self, nil)
+	require.NoError(t, err)
 
 	a := tiny.NewNode(4)  // 4
 	b := tiny.NewNode(8)  // 8
@@ -349,7 +355,8 @@ func TestExploreQueriesNextHighestCpl(t *testing.T) {
 	cfg.Clock = clk
 
 	self := tiny.NewNode(128)
-	rt := simplert.New[tiny.Key, tiny.Node](self, 5)
+	rt, err := triert.New[tiny.Key, tiny.Node](self, nil)
+	require.NoError(t, err)
 
 	// populate the routing table with at least one node
 	a := tiny.NewNode(4)

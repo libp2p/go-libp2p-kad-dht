@@ -6,7 +6,6 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/network/address"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/internal/coord/routing"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
@@ -110,14 +109,14 @@ func (t *Topology) Dial(ctx context.Context, from kadt.PeerID, to kadt.PeerID) e
 	return nil
 }
 
-func (t *Topology) RouteMessage(ctx context.Context, from kadt.PeerID, to kadt.PeerID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
+func (t *Topology) RouteMessage(ctx context.Context, from kadt.PeerID, to kadt.PeerID, req *pb.Message) (*pb.Message, error) {
 	if from == to {
 		node, ok := t.nodeIndex[to.String()]
 		if !ok {
 			return nil, fmt.Errorf("unknown node")
 		}
 
-		return node.Router.handleMessage(ctx, from, protoID, req)
+		return node.Router.handleMessage(ctx, from, req)
 	}
 
 	route, err := t.findRoute(ctx, from, to)
@@ -135,5 +134,5 @@ func (t *Topology) RouteMessage(ctx context.Context, from kadt.PeerID, to kadt.P
 		return nil, fmt.Errorf("no route to node")
 	}
 
-	return node.Router.handleMessage(ctx, from, protoID, req)
+	return node.Router.handleMessage(ctx, from, req)
 }

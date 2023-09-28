@@ -1,4 +1,4 @@
-// Package kadt contains the kademlia types for interacting with go-kademlia.
+// Package kadt contains the kademlia types for interacting with go-libdht.
 package kadt
 
 import (
@@ -6,8 +6,8 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad/key/bit256"
 )
 
 // Key is a type alias for the type of key that's used with this DHT
@@ -15,7 +15,7 @@ import (
 // of the actual key that's used for calculating Kademlia distance. That's
 // why this Key struct also holds the preimage bytes.
 type Key struct {
-	key      key.Key256
+	key      bit256.Key
 	preimage []byte
 }
 
@@ -27,7 +27,7 @@ var _ kad.Key[Key] = (*Key)(nil)
 func NewKey(preimage []byte) Key {
 	h := sha256.Sum256(preimage)
 	return Key{
-		key:      key.NewKey256(h[:]),
+		key:      bit256.NewKey(h[:]),
 		preimage: preimage,
 	}
 }
@@ -66,7 +66,7 @@ func (k Key) HexString() string {
 
 // PeerID is a type alias for [peer.ID] that implements the [kad.NodeID]
 // interface. This means we can use PeerID for any operation that interfaces
-// with go-kademlia.
+// with go-libdht.
 type PeerID peer.ID
 
 // assertion that PeerID implements the kad.NodeID interface
@@ -92,16 +92,13 @@ func (p PeerID) Equal(o PeerID) bool {
 
 // AddrInfo is a type that wraps peer.AddrInfo and implements the kad.NodeInfo
 // interface. This means we can use AddrInfo for any operation that interfaces
-// with go-kademlia.
+// with go-libdht.
 //
 // A more accurate name would be PeerInfo or NodeInfo. However, for consistency
 // and coherence with [peer.AddrInfo] we also name it AddrInfo.
 type AddrInfo struct {
 	Info peer.AddrInfo
 }
-
-// assertion that AddrInfo implements the [kad.NodeInfo] interface
-var _ kad.NodeInfo[Key, ma.Multiaddr] = (*AddrInfo)(nil)
 
 // ID returns the [kad.NodeID] of this peer's information struct.
 func (ai AddrInfo) ID() kad.NodeID[Key] {

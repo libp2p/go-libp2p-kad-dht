@@ -375,7 +375,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		Key:  routingKey,
 	}
 
-	//  The currently known best value for keyStr
+	// The currently known best value for /$ns/$path
 	var best []byte
 
 	// Peers that we identified to hold stale records

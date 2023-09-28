@@ -508,12 +508,6 @@ func TestDHT_GetValue_happy_path(t *testing.T) {
 	d4 := top.AddServer(cfg)
 	d5 := top.AddServer(cfg)
 
-	fmt.Println(d1.host.ID().ShortString(), "Host 1")
-	fmt.Println(d2.host.ID().ShortString(), "Host 2")
-	fmt.Println(d3.host.ID().ShortString(), "Host 3")
-	fmt.Println(d4.host.ID().ShortString(), "Host 4")
-	fmt.Println(d5.host.ID().ShortString(), "Host 5")
-
 	top.ConnectChain(ctx, d1, d2, d3, d4, d5)
 
 	err = d3.putValueLocal(ctx, key, validValue)

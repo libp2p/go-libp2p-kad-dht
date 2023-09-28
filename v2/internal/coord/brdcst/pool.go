@@ -14,7 +14,7 @@ import (
 
 // Broadcast is a type alias for a specific kind of state machine that any
 // kind of broadcast strategy state machine must implement. Currently, there
-// are the [FollowUp] and [Optimistic] state machines.
+// are the [FollowUp] and [Static] state machines.
 type Broadcast = coordt.StateMachine[BroadcastEvent, BroadcastState]
 
 // Pool is a [coordt.StateMachine] that manages all running broadcast
@@ -26,7 +26,7 @@ type Broadcast = coordt.StateMachine[BroadcastEvent, BroadcastState]
 //
 // Conceptually, a broadcast consists of finding the closest nodes to a certain
 // key and then storing the record with them. There are a few different
-// strategies that can be applied. For now, these are the [FollowUp] and the [Optimistic]
+// strategies that can be applied. For now, these are the [FollowUp] and the [Static]
 // strategies. In the future, we also want to support [Reprovide Sweep].
 // However, this requires a different type of query as we are not looking for
 // the closest nodes but rather enumerating the keyspace. In any case, this
@@ -104,7 +104,7 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) (out PoolStat
 }
 
 // handleEvent receives a broadcast [PoolEvent] and returns the corresponding
-// broadcast state machine [FollowUp] or [Optimistic] plus the event for that
+// broadcast state machine [FollowUp] or [Static] plus the event for that
 // state machine. If any return parameter is nil, either the pool event was for
 // an unknown query or the event doesn't need to be forwarded to the state
 // machine.
@@ -120,7 +120,9 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broad
 		// first initialize the state machine for the broadcast desired strategy
 		switch cfg := ev.Config.(type) {
 		case *ConfigFollowUp:
-			p.bcs[ev.QueryID] = NewFollowUp(ev.QueryID, p.qp, ev.Message, cfg)
+			p.bcs[ev.QueryID] = NewFollowUp[K, N, M](ev.QueryID, p.qp, ev.Message, cfg)
+		case *ConfigStatic:
+			p.bcs[ev.QueryID] = NewStatic[K, N, M](ev.QueryID, ev.Message, cfg)
 		case *ConfigOptimistic:
 			panic("implement me")
 		}
@@ -171,7 +173,7 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broad
 }
 
 // advanceBroadcast advances the given broadcast state machine ([FollowUp] or
-// [Optimistic]) and returns the new [Pool] state ([PoolState]). The additional
+// [Static]) and returns the new [Pool] state ([PoolState]). The additional
 // boolean value indicates whether the returned [PoolState] should be ignored.
 func (p *Pool[K, N, M]) advanceBroadcast(ctx context.Context, sm Broadcast, bev BroadcastEvent) (PoolState, bool) {
 	ctx, span := tele.StartSpan(ctx, "Pool.advanceBroadcast", trace.WithAttributes(tele.AttrInEvent(bev)))
@@ -284,7 +286,7 @@ type EventPoolStartBroadcast[K kad.Key[K], N kad.NodeID[K], M coordt.Message] st
 	Target  K              // the key we want to store the record for
 	Message M              // the message that we want to send to the closest peers (this encapsulates the payload we want to store)
 	Seed    []N            // the closest nodes we know so far and from where we start the operation
-	Config  Config         // the configuration for this operation. Most importantly, this defines the broadcast strategy ([FollowUp] or [Optimistic])
+	Config  Config         // the configuration for this operation. Most importantly, this defines the broadcast strategy ([FollowUp] or [Static])
 }
 
 // EventPoolStopBroadcast notifies broadcast [Pool] to stop a broadcast

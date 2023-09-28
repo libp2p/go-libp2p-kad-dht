@@ -1,10 +1,10 @@
-package test
+package kadtest
 
 import (
 	"math/rand"
 	"strconv"
 
-	"github.com/libp2p/go-libdht/kad/key/key256"
+	"github.com/plprobelab/go-libdht/kad/key/bit256"
 )
 
 var rng = rand.New(rand.NewSource(299792458))
@@ -40,6 +40,6 @@ func RandomKeyWithPrefix(s string) Key32 {
 
 // Key256WithLeadingBytes returns a 256-bit Kademlia key consisting of the given leading bytes padded by
 // zero bytes to the end of the key.
-func Key256WithLeadingBytes(in []byte) key256.Key256 {
-	return key256.NewKey256(append(in, make([]byte, 32-len(in))...))
+func Key256WithLeadingBytes(in []byte) bit256.Key {
+	return bit256.NewKey(append(in, make([]byte, 32-len(in))...))
 }

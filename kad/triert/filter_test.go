@@ -4,19 +4,19 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/libp2p/go-libdht/kad/internal/test"
+	"github.com/plprobelab/go-libdht/kad/kadtest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBucketLimit20(t *testing.T) {
-	cfg := DefaultConfig[test.Key32, node[test.Key32]]()
-	cfg.KeyFilter = BucketLimit20[test.Key32, node[test.Key32]]
+	cfg := DefaultConfig[kadtest.Key32, node[kadtest.Key32]]()
+	cfg.KeyFilter = BucketLimit20[kadtest.Key32, node[kadtest.Key32]]
 	rt, err := New(node0, cfg)
 	require.NoError(t, err)
 
-	nodes := make([]node[test.Key32], 21)
+	nodes := make([]node[kadtest.Key32], 21)
 	for i := range nodes {
-		kk := test.RandomKeyWithPrefix("000100")
+		kk := kadtest.RandomKeyWithPrefix("000100")
 		nodes[i] = newNode(fmt.Sprintf("QmPeer%d", i), kk)
 	}
 
@@ -31,7 +31,7 @@ func TestBucketLimit20(t *testing.T) {
 	require.False(t, success)
 
 	// add peer with different cpl
-	kk := test.RandomKeyWithPrefix("0000100")
+	kk := kadtest.RandomKeyWithPrefix("0000100")
 	node22 := newNode("QmPeer22", kk)
 	success = rt.AddNode(node22)
 	require.True(t, success)

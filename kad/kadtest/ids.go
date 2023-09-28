@@ -1,12 +1,11 @@
-package test
+package kadtest
 
 import (
 	"crypto/sha256"
-	"net"
 
-	"github.com/libp2p/go-libdht/kad"
-	"github.com/libp2p/go-libdht/kad/key"
-	"github.com/libp2p/go-libdht/kad/key/key256"
+	"github.com/plprobelab/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/plprobelab/go-libdht/kad/key/bit256"
 )
 
 // ID is a concrete implementation of the NodeID interface.
@@ -43,19 +42,19 @@ func (i ID[K]) String() string {
 
 type StringID string
 
-var _ kad.NodeID[key256.Key256] = (*StringID)(nil)
+var _ kad.NodeID[bit256.Key] = (*StringID)(nil)
 
 func NewStringID(s string) *StringID {
 	return (*StringID)(&s)
 }
 
-func (s StringID) Key() key256.Key256 {
+func (s StringID) Key() bit256.Key {
 	h := sha256.New()
 	h.Write([]byte(s))
-	return key256.NewKey256(h.Sum(nil))
+	return bit256.NewKey(h.Sum(nil))
 }
 
-func (s StringID) NodeID() kad.NodeID[key256.Key256] {
+func (s StringID) NodeID() kad.NodeID[bit256.Key] {
 	return &s
 }
 
@@ -65,44 +64,4 @@ func (s StringID) Equal(other string) bool {
 
 func (s StringID) String() string {
 	return string(s)
-}
-
-type Info[K kad.Key[K], A kad.Address[A]] struct {
-	id    *ID[K]
-	addrs []A
-}
-
-var _ kad.NodeInfo[Key8, net.IP] = (*Info[Key8, net.IP])(nil)
-
-func NewInfo[K kad.Key[K], A kad.Address[A]](id *ID[K], addrs []A) *Info[K, A] {
-	return &Info[K, A]{
-		id:    id,
-		addrs: addrs,
-	}
-}
-
-func (a *Info[K, A]) AddAddr(addr A) {
-	a.addrs = append(a.addrs, addr)
-}
-
-func (a *Info[K, A]) RemoveAddr(addr A) {
-	writeIndex := 0
-	// remove all occurrences of addr
-	for _, ad := range a.addrs {
-		if !ad.Equal(addr) {
-			a.addrs[writeIndex] = ad
-			writeIndex++
-		}
-	}
-	a.addrs = a.addrs[:writeIndex]
-}
-
-func (a *Info[K, A]) ID() kad.NodeID[K] {
-	return a.id
-}
-
-func (a *Info[K, A]) Addresses() []A {
-	addresses := make([]A, len(a.addrs))
-	copy(addresses, a.addrs)
-	return addresses
 }

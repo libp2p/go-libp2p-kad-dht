@@ -5,10 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/libp2p/go-libdht/kad"
-	"github.com/libp2p/go-libdht/kad/internal/test"
-	"github.com/libp2p/go-libdht/kad/key/key256"
-	"github.com/libp2p/go-libdht/kad/trie"
+	"github.com/plprobelab/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad/kadtest"
+	"github.com/plprobelab/go-libdht/kad/key/bit256"
+	"github.com/plprobelab/go-libdht/kad/trie"
 )
 
 // TrieRT is a routing table backed by a XOR Trie which offers good scalablity and performance
@@ -21,7 +21,7 @@ type TrieRT[K kad.Key[K], N kad.NodeID[K]] struct {
 	trie atomic.Value // holds a *trie.Trie[K, N]
 }
 
-var _ kad.RoutingTable[key256.Key256, test.ID[key256.Key256]] = (*TrieRT[key256.Key256, test.ID[key256.Key256]])(nil)
+var _ kad.RoutingTable[bit256.Key, kadtest.ID[bit256.Key]] = (*TrieRT[bit256.Key, kadtest.ID[bit256.Key]])(nil)
 
 // New creates a new TrieRT using the supplied key as the local node's Kademlia key.
 // If cfg is nil, the default config is used.

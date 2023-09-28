@@ -1,9 +1,9 @@
-package test
+package kadtest
 
 import (
 	"testing"
 
-	"github.com/libp2p/go-libdht/kad/key/test"
+	"github.com/plprobelab/go-libdht/kad/key/test"
 )
 
 func TestKey32(t *testing.T) {

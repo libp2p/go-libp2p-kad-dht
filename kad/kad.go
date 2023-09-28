@@ -1,9 +1,5 @@
 package kad
 
-import (
-	"context"
-)
-
 // Key is the interface all Kademlia key types support.
 //
 // A Kademlia key is defined as a bit string of arbitrary size. In practice, different Kademlia implementations use
@@ -95,52 +91,3 @@ type NodeID[K Key[K]] interface {
 	// TODO: Try to get rid of this as it's also used for map keys which is not great.
 	String() string
 }
-
-// NodeInfo is a container type that combines node identification information
-// and network addresses at which the node is reachable.
-type NodeInfo[K Key[K], A Address[A]] interface {
-	// ID returns the node identifier.
-	ID() NodeID[K]
-
-	// Addresses returns the network addresses associated with the given node.
-	Addresses() []A
-}
-
-// Address is an interface that any type must implement that can be used
-// to address a node in the DHT network. This can be an IP/Port combination
-// or in the case of libp2p a Multiaddress.
-type Address[T any] interface {
-	// Equal re
-	Equal(T) bool
-}
-
-type Message interface{}
-
-type Request[K Key[K], A Address[A]] interface {
-	Message
-
-	// Target returns the target key and true, or false if no target key has been specfied.
-	Target() K
-
-	// EmptyResponse returns an empty response struct for this request message
-	// TODO: this is a weird patter, let's try to remove this.
-	EmptyResponse() Response[K, A]
-}
-
-type Response[K Key[K], A Address[A]] interface {
-	Message
-
-	CloserNodes() []NodeInfo[K, A]
-}
-
-type RoutingProtocol[K Key[K], N NodeID[K], A Address[A]] interface {
-	FindNode(ctx context.Context, to N, target K) (NodeInfo[K, A], []N, error)
-	Ping(ctx context.Context, to N) error
-}
-
-type RecordProtocol[K Key[K], N NodeID[K]] interface {
-	Get(ctx context.Context, to N, target K) ([]Record, []N, error)
-	Put(ctx context.Context, to N, record Record) error
-}
-
-type Record any

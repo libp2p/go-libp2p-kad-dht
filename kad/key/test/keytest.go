@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/libp2p/go-libdht/kad"
-	"github.com/libp2p/go-libdht/kad/key"
+	"github.com/plprobelab/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad/key"
 
 	"github.com/stretchr/testify/require"
 )

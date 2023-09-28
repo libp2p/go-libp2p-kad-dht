@@ -1,4 +1,4 @@
-module github.com/libp2p/go-libdht
+module github.com/plprobelab/go-libdht
 
 go 1.20
 

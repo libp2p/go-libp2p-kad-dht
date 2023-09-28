@@ -1,9 +1,9 @@
-package test
+package kadtest
 
 import (
 	"fmt"
 
-	"github.com/libp2p/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad"
 )
 
 const bitPanicMsg = "bit index out of range"

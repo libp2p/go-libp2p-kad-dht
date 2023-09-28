@@ -1,4 +1,4 @@
-package test
+package kadtest
 
 import (
 	"context"

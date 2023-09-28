@@ -366,7 +366,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 		return nil, fmt.Errorf("explore schedule: %w", err)
 	}
 
-	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
+	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID[kadt.Key], schedule, exploreCfg)
 	if err != nil {
 		return nil, fmt.Errorf("explore: %w", err)
 	}

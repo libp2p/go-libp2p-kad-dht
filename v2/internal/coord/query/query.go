@@ -432,6 +432,7 @@ type EventQueryCancel struct{}
 // EventQueryNodeResponse notifies a [Query] that an attempt to contact a node has received a successful response.
 type EventQueryNodeResponse[K kad.Key[K], N kad.NodeID[K]] struct {
 	NodeID      N   // the node the message was sent to
+	Target      K   // the target key that the node was asked for
 	CloserNodes []N // the closer nodes sent by the node
 }
 

@@ -88,3 +88,8 @@ type Router[K kad.Key[K], N kad.NodeID[K], M Message] interface {
 	// closest to the target key.
 	GetClosestNodes(ctx context.Context, to N, target K) ([]N, error)
 }
+
+// NodeIDForCplFunc is a function that given a cpl generates a [kad.NodeID] with a key that has
+// a common prefix length with k of length cpl.
+// Invariant: CommonPrefixLength(k, node.Key()) = cpl
+type NodeIDForCplFunc[K kad.Key[K], N kad.NodeID[K]] func(k K, cpl int) (N, error)

@@ -41,7 +41,7 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 	// rt is the local routing table
 	rt RoutingTableCpl[K, N]
 
-	cplFn NodeIDForCplFunc[K, N]
+	cplFn coordt.NodeIDForCplFunc[K, N]
 
 	// qry is the query used by the explore process
 	qry *query.Query[K, N, any]
@@ -72,11 +72,6 @@ type Explore[K kad.Key[K], N kad.NodeID[K]] struct {
 	// cplAttributeSet holds the current cpl being explored in an attribute that may be used with metrics
 	cplAttributeSet atomic.Value // holds a [attribute.Set]
 }
-
-// NodeIDForCplFunc is a function that given a cpl generates a [kad.NodeID] with a key that has
-// a common prefix length with k of length cpl.
-// Invariant: CommonPrefixLength(k, node.Key()) = cpl
-type NodeIDForCplFunc[K kad.Key[K], N kad.NodeID[K]] func(k K, cpl int) (N, error)
 
 // An ExploreSchedule provides an ordering for explorations of each cpl in a routing table.
 type ExploreSchedule interface {
@@ -165,7 +160,7 @@ func DefaultExploreConfig() *ExploreConfig {
 	}
 }
 
-func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N], cplFn NodeIDForCplFunc[K, N], schedule ExploreSchedule, cfg *ExploreConfig) (*Explore[K, N], error) {
+func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N], cplFn coordt.NodeIDForCplFunc[K, N], schedule ExploreSchedule, cfg *ExploreConfig) (*Explore[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultExploreConfig()
 	} else if err := cfg.Validate(); err != nil {

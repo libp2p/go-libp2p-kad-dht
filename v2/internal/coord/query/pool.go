@@ -138,6 +138,7 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 		if qry, ok := p.queryIndex[tev.QueryID]; ok {
 			state, terminal := p.advanceQuery(ctx, qry, &EventQueryNodeResponse[K, N]{
 				NodeID:      tev.NodeID,
+				Target:      tev.Target,
 				CloserNodes: tev.CloserNodes,
 			})
 			if terminal {
@@ -396,6 +397,7 @@ type EventPoolStopQuery struct {
 type EventPoolNodeResponse[K kad.Key[K], N kad.NodeID[K]] struct {
 	QueryID     coordt.QueryID // the id of the query that sent the message
 	NodeID      N              // the node the message was sent to
+	Target      K              // the target key that the node was asked for
 	CloserNodes []N            // the closer nodes sent by the node
 }
 

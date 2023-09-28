@@ -63,9 +63,9 @@ type Backend interface {
 	// "best" value based on user-defined logic and return its index in the
 	// original values list. If we receive a request for /ipns/$binary_id, the
 	// key parameter will be set to $binary_id. Decisions about which value is
-	// the "best" from the given list must be stable. So if there are two
+	// the "best" from the given list must be stable. So if there are multiple
 	// equally good values, the implementation must always return the same
-	// index.
+	// index - for example, always the first good or last good value.
 	Validate(ctx context.Context, key string, values ...any) (int, error)
 }
 

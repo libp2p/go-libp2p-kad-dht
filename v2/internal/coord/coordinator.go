@@ -600,15 +600,13 @@ func (c *Coordinator) NotifyConnectivity(ctx context.Context, id kadt.PeerID) {
 
 // NotifyNonConnectivity notifies the coordinator that a peer has failed a connectivity check
 // which means it is not connected and/or it doesn't support finding closer nodes
-func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID) error {
+func (c *Coordinator) NotifyNonConnectivity(ctx context.Context, id kadt.PeerID) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.NotifyNonConnectivity")
 	defer span.End()
 
 	c.routingBehaviour.Notify(ctx, &EventNotifyNonConnectivity{
 		NodeID: id,
 	})
-
-	return nil
 }
 
 func (c *Coordinator) newOperationID() coordt.QueryID {

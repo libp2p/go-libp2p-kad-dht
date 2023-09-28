@@ -340,7 +340,7 @@ LOOP:
 }
 
 func TestDHT_FindProvidersAsync_queries_other_peers(t *testing.T) {
-	ctx := context.Background() // kadtest.CtxShort(t)
+	ctx := kadtest.CtxShort(t)
 
 	c := newRandomContent(t)
 
@@ -599,8 +599,9 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	// Test setup:
 	// d2 returns no value
 	// d3 returns valid value
-	// d4 returns worse value
+	// d4 returns worse value (will get rejected because we already have a valid value)
 	// d5 returns better value
+	// all peers are connected in a chain from d1 to d5 (d1 initiates the query)
 	// assert that we receive two values on the channel (valid + better)
 	ctx := kadtest.CtxShort(t)
 	clk := clock.New()

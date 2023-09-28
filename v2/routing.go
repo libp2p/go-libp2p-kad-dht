@@ -438,7 +438,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 
 	_, _, err := d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
 	if err != nil {
-		d.log.Warn("Search value query failed", slog.String("err", err.Error()))
+		d.logErr(err, "Search value query failed")
 		return
 	}
 

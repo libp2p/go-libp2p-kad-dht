@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
-	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-libdht/kad/key/bit256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,10 +20,10 @@ func TestPrefix(t *testing.T) {
 		0b0000000000000010,
 	}
 
-	makeKeyWithPrefix := func(v uint16) key.Key256 {
+	makeKeyWithPrefix := func(v uint16) bit256.Key {
 		data := [32]byte{}
 		binary.BigEndian.PutUint16(data[0:2], v)
-		return key.NewKey256(data[:])
+		return bit256.NewKey(data[:])
 	}
 
 	for _, tc := range testCases {

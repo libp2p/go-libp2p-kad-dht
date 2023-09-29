@@ -36,7 +36,7 @@ type DHT struct {
 	modeMu sync.RWMutex
 	mode   mode
 
-	// kad is a reference to the go-kademlia coordinator
+	// kad is a reference to the coordinator
 	kad *coord.Coordinator
 
 	// rt holds a reference to the routing table implementation. This can be

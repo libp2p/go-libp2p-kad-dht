@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/plprobelab/go-kademlia/kad"
+	"github.com/plprobelab/go-libdht/kad"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 

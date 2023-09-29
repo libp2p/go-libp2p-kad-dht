@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/plprobelab/go-kademlia/key"
+	"github.com/plprobelab/go-libdht/kad/key"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 

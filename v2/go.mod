@@ -17,7 +17,6 @@ require (
 	github.com/multiformats/go-multiaddr v0.11.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/plprobelab/go-kademlia v0.0.0-20230913171354-443ec1f56080
 	github.com/prometheus/client_golang v1.16.0 // indirect
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/otel v1.18.0
@@ -30,6 +29,8 @@ require (
 	golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63
 	google.golang.org/protobuf v1.31.0
 )
+
+require github.com/plprobelab/go-libdht v0.0.0-20230928112736-796722ce828d
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

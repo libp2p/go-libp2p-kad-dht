@@ -9,10 +9,8 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-kademlia/kad"
-	"github.com/plprobelab/go-kademlia/key"
-	"github.com/plprobelab/go-kademlia/network/address"
-	"github.com/plprobelab/go-kademlia/network/endpoint"
+	"github.com/plprobelab/go-libdht/kad"
+	"github.com/plprobelab/go-libdht/kad/key"
 
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/pb"
@@ -56,8 +54,8 @@ type Router struct {
 }
 
 type nodeStatus struct {
-	NodeID        kadt.PeerID
-	Connectedness endpoint.Connectedness
+	NodeID    kadt.PeerID
+	Connected bool
 }
 
 func NewRouter(self kadt.PeerID, top *Topology) *Router {
@@ -72,7 +70,7 @@ func (r *Router) NodeID() kad.NodeID[kadt.Key] {
 	return r.self
 }
 
-func (r *Router) handleMessage(ctx context.Context, n kadt.PeerID, protoID address.ProtocolID, req *pb.Message) (*pb.Message, error) {
+func (r *Router) handleMessage(ctx context.Context, n kadt.PeerID, req *pb.Message) (*pb.Message, error) {
 	closer := make([]*pb.Message_Peer, 0)
 
 	r.mu.Lock()
@@ -101,19 +99,19 @@ func (r *Router) dial(ctx context.Context, to kadt.PeerID) error {
 
 	if !ok {
 		status = &nodeStatus{
-			NodeID:        to,
-			Connectedness: endpoint.CanConnect,
+			NodeID:    to,
+			Connected: false,
 		}
 	}
 
-	if status.Connectedness == endpoint.Connected {
+	if status.Connected {
 		return nil
 	}
 	if err := r.top.Dial(ctx, r.self, to); err != nil {
 		return err
 	}
 
-	status.Connectedness = endpoint.Connected
+	status.Connected = true
 	r.mu.Lock()
 	r.nodes[to.String()] = status
 	r.mu.Unlock()
@@ -126,8 +124,8 @@ func (r *Router) AddToPeerStore(ctx context.Context, id kadt.PeerID) error {
 
 	if _, ok := r.nodes[id.String()]; !ok {
 		r.nodes[id.String()] = &nodeStatus{
-			NodeID:        id,
-			Connectedness: endpoint.CanConnect,
+			NodeID:    id,
+			Connected: false,
 		}
 	}
 	return nil
@@ -138,7 +136,7 @@ func (r *Router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 		return nil, fmt.Errorf("dial: %w", err)
 	}
 
-	return r.top.RouteMessage(ctx, r.self, to, "", req)
+	return r.top.RouteMessage(ctx, r.self, to, req)
 }
 
 func (r *Router) GetClosestNodes(ctx context.Context, to kadt.PeerID, target kadt.Key) ([]kadt.PeerID, error) {

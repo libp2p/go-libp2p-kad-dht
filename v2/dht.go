@@ -128,6 +128,7 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	coordCfg.Routing.Logger = cfg.Logger.With("behaviour", "routing")
 	coordCfg.Routing.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
 	coordCfg.Routing.Meter = cfg.MeterProvider.Meter(tele.MeterName)
+	coordCfg.Routing.IncludeSkipCheck = cfg.Query.SkipConnectivityCheck
 
 	rtr := &router{
 		host:       h,

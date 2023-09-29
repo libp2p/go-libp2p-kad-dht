@@ -395,16 +395,21 @@ type QueryConfig struct {
 	// operation. A DefaultQuorum of 0 means that we search the network until
 	// we have exhausted the keyspace.
 	DefaultQuorum int
+
+	// SkipConnectivityCheck defines whether we do a connectivity check before
+	// we add peers to the routing table.
+	SkipConnectivityCheck bool
 }
 
 // DefaultQueryConfig returns the default query configuration options for a DHT.
 func DefaultQueryConfig() *QueryConfig {
 	return &QueryConfig{
-		Concurrency:        3,               // MAGIC
-		Timeout:            5 * time.Minute, // MAGIC
-		RequestConcurrency: 3,               // MAGIC
-		RequestTimeout:     time.Minute,     // MAGIC
-		DefaultQuorum:      0,               // MAGIC
+		Concurrency:           3,               // MAGIC
+		Timeout:               5 * time.Minute, // MAGIC
+		RequestConcurrency:    3,               // MAGIC
+		RequestTimeout:        time.Minute,     // MAGIC
+		DefaultQuorum:         0,               // MAGIC
+		SkipConnectivityCheck: false,
 	}
 }
 

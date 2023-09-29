@@ -682,6 +682,8 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 	cfg := DefaultConfig()
 	cfg.Clock = clk
+	cfg.Query.SkipConnectivityCheck = true
+
 	top := NewTopology(t)
 
 	// init privileged DHT server

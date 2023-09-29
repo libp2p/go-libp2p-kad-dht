@@ -61,12 +61,9 @@ type IncludeConfig struct {
 	Concurrency   int           // the maximum number of include checks that may be in progress at any one time
 	Timeout       time.Duration // the time to wait before terminating a check that is not making progress
 	Clock         clock.Clock   // a clock that may replaced by a mock when testing
-
-	// Tracer is the tracer that should be used to trace execution.
-	Tracer trace.Tracer
-
-	// Meter is the meter that should be used to record metrics.
-	Meter metric.Meter
+	SkipCheck     bool          // whether to skip connectivity checks and add any node passed to this state machine
+	Tracer        trace.Tracer  // Tracer is the tracer that should be used to trace execution.
+	Meter         metric.Meter  // Meter is the meter that should be used to record metrics.
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -124,6 +121,7 @@ func DefaultIncludeConfig() *IncludeConfig {
 		Tracer: tele.NoopTracer(),
 		Meter:  tele.NoopMeter(),
 
+		SkipCheck:     false,
 		Concurrency:   3,
 		Timeout:       time.Minute,
 		QueueCapacity: 128,
@@ -209,6 +207,15 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 
 	switch tev := ev.(type) {
 	case *EventIncludeAddCandidate[K, N]:
+
+		if in.cfg.SkipCheck {
+			if in.rt.AddNode(tev.NodeID) {
+				return &StateIncludeRoutingUpdated[K, N]{NodeID: tev.NodeID}
+			} else {
+				return &StateIncludeIdle{}
+			}
+		}
+
 		// Ignore if already running a check
 		_, checking := in.checks[key.HexString(tev.NodeID.Key())]
 		if checking {

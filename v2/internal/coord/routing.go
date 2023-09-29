@@ -62,6 +62,9 @@ type RoutingConfig struct {
 	// ProbeCheckInterval is the time interval the behaviour should use between connectivity checks for the same node in the routing table.
 	ProbeCheckInterval time.Duration
 
+	// IncludeSkipCheck indicates whether we perform connectivity checks before we add a peer to the routing table.
+	IncludeSkipCheck bool
+
 	// IncludeQueueCapacity is the maximum number of nodes the behaviour should keep queued as candidates for inclusion in the routing table.
 	IncludeQueueCapacity int
 
@@ -268,6 +271,7 @@ func DefaultRoutingConfig() *RoutingConfig {
 		ProbeRequestConcurrency: 3,             // MAGIC
 		ProbeCheckInterval:      6 * time.Hour, // MAGIC
 
+		IncludeSkipCheck:          false,
 		IncludeRequestConcurrency: 3,   // MAGIC
 		IncludeQueueCapacity:      128, // MAGIC
 
@@ -307,6 +311,22 @@ type RoutingBehaviour struct {
 	ready     chan struct{}
 }
 
+type Recording2SM[E any, S any] struct {
+	State    S
+	Received E
+}
+
+func NewRecording2SM[E any, S any](response S) *Recording2SM[E, S] {
+	return &Recording2SM[E, S]{
+		State: response,
+	}
+}
+
+func (r *Recording2SM[E, S]) Advance(ctx context.Context, e E) S {
+	r.Received = e
+	return r.State
+}
+
 func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *RoutingConfig) (*RoutingBehaviour, error) {
 	if cfg == nil {
 		cfg = DefaultRoutingConfig()
@@ -331,6 +351,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	includeCfg.Clock = cfg.Clock
 	includeCfg.Tracer = cfg.Tracer
 	includeCfg.Meter = cfg.Meter
+	includeCfg.SkipCheck = cfg.IncludeSkipCheck
 	includeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	includeCfg.QueueCapacity = cfg.IncludeQueueCapacity
 	includeCfg.Concurrency = cfg.IncludeRequestConcurrency

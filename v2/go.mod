@@ -11,12 +11,14 @@ require (
 	github.com/ipfs/go-ds-leveldb v0.5.0
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p v0.30.0
+	github.com/libp2p/go-libp2p-kbucket v0.5.0
 	github.com/libp2p/go-libp2p-record v0.2.0
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/multiformats/go-base32 v0.1.0
 	github.com/multiformats/go-multiaddr v0.11.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/plprobelab/go-libdht v0.0.0-20230928202609-8c74cc7954b3
 	github.com/prometheus/client_golang v1.16.0 // indirect
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/otel v1.18.0
@@ -29,8 +31,6 @@ require (
 	golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63
 	google.golang.org/protobuf v1.31.0
 )
-
-require github.com/plprobelab/go-libdht v0.0.0-20230928112736-796722ce828d
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -59,6 +59,7 @@ require (
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect
+	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
@@ -92,6 +93,7 @@ require (
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/onsi/ginkgo/v2 v2.11.0 // indirect
 	github.com/opencontainers/runtime-spec v1.1.0 // indirect
+	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/polydawn/refmt v0.89.0 // indirect

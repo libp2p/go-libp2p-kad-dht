@@ -15,7 +15,8 @@ var _ triert.NodeFilter[kadt.Key, kadt.PeerID] = (*TrieRTPeerDiversityFilter)(ni
 
 // TrieRTPeerDiversityFilter is a wrapper around the `peerdiversity.Filter` used
 // as `triert.NodeFilter` to configure the diversity filter for the TrieRT
-// Routing Table.
+// Routing Table. TrieRTPeerDiversityFilter should be provided as in the TrieRT
+// config, and is not applied directly on the `DHT` instance.
 // Please see the docs for `peerdiversity.Filter` for more details
 type TrieRTPeerDiversityFilter struct {
 	*peerdiversity.Filter

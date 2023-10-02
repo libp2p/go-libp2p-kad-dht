@@ -1,8 +1,10 @@
 package dht
 
 import (
+	"context"
 	"testing"
 
+	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-kad-dht/v2/kadt"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -142,4 +144,39 @@ func TestRtPeerIPGroupFilter(t *testing.T) {
 	// ip6 group with 1EooPEER15, it has a different cpl
 	success = rt.AddNode(kadt.PeerID(peers["1EooPEER13"].ID))
 	require.True(t, success)
+}
+
+func TestRTPeerDiversityFilter(t *testing.T) {
+	ctx := context.Background()
+	h, err := libp2p.New()
+	require.NoError(t, err)
+
+	// create 2 remote peers
+	h1, err := libp2p.New()
+	require.NoError(t, err)
+	h2, err := libp2p.New()
+	require.NoError(t, err)
+
+	// connect h to h1 and h2
+	err = h.Connect(ctx, peer.AddrInfo{ID: h1.ID(), Addrs: h1.Addrs()})
+	require.NoError(t, err)
+	err = h.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+	require.NoError(t, err)
+
+	// create peer filter and routing table
+	peerFilter, err := NewRTPeerDiversityFilter(h, 1, 1)
+	require.NoError(t, err)
+	rtcfg := &triert.Config[kadt.Key, kadt.PeerID]{
+		NodeFilter: peerFilter,
+	}
+	rt, err := triert.New[kadt.Key, kadt.PeerID](kadt.PeerID(h.ID()), rtcfg)
+	require.NoError(t, err)
+
+	// try to add h1 to the routing table. succeeds because it is the first peer
+	success := rt.AddNode(kadt.PeerID(h1.ID()))
+	require.True(t, success)
+
+	// try to add h2 to the routing table. fails because it is the second peer
+	success = rt.AddNode(kadt.PeerID(h2.ID()))
+	require.False(t, success)
 }

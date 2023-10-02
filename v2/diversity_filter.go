@@ -28,7 +28,7 @@ type TrieRTPeerDiversityFilter struct {
 // allowed to share the same /16 IP group.
 // `maxForTable` represents the maximum number of peers in the routing table
 // allowed to share the same /16 IP group.
-func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int) *TrieRTPeerDiversityFilter {
+func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int) (*TrieRTPeerDiversityFilter, error) {
 	multiaddrsFn := func(p peer.ID) []ma.Multiaddr {
 		cs := h.Network().ConnsToPeer(p)
 		addr := make([]ma.Multiaddr, 0, len(cs))
@@ -45,12 +45,12 @@ func NewRTPeerDiversityFilter(h host.Host, maxPerCpl, maxForTable int) *TrieRTPe
 		})
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &TrieRTPeerDiversityFilter{
 		Filter: filter,
-	}
+	}, nil
 }
 
 // TryAdd is called by TrieRT when a new node is added to the routing table.

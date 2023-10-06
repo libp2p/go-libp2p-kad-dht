@@ -31,6 +31,12 @@ const (
 	// it expires, the returned records will require an extra lookup, to
 	// find the multiaddress associated with the returned peer id.
 	ProviderAddrTTL = 24 * time.Hour
+
+	// AddProviderTimeout is the timeout for adding a provider to the DHT; when this timeout is reached, the provider is discarded.
+	AddProviderTimeout = 1 * time.Second
+
+	// ProviderQueueSize is the size of the queue used to store addProvider requests; when the queue is full, new requests are discarded after AddProviderTimeout.
+	ProviderQueueSize = 10_000
 )
 
 // ProvideValidity is the default time that a Provider Record should last on DHT
@@ -117,7 +123,7 @@ func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batchin
 	pm := new(ProviderManager)
 	pm.self = local
 	pm.getprovs = make(chan *getProv)
-	pm.newprovs = make(chan *addProv)
+	pm.newprovs = make(chan *addProv, ProviderQueueSize)
 	pm.pstore = ps
 	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
 	cache, err := lru.NewLRU(lruCacheSize, nil)
@@ -259,11 +265,13 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo p
 		key: k,
 		val: provInfo.ID,
 	}
+
+	timeoutCtx, _ := context.WithTimeout(ctx, AddProviderTimeout)
 	select {
 	case pm.newprovs <- prov:
 		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-timeoutCtx.Done():
+		return timeoutCtx.Err()
 	}
 }
 

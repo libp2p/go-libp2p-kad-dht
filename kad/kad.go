@@ -34,6 +34,27 @@ type Key[K any] interface {
 	Compare(other K) int
 }
 
+// NodeID is a generic node identifier and not equal to a Kademlia key. Some
+// implementations use NodeID's as preimages for Kademlia keys. Kademlia keys
+// are used for calculating distances between nodes while NodeID's are the
+// original logical identifier of a node.
+//
+// The NodeID interface only defines a method that returns the Kademlia key
+// for the given NodeID. E.g., the operation to go from a NodeID to a Kademlia key
+// can be as simple as hashing the NodeID.
+//
+// Implementations may choose to equate NodeID's and Kademlia keys.
+type NodeID[K Key[K]] interface {
+	// Key returns the Kademlia key of the given NodeID. E.g., NodeID's can be
+	// preimages to Kademlia keys, in which case, Key() could return the SHA256
+	// of NodeID.
+	Key() K
+
+	// String returns a string reprensentation for this NodeID.
+	// TODO: Try to get rid of this as it's also used for map keys which is not great.
+	String() string
+}
+
 // RoutingTable is the interface all Kademlia Routing Tables types support.
 type RoutingTable[K Key[K], N NodeID[K]] interface {
 	// AddNode tries to add a peer to the routing table. It returns true if
@@ -69,25 +90,4 @@ type RoutingTable[K Key[K], N NodeID[K]] interface {
 	// value if the node is not present in the routing table. The boolean second
 	// return value indicates whether the node was found in the table.
 	GetNode(K) (N, bool)
-}
-
-// NodeID is a generic node identifier and not equal to a Kademlia key. Some
-// implementations use NodeID's as preimages for Kademlia keys. Kademlia keys
-// are used for calculating distances between nodes while NodeID's are the
-// original logical identifier of a node.
-//
-// The NodeID interface only defines a method that returns the Kademlia key
-// for the given NodeID. E.g., the operation to go from a NodeID to a Kademlia key
-// can be as simple as hashing the NodeID.
-//
-// Implementations may choose to equate NodeID's and Kademlia keys.
-type NodeID[K Key[K]] interface {
-	// Key returns the Kademlia key of the given NodeID. E.g., NodeID's can be
-	// preimages to Kademlia keys, in which case, Key() could return the SHA256
-	// of NodeID.
-	Key() K
-
-	// String returns a string reprensentation for this NodeID.
-	// TODO: Try to get rid of this as it's also used for map keys which is not great.
-	String() string
 }

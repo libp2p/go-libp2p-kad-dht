@@ -149,13 +149,13 @@ func addAtDepth[K kad.Key[K], D any](depth int, tr *Trie[K, D], kk K, data D) *T
 	default:
 		dir := kk.Bit(depth)
 		b := addAtDepth(depth+1, tr.branch[dir], kk, data)
-		if b != tr.branch[dir] {
-			s := &Trie[K, D]{}
-			s.branch[dir] = b
-			s.branch[1-dir] = tr.branch[1-dir]
-			return s
+		if b == tr.branch[dir] {
+			return tr
 		}
-		return tr
+		s := &Trie[K, D]{}
+		s.branch[dir] = b
+		s.branch[1-dir] = tr.branch[1-dir]
+		return s
 	}
 }
 

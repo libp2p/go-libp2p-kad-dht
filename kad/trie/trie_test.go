@@ -167,6 +167,22 @@ func TestSize(t *testing.T) {
 	require.Equal(t, len(sampleKeySet.Keys), tr.Size())
 }
 
+func TestImmutableAddReturnsNewTrie(t *testing.T) {
+	tr := New[kadtest.Key32, any]()
+	for _, kk := range sampleKeySet.Keys {
+		var err error
+		trBefore := *tr // take a copy of tr before Add is called
+		trNext, err := Add(tr, kk, nil)
+		require.NoError(t, err)
+		// a new trie must be returned
+		require.NotSame(t, tr, trNext)
+		// old trie must be not be modified
+		require.EqualValues(t, trBefore, *tr)
+		tr = trNext
+	}
+	require.Equal(t, len(sampleKeySet.Keys), tr.Size())
+}
+
 func TestAddIgnoresDuplicates(t *testing.T) {
 	tr := New[kadtest.Key32, any]()
 	for _, kk := range sampleKeySet.Keys {
@@ -245,10 +261,13 @@ func TestAddWithData(t *testing.T) {
 
 func TestImmutableAddWithData(t *testing.T) {
 	tr := New[kadtest.Key32, int]()
-	var err error
 	for i, kk := range sampleKeySet.Keys {
-		tr, err = Add(tr, kk, i)
+		var err error
+		trNext, err := Add(tr, kk, i)
 		require.NoError(t, err)
+		// a new trie must be returned
+		require.NotSame(t, tr, trNext)
+		tr = trNext
 	}
 	require.Equal(t, len(sampleKeySet.Keys), tr.Size())
 
@@ -285,6 +304,9 @@ func TestImmutableRemove(t *testing.T) {
 	trNext, err := Remove(tr, sampleKeySet.Keys[0])
 	require.NoError(t, err)
 	require.Equal(t, len(sampleKeySet.Keys)-1, trNext.Size())
+
+	// a new trie must be returned
+	require.NotSame(t, tr, trNext)
 
 	if d := CheckInvariant(tr); d != nil {
 		t.Fatalf("reordered trie invariant discrepancy: %v", d)

@@ -129,7 +129,7 @@ func (tr *Trie[K, D]) addAtDepth(depth int, kk K, data D) bool {
 	}
 }
 
-// Add adds the key to trie, returning a new trie.
+// Add adds the key to trie, returning a new trie if the key was not already in the trie.
 // Add is immutable/non-destructive: the original trie remains unchanged.
 func Add[K kad.Key[K], D any](tr *Trie[K, D], kk K, data D) (*Trie[K, D], error) {
 	return addAtDepth(0, tr, kk, data), nil
@@ -148,8 +148,12 @@ func addAtDepth[K kad.Key[K], D any](depth int, tr *Trie[K, D], kk K, data D) *T
 
 	default:
 		dir := kk.Bit(depth)
+		b := addAtDepth(depth+1, tr.branch[dir], kk, data)
+		if b == tr.branch[dir] {
+			return tr
+		}
 		s := &Trie[K, D]{}
-		s.branch[dir] = addAtDepth(depth+1, tr.branch[dir], kk, data)
+		s.branch[dir] = b
 		s.branch[1-dir] = tr.branch[1-dir]
 		return s
 	}

@@ -321,7 +321,8 @@ type nodeFilter struct {
 }
 
 func (f *nodeFilter) TryAdd(rt *TrieRT[kadtest.Key32, node[kadtest.Key32]],
-	n node[kadtest.Key32]) bool {
+	n node[kadtest.Key32],
+) bool {
 	if n == node2 {
 		return false
 	}

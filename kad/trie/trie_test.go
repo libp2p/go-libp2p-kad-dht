@@ -206,6 +206,28 @@ func TestImmutableAddIgnoresDuplicates(t *testing.T) {
 	}
 }
 
+func TestImmutableAddReturnsOriginalTrieForDuplicates(t *testing.T) {
+	tr := New[kadtest.Key32, any]()
+	var err error
+	for _, kk := range sampleKeySet.Keys {
+		tr, err = Add(tr, kk, nil)
+		require.NoError(t, err)
+	}
+	require.Equal(t, len(sampleKeySet.Keys), tr.Size())
+
+	for _, kk := range sampleKeySet.Keys {
+		next, err := Add(tr, kk, nil)
+		require.NoError(t, err)
+		// trie has not been changed
+		require.Same(t, tr, next)
+	}
+	require.Equal(t, len(sampleKeySet.Keys), tr.Size())
+
+	if d := CheckInvariant(tr); d != nil {
+		t.Fatalf("reordered trie invariant discrepancy: %v", d)
+	}
+}
+
 func TestAddWithData(t *testing.T) {
 	tr := New[kadtest.Key32, int]()
 	for i, kk := range sampleKeySet.Keys {

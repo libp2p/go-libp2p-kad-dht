@@ -295,11 +295,11 @@ func (ms *peerMessageSender) SendRequest(ctx context.Context, pmes *pb.Message) 
 
 		mes := new(pb.Message)
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
-			if err != context.Canceled {
-				_ = ms.s.Reset()
-				ms.s = nil
+			if err == context.Canceled {
+				return nil, err
 			}
-
+			_ = ms.s.Reset()
+			ms.s = nil
 			if retry {
 				logger.Debugw("error reading message", "error", err)
 				return nil, err

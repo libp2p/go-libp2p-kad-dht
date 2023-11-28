@@ -297,7 +297,10 @@ func (ms *peerMessageSender) SendRequest(ctx context.Context, pmes *pb.Message) 
 		if err := ms.ctxReadMsg(ctx, mes); err != nil {
 			_ = ms.s.Reset()
 			ms.s = nil
-
+			if err == context.Canceled {
+				// retry would be same error
+				return nil, err
+			}
 			if retry {
 				logger.Debugw("error reading message", "error", err)
 				return nil, err

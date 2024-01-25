@@ -1,8 +1,8 @@
 # go-libdht
 
 [![ProbeLab](https://img.shields.io/badge/made%20by-ProbeLab-blue.svg)](https://probelab.io)
-[![GoDoc](https://pkg.go.dev/badge/github.com/plprobelab/go-libdht)](https://pkg.go.dev/github.com/plprobelab/go-libdht)
-[![Build status](https://img.shields.io/github/actions/workflow/status/plprobelab/go-libdht/go-test.yml?branch=main)](https://github.com/plprobelab/go-libdht/actions)
+[![GoDoc](https://pkg.go.dev/badge/github.com/probe-lab/go-libdht)](https://pkg.go.dev/github.com/probe-lab/go-libdht)
+[![Build status](https://img.shields.io/github/actions/workflow/status/probe-lab/go-libdht/go-test.yml?branch=main)](https://github.com/probe-lab/go-libdht/actions)
 
 `go-libdht` is a generic toolbox designed for the implementation and experimentation of Distributed Hash Tables (DHT) in Go. It establishes foundational types and interfaces applicable across a broad spectrum of DHTs, especially those sharing a similar topology. By offering reusable components like keys and routing tables, `go-libdht` streamlines the DHT implementation process. Using `go-libdht`, developers can seamlessly craft their own DHTs using the provided modular components.
 
@@ -51,11 +51,11 @@ Generic Kademlia interfaces can be found in [`kad.go`](kad/kad.go), and include 
 
 It's enouraged to review other DHT implementations for guidance. Certain components, while not sufficiently generic for inclusion in go-libdht, can be reused from existing DHT solutions.
 
-* [**`zikade`**](https://github.com/plprobelab/zikade): Most recent Go implementation of [libp2p Kademlia DHT specification](https://github.com/libp2p/specs/tree/master/kad-dht)
+* [**`zikade`**](https://github.com/probe-lab/zikade): Most recent Go implementation of [libp2p Kademlia DHT specification](https://github.com/libp2p/specs/tree/master/kad-dht)
 
 ## Future work
 
-* Import more generic Kademlia building blocks from [`zikade`](https://github.com/plprobelab/zikade)
+* Import more generic Kademlia building blocks from [`zikade`](https://github.com/probe-lab/zikade)
 * Add interfaces and building blocks other DHT topologies (e.g Chord, CAN, etc.)
 * Define generic interfaces for all DHTs (e.g Point in topology, Distance function, lookup algorithms etc.)
 

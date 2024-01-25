@@ -1,8 +1,8 @@
 package bitstr
 
 import (
-	"github.com/plprobelab/go-libdht/kad"
-	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/key"
 )
 
 // Key is a binary key represented by a string of 1's and 0's

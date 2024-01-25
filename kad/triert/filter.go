@@ -1,6 +1,6 @@
 package triert
 
-import "github.com/plprobelab/go-libdht/kad"
+import "github.com/probe-lab/go-libdht/kad"
 
 // KeyFilterFunc is a function that is applied before a key is added to the table.
 // Return false to prevent the key from being added.

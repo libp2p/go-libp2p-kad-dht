@@ -3,7 +3,7 @@ package bitstr
 import (
 	"testing"
 
-	"github.com/plprobelab/go-libdht/kad/key/test"
+	"github.com/probe-lab/go-libdht/kad/key/test"
 )
 
 // TestBitStrKey7 tests a strange 7-bit Kademlia key

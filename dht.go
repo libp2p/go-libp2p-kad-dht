@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -373,11 +374,21 @@ func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 	return dht, nil
 }
 
-// lookupCheck performs a lookup request to a remote peer.ID, verifying that it is able to
+// lookupCheck performs a random lookup request to a remote peer.ID, verifying that it is able to
 // answer it correctly
 func (dht *IpfsDHT) lookupCheck(ctx context.Context, p peer.ID) error {
-	// lookup request to p requesting for its own peer.ID
-	peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p)
+	_, public, err := crypto.GenerateKeyPair(crypto.Ed25519, 0)
+	if err != nil {
+		return fmt.Errorf("failed to generate key pair for lookup check: %w", err)
+	}
+
+	peerID, err := peer.IDFromPublicKey(public)
+	if err != nil {
+		return fmt.Errorf("failed to generate peer ID from public key for lookup check: %w", err)
+	}
+
+	// lookup request to p requesting for a random peer.ID
+	peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, peerID)
 	// p should return at least its own peerid
 	if err == nil && len(peerids) == 0 {
 		return fmt.Errorf("peer %s failed to return its closest peers, got %d", p, len(peerids))

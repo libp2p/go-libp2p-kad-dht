@@ -262,29 +262,25 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 
 	// if looking for self... special case where we send it on CloserPeers.
 	targetPid := peer.ID(pmes.GetKey())
-	if targetPid == dht.self {
-		closest = []peer.ID{dht.self}
-	} else {
-		closest = dht.betterPeersToQuery(pmes, from, dht.bucketSize)
+	closest = dht.betterPeersToQuery(pmes, from, dht.bucketSize)
 
-		// Never tell a peer about itself.
-		if targetPid != from {
-			// Add the target peer to the set of closest peers if
-			// not already present in our routing table.
-			//
-			// Later, when we lookup known addresses for all peers
-			// in this set, we'll prune this peer if we don't
-			// _actually_ know where it is.
-			found := false
-			for _, p := range closest {
-				if targetPid == p {
-					found = true
-					break
-				}
+	// Never tell a peer about itself.
+	if targetPid != from {
+		// Add the target peer to the set of closest peers if
+		// not already present in our routing table.
+		//
+		// Later, when we lookup known addresses for all peers
+		// in this set, we'll prune this peer if we don't
+		// _actually_ know where it is.
+		found := false
+		for _, p := range closest {
+			if targetPid == p {
+				found = true
+				break
 			}
-			if !found {
-				closest = append(closest, targetPid)
-			}
+		}
+		if !found {
+			closest = append(closest, targetPid)
 		}
 	}
 

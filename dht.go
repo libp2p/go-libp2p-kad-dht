@@ -376,6 +376,10 @@ func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 // lookupCheck performs a lookup request to a remote peer.ID, verifying that it is able to
 // answer it correctly
 func (dht *IpfsDHT) lookupCheck(ctx context.Context, p peer.ID) error {
+	if dht.routingTable.Size() < dht.bucketSize {
+		// no need to be picky if we don't have enough peers
+		return nil
+	}
 	// lookup request to p requesting for its own peer.ID
 	peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p)
 	// p should return at least its own peerid

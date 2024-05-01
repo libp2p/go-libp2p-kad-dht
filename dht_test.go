@@ -1488,42 +1488,66 @@ func TestInvalidServer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a := setupDHT(ctx, t, false)
-	b := setupDHT(ctx, t, true)
+	s0 := setupDHT(ctx, t, false, BucketSize(2)) // server
+	s1 := setupDHT(ctx, t, false, BucketSize(2)) // server
+	c0 := setupDHT(ctx, t, true, BucketSize(2))  // client advertising server protocols
+	c1 := setupDHT(ctx, t, true, BucketSize(2))  // client advertising server protocols
+	// note that the bucket size is 2
 
-	// make b advertise all dht server protocols
-	for _, proto := range a.serverProtocols {
-		// Hang on every request.
-		b.host.SetStreamHandler(proto, func(s network.Stream) {
-			defer s.Reset() // nolint
-			<-ctx.Done()
-		})
+	// make c0 and c1 advertise all dht server protocols, but hang on all requests
+	for _, proto := range s0.serverProtocols {
+		for _, c := range []*IpfsDHT{c0, c1} {
+			// Hang on every request.
+			c.host.SetStreamHandler(proto, func(s network.Stream) {
+				defer s.Reset() // nolint
+				<-ctx.Done()
+			})
+		}
 	}
 
-	connectNoSync(t, ctx, a, b)
+	// connect s0 and c0
+	connectNoSync(t, ctx, s0, c0)
 
-	c := testCaseCids[0]
+	// add a provider (p) for a key (k) to s0
+	k := testCaseCids[0]
 	p := peer.ID("TestPeer")
-	a.ProviderStore().AddProvider(ctx, c.Hash(), peer.AddrInfo{ID: p})
+	s0.ProviderStore().AddProvider(ctx, k.Hash(), peer.AddrInfo{ID: p})
 	time.Sleep(time.Millisecond * 5) // just in case...
 
-	provs, err := b.FindProviders(ctx, c)
+	// find the provider for k from c0
+	provs, err := c0.FindProviders(ctx, k)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if len(provs) == 0 {
 		t.Fatal("Expected to get a provider back")
 	}
-
 	if provs[0].ID != p {
 		t.Fatal("expected it to be our test peer")
 	}
-	if a.routingTable.Find(b.self) != "" {
-		t.Fatal("DHT clients should not be added to routing tables")
+
+	// verify that c0 and s0 contain each other in their routing tables
+	if s0.routingTable.Find(c0.self) == "" {
+		// c0 is added to s0 routing table even though it is misbehaving, because
+		// s0's routing table is not well populated, so s0 isn't picky about who it adds.
+		t.Fatal("Misbehaving DHT servers should be added to routing table if not well populated")
 	}
-	if b.routingTable.Find(a.self) == "" {
-		t.Fatal("DHT server should have been added to the dht client's routing table")
+	if c0.routingTable.Find(s0.self) == "" {
+		t.Fatal("DHT server should have been added to the misbehaving server routing table")
+	}
+
+	// connect s0 to both s1 and c1
+	connectNoSync(t, ctx, s0, s1)
+	connectNoSync(t, ctx, s0, c1)
+
+	// s1 should be added to s0's routing table. Then, because s0's routing table
+	// contains more than bucketSize (2) entries, lookupCheck is enabled and c1
+	// shouldn't be added, because it fails the lookupCheck (hang on all requests).
+	if s0.routingTable.Find(s1.self) == "" {
+		t.Fatal("Well behaving DHT server should have been added to the server routing table")
+	}
+	if s0.routingTable.Find(c1.self) != "" {
+		t.Fatal("Misbehaving DHT servers should not be added to routing table if well populated")
 	}
 }
 

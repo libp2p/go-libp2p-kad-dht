@@ -23,6 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/libp2p/go-msgio"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
@@ -1490,23 +1491,39 @@ func TestInvalidServer(t *testing.T) {
 
 	s0 := setupDHT(ctx, t, false, BucketSize(2)) // server
 	s1 := setupDHT(ctx, t, false, BucketSize(2)) // server
-	c0 := setupDHT(ctx, t, true, BucketSize(2))  // client advertising server protocols
-	c1 := setupDHT(ctx, t, true, BucketSize(2))  // client advertising server protocols
-	// note that the bucket size is 2
+	m0 := setupDHT(ctx, t, false, BucketSize(2)) // misbehabing server
+	m1 := setupDHT(ctx, t, false, BucketSize(2)) // misbehabing server
 
-	// make c0 and c1 advertise all dht server protocols, but hang on all requests
+	// make m0 and m1 advertise all dht server protocols, but hang on all requests
 	for _, proto := range s0.serverProtocols {
-		for _, c := range []*IpfsDHT{c0, c1} {
+		for _, m := range []*IpfsDHT{m0, m1} {
 			// Hang on every request.
-			c.host.SetStreamHandler(proto, func(s network.Stream) {
-				defer s.Reset() // nolint
-				<-ctx.Done()
+			m.host.SetStreamHandler(proto, func(s network.Stream) {
+				r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
+				msgbytes, err := r.ReadMsg()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var req pb.Message
+				err = req.Unmarshal(msgbytes)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// answer with an empty response message
+				resp := pb.NewMessage(req.GetType(), nil, req.GetClusterLevel())
+
+				// send out response msg
+				err = net.WriteMsg(s, resp)
+				if err != nil {
+					t.Fatal(err)
+				}
 			})
 		}
 	}
 
-	// connect s0 and c0
-	connectNoSync(t, ctx, s0, c0)
+	// connect s0 and m0
+	connectNoSync(t, ctx, s0, m0)
 
 	// add a provider (p) for a key (k) to s0
 	k := testCaseCids[0]
@@ -1514,8 +1531,8 @@ func TestInvalidServer(t *testing.T) {
 	s0.ProviderStore().AddProvider(ctx, k.Hash(), peer.AddrInfo{ID: p})
 	time.Sleep(time.Millisecond * 5) // just in case...
 
-	// find the provider for k from c0
-	provs, err := c0.FindProviders(ctx, k)
+	// find the provider for k from m0
+	provs, err := m0.FindProviders(ctx, k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1526,27 +1543,27 @@ func TestInvalidServer(t *testing.T) {
 		t.Fatal("expected it to be our test peer")
 	}
 
-	// verify that c0 and s0 contain each other in their routing tables
-	if s0.routingTable.Find(c0.self) == "" {
-		// c0 is added to s0 routing table even though it is misbehaving, because
+	// verify that m0 and s0 contain each other in their routing tables
+	if s0.routingTable.Find(m0.self) == "" {
+		// m0 is added to s0 routing table even though it is misbehaving, because
 		// s0's routing table is not well populated, so s0 isn't picky about who it adds.
 		t.Fatal("Misbehaving DHT servers should be added to routing table if not well populated")
 	}
-	if c0.routingTable.Find(s0.self) == "" {
+	if m0.routingTable.Find(s0.self) == "" {
 		t.Fatal("DHT server should have been added to the misbehaving server routing table")
 	}
 
-	// connect s0 to both s1 and c1
+	// connect s0 to both s1 and m1
 	connectNoSync(t, ctx, s0, s1)
-	connectNoSync(t, ctx, s0, c1)
+	connectNoSync(t, ctx, s0, m1)
 
 	// s1 should be added to s0's routing table. Then, because s0's routing table
-	// contains more than bucketSize (2) entries, lookupCheck is enabled and c1
+	// contains more than bucketSize (2) entries, lookupCheck is enabled and m1
 	// shouldn't be added, because it fails the lookupCheck (hang on all requests).
 	if s0.routingTable.Find(s1.self) == "" {
 		t.Fatal("Well behaving DHT server should have been added to the server routing table")
 	}
-	if s0.routingTable.Find(c1.self) != "" {
+	if s0.routingTable.Find(m1.self) != "" {
 		t.Fatal("Misbehaving DHT servers should not be added to routing table if well populated")
 	}
 }

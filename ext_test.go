@@ -42,5 +42,7 @@ func TestInvalidRemotePeers(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
+	// hosts[1] isn't added to the routing table because it isn't responding to
+	// the DHT request
 	require.Equal(t, 0, d.routingTable.Size())
 }

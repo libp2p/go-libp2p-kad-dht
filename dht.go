@@ -378,8 +378,10 @@ func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 func (dht *IpfsDHT) lookupCheck(ctx context.Context, p peer.ID) error {
 	// lookup request to p requesting for its own peer.ID
 	peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p)
-	// p should return at least its own peerid
-	if err == nil && len(peerids) == 0 {
+	// p is expected to return at least 1 peer id, unless our routing table has
+	// less than bucketSize peers, in which case we aren't picky about who we
+	// add to the routing table.
+	if err == nil && len(peerids) == 0 && dht.routingTable.Size() >= dht.bucketSize {
 		return fmt.Errorf("peer %s failed to return its closest peers, got %d", p, len(peerids))
 	}
 	return err

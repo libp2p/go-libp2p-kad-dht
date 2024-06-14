@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-multierror"
-	logging "github.com/ipfs/go-log"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/host"

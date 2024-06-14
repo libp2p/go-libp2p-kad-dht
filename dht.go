@@ -33,7 +33,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
-	logging "github.com/ipfs/go-log"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	"go.opencensus.io/tag"

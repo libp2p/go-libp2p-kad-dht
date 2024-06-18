@@ -14,7 +14,7 @@ require (
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-datastore v0.6.0
 	github.com/ipfs/go-detect-race v0.0.1
-	github.com/ipfs/go-log v1.0.5
+	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p v0.30.0
 	github.com/libp2p/go-libp2p-kbucket v0.6.3
 	github.com/libp2p/go-libp2p-record v0.2.0
@@ -62,7 +62,7 @@ require (
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect
-	github.com/ipfs/go-log/v2 v2.5.1 // indirect
+	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipld/go-ipld-prime v0.20.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect

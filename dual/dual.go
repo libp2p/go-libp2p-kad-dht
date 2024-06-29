@@ -380,9 +380,11 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 func (dht *DHT) SearchValue(ctx context.Context, key string, opts ...routing.Option) (ch <-chan []byte, err error) {
 	ctx, end := tracer.SearchValue(dualName, ctx, key, opts...)
 	defer func() { ch, err = end(ch, err) }()
-
-	p := helper.Parallel{Routers: []routing.Routing{dht.WAN, dht.LAN}, Validator: dht.WAN.Validator}
-	return p.SearchValue(ctx, key, opts...)
+	ch, err = dht.WAN.SearchValue(ctx, key, opts...)
+	if err != nil {
+		return dht.LAN.SearchValue(ctx, key, opts...)
+	}
+	return ch, err
 }
 
 // GetPublicKey returns the public key for the given peer.

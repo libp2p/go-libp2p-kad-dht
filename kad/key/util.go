@@ -18,6 +18,22 @@ func Equal[K kad.Key[K]](a, b K) bool {
 	return a.Compare(b) == 0
 }
 
+// CommonPrefixLength returns the length of the common prefix of two keys.
+// Note that keys can be of different types, and different lengths.
+func CommonPrefixLength[K0 kad.Key[K0], K1 kad.Key[K1]](a K0, b K1) int {
+	minLen := a.BitLen()
+	if b.BitLen() < minLen {
+		minLen = b.BitLen()
+	}
+
+	for i := 0; i < minLen; i++ {
+		if a.Bit(i) != b.Bit(i) {
+			return i
+		}
+	}
+	return minLen
+}
+
 // BitString returns a string containing the binary representation of a key.
 func BitString[K kad.Key[K]](k K) string {
 	if bs, ok := any(k).(interface{ BitString() string }); ok {

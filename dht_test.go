@@ -28,6 +28,7 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1495,17 +1496,17 @@ func TestInvalidServer(t *testing.T) {
 	m1 := setupDHT(ctx, t, false, BucketSize(2)) // misbehabing server
 
 	// make m0 and m1 advertise all dht server protocols, but hang on all requests
-	for _, proto := range s0.serverProtocols {
+	for _, protocol := range s0.serverProtocols {
 		for _, m := range []*IpfsDHT{m0, m1} {
 			// Hang on every request.
-			m.host.SetStreamHandler(proto, func(s network.Stream) {
+			m.host.SetStreamHandler(protocol, func(s network.Stream) {
 				r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 				msgbytes, err := r.ReadMsg()
 				if err != nil {
 					t.Fatal(err)
 				}
 				var req pb.Message
-				err = req.Unmarshal(msgbytes)
+				err = proto.Unmarshal(msgbytes, &req)
 				if err != nil {
 					t.Fatal(err)
 				}

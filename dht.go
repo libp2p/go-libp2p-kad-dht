@@ -31,7 +31,6 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 
-	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-base32"
@@ -39,6 +38,7 @@ import (
 	"go.opencensus.io/tag"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 const tracer = tracing.Tracer("go-libp2p-kad-dht")

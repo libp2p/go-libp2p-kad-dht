@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	pstore "github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -530,7 +529,7 @@ func (dht *IpfsDHT) dialPeer(ctx context.Context, p peer.ID) error {
 	defer span.End()
 
 	// short-circuit if we're already connected.
-	if dht.host.Network().Connectedness(p) == network.Connected {
+	if HasValidConnectedness(dht.host, p) {
 		return nil
 	}
 

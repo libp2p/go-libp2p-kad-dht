@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -664,8 +663,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 			return peers, err
 		},
 		func(*qpeerset.QueryPeerset) bool {
-			connectedness := dht.host.Network().Connectedness(id)
-			return connectedness == network.Connected || connectedness == network.Limited
+			return HasValidConnectedness(dht.host, id)
 		},
 	)
 
@@ -686,8 +684,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.
-	connectedness := dht.host.Network().Connectedness(id)
-	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.Limited {
+	if dialedPeerDuringQuery || HasValidConnectedness(dht.host, id) {
 		return dht.peerstore.PeerInfo(id), nil
 	}
 

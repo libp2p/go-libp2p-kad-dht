@@ -34,7 +34,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	// peers should be in the RT because of fixLowPeers
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should have routes 0")
+			return fmt.Errorf("should have routes")
 		}
 		return nil
 	}))
@@ -45,7 +45,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	// peers will still be in the RT because we have decoupled membership from connectivity
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should have routes 1")
+			return fmt.Errorf("should have routes")
 		}
 		return nil
 	}))
@@ -59,7 +59,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should not have routes 2")
+			return fmt.Errorf("should not have routes")
 		}
 		return nil
 	}))

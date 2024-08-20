@@ -737,12 +737,10 @@ func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
 	_, span := internal.StartSpan(ctx, "IpfsDHT.FindLocal", trace.WithAttributes(attribute.Stringer("PeerID", id)))
 	defer span.End()
 
-	switch dht.host.Network().Connectedness(id) {
-	case network.Connected, network.CanConnect:
+	if dht.host.Network().Connectedness(id) == network.Connected {
 		return dht.peerstore.PeerInfo(id)
-	default:
-		return peer.AddrInfo{}
 	}
+	return peer.AddrInfo{}
 }
 
 // nearestPeersToQuery returns the routing tables closest peers.

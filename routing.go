@@ -686,7 +686,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.
 	connectedness := dht.host.Network().Connectedness(id)
-	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
+	if dialedPeerDuringQuery || connectedness == network.Connected {
 		return dht.peerstore.PeerInfo(id), nil
 	}
 

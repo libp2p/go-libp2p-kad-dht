@@ -9,26 +9,29 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key"
 )
 
+// KeyLen is the length of a 256-bit key in bytes.
+const KeyLen = 32
+
 // Key is a 256-bit Kademlia key.
 type Key struct {
-	b *[32]byte // this is a pointer to keep the size of Key small since it is often passed as argument
+	b *[KeyLen]byte // this is a pointer to keep the size of Key small since it is often passed as argument
 }
 
 var _ kad.Key[Key] = Key{}
 
 // NewKey returns a 256-bit Kademlia key whose bits are set from the supplied bytes.
 func NewKey(data []byte) Key {
-	if len(data) != 32 {
+	if len(data) != KeyLen {
 		panic(key.ErrInvalidDataLength)
 	}
-	var b [32]byte
+	var b [KeyLen]byte
 	copy(b[:], data)
 	return Key{b: &b}
 }
 
 // ZeroKey returns a 256-bit Kademlia key with all bits zeroed.
 func ZeroKey() Key {
-	var b [32]byte
+	var b [KeyLen]byte
 	return Key{b: &b}
 }
 
@@ -54,9 +57,9 @@ func (Key) BitLen() int {
 
 // Xor returns the result of the eXclusive OR operation between the key and another key of the same type.
 func (k Key) Xor(o Key) Key {
-	var xored [32]byte
+	var xored [KeyLen]byte
 	if k.b != nil && o.b != nil {
-		for i := 0; i < 32; i++ {
+		for i := 0; i < KeyLen; i++ {
 			xored[i] = k.b[i] ^ o.b[i]
 		}
 	} else if k.b != nil && o.b == nil {
@@ -73,7 +76,7 @@ func (k Key) CommonPrefixLength(o Key) int {
 		return 256
 	}
 	var x byte
-	for i := 0; i < 32; i++ {
+	for i := 0; i < KeyLen; i++ {
 		x = k.b[i] ^ o.b[i]
 		if x != 0 {
 			return i*8 + 7 - int(math.Log2(float64(x))) // TODO: make this more efficient
@@ -88,7 +91,7 @@ func (k Key) Compare(o Key) int {
 		return bytes.Compare(k.b[:], o.b[:])
 	}
 
-	var zero [32]byte
+	var zero [KeyLen]byte
 	if k.b == nil {
 		return bytes.Compare(zero[:], o.b[:])
 	}
@@ -106,7 +109,7 @@ func (k Key) HexString() string {
 // MarshalBinary marshals the key into a byte slice.
 // The bytes may be passed to NewKey to construct a new key with the same value.
 func (k Key) MarshalBinary() ([]byte, error) {
-	buf := make([]byte, 32)
+	buf := make([]byte, KeyLen)
 	if k.b != nil {
 		copy(buf, (*k.b)[:])
 	}

@@ -90,9 +90,11 @@ func (tr *Trie[K, D]) shrink() {
 		tr.branch[0], tr.branch[1] = nil, nil
 	case b0.IsEmptyLeaf() && b1.IsNonEmptyLeaf():
 		tr.key = b1.key
+		tr.data = b1.data
 		tr.branch[0], tr.branch[1] = nil, nil
 	case b0.IsNonEmptyLeaf() && b1.IsEmptyLeaf():
 		tr.key = b0.key
+		tr.data = b0.data
 		tr.branch[0], tr.branch[1] = nil, nil
 	}
 }

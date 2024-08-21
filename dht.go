@@ -737,7 +737,7 @@ func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
 	_, span := internal.StartSpan(ctx, "IpfsDHT.FindLocal", trace.WithAttributes(attribute.Stringer("PeerID", id)))
 	defer span.End()
 
-	if HasValidConnectedness(dht.host, id) {
+	if hasValidConnectedness(dht.host, id) {
 		return dht.peerstore.PeerInfo(id)
 	}
 	return peer.AddrInfo{}
@@ -926,7 +926,7 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 
 func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Duration) {
 	// Don't add addresses for self or our connected peers. We have better ones.
-	if p == dht.self || HasValidConnectedness(dht.host, p) {
+	if p == dht.self || hasValidConnectedness(dht.host, p) {
 		return
 	}
 	dht.peerstore.AddAddrs(p, dht.filterAddrs(addrs), ttl)

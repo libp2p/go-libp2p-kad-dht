@@ -1459,7 +1459,7 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo, 
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.
-	if kaddht.HasValidConnectedness(dht.h, id) {
+	if hasValidConnectedness(dht.h, id) {
 		return dht.h.Peerstore().PeerInfo(id), nil
 	}
 
@@ -1537,7 +1537,7 @@ func (dht *FullRT) getRecordFromDatastore(ctx context.Context, dskey ds.Key) (*r
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.
 func (dht *FullRT) FindLocal(id peer.ID) peer.AddrInfo {
-	if kaddht.HasValidConnectedness(dht.h, id) {
+	if hasValidConnectedness(dht.h, id) {
 		return dht.h.Peerstore().PeerInfo(id)
 	}
 	return peer.AddrInfo{}
@@ -1545,8 +1545,13 @@ func (dht *FullRT) FindLocal(id peer.ID) peer.AddrInfo {
 
 func (dht *FullRT) maybeAddAddrs(p peer.ID, addrs []multiaddr.Multiaddr, ttl time.Duration) {
 	// Don't add addresses for self or our connected peers. We have better ones.
-	if p == dht.h.ID() || kaddht.HasValidConnectedness(dht.h, p) {
+	if p == dht.h.ID() || hasValidConnectedness(dht.h, p) {
 		return
 	}
 	dht.h.Peerstore().AddAddrs(p, addrs, ttl)
+}
+
+func hasValidConnectedness(host host.Host, id peer.ID) bool {
+	connectedness := host.Network().Connectedness(id)
+	return connectedness == network.Connected || connectedness == network.Limited
 }

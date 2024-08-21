@@ -239,7 +239,7 @@ func inAddrRange(ip net.IP, ipnets []*net.IPNet) bool {
 	return false
 }
 
-func HasValidConnectedness(host host.Host, id peer.ID) bool {
+func hasValidConnectedness(host host.Host, id peer.ID) bool {
 	connectedness := host.Network().Connectedness(id)
 	return connectedness == network.Connected || connectedness == network.Limited
 }

@@ -663,7 +663,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 			return peers, err
 		},
 		func(*qpeerset.QueryPeerset) bool {
-			return HasValidConnectedness(dht.host, id)
+			return hasValidConnectedness(dht.host, id)
 		},
 	)
 
@@ -684,7 +684,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.
-	if dialedPeerDuringQuery || HasValidConnectedness(dht.host, id) {
+	if dialedPeerDuringQuery || hasValidConnectedness(dht.host, id) {
 		return dht.peerstore.PeerInfo(id), nil
 	}
 

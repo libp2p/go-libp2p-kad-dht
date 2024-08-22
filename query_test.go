@@ -39,10 +39,10 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 		return nil
 	}))
 
-	// clear the addresses of the peers so that the next queries fail
-	d1.host.Peerstore().ClearAddrs(d2.self)
-	d2.host.Peerstore().ClearAddrs(d1.self)
-	// peers will still be in the RT because RT is decoupled with the host and peerstore
+	// close both hosts so query fails
+	require.NoError(t, d1.host.Close())
+	require.NoError(t, d2.host.Close())
+	// peers will still be in the RT because we have decoupled membership from connectivity
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d2) {
 			return fmt.Errorf("should have routes")

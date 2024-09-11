@@ -74,7 +74,7 @@ func (m *messageSenderImpl) OnDisconnect(ctx context.Context, p peer.ID) {
 // measure the RTT for latency measurements.
 func (m *messageSenderImpl) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
-
+	ctx = network.WithAllowLimitedConn(ctx, "sendrequest")
 	ms, err := m.messageSenderForPeer(ctx, p)
 	if err != nil {
 		stats.Record(ctx,

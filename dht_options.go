@@ -359,7 +359,6 @@ func AddressFilter(f func([]ma.Multiaddr) []ma.Multiaddr) Option {
 	}
 }
 
-// --- NEW FEATURE ---
 // WithCustomMessageSender configures the pb.MessageSender of the IpfsDHT to use the
 // custom implementation of the pb.MessageSender
 func WithCustomMessageSender(messageSenderBuilder func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect) Option {

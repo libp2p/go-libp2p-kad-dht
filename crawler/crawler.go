@@ -75,7 +75,10 @@ type messageSender struct {
 
 // SendRequest sends a peer a message and waits for its response
 func (ms *messageSender) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
-	s, err := ms.h.NewStream(ctx, p, ms.protocols...)
+	tctx, cancel := context.WithTimeout(ctx, ms.timeout)
+	defer cancel()
+
+	s, err := ms.h.NewStream(tctx, p, ms.protocols...)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +89,6 @@ func (ms *messageSender) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Me
 	}
 
 	r := protoio.NewDelimitedReader(s, network.MessageSizeMax)
-	tctx, cancel := context.WithTimeout(ctx, ms.timeout)
-	defer cancel()
 	defer func() { _ = s.Close() }()
 
 	msg := new(pb.Message)

@@ -34,6 +34,7 @@ type (
 	DefaultCrawler struct {
 		parallelism          int
 		connectTimeout       time.Duration
+		queryTimeout         time.Duration
 		host                 host.Host
 		dhtRPC               *pb.ProtocolMessenger
 		dialAddressExtendDur time.Duration
@@ -60,6 +61,7 @@ func NewDefaultCrawler(host host.Host, opts ...Option) (*DefaultCrawler, error) 
 	return &DefaultCrawler{
 		parallelism:          o.parallelism,
 		connectTimeout:       o.connectTimeout,
+		queryTimeout:         3 * o.connectTimeout,
 		host:                 host,
 		dhtRPC:               pm,
 		dialAddressExtendDur: o.dialAddressExtendDur,
@@ -145,6 +147,8 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 	for i := 0; i < c.parallelism; i++ {
 		go func() {
 			defer wg.Done()
+			ctx, cancel := context.WithTimeout(ctx, c.queryTimeout)
+			defer cancel()
 			for p := range jobs {
 				res := c.queryPeer(ctx, p)
 				results <- res

@@ -123,7 +123,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option)
 		baseOpts = append(baseOpts, Mode(ModeServer))
 	}
 
-	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport, swarmt.OptDisableQUIC), new(bhost.HostOpts))
 	require.NoError(t, err)
 	host.Start()
 	t.Cleanup(func() { host.Close() })

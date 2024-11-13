@@ -7,6 +7,7 @@ import (
 	"github.com/ipfs/boxo/ipns"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
@@ -19,9 +20,7 @@ import (
 )
 
 // DefaultPrefix is the application specific prefix attached to all DHT protocols by default.
-const DefaultPrefix protocol.ID = "/ipfs"
-
-const defaultBucketSize = 20
+const DefaultPrefix protocol.ID = amino.ProtocolPrefix
 
 // ModeOpt describes what mode the dht should operate in
 type ModeOpt int
@@ -127,9 +126,9 @@ var Defaults = func(o *Config) error {
 
 	o.MaxRecordAge = providers.ProvideValidity
 
-	o.BucketSize = defaultBucketSize
-	o.Concurrency = 10
-	o.Resiliency = 3
+	o.BucketSize = amino.DefaultBucketSize
+	o.Concurrency = amino.DefaultConcurrency
+	o.Resiliency = amino.DefaultResiliency
 	o.LookupCheckConcurrency = 256
 
 	// MAGIC: It makes sense to set it to a multiple of OptProvReturnRatio * BucketSize. We chose a multiple of 4.
@@ -139,11 +138,12 @@ var Defaults = func(o *Config) error {
 }
 
 func (c *Config) Validate() error {
+	// Configuration is validated and enforced only if prefix matches Amino DHT
 	if c.ProtocolPrefix != DefaultPrefix {
 		return nil
 	}
-	if c.BucketSize != defaultBucketSize {
-		return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, defaultBucketSize)
+	if c.BucketSize != amino.DefaultBucketSize {
+		return fmt.Errorf("protocol prefix %s must use bucket size %d", DefaultPrefix, amino.DefaultBucketSize)
 	}
 	if !c.EnableProviders {
 		return fmt.Errorf("protocol prefix %s must have providers enabled", DefaultPrefix)

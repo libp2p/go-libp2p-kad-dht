@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
@@ -34,7 +35,7 @@ const (
 )
 
 // DefaultPrefix is the application specific prefix attached to all DHT protocols by default.
-const DefaultPrefix protocol.ID = "/ipfs"
+const DefaultPrefix protocol.ID = amino.ProtocolPrefix
 
 type Option = dhtcfg.Option
 
@@ -136,7 +137,7 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 // ProtocolPrefix sets an application specific prefix to be attached to all DHT protocols. For example,
 // /myapp/kad/1.0.0 instead of /ipfs/kad/1.0.0. Prefix should be of the form /myapp.
 //
-// Defaults to dht.DefaultPrefix
+// Defaults to amino.ProtocolPrefix
 func ProtocolPrefix(prefix protocol.ID) Option {
 	return func(c *dhtcfg.Config) error {
 		c.ProtocolPrefix = prefix
@@ -167,7 +168,7 @@ func V1ProtocolOverride(proto protocol.ID) Option {
 
 // BucketSize configures the bucket size (k in the Kademlia paper) of the routing table.
 //
-// The default value is 20.
+// The default value is amino.DefaultBucketSize
 func BucketSize(bucketSize int) Option {
 	return func(c *dhtcfg.Config) error {
 		c.BucketSize = bucketSize
@@ -177,7 +178,7 @@ func BucketSize(bucketSize int) Option {
 
 // Concurrency configures the number of concurrent requests (alpha in the Kademlia paper) for a given query path.
 //
-// The default value is 10.
+// The default value is amino.DefaultConcurrency
 func Concurrency(alpha int) Option {
 	return func(c *dhtcfg.Config) error {
 		c.Concurrency = alpha
@@ -188,7 +189,7 @@ func Concurrency(alpha int) Option {
 // Resiliency configures the number of peers closest to a target that must have responded in order for a given query
 // path to complete.
 //
-// The default value is 3.
+// The default value is amino.DefaultResiliency
 func Resiliency(beta int) Option {
 	return func(c *dhtcfg.Config) error {
 		c.Resiliency = beta

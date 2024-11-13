@@ -12,7 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru v1.0.2
-	github.com/ipfs/boxo v0.22.0
+	github.com/ipfs/boxo v0.24.3
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-datastore v0.6.0
 	github.com/ipfs/go-detect-race v0.0.1
@@ -34,8 +34,8 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.24.0
-	go.opentelemetry.io/otel v1.27.0
-	go.opentelemetry.io/otel/trace v1.27.0
+	go.opentelemetry.io/otel v1.31.0
+	go.opentelemetry.io/otel/trace v1.31.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	gonum.org/v1/gonum v0.15.0
@@ -126,7 +126,7 @@ require (
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	go.opentelemetry.io/otel/metric v1.27.0 // indirect
+	go.opentelemetry.io/otel/metric v1.31.0 // indirect
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/fx v1.23.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect

@@ -8,6 +8,8 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
+	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
@@ -47,6 +49,7 @@ type Config struct {
 	ProviderStore          providers.ProviderStore
 	QueryPeerFilter        QueryFilterFunc
 	LookupCheckConcurrency int
+	MsgSenderBuilder       func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect
 
 	RoutingTable struct {
 		RefreshQueryTimeout time.Duration
@@ -113,6 +116,7 @@ var Defaults = func(o *Config) error {
 	o.EnableProviders = true
 	o.EnableValues = true
 	o.QueryPeerFilter = EmptyQueryFilter
+	o.MsgSenderBuilder = net.NewMessageSenderImpl
 
 	o.RoutingTable.LatencyTolerance = 10 * time.Second
 	o.RoutingTable.RefreshQueryTimeout = 10 * time.Second

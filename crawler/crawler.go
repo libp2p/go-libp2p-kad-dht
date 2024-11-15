@@ -147,10 +147,10 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 	for i := 0; i < c.parallelism; i++ {
 		go func() {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(ctx, c.queryTimeout)
-			defer cancel()
 			for p := range jobs {
-				res := c.queryPeer(ctx, p)
+				qctx, cancel := context.WithTimeout(ctx, c.queryTimeout)
+				res := c.queryPeer(qctx, p)
+				cancel() // do not defer, cleanup after each job
 				results <- res
 			}
 		}()

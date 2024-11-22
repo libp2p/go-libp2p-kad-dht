@@ -547,9 +547,12 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		if psTryAdd(p) {
 			select {
 			case peerOut <- p:
+				// Add tracing event for finding a provider
 				span.AddEvent("found provider", trace.WithAttributes(
 					attribute.Stringer("peer", p.ID),
 					attribute.Stringer("from", dht.self),
+					attribute.Int("provider_addrs_count", len(p.Addrs)),
+					attribute.Bool("found_in_provider_store", true),
 				))
 			case <-ctx.Done():
 				return
@@ -590,6 +593,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 						span.AddEvent("found provider", trace.WithAttributes(
 							attribute.Stringer("peer", prov.ID),
 							attribute.Stringer("from", p),
+							attribute.Int("provider_addrs_count", len(prov.Addrs)),
 						))
 					case <-ctx.Done():
 						logger.Debug("context timed out sending more providers")

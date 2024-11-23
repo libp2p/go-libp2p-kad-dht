@@ -29,6 +29,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
+	manet "github.com/multiformats/go-multiaddr/net"
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/crawler"
@@ -302,6 +303,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 					logger.Debugf("no connections to %v after successful query. keeping addresses from the peerstore", p)
 					addrs = dht.h.Peerstore().Addrs(p)
 				}
+
+				addrs = filterPublicAddrs(addrs)
 
 				keep := kaddht.PublicRoutingTableFilter(dht, p)
 				if !keep {
@@ -619,6 +622,31 @@ func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.
 	}()
 
 	return out, nil
+}
+
+// filterPublicAddrs returns a new slice of multiaddrs with any private, loopback,
+// or unspecified multiaddrs removed.
+func filterPublicAddrs(maddrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+	filtered := multiaddr.FilterAddrs(maddrs, func(target multiaddr.Multiaddr) bool {
+		if target == nil {
+			return true
+		}
+		c, _ := multiaddr.SplitFirst(target)
+		if c == nil {
+			return false
+		}
+		switch c.Protocol().Code {
+		case multiaddr.P_IP4, multiaddr.P_IP6, multiaddr.P_IP6ZONE, multiaddr.P_IPCIDR:
+			return manet.IsPublicAddr(target) && !manet.IsIPUnspecified(target)
+		case multiaddr.P_DNS, multiaddr.P_DNS4, multiaddr.P_DNS6, multiaddr.P_DNSADDR:
+			return c.Value() != "localhost"
+		}
+		return true
+	})
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 func (dht *FullRT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},

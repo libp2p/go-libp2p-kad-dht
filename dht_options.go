@@ -197,7 +197,7 @@ func Resiliency(beta int) Option {
 	}
 }
 
-// LookupInterval configures maximal number of go routines that can be used to
+// LookupCheckConcurrency configures maximal number of go routines that can be used to
 // perform a lookup check operation, before adding a new node to the routing table.
 func LookupCheckConcurrency(n int) Option {
 	return func(c *dhtcfg.Config) error {

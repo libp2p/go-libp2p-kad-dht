@@ -48,7 +48,7 @@ func peerInfoToPBPeer(p peer.AddrInfo) Message_Peer {
 	return pbp
 }
 
-// PBPeerToPeer turns a *Message_Peer into its peer.AddrInfo counterpart
+// PBPeerToPeerInfo turns a *Message_Peer into its peer.AddrInfo counterpart
 func PBPeerToPeerInfo(pbp Message_Peer) peer.AddrInfo {
 	return peer.AddrInfo{
 		ID:    peer.ID(pbp.Id),

@@ -44,11 +44,22 @@ type messageSenderImpl struct {
 }
 
 func NewMessageSenderImpl(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect {
-	return &messageSenderImpl{
+	fmt.Println("new msg sender created!")
+	msi := &messageSenderImpl{
 		host:      h,
 		strmap:    make(map[peer.ID]*peerMessageSender),
 		protocols: protos,
 	}
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		for {
+			<-t.C
+			msi.smlk.Lock()
+			fmt.Println("map size", len(msi.strmap))
+			msi.smlk.Unlock()
+		}
+	}()
+	return msi
 }
 
 func (m *messageSenderImpl) OnDisconnect(ctx context.Context, p peer.ID) {

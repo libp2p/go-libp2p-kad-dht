@@ -15,6 +15,7 @@ import (
 	"github.com/multiformats/go-multihash"
 
 	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
+	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -201,6 +202,13 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 	}
 
 	rt.wg.Add(1)
+	sub, err := h.EventBus().Subscribe(new(event.EvtPeerConnectednessChanged))
+	if err != nil {
+		return nil, err
+	}
+	go rt.cleanup(ctx, sub, func(p peer.ID) {
+		ms.OnDisconnect(ctx, p)
+	})
 	go rt.runCrawler(ctx)
 
 	return rt, nil
@@ -209,6 +217,23 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 type crawlVal struct {
 	addrs []multiaddr.Multiaddr
 	key   kadkey.Key
+}
+
+func (dht *FullRT) cleanup(ctx context.Context, sub event.Subscription, removePeer func(peer.ID)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e, ok := <-sub.Out():
+			if !ok {
+				return
+			}
+			ee := e.(event.EvtPeerConnectednessChanged)
+			if dht.Host().Network().Connectedness(ee.Peer) != network.Connected {
+				removePeer(ee.Peer)
+			}
+		}
+	}
 }
 
 func (dht *FullRT) TriggerRefresh(ctx context.Context) error {

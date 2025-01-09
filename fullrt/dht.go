@@ -223,17 +223,19 @@ type crawlVal struct {
 func (dht *FullRT) runSubscriber() {
 	defer dht.wg.Done()
 	ms, ok := dht.messageSender.(dht_pb.MessageSenderWithDisconnect)
+	defer dht.peerConnectednessSubscriber.Close()
 	if !ok {
 		return
 	}
-	defer dht.peerConnectednessSubscriber.Close()
 	for {
 		select {
 		case e := <-dht.peerConnectednessSubscriber.Out():
 			pc, ok := e.(event.EvtPeerConnectednessChanged)
 			if !ok {
 				logger.Errorf("invalid event message type: %T", e)
+				continue
 			}
+
 			if pc.Connectedness != network.Connected {
 				ms.OnDisconnect(dht.ctx, pc.Peer)
 			}

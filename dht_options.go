@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
@@ -365,6 +367,16 @@ func AddressFilter(f func([]ma.Multiaddr) []ma.Multiaddr) Option {
 func WithCustomMessageSender(messageSenderBuilder func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect) Option {
 	return func(c *dhtcfg.Config) error {
 		c.MsgSenderBuilder = messageSenderBuilder
+		return nil
+	}
+}
+
+// OnRequestHook registers a callback function that will be invoked
+// for every incoming DHT protocol message. Note: Ensure that the
+// callback executes efficiently, as it can block the entire message handler.
+func OnRequestHook(f func(ctx context.Context, s network.Stream, req pb.Message)) Option {
+	return func(c *dhtcfg.Config) error {
+		c.OnRequestHook = f
 		return nil
 	}
 }

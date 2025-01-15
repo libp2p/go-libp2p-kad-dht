@@ -100,6 +100,10 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			metrics.ReceivedBytes.M(int64(msgLen)),
 		)
 
+		if dht.onRequestHook != nil {
+			dht.onRequestHook(ctx, s, req)
+		}
+
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))

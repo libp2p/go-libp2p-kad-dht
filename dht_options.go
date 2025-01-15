@@ -371,9 +371,10 @@ func WithCustomMessageSender(messageSenderBuilder func(h host.Host, protos []pro
 	}
 }
 
-// OnRequestHook registers a callback function that will be invoked
-// for every incoming DHT protocol message. Note: Ensure that the
-// callback executes efficiently, as it can block the entire message handler.
+// OnRequestHook registers a callback function that will be invoked for every
+// incoming DHT protocol message.
+// Note: Ensure that the callback executes efficiently, as it will block the
+// entire message handler.
 func OnRequestHook(f func(ctx context.Context, s network.Stream, req pb.Message)) Option {
 	return func(c *dhtcfg.Config) error {
 		c.OnRequestHook = f

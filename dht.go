@@ -20,7 +20,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
-	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -206,7 +205,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.disableFixLowPeers = cfg.DisableFixLowPeers
 
 	dht.Validator = cfg.Validator
-	dht.msgSender = net.NewMessageSenderImpl(h, dht.protocols)
+	dht.msgSender = cfg.MsgSenderBuilder(h, dht.protocols)
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender)
 	if err != nil {
 		return nil, err
@@ -737,12 +736,10 @@ func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
 	_, span := internal.StartSpan(ctx, "IpfsDHT.FindLocal", trace.WithAttributes(attribute.Stringer("PeerID", id)))
 	defer span.End()
 
-	switch dht.host.Network().Connectedness(id) {
-	case network.Connected, network.CanConnect:
+	if hasValidConnectedness(dht.host, id) {
 		return dht.peerstore.PeerInfo(id)
-	default:
-		return peer.AddrInfo{}
 	}
+	return peer.AddrInfo{}
 }
 
 // nearestPeersToQuery returns the routing tables closest peers.
@@ -928,7 +925,7 @@ func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...ta
 
 func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Duration) {
 	// Don't add addresses for self or our connected peers. We have better ones.
-	if p == dht.self || dht.host.Network().Connectedness(p) == network.Connected {
+	if p == dht.self || hasValidConnectedness(dht.host, p) {
 		return
 	}
 	dht.peerstore.AddAddrs(p, dht.filterAddrs(addrs), ttl)

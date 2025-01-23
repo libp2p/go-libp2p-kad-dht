@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -548,9 +547,12 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		if psTryAdd(p) {
 			select {
 			case peerOut <- p:
+				// Add tracing event for finding a provider
 				span.AddEvent("found provider", trace.WithAttributes(
 					attribute.Stringer("peer", p.ID),
 					attribute.Stringer("from", dht.self),
+					attribute.Int("provider_addrs_count", len(p.Addrs)),
+					attribute.Bool("found_in_provider_store", true),
 				))
 			case <-ctx.Done():
 				return
@@ -591,6 +593,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 						span.AddEvent("found provider", trace.WithAttributes(
 							attribute.Stringer("peer", prov.ID),
 							attribute.Stringer("from", p),
+							attribute.Int("provider_addrs_count", len(prov.Addrs)),
 						))
 					case <-ctx.Done():
 						logger.Debug("context timed out sending more providers")
@@ -664,7 +667,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 			return peers, err
 		},
 		func(*qpeerset.QueryPeerset) bool {
-			return dht.host.Network().Connectedness(id) == network.Connected
+			return hasValidConnectedness(dht.host, id)
 		},
 	)
 
@@ -685,8 +688,7 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 
 	// Return peer information if we tried to dial the peer during the query or we are (or recently were) connected
 	// to the peer.
-	connectedness := dht.host.Network().Connectedness(id)
-	if dialedPeerDuringQuery || connectedness == network.Connected || connectedness == network.CanConnect {
+	if dialedPeerDuringQuery || hasValidConnectedness(dht.host, id) {
 		return dht.peerstore.PeerInfo(id), nil
 	}
 

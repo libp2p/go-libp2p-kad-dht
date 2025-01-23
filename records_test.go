@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/test"
 
 	u "github.com/ipfs/boxo/util"
+	"github.com/ipfs/go-test/random"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
@@ -151,7 +152,7 @@ func TestPubkeyNotFound(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	r := u.NewSeededRand(15) // generate deterministic keypair
+	r := random.NewSeededRand(15) // generate deterministic keypair
 	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 2048, r)
 	if err != nil {
 		t.Fatal(err)

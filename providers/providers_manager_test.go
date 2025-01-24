@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
 
 	mh "github.com/multiformats/go-multihash"
 
-	u "github.com/ipfs/boxo/util"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -35,7 +35,7 @@ func TestProviderManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := u.Hash([]byte("test"))
+	a := internal.Hash([]byte("test"))
 	p.AddProvider(ctx, a, peer.AddrInfo{ID: peer.ID("testingprovider")})
 
 	// Not cached
@@ -86,7 +86,7 @@ func TestProvidersDatastore(t *testing.T) {
 	friend := peer.ID("friend")
 	var mhs []mh.Multihash
 	for i := 0; i < 100; i++ {
-		h := u.Hash([]byte(fmt.Sprint(i)))
+		h := internal.Hash([]byte(fmt.Sprint(i)))
 		mhs = append(mhs, h)
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: friend})
 	}
@@ -105,7 +105,7 @@ func TestProvidersDatastore(t *testing.T) {
 func TestProvidersSerialization(t *testing.T) {
 	dstore := dssync.MutexWrap(ds.NewMapDatastore())
 
-	k := u.Hash(([]byte("my key!")))
+	k := internal.Hash(([]byte("my key!")))
 	p1 := peer.ID("peer one")
 	p2 := peer.ID("peer two")
 	pt1 := time.Now()
@@ -174,7 +174,7 @@ func TestProvidesExpire(t *testing.T) {
 	peers := []peer.ID{"a", "b"}
 	var mhs []mh.Multihash
 	for i := 0; i < 10; i++ {
-		h := u.Hash([]byte(fmt.Sprint(i)))
+		h := internal.Hash([]byte(fmt.Sprint(i)))
 		mhs = append(mhs, h)
 	}
 
@@ -235,8 +235,10 @@ func TestProvidesExpire(t *testing.T) {
 	}
 }
 
-var _ = io.NopCloser
-var _ = os.DevNull
+var (
+	_ = io.NopCloser
+	_ = os.DevNull
+)
 
 // TestLargeProvidersSet can be used for profiling.
 // The datastore can be switched to levelDB by uncommenting the section below and the import above
@@ -286,7 +288,7 @@ func TestLargeProvidersSet(t *testing.T) {
 
 	var mhs []mh.Multihash
 	for i := 0; i < 1000; i++ {
-		h := u.Hash([]byte(fmt.Sprint(i)))
+		h := internal.Hash([]byte(fmt.Sprint(i)))
 		mhs = append(mhs, h)
 		for _, pid := range peers {
 			p.AddProvider(ctx, h, peer.AddrInfo{ID: pid})
@@ -311,8 +313,8 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	defer cancel()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
-	h1 := u.Hash([]byte("1"))
-	h2 := u.Hash([]byte("2"))
+	h1 := internal.Hash([]byte("1"))
+	h2 := internal.Hash([]byte("2"))
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +343,7 @@ func TestWriteUpdatesCache(t *testing.T) {
 	defer cancel()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
-	h1 := u.Hash([]byte("1"))
+	h1 := internal.Hash([]byte("1"))
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
 		t.Fatal(err)

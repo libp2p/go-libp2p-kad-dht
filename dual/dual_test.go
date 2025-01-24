@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -22,8 +22,8 @@ import (
 var wancid, lancid cid.Cid
 
 func init() {
-	wancid = cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("wan cid -- value")))
-	lancid = cid.NewCidV1(cid.DagCBOR, u.Hash([]byte("lan cid -- value")))
+	wancid = cid.NewCidV1(cid.DagCBOR, internal.Hash([]byte("wan cid -- value")))
+	lancid = cid.NewCidV1(cid.DagCBOR, internal.Hash([]byte("lan cid -- value")))
 }
 
 type blankValidator struct{}

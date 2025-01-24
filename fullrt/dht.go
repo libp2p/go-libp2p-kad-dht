@@ -26,7 +26,6 @@ import (
 	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/gogo/protobuf/proto"
-	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -53,8 +52,10 @@ import (
 
 var logger = logging.Logger("fullrtdht")
 
-const tracer = tracing.Tracer("go-libp2p-kad-dht/fullrt")
-const dhtName = "FullRT"
+const (
+	tracer  = tracing.Tracer("go-libp2p-kad-dht/fullrt")
+	dhtName = "FullRT"
+)
 
 const rtRefreshLimitsMsg = `Accelerated DHT client was unable to fully refresh its routing table due to Resource Manager limits, which may degrade content routing. Consider increasing resource limits. See debug logs for the "dht-crawler" subsystem for details.`
 
@@ -530,7 +531,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 	}
 
 	rec := record.MakePutRecord(key, value)
-	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	rec.TimeReceived = internal.FormatRFC3339(time.Now())
 	err = dht.putLocal(ctx, key, rec)
 	if err != nil {
 		return err
@@ -656,7 +657,8 @@ func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.
 }
 
 func (dht *FullRT) searchValueQuorum(ctx context.Context, key string, valCh <-chan RecvdVal, stopCh chan struct{},
-	out chan<- []byte, nvals int) ([]byte, map[peer.ID]struct{}, bool) {
+	out chan<- []byte, nvals int,
+) ([]byte, map[peer.ID]struct{}, bool) {
 	numResponses := 0
 	return dht.processValues(ctx, key, valCh,
 		func(ctx context.Context, v RecvdVal, better bool) bool {
@@ -678,7 +680,8 @@ func (dht *FullRT) searchValueQuorum(ctx context.Context, key string, valCh <-ch
 }
 
 func (dht *FullRT) processValues(ctx context.Context, key string, vals <-chan RecvdVal,
-	newVal func(ctx context.Context, v RecvdVal, better bool) bool) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
+	newVal func(ctx context.Context, v RecvdVal, better bool) bool,
+) (best []byte, peersWithBest map[peer.ID]struct{}, aborted bool) {
 loop:
 	for {
 		if aborted {

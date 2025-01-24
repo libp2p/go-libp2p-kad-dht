@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -35,7 +36,6 @@ import (
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
-	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-cid"
 	detectrace "github.com/ipfs/go-detect-race"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -53,10 +53,10 @@ func init() {
 		var newCid cid.Cid
 		switch i % 3 {
 		case 0:
-			mhv := u.Hash([]byte(v))
+			mhv := internal.Hash([]byte(v))
 			newCid = cid.NewCidV0(mhv)
 		case 1:
-			mhv := u.Hash([]byte(v))
+			mhv := internal.Hash([]byte(v))
 			newCid = cid.NewCidV1(cid.DagCBOR, mhv)
 		case 2:
 			rawMh := make([]byte, 12)
@@ -857,7 +857,7 @@ func TestRefresh(t *testing.T) {
 		time.Sleep(time.Microsecond * 50)
 	}
 
-	if u.Debug {
+	if testing.Verbose() {
 		// the routing tables should be full now. let's inspect them.
 		printRoutingTables(dhts)
 	}
@@ -1002,7 +1002,7 @@ func TestPeriodicRefresh(t *testing.T) {
 		}
 	}
 
-	if u.Debug {
+	if testing.Verbose() {
 		printRoutingTables(dhts)
 	}
 
@@ -1021,7 +1021,7 @@ func TestPeriodicRefresh(t *testing.T) {
 	// until the routing tables look better, or some long timeout for the failure case.
 	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
 
-	if u.Debug {
+	if testing.Verbose() {
 		printRoutingTables(dhts)
 	}
 }
@@ -1056,7 +1056,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 	bootstrap(t, ctxT, dhts)
 
-	if u.Debug {
+	if testing.Verbose() {
 		// the routing tables should be full now. let's inspect them.
 		t.Logf("checking routing table of %d", nDHTs)
 		for _, dht := range dhts {

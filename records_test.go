@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p/core/test"
 
-	u "github.com/ipfs/boxo/util"
 	"github.com/ipfs/go-test/random"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
@@ -205,7 +205,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	rec.TimeReceived = internal.FormatRFC3339(time.Now())
 	err = dhtB.putLocal(ctx, pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	rec.TimeReceived = internal.FormatRFC3339(time.Now())
 	err = dhtB.putLocal(ctx, pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
@@ -317,9 +317,7 @@ func TestValuesDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			var (
-				optsA, optsB []Option
-			)
+			var optsA, optsB []Option
 			optsA = append(optsA, ProtocolPrefix("/valuesMaybeDisabled"))
 			optsB = append(optsB, ProtocolPrefix("/valuesMaybeDisabled"))
 

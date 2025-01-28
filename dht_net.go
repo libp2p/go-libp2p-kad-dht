@@ -102,7 +102,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 		)
 
 		if dht.onRequestHook != nil {
-			dht.onRequestHook(ctx, s, req)
+			dht.onRequestHook(ctx, s, &req)
 		}
 
 		handler := dht.handlerForMsgType(req.GetType())

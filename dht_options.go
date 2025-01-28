@@ -375,7 +375,7 @@ func WithCustomMessageSender(messageSenderBuilder func(h host.Host, protos []pro
 // incoming DHT protocol message.
 // Note: Ensure that the callback executes efficiently, as it will block the
 // entire message handler.
-func OnRequestHook(f func(ctx context.Context, s network.Stream, req pb.Message)) Option {
+func OnRequestHook(f func(ctx context.Context, s network.Stream, req *pb.Message)) Option {
 	return func(c *dhtcfg.Config) error {
 		c.OnRequestHook = f
 		return nil

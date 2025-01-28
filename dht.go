@@ -40,8 +40,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const tracer = tracing.Tracer("go-libp2p-kad-dht")
-const dhtName = "IpfsDHT"
+const (
+	tracer  = tracing.Tracer("go-libp2p-kad-dht")
+	dhtName = "IpfsDHT"
+)
 
 var (
 	logger     = logging.Logger("dht")
@@ -164,7 +166,7 @@ type IpfsDHT struct {
 	// Mostly used to filter out localhost and local addresses.
 	addrFilter func([]ma.Multiaddr) []ma.Multiaddr
 
-	onRequestHook func(ctx context.Context, s network.Stream, req pb.Message)
+	onRequestHook func(ctx context.Context, s network.Stream, req *pb.Message)
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -420,7 +422,6 @@ func makeRoutingTable(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutbound
 		df, err := peerdiversity.NewFilter(dht.rtPeerDiversityFilter, "rt/diversity", func(p peer.ID) int {
 			return kb.CommonPrefixLen(dht.selfKey, kb.ConvertPeerID(p))
 		})
-
 		if err != nil {
 			return nil, fmt.Errorf("failed to construct peer diversity filter: %w", err)
 		}

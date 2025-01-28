@@ -65,7 +65,7 @@ type Config struct {
 
 	BootstrapPeers func() []peer.AddrInfo
 	AddressFilter  func([]ma.Multiaddr) []ma.Multiaddr
-	OnRequestHook  func(ctx context.Context, s network.Stream, req pb.Message)
+	OnRequestHook  func(ctx context.Context, s network.Stream, req *pb.Message)
 
 	// test specific Config options
 	DisableFixLowPeers          bool

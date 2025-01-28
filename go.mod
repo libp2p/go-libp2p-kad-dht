@@ -2,8 +2,6 @@ module github.com/libp2p/go-libp2p-kad-dht
 
 go 1.22.0
 
-toolchain go1.23.5
-
 retract v0.24.3 // this includes a breaking change and should have been released as v0.25.0
 
 require (

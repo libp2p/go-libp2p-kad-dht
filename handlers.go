@@ -10,12 +10,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	pstore "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 
-	"github.com/gogo/protobuf/proto"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/multiformats/go-base32"
+	"google.golang.org/protobuf/proto"
 )
 
 // dhthandler specifies the signature of functions that handle DHT messages.

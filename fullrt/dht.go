@@ -25,11 +25,11 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
+	"google.golang.org/protobuf/proto"
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/crawler"

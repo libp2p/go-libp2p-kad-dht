@@ -8,8 +8,11 @@ import (
 
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 
+	logging "github.com/ipfs/go-log"
 	ma "github.com/multiformats/go-multiaddr"
 )
+
+var dfLog = logging.Logger("dht/RtDiversityFilter")
 
 var _ peerdiversity.PeerIPGroupFilter = (*rtPeerIPGroupFilter)(nil)
 
@@ -48,12 +51,15 @@ func (r *rtPeerIPGroupFilter) Allow(g peerdiversity.PeerGroupInfo) bool {
 	cpl := g.Cpl
 
 	if r.tableIpGroupCount[key] >= r.maxForTable {
-
+		dfLog.Debugw("rejecting (max for table) diversity", "peer', g.Id, "cpl", g.Cpl, "ip group", g.IPGroupKey)
 		return false
 	}
 
 	c, ok := r.cplIpGroupCount[cpl]
 	allow := !ok || c[key] < r.maxPerCpl
+	if !allow {
+		dfLog.Debugw("rejecting (max for cpl) diversity", "peer", g.Id, "cpl", g.Cpl, "ip group", g.IPGroupKey)
+	}
 	return allow
 }
 

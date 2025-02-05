@@ -364,7 +364,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		}
 
 		// We run the addrs filter after checking for the length,
-		// this allows transient nodes with varying /p2p-circuit addresses to still have their anouncement go through.
+		// this allows transient nodes with varying /p2p-circuit addresses to still have their announcement go through.
 		addrs := dht.filterAddrs(pi.Addrs)
 		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs})
 	}

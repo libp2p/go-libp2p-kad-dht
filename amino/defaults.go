@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// ProtocolPrefix is the base prefix for Amono DHT protocols.
+	// ProtocolPrefix is the base prefix for Amino DHT protocols.
 	ProtocolPrefix protocol.ID = "/ipfs"
 
 	// ProtocolID is the latest protocol identifier for the Amino DHT.

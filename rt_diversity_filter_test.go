@@ -50,7 +50,7 @@ func TestRTPeerDiversityFilter(t *testing.T) {
 	require.True(t, r.Allow(g2))
 	r.Increment(g2)
 
-	// and then it dosen't work again
+	// and then it doesn't work again
 	require.False(t, r.Allow(g2))
 }
 

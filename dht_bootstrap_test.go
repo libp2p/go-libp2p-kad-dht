@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/event"
-	"github.com/libp2p/go-libp2p-core/peer"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/event"
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/stretchr/testify/require"
 )
@@ -191,8 +191,8 @@ func TestBootstrappersReplacable(t *testing.T) {
 	require.NoError(t, d.host.Network().ClosePeer(d5.self))
 	connectNoSync(t, ctx, d, d1)
 	connectNoSync(t, ctx, d, d5)
-	d.peerFound(ctx, d5.self, true)
-	d.peerFound(ctx, d1.self, true)
+	d.peerFound(d5.self)
+	d.peerFound(d1.self)
 	time.Sleep(1 * time.Second)
 
 	require.Len(t, d.routingTable.ListPeers(), 2)

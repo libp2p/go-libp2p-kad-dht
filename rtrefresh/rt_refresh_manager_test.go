@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/test"
+	"github.com/libp2p/go-libp2p/core/test"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	pstore "github.com/libp2p/go-libp2p-peerstore"
+	pstore "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 
 	"github.com/stretchr/testify/require"
 )
@@ -65,7 +65,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	b, _ := rt.TryAddPeer(p, true, false)
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
-	require.NoError(t, r.doRefresh(true))
+	require.NoError(t, r.doRefresh(ctx, true))
 
 	for i := uint(0); i < lastCpl+1; i++ {
 		if i == icpl {
@@ -88,7 +88,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	b, _ = rt.TryAddPeer(p, true, false)
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
-	require.NoError(t, r.doRefresh(true))
+	require.NoError(t, r.doRefresh(ctx, true))
 
 	for i := uint(0); i < 10; i++ {
 		if i == icpl {

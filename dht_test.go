@@ -14,14 +14,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/event"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/peerstore"
-	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
+	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/event"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/libp2p/go-msgio"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +39,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	detectrace "github.com/ipfs/go-detect-race"
-	u "github.com/ipfs/go-ipfs-util"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
@@ -47,10 +54,10 @@ func init() {
 		var newCid cid.Cid
 		switch i % 3 {
 		case 0:
-			mhv := u.Hash([]byte(v))
+			mhv := internal.Hash([]byte(v))
 			newCid = cid.NewCidV0(mhv)
 		case 1:
-			mhv := u.Hash([]byte(v))
+			mhv := internal.Hash([]byte(v))
 			newCid = cid.NewCidV1(cid.DagCBOR, mhv)
 		case 2:
 			rawMh := make([]byte, 12)
@@ -119,6 +126,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option)
 
 	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host.Start()
 	t.Cleanup(func() { host.Close() })
 
 	d, err := New(ctx, host, append(baseOpts, options...)...)
@@ -164,9 +172,7 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *IpfsDHT) {
 		t.Fatal("peers setup incorrectly: no local address")
 	}
 
-	a.peerstore.AddAddrs(idB, addrB, peerstore.TempAddrTTL)
-	pi := peer.AddrInfo{ID: idB}
-	if err := a.host.Connect(ctx, pi); err != nil {
+	if err := a.host.Connect(ctx, peer.AddrInfo{ID: idB, Addrs: addrB}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -293,8 +299,6 @@ func TestValueGetSet(t *testing.T) {
 	if string(val) != "world" {
 		t.Fatalf("Expected 'world' got '%s'", string(val))
 	}
-
-	// late connect
 
 	connect(t, ctx, dhts[2], dhts[0])
 	connect(t, ctx, dhts[2], dhts[1])
@@ -561,9 +565,133 @@ func TestProvides(t *testing.T) {
 			if prov.ID != dhts[3].self {
 				t.Fatal("Got back wrong provider")
 			}
+			if len(prov.Addrs) == 0 {
+				t.Fatal("Got no addresses back")
+			}
 		case <-ctxT.Done():
 			t.Fatal("Did not get a provider back.")
 		}
+	}
+}
+
+type testMessageSender struct {
+	sendRequest func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error)
+	sendMessage func(ctx context.Context, p peer.ID, pmes *pb.Message) error
+}
+
+var _ pb.MessageSender = (*testMessageSender)(nil)
+
+func (t testMessageSender) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+	return t.sendRequest(ctx, p, pmes)
+}
+
+func (t testMessageSender) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+	return t.sendMessage(ctx, p, pmes)
+}
+
+func TestProvideAddressFilter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dhts := setupDHTS(t, ctx, 2)
+
+	connect(t, ctx, dhts[0], dhts[1])
+	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
+
+	done := make(chan struct{})
+	impl := net.NewMessageSenderImpl(dhts[0].host, dhts[0].protocols)
+	tms := &testMessageSender{
+		sendMessage: func(ctx context.Context, p peer.ID, pmes *pb.Message) error {
+			defer close(done)
+			assert.Equal(t, pmes.Type, pb.Message_ADD_PROVIDER)
+			assert.Len(t, pmes.ProviderPeers[0].Addrs, 1)
+			assert.True(t, pmes.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
+			return impl.SendMessage(ctx, p, pmes)
+		},
+		sendRequest: func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+			return impl.SendRequest(ctx, p, pmes)
+		},
+	}
+	pm, err := pb.NewProtocolMessenger(tms)
+	require.NoError(t, err)
+
+	dhts[0].protoMessenger = pm
+	dhts[0].addrFilter = func(multiaddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{testMaddr}
+	}
+
+	if err := dhts[0].Provide(ctx, testCaseCids[0], true); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+type testProviderManager struct {
+	addProvider  func(ctx context.Context, key []byte, prov peer.AddrInfo) error
+	getProviders func(ctx context.Context, key []byte) ([]peer.AddrInfo, error)
+	close        func() error
+}
+
+var _ providers.ProviderStore = (*testProviderManager)(nil)
+
+func (t *testProviderManager) AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error {
+	return t.addProvider(ctx, key, prov)
+}
+
+func (t *testProviderManager) GetProviders(ctx context.Context, key []byte) ([]peer.AddrInfo, error) {
+	return t.getProviders(ctx, key)
+}
+
+func (t *testProviderManager) Close() error {
+	return t.close()
+}
+
+func TestHandleAddProviderAddressFilter(t *testing.T) {
+	ctx := context.Background()
+
+	d := setupDHT(ctx, t, false)
+	provider := setupDHT(ctx, t, false)
+
+	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
+
+	d.addrFilter = func(multiaddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{testMaddr}
+	}
+
+	done := make(chan struct{})
+	d.providerStore = &testProviderManager{
+		addProvider: func(ctx context.Context, key []byte, prov peer.AddrInfo) error {
+			defer close(done)
+			assert.True(t, prov.Addrs[0].Equal(testMaddr))
+			return nil
+		},
+		close: func() error { return nil },
+	}
+
+	pmes := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("test-key"),
+		ProviderPeers: pb.RawPeerInfosToPBPeers([]peer.AddrInfo{{
+			ID: provider.self,
+			Addrs: []ma.Multiaddr{
+				ma.StringCast("/ip4/55.55.55.55/tcp/5555"),
+				ma.StringCast("/ip4/66.66.66.66/tcp/6666"),
+			},
+		}}),
+	}
+
+	_, err := d.handleAddProvider(ctx, provider.self, pmes)
+	require.NoError(t, err)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
 	}
 }
 
@@ -603,29 +731,51 @@ func TestLocalProvides(t *testing.T) {
 	}
 }
 
+func TestAddressFilterProvide(t *testing.T) {
+	// t.Skip("skipping test to debug another")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testMaddr := ma.StringCast("/ip4/99.99.99.99/tcp/9999")
+
+	d := setupDHT(ctx, t, false)
+	provider := setupDHT(ctx, t, false)
+
+	d.addrFilter = func(maddrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{
+			testMaddr,
+		}
+	}
+
+	_, err := d.handleAddProvider(ctx, provider.self, &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("random-key"),
+		ProviderPeers: pb.PeerInfosToPBPeers(provider.host.Network(), []peer.AddrInfo{{
+			ID:    provider.self,
+			Addrs: provider.host.Addrs(),
+		}}),
+	})
+	require.NoError(t, err)
+
+	// because of the identify protocol we add all
+	// addresses to the peerstore, although the addresses
+	// will be filtered in the above handleAddProvider call
+	d.peerstore.AddAddrs(provider.self, provider.host.Addrs(), time.Hour)
+
+	resp, err := d.handleGetProviders(ctx, d.self, &pb.Message{
+		Type: pb.Message_GET_PROVIDERS,
+		Key:  []byte("random-key"),
+	})
+	require.NoError(t, err)
+
+	assert.True(t, resp.ProviderPeers[0].Addresses()[0].Equal(testMaddr))
+	assert.Len(t, resp.ProviderPeers[0].Addresses(), 1)
+}
+
 // if minPeers or avgPeers is 0, dont test for it.
 func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int, timeout time.Duration) {
 	// test "well-formed-ness" (>= minPeers peers in every routing table)
 	t.Helper()
-
-	checkTables := func() bool {
-		totalPeers := 0
-		for _, dht := range dhts {
-			rtlen := dht.routingTable.Size()
-			totalPeers += rtlen
-			if minPeers > 0 && rtlen < minPeers {
-				//t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
-				return false
-			}
-		}
-		actualAvgPeers := totalPeers / len(dhts)
-		t.Logf("avg rt size: %d", actualAvgPeers)
-		if avgPeers > 0 && actualAvgPeers < avgPeers {
-			t.Logf("avg rt size: %d < %d", actualAvgPeers, avgPeers)
-			return false
-		}
-		return true
-	}
 
 	timeoutA := time.After(timeout)
 	for {
@@ -634,12 +784,32 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 			t.Errorf("failed to reach well-formed routing tables after %s", timeout)
 			return
 		case <-time.After(5 * time.Millisecond):
-			if checkTables() {
+			if checkForWellFormedTablesOnce(t, dhts, minPeers, avgPeers) {
 				// succeeded
 				return
 			}
 		}
 	}
+}
+
+func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int) bool {
+	t.Helper()
+	totalPeers := 0
+	for _, dht := range dhts {
+		rtlen := dht.routingTable.Size()
+		totalPeers += rtlen
+		if minPeers > 0 && rtlen < minPeers {
+			// t.Logf("routing table for %s only has %d peers (should have >%d)", dht.self, rtlen, minPeers)
+			return false
+		}
+	}
+	actualAvgPeers := totalPeers / len(dhts)
+	t.Logf("avg rt size: %d", actualAvgPeers)
+	if avgPeers > 0 && actualAvgPeers < avgPeers {
+		t.Logf("avg rt size: %d < %d", actualAvgPeers, avgPeers)
+		return false
+	}
+	return true
 }
 
 func printRoutingTables(dhts []*IpfsDHT) {
@@ -677,26 +847,18 @@ func TestRefresh(t *testing.T) {
 	<-time.After(100 * time.Millisecond)
 	// bootstrap a few times until we get good tables.
 	t.Logf("bootstrapping them so they find each other %d", nDHTs)
-	ctxT, cancelT := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelT()
 
-	for ctxT.Err() == nil {
-		bootstrap(t, ctxT, dhts)
+	for {
+		bootstrap(t, ctx, dhts)
 
-		// wait a bit.
-		select {
-		case <-time.After(50 * time.Millisecond):
-			continue // being explicit
-		case <-ctxT.Done():
-			return
+		if checkForWellFormedTablesOnce(t, dhts, 7, 10) {
+			break
 		}
+
+		time.Sleep(time.Microsecond * 50)
 	}
 
-	waitForWellFormedTables(t, dhts, 7, 10, 10*time.Second)
-
-	cancelT()
-
-	if u.Debug {
+	if testing.Verbose() {
 		// the routing tables should be full now. let's inspect them.
 		printRoutingTables(dhts)
 	}
@@ -708,6 +870,7 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 
 	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	host.Start()
 
 	// enable auto bootstrap on A
 	dhtA, err := New(
@@ -763,7 +926,8 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 	connect(t, ctx, dhtA, dhtD)
 
 	// and because of the above bootstrap, A also discovers E !
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 20*time.Second)
+	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 4, 4, 10*time.Second)
+	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, dhtE.self, dhtA.routingTable.Find(dhtE.self), "A's routing table should have peer E!")
 }
 
@@ -839,7 +1003,7 @@ func TestPeriodicRefresh(t *testing.T) {
 		}
 	}
 
-	if u.Debug {
+	if testing.Verbose() {
 		printRoutingTables(dhts)
 	}
 
@@ -858,7 +1022,7 @@ func TestPeriodicRefresh(t *testing.T) {
 	// until the routing tables look better, or some long timeout for the failure case.
 	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
 
-	if u.Debug {
+	if testing.Verbose() {
 		printRoutingTables(dhts)
 	}
 }
@@ -893,7 +1057,7 @@ func TestProvidesMany(t *testing.T) {
 	defer cancel()
 	bootstrap(t, ctxT, dhts)
 
-	if u.Debug {
+	if testing.Verbose() {
 		// the routing tables should be full now. let's inspect them.
 		t.Logf("checking routing table of %d", nDHTs)
 		for _, dht := range dhts {
@@ -1134,6 +1298,7 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 
 	filteredPeer, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	filteredPeer.Start()
 	defer filteredPeer.Close()
 	dhts := setupDHTS(t, ctx, 4, QueryFilter(func(_ interface{}, ai peer.AddrInfo) bool {
 		return ai.ID != filteredPeer.ID()
@@ -1318,6 +1483,89 @@ func TestClientModeConnect(t *testing.T) {
 	}
 	if b.routingTable.Find(a.self) == "" {
 		t.Fatal("DHT server should have been added to the dht client's routing table")
+	}
+}
+
+func TestInvalidServer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s0 := setupDHT(ctx, t, false, BucketSize(2)) // server
+	s1 := setupDHT(ctx, t, false, BucketSize(2)) // server
+	m0 := setupDHT(ctx, t, false, BucketSize(2)) // misbehabing server
+	m1 := setupDHT(ctx, t, false, BucketSize(2)) // misbehabing server
+
+	// make m0 and m1 advertise all dht server protocols, but hang on all requests
+	for _, protocol := range s0.serverProtocols {
+		for _, m := range []*IpfsDHT{m0, m1} {
+			// Hang on every request.
+			m.host.SetStreamHandler(protocol, func(s network.Stream) {
+				r := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
+				msgbytes, err := r.ReadMsg()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var req pb.Message
+				err = proto.Unmarshal(msgbytes, &req)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// answer with an empty response message
+				resp := pb.NewMessage(req.GetType(), nil, req.GetClusterLevel())
+
+				// send out response msg
+				err = net.WriteMsg(s, resp)
+				if err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+
+	// connect s0 and m0
+	connectNoSync(t, ctx, s0, m0)
+
+	// add a provider (p) for a key (k) to s0
+	k := testCaseCids[0]
+	p := peer.ID("TestPeer")
+	s0.ProviderStore().AddProvider(ctx, k.Hash(), peer.AddrInfo{ID: p})
+	time.Sleep(time.Millisecond * 5) // just in case...
+
+	// find the provider for k from m0
+	provs, err := m0.FindProviders(ctx, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provs) == 0 {
+		t.Fatal("Expected to get a provider back")
+	}
+	if provs[0].ID != p {
+		t.Fatal("expected it to be our test peer")
+	}
+
+	// verify that m0 and s0 contain each other in their routing tables
+	if s0.routingTable.Find(m0.self) == "" {
+		// m0 is added to s0 routing table even though it is misbehaving, because
+		// s0's routing table is not well populated, so s0 isn't picky about who it adds.
+		t.Fatal("Misbehaving DHT servers should be added to routing table if not well populated")
+	}
+	if m0.routingTable.Find(s0.self) == "" {
+		t.Fatal("DHT server should have been added to the misbehaving server routing table")
+	}
+
+	// connect s0 to both s1 and m1
+	connectNoSync(t, ctx, s0, s1)
+	connectNoSync(t, ctx, s0, m1)
+
+	// s1 should be added to s0's routing table. Then, because s0's routing table
+	// contains more than bucketSize (2) entries, lookupCheck is enabled and m1
+	// shouldn't be added, because it fails the lookupCheck (hang on all requests).
+	if s0.routingTable.Find(s1.self) == "" {
+		t.Fatal("Well behaving DHT server should have been added to the server routing table")
+	}
+	if s0.routingTable.Find(m1.self) != "" {
+		t.Fatal("Misbehaving DHT servers should not be added to routing table if well populated")
 	}
 }
 
@@ -1529,9 +1777,7 @@ func TestProvideDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			var (
-				optsA, optsB []Option
-			)
+			var optsA, optsB []Option
 			optsA = append(optsA, ProtocolPrefix("/provMaybeDisabled"))
 			optsB = append(optsB, ProtocolPrefix("/provMaybeDisabled"))
 
@@ -1603,6 +1849,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	// start host 1 that speaks dht v1
 	hA, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	hA.Start()
 	defer hA.Close()
 	dhtA, err := New(ctx, hA, os...)
 	require.NoError(t, err)
@@ -1611,6 +1858,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	// start host 2 that also speaks dht v1
 	hB, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	hB.Start()
 	defer hB.Close()
 	dhtB, err := New(ctx, hB, os...)
 	require.NoError(t, err)
@@ -1648,6 +1896,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hA, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hA.Start()
 		defer hA.Close()
 		dhtA, err := New(ctx, hA, os...)
 		require.NoError(t, err)
@@ -1655,6 +1904,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hB, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hB.Start()
 		defer hB.Close()
 		dhtB, err := New(ctx, hB, os...)
 		require.NoError(t, err)
@@ -1679,6 +1929,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hA, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hA.Start()
 		defer hA.Close()
 		dhtA, err := New(ctx, hA, []Option{
 			ProtocolPrefix("/esh"),
@@ -1691,6 +1942,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 
 		hB, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		hB.Start()
 		defer hB.Close()
 		dhtB, err := New(ctx, hB, []Option{
 			ProtocolPrefix("/lsr"),
@@ -1735,7 +1987,7 @@ func TestClientModeAtInit(t *testing.T) {
 	client := setupDHT(ctx, t, true)
 	pinger.Host().Peerstore().AddAddrs(client.PeerID(), client.Host().Addrs(), peerstore.AddressTTL)
 	err := pinger.Ping(context.Background(), client.PeerID())
-	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 }
 
 func TestModeChange(t *testing.T) {
@@ -1746,7 +1998,7 @@ func TestModeChange(t *testing.T) {
 	clientToServer := setupDHT(ctx, t, true)
 	clientOnly.Host().Peerstore().AddAddrs(clientToServer.PeerID(), clientToServer.Host().Addrs(), peerstore.AddressTTL)
 	err := clientOnly.Ping(ctx, clientToServer.PeerID())
-	assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 	err = clientToServer.setMode(modeServer)
 	assert.Nil(t, err)
 	err = clientOnly.Ping(ctx, clientToServer.PeerID())
@@ -1775,7 +2027,7 @@ func TestDynamicModeSwitching(t *testing.T) {
 
 	assertDHTClient := func() {
 		err = prober.Ping(ctx, node.PeerID())
-		assert.True(t, errors.Is(err, multistream.ErrNotSupported))
+		assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
 		if l := len(prober.RoutingTable().ListPeers()); l != 0 {
 			t.Errorf("expected routing table length to be 0; instead is %d", l)
 		}
@@ -1950,14 +2202,16 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 	// convert the bootstrap addresses to a p2p address
 	bootstrapAddrs := make([]peer.AddrInfo, nBootStraps)
 	for i := 0; i < nBootStraps; i++ {
-		b := peer.AddrInfo{ID: bootstrappers[i].self,
-			Addrs: bootstrappers[i].host.Addrs()}
+		b := peer.AddrInfo{
+			ID:    bootstrappers[i].self,
+			Addrs: bootstrappers[i].host.Addrs(),
+		}
 		bootstrapAddrs[i] = b
 	}
 
 	{
 
-		//----------------
+		// ----------------
 		// We will initialize a DHT with 1 bootstrapper, connect it to another DHT,
 		// then remove the latter from the Routing Table
 		// This should add the bootstrap peer and the peer that the bootstrap peer is conencted to
@@ -1966,6 +2220,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 
 		h1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		h1.Start()
 		dht1, err := New(
 			ctx,
 			h1,
@@ -1997,7 +2252,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 
 	{
 
-		//----------------
+		// ----------------
 		// We will initialize a DHT with 2 bootstrappers, connect it to another DHT,
 		// then remove the DHT handler from the other DHT which should make the first DHT's
 		// routing table empty.
@@ -2006,6 +2261,7 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		// AutoRefresh needs to be enabled for this.
 		h1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
+		h1.Start()
 		dht1, err := New(
 			ctx,
 			h1,
@@ -2065,7 +2321,7 @@ func TestBootstrapPeersFunc(t *testing.T) {
 	bootstrapPeersB = []peer.AddrInfo{addrA}
 	lock.Unlock()
 
-	dhtB.fixLowPeers(ctx)
+	dhtB.fixLowPeers()
 	require.NotEqual(t, 0, len(dhtB.host.Network().Peers()))
 }
 
@@ -2082,9 +2338,11 @@ func TestPreconnectedNodes(t *testing.T) {
 	// Create hosts
 	h1, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h1.Start()
 	defer h1.Close()
 	h2, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h2.Start()
 	defer h2.Close()
 
 	// Setup first DHT
@@ -2099,7 +2357,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	// Wait until we know identify has completed by checking for supported protocols
 	// TODO: Is this needed? Could we do h2.Connect(h1) and that would wait for identify to complete.
 	require.Eventually(t, func() bool {
-		h1Protos, err := h2.Peerstore().SupportsProtocols(h1.ID(), d1.protocolsStrs...)
+		h1Protos, err := h2.Peerstore().SupportsProtocols(h1.ID(), d1.protocols...)
 		require.NoError(t, err)
 
 		return len(h1Protos) > 0
@@ -2110,10 +2368,101 @@ func TestPreconnectedNodes(t *testing.T) {
 	require.NoError(t, err)
 	defer h2.Close()
 
+	connect(t, ctx, d1, d2)
+
 	// See if it works
 	peers, err := d2.GetClosestPeers(ctx, "testkey")
 	require.NoError(t, err)
 
 	require.Equal(t, len(peers), 1, "why is there more than one peer?")
 	require.Equal(t, h1.ID(), peers[0], "could not find peer")
+}
+
+func TestAddrFilter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// generate a bunch of addresses
+	publicAddrs := []ma.Multiaddr{
+		ma.StringCast("/ip4/1.2.3.1/tcp/123"),
+		ma.StringCast("/ip4/160.160.160.160/tcp/1600"),
+		ma.StringCast("/ip6/2001::10/tcp/123"),
+	}
+	privAddrs := []ma.Multiaddr{
+		ma.StringCast("/ip4/192.168.1.100/tcp/123"),
+		ma.StringCast("/ip4/172.16.10.10/tcp/123"),
+		ma.StringCast("/ip4/10.10.10.10/tcp/123"),
+		ma.StringCast("/ip6/fc00::10/tcp/123"),
+	}
+	loopbackAddrs := []ma.Multiaddr{
+		ma.StringCast("/ip4/127.0.0.100/tcp/123"),
+		ma.StringCast("/ip6/::1/tcp/123"),
+	}
+
+	allAddrs := append(publicAddrs, privAddrs...)
+	allAddrs = append(allAddrs, loopbackAddrs...)
+
+	// generate different address filters
+	acceptAllFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return addrs
+	})
+	rejectAllFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return []ma.Multiaddr{}
+	})
+	publicIpFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return ma.FilterAddrs(addrs, manet.IsPublicAddr)
+	})
+	localIpFilter := AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
+		return ma.FilterAddrs(addrs, func(a ma.Multiaddr) bool { return !manet.IsIPLoopback(a) })
+	})
+
+	// generate peerid for "remote" peer
+	_, pub, err := crypto.GenerateKeyPair(
+		crypto.Ed25519, // Select your key type. Ed25519 are nice short
+		-1,             // Select key length when possible (i.e. RSA).
+	)
+	require.NoError(t, err)
+	peerid, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+
+	// DHT accepting all addresses
+	d0 := setupDHT(ctx, t, false, acceptAllFilter)
+
+	// peerstore should only contain self
+	require.Equal(t, 1, d0.host.Peerstore().Peers().Len())
+
+	d0.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	require.Equal(t, 2, d0.host.Peerstore().Peers().Len())
+	for _, a := range allAddrs {
+		// check that the peerstore contains all addresses of the remote peer
+		require.Contains(t, d0.host.Peerstore().Addrs(peerid), a)
+	}
+
+	// DHT rejecting all addresses
+	d1 := setupDHT(ctx, t, false, rejectAllFilter)
+	d1.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	// remote peer should not be added to peerstore (all addresses rejected)
+	require.Equal(t, 1, d1.host.Peerstore().Peers().Len())
+
+	// DHT accepting only public addresses
+	d2 := setupDHT(ctx, t, false, publicIpFilter)
+	d2.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	for _, a := range publicAddrs {
+		// check that the peerstore contains only public addresses of the remote peer
+		require.Contains(t, d2.host.Peerstore().Addrs(peerid), a)
+	}
+	require.Equal(t, len(publicAddrs), len(d2.host.Peerstore().Addrs(peerid)))
+
+	// DHT accepting only non-loopback addresses
+	d3 := setupDHT(ctx, t, false, localIpFilter)
+	d3.maybeAddAddrs(peerid, allAddrs, time.Minute)
+	for _, a := range publicAddrs {
+		// check that the peerstore contains only non-loopback addresses of the remote peer
+		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
+	}
+	for _, a := range privAddrs {
+		// check that the peerstore contains only non-loopback addresses of the remote peer
+		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
+	}
+	require.Equal(t, len(publicAddrs)+len(privAddrs), len(d3.host.Peerstore().Addrs(peerid)))
 }

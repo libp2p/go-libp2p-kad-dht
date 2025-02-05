@@ -496,13 +496,11 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 	ctx, end := tracer.FindProvidersAsync(dhtName, ctx, key, count)
 	defer func() { ch = end(ch, nil) }()
 
+	peerOut := make(chan peer.AddrInfo)
 	if !dht.enableProviders || !key.Defined() {
-		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
 		return peerOut
 	}
-
-	peerOut := make(chan peer.AddrInfo)
 
 	keyMH := key.Hash()
 

@@ -294,8 +294,8 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 	defer dht.wg.Done()
 	t := time.NewTicker(dht.crawlerInterval)
 
-	m := make(map[peer.ID]*crawlVal)
-	mxLk := sync.Mutex{}
+	foundPeers := make(map[peer.ID]*crawlVal)
+	foundPeersLk := sync.Mutex{}
 
 	initialTrigger := make(chan struct{}, 1)
 	initialTrigger <- struct{}{}
@@ -311,15 +311,15 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 
 		var addrs []*peer.AddrInfo
 		dht.peerAddrsLk.Lock()
-		for k := range m {
+		for k := range foundPeers {
 			addrs = append(addrs, &peer.AddrInfo{ID: k}) // Addrs: v.addrs
 		}
 
 		addrs = append(addrs, dht.bootstrapPeers...)
 		dht.peerAddrsLk.Unlock()
 
-		for k := range m {
-			delete(m, k)
+		for k := range foundPeers {
+			delete(foundPeers, k)
 		}
 
 		start := time.Now()
@@ -343,9 +343,9 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 					return
 				}
 
-				mxLk.Lock()
-				defer mxLk.Unlock()
-				m[p] = &crawlVal{
+				foundPeersLk.Lock()
+				defer foundPeersLk.Unlock()
+				foundPeers[p] = &crawlVal{
 					addrs: addrs,
 				}
 			},
@@ -369,11 +369,11 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		peerAddrs := make(map[peer.ID][]multiaddr.Multiaddr)
 		kPeerMap := make(map[string]peer.ID)
 		newRt := trie.New()
-		for k, v := range m {
-			v.key = kadkey.KbucketIDToKey(kb.ConvertPeerID(k))
-			peerAddrs[k] = v.addrs
-			kPeerMap[string(v.key)] = k
-			newRt.Add(v.key)
+		for peerID, foundCrawlVal := range foundPeers {
+			foundCrawlVal.key = kadkey.KbucketIDToKey(kb.ConvertPeerID(peerID))
+			peerAddrs[peerID] = foundCrawlVal.addrs
+			kPeerMap[string(foundCrawlVal.key)] = peerID
+			newRt.Add(foundCrawlVal.key)
 		}
 
 		dht.peerAddrsLk.Lock()

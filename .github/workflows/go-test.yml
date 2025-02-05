@@ -1,55 +1,20 @@
-# File managed by web3-bot. DO NOT EDIT.
-# See https://github.com/protocol/.github/ for details.
-
-on: [push, pull_request]
 name: Go Test
 
+on:
+  pull_request:
+  push:
+    branches: ["master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  unit:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ "ubuntu", "windows", "macos" ]
-        go: [ "1.16.x", "1.17.x" ]
-    env:
-      COVERAGES: ""
-    runs-on: ${{ matrix.os }}-latest
-    name: ${{ matrix.os}} (go ${{ matrix.go }})
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: recursive
-      - uses: actions/setup-go@v2
-        with:
-          go-version: ${{ matrix.go }}
-      - name: Go information
-        run: |
-          go version
-          go env
-      - name: Run repo-specific setup
-        uses: ./.github/actions/go-test-setup
-        if: hashFiles('./.github/actions/go-test-setup') != ''
-      - name: Run tests
-        uses: protocol/multiple-go-modules@v1.2
-        with:
-          run: go test -v -coverprofile module-coverage.txt ./...
-      - name: Run tests (32 bit)
-        if: ${{ matrix.os != 'macos' }} # can't run 32 bit tests on OSX.
-        uses: protocol/multiple-go-modules@v1.2
-        env:
-          GOARCH: 386
-        with:
-          run: go test -v ./...
-      - name: Run tests with race detector
-        if: ${{ matrix.os == 'ubuntu' }} # speed things up. Windows and OSX VMs are slow
-        uses: protocol/multiple-go-modules@v1.2
-        with:
-          run: go test -v -race ./...
-      - name: Collect coverage files
-        shell: bash
-        run: echo "COVERAGES=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_ENV
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@51d810878be5422784e86451c0e7c14e5860ec47 # v2.0.2
-        with:
-          files: '${{ env.COVERAGES }}'
-          env_vars: OS=${{ matrix.os }}, GO=${{ matrix.go }}
+  go-test:
+    uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

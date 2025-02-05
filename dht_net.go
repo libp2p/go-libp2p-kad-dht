@@ -4,11 +4,12 @@ import (
 	"io"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/libp2p/go-msgio"
 	"go.opencensus.io/stats"
@@ -44,7 +45,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 
 	for {
 		if dht.getMode() != modeServer {
-			logger.Errorf("ignoring incoming dht message while not in server mode")
+			logger.Debugf("ignoring incoming dht message while not in server mode")
 			return false
 		}
 
@@ -72,7 +73,7 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			}
 			return false
 		}
-		err = req.Unmarshal(msgbytes)
+		err = proto.Unmarshal(msgbytes, &req)
 		r.ReleaseMsg(msgbytes)
 		if err != nil {
 			if c := baseLogger.Check(zap.DebugLevel, "error unmarshaling message"); c != nil {
@@ -100,6 +101,10 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			metrics.ReceivedBytes.M(int64(msgLen)),
 		)
 
+		if dht.onRequestHook != nil {
+			dht.onRequestHook(ctx, s, &req)
+		}
+
 		handler := dht.handlerForMsgType(req.GetType())
 		if handler == nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
@@ -109,9 +114,6 @@ func (dht *IpfsDHT) handleNewMessage(s network.Stream) bool {
 			}
 			return false
 		}
-
-		// a peer has queried us, let's add it to RT
-		dht.peerFound(dht.ctx, mPeer, true)
 
 		if c := baseLogger.Check(zap.DebugLevel, "handling message"); c != nil {
 			c.Write(zap.String("from", mPeer.String()),

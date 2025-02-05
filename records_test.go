@@ -7,14 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/test"
+	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	"github.com/libp2p/go-libp2p/core/test"
 
-	u "github.com/ipfs/go-ipfs-util"
-	ci "github.com/libp2p/go-libp2p-core/crypto"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/ipfs/go-test/random"
 	record "github.com/libp2p/go-libp2p-record"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
+	ci "github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/routing"
 )
 
 // Check that GetPublicKey() correctly extracts a public key
@@ -151,7 +152,7 @@ func TestPubkeyNotFound(t *testing.T) {
 
 	connect(t, ctx, dhtA, dhtB)
 
-	r := u.NewSeededRand(15) // generate deterministic keypair
+	r := random.NewSeededRand(15) // generate deterministic keypair
 	_, pubk, err := ci.GenerateKeyPairWithReader(ci.RSA, 2048, r)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +205,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	rec.TimeReceived = internal.FormatRFC3339(time.Now())
 	err = dhtB.putLocal(ctx, pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
@@ -243,7 +244,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 
 	// Store incorrect public key on node B
 	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = u.FormatRFC3339(time.Now())
+	rec.TimeReceived = internal.FormatRFC3339(time.Now())
 	err = dhtB.putLocal(ctx, pkkey, rec)
 	if err != nil {
 		t.Fatal(err)
@@ -316,9 +317,7 @@ func TestValuesDisabled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			var (
-				optsA, optsB []Option
-			)
+			var optsA, optsB []Option
 			optsA = append(optsA, ProtocolPrefix("/valuesMaybeDisabled"))
 			optsB = append(optsB, ProtocolPrefix("/valuesMaybeDisabled"))
 

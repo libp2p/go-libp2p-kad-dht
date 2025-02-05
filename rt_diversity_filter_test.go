@@ -7,8 +7,8 @@ import (
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 
 	"github.com/stretchr/testify/require"
 )
@@ -16,6 +16,7 @@ import (
 func TestRTPeerDiversityFilter(t *testing.T) {
 	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h.Start()
 	defer h.Close()
 	r := NewRTPeerDiversityFilter(h, 2, 3)
 
@@ -57,6 +58,7 @@ func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 	ctx := context.Background()
 	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h.Start()
 	defer h.Close()
 	r := NewRTPeerDiversityFilter(h, 1, 2)
 
@@ -116,6 +118,7 @@ func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
 
 	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)
+	h.Start()
 	defer h.Close()
 	r := NewRTPeerDiversityFilter(h, 100, 3)
 

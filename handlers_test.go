@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	proto "github.com/gogo/protobuf/proto"
 	"github.com/libp2p/go-libp2p"
-	crypto "github.com/libp2p/go-libp2p-core/crypto"
-	peer "github.com/libp2p/go-libp2p-core/peer"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	crypto "github.com/libp2p/go-libp2p/core/crypto"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestCleanRecordSigned(t *testing.T) {
@@ -111,7 +111,7 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 			panic(err)
 		}
 
-		d.peerFound(ctx, id, true)
+		d.peerFound(id)
 
 		peers = append(peers, id)
 		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))

@@ -336,7 +336,7 @@ func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 	}
 
 	// construct routing table
-	// use twice the theoritical usefulness threhold to keep older peers around longer
+	// use twice the theoretical usefulness threshold to keep older peers around longer
 	rt, err := makeRoutingTable(dht, cfg, 2*maxLastSuccessfulOutboundThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct routing table,err=%s", err)
@@ -720,7 +720,7 @@ func (dht *IpfsDHT) validPeerFound(p peer.ID) {
 	}
 }
 
-// peerStoppedDHT signals the routing table that a peer is unable to responsd to DHT queries anymore.
+// peerStoppedDHT signals the routing table that a peer is unable to respond to DHT queries anymore.
 func (dht *IpfsDHT) peerStoppedDHT(p peer.ID) {
 	logger.Debugw("peer stopped dht", "peer", p)
 	// A peer that does not support the DHT protocol is dead for us.

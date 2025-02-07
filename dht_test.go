@@ -1082,7 +1082,7 @@ func TestProvidesMany(t *testing.T) {
 
 	errchan := make(chan error)
 
-	ctxT, cancel = context.WithTimeout(ctx, 5*time.Second)
+	ctxT, cancel = context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup

@@ -1599,7 +1599,7 @@ func minInt(a, b int) int {
 }
 
 func TestFindPeerQueryMinimal(t *testing.T) {
-	testFindPeerQuery(t, 2, 22, 1)
+	testFindPeerQuery(t, 1, 22, 1)
 }
 
 func TestFindPeerQuery(t *testing.T) {

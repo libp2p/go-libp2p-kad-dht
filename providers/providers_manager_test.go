@@ -146,8 +146,6 @@ func TestProvidersSerialization(t *testing.T) {
 }
 
 func TestProvidesExpire(t *testing.T) {
-	t.Skip("This test is flaky, see https://github.com/libp2p/go-libp2p-kad-dht/issues/725.")
-
 	pval := ProvideValidity
 	cleanup := defaultCleanupInterval
 	ProvideValidity = time.Second / 2

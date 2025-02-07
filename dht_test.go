@@ -521,7 +521,6 @@ func TestValueGetInvalid(t *testing.T) {
 }
 
 func TestProvides(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -695,7 +694,6 @@ func TestHandleAddProviderAddressFilter(t *testing.T) {
 }
 
 func TestLocalProvides(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -731,7 +729,6 @@ func TestLocalProvides(t *testing.T) {
 }
 
 func TestAddressFilterProvide(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1130,7 +1127,6 @@ func TestProvidesMany(t *testing.T) {
 }
 
 func TestProvidesAsync(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -1247,7 +1243,6 @@ func TestUnfindablePeer(t *testing.T) {
 }
 
 func TestFindPeer(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -1284,7 +1279,6 @@ func TestFindPeer(t *testing.T) {
 }
 
 func TestFindPeerWithQueryFilter(t *testing.T) {
-	// t.Skip("skipping test to debug another")
 	if testing.Short() {
 		t.SkipNow()
 	}

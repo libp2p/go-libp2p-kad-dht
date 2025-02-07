@@ -2,7 +2,6 @@ package dht
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"testing"
 	"time"
@@ -17,33 +16,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 )
-
-// Check that GetPublicKey() correctly extracts a public key
-func TestPubkeyExtract(t *testing.T) {
-	t.Skip("public key extraction for ed25519 keys has been disabled. See https://github.com/libp2p/specs/issues/111")
-	ctx := context.Background()
-	dht := setupDHT(ctx, t, false)
-	defer dht.Close()
-
-	_, pk, err := ci.GenerateEd25519Key(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pid, err := peer.IDFromPublicKey(pk)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pkOut, err := dht.GetPublicKey(context.Background(), pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !pkOut.Equals(pk) {
-		t.Fatal("got incorrect public key out")
-	}
-}
 
 // Check that GetPublicKey() correctly retrieves a public key from the peerstore
 func TestPubkeyPeerstore(t *testing.T) {

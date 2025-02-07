@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -792,6 +792,8 @@ func waitForWellFormedTables(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers i
 	}
 }
 
+// checks that all DHTs routing tables have at least minPeers, and that the
+// average number of peers in the routing tables is at least avgPeers
 func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPeers int) bool {
 	t.Helper()
 	totalPeers := 0
@@ -812,14 +814,126 @@ func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPe
 	return true
 }
 
-func printRoutingTables(dhts []*IpfsDHT) {
-	// the routing tables should be full now. let's inspect them.
-	fmt.Printf("checking routing table of %d\n", len(dhts))
-	for _, dht := range dhts {
-		fmt.Printf("checking routing table of %s\n", dht.self)
-		dht.routingTable.Print()
-		fmt.Println("")
+// makes sure all routing table converge (have their bucketSize closest peers
+// in the routing table) by refreshing the routing tables. fails after a
+// timeout if tables haven't converged.
+func makeTablesConverge(t *testing.T, dhts []*IpfsDHT, timeout time.Duration) {
+	t.Helper()
+	followUp := func(t *testing.T, dhts []*IpfsDHT) {
+		start := time.Now()
+		t.Log("refreshing routing tables")
+		var wg sync.WaitGroup
+		for _, dht := range dhts {
+			wg.Add(1)
+			go func(d *IpfsDHT) {
+				<-d.RefreshRoutingTable()
+				wg.Done()
+			}(dht)
+		}
+		wg.Wait()
+		t.Log("refresh done in", time.Since(start))
 	}
+	checkForConvergedTablesAndFollowUp(t, dhts, timeout, followUp)
+}
+
+func checkForConvergedTables(t *testing.T, dhts []*IpfsDHT, timeout time.Duration) {
+	checkForConvergedTablesAndFollowUp(t, dhts, timeout, nil)
+}
+
+func checkForConvergedTablesAndFollowUp(t *testing.T, dhts []*IpfsDHT, timeout time.Duration, followUp func(*testing.T, []*IpfsDHT)) {
+	t.Helper()
+
+	timeoutA := time.After(timeout)
+	count := 0
+	for {
+		select {
+		case <-timeoutA:
+			t.Errorf("failed to reach converged routing tables after %d iteration in %s", count, timeout)
+			return
+		case <-time.After(5 * time.Millisecond):
+			if checkForConvergedTablesOnce(t, dhts) {
+				// succeeded
+				return
+			}
+			if followUp != nil {
+				followUp(t, dhts)
+			}
+			count++
+		}
+	}
+}
+
+// checkForConvergedTablesOnce checks whether all routing tables include the bucketSize closest peers
+// this is required for routing soundness
+func checkForConvergedTablesOnce(t *testing.T, dhts []*IpfsDHT) bool {
+	t.Helper()
+
+	peerids := make([]peer.ID, len(dhts))
+	for i, dht := range dhts {
+		peerids[i] = dht.self
+	}
+
+	for _, dht := range dhts {
+		selfKadId := kb.ConvertPeerID(dht.self)
+		closestPeers := kb.SortClosestPeers(peerids, selfKadId)
+		if len(closestPeers) < 1 {
+			return false
+		}
+
+		var expectedPeers []peer.ID
+		if len(closestPeers) >= dht.bucketSize+2 {
+			firstExcludedBucketId := kb.CommonPrefixLen(selfKadId, kb.ConvertPeerID(closestPeers[dht.bucketSize+1]))
+			for i := 1; kb.CommonPrefixLen(selfKadId, kb.ConvertPeerID(closestPeers[i])) < firstExcludedBucketId; i++ {
+				expectedPeers = append(expectedPeers, closestPeers[i])
+			}
+		} else {
+			expectedPeers = closestPeers[1:]
+		}
+		// closest peer is always self. we don't want to check whether self is in routing table
+		for _, p := range expectedPeers {
+			// check if the bucketSize closest peers are included in the routing table
+			if dht.RoutingTable().Find(p) == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func printRoutingTables(t *testing.T, dhts []*IpfsDHT) {
+	t.Helper()
+	// the routing tables should be full now. let's inspect them.
+	for _, dht := range dhts {
+		t.Logf("checking routing table of %s\n", dht.self)
+		peers := dht.RoutingTable().NearestPeers(kb.ConvertPeerID(dht.self), dht.RoutingTable().Size())
+		selfKadId := kb.ConvertPeerID(dht.self)
+		str := ""
+		for _, p := range peers {
+			str += fmt.Sprintf("%s (%d), ", p, kb.CommonPrefixLen(selfKadId, kb.ConvertPeerID(p)))
+		}
+		t.Log(str)
+	}
+}
+
+func TestTablesConverge(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nDHTs := 32
+	dhts := setupDHTS(t, ctx, nDHTs, BucketSize(4))
+	defer func() {
+		for i := 0; i < nDHTs; i++ {
+			dhts[i].Close()
+			defer dhts[i].host.Close()
+		}
+	}()
+
+	t.Logf("connecting %d dhts in a ring", nDHTs)
+	for i := 0; i < nDHTs; i++ {
+		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
+	}
+
+	makeTablesConverge(t, dhts, 2*time.Second)
 }
 
 func TestRefresh(t *testing.T) {
@@ -860,7 +974,7 @@ func TestRefresh(t *testing.T) {
 
 	if testing.Verbose() {
 		// the routing tables should be full now. let's inspect them.
-		printRoutingTables(dhts)
+		printRoutingTables(t, dhts)
 	}
 }
 
@@ -1004,7 +1118,7 @@ func TestPeriodicRefresh(t *testing.T) {
 	}
 
 	if testing.Verbose() {
-		printRoutingTables(dhts)
+		printRoutingTables(t, dhts)
 	}
 
 	t.Logf("bootstrapping them so they find each other. %d", nDHTs)
@@ -1023,7 +1137,7 @@ func TestPeriodicRefresh(t *testing.T) {
 	waitForWellFormedTables(t, dhts, 7, 10, 20*time.Second)
 
 	if testing.Verbose() {
-		printRoutingTables(dhts)
+		printRoutingTables(t, dhts)
 	}
 }
 
@@ -1606,7 +1720,7 @@ func minInt(a, b int) int {
 }
 
 func TestFindPeerQueryMinimal(t *testing.T) {
-	testFindPeerQuery(t, 2, 22, 1)
+	testFindPeerQuery(t, 1, 22, 1)
 }
 
 func TestFindPeerQuery(t *testing.T) {
@@ -1626,14 +1740,11 @@ func testFindPeerQuery(t *testing.T,
 	leafs, // Number of nodes that might be connected to from the bootstrappers
 	bootstrapConns int, // Number of bootstrappers each leaf should connect to.
 ) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping due to #760")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhts := setupDHTS(t, ctx, 1+bootstrappers+leafs, BucketSize(4))
+	bucketSize := 4
+	dhts := setupDHTS(t, ctx, 1+bootstrappers+leafs, BucketSize(bucketSize))
 	defer func() {
 		for _, d := range dhts {
 			d.Close()
@@ -1645,13 +1756,15 @@ func testFindPeerQuery(t *testing.T,
 
 	mrand := rand.New(rand.NewSource(42))
 	guy := dhts[0]
-	others := dhts[1:]
+	others := dhts[1:] // others[:bootstrappers] are bootstrappers, others[bootstrappers:] are leafs
 	for i := 0; i < leafs; i++ {
+		// for each leaf select bootstrapConns random bootstrappers and connect to them
 		for _, v := range mrand.Perm(bootstrappers)[:bootstrapConns] {
 			connectNoSync(t, ctx, others[v], others[bootstrappers+i])
 		}
 	}
 
+	// bootstrappers connect to guy
 	for i := 0; i < bootstrappers; i++ {
 		connectNoSync(t, ctx, guy, others[i])
 	}
@@ -1659,7 +1772,7 @@ func testFindPeerQuery(t *testing.T,
 	t.Log("waiting for routing tables")
 
 	// give some time for things to settle down
-	waitForWellFormedTables(t, dhts, bootstrapConns, bootstrapConns, 5*time.Second)
+	waitForWellFormedTables(t, others, bootstrapConns, bootstrapConns, 5*time.Second)
 
 	t.Log("refreshing")
 
@@ -1668,16 +1781,44 @@ func testFindPeerQuery(t *testing.T,
 		wg.Add(1)
 		go func(d *IpfsDHT) {
 			<-d.RefreshRoutingTable()
+			// <-d.ForceRefresh()
 			wg.Done()
 		}(dht)
 	}
-
 	wg.Wait()
+	// for _, dht := range dhts {
+	// 	wg.Add(1)
+	// 	go func(d *IpfsDHT) {
+	// 		// <-d.RefreshRoutingTable()
+	// 		<-d.ForceRefresh()
+	// 		wg.Done()
+	// 	}(dht)
+	// }
+	// wg.Wait()
+	// for _, dht := range dhts {
+	// 	wg.Add(1)
+	// 	go func(d *IpfsDHT) {
+	// 		// <-d.RefreshRoutingTable()
+	// 		<-d.ForceRefresh()
+	// 		wg.Done()
+	// 	}(dht)
+	// }
+	// wg.Wait()
 
 	t.Log("waiting for routing tables again")
 
 	// Wait for refresh to work. At least one bucket should be full.
-	waitForWellFormedTables(t, dhts, 4, 0, 5*time.Second)
+	waitForWellFormedTables(t, others, 4, 0, 5*time.Second)
+	// makeTablesConverge(t, dhts, 5*time.Second)
+
+	// bs := make([]peer.ID, 0, bootstrappers)
+	// // bootstrappers connect to guy
+	// for i := 0; i < bootstrappers; i++ {
+	// 	connectNoSync(t, ctx, guy, others[i])
+	// 	bs = append(bs, others[i].self)
+	// }
+	//
+	// t.Log("bootstrappers:", len(bs), bootstrappers, bs)
 
 	var peers []peer.ID
 	for _, d := range others {
@@ -1689,15 +1830,65 @@ func testFindPeerQuery(t *testing.T,
 	val := "foobar"
 	rtval := kb.ConvertKey(val)
 
-	outpeers, err := guy.GetClosestPeers(ctx, val)
-	require.NoError(t, err)
+	queryFn := func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+		peers, err := guy.protoMessenger.GetClosestPeers(ctx, p, peer.ID(val))
+		str := ""
+		for _, ai := range peers {
+			str += ai.ID.String() + " "
+		}
+		t.Log(p, "returned", len(peers), str)
+		return peers, err
+	}
 
-	sort.Sort(peer.IDSlice(outpeers))
+	// outpeers, err := guy.GetClosestPeers(ctx, val)
+	lookupRes, err := guy.runLookupWithFollowup(ctx, val, queryFn, func(*qpeerset.QueryPeerset) bool { return false })
+	t.Log(lookupRes.state)
+	outpeers := lookupRes.peers
+	require.NoError(t, err)
 
 	exp := kb.SortClosestPeers(peers, rtval)[:minInt(guy.bucketSize, len(peers))]
 	t.Logf("got %d peers", len(outpeers))
 	got := kb.SortClosestPeers(outpeers, rtval)
 
+	expMap := map[peer.ID]struct{}{}
+	for _, p := range outpeers {
+		for _, dht := range dhts {
+			if p == dht.self {
+				pExp := kb.SortClosestPeers(dht.routingTable.ListPeers(), rtval)
+				for _, e := range pExp {
+					expMap[e] = struct{}{}
+				}
+			}
+		}
+	}
+	// Convert map to deduplicated list
+	var expList []peer.ID
+	for p := range expMap {
+		expList = append(expList, p)
+	}
+	// Sort the list by distance to target
+	expList = kb.SortClosestPeers(expList, rtval)
+
+	printWithBucketId := func(target kb.ID, peers []peer.ID) {
+		str := ""
+		for _, p := range peers {
+			cpl := kb.CommonPrefixLen(target, kb.ConvertPeerID(p))
+			str += fmt.Sprintf("%s (%d) ", p, cpl)
+		}
+		t.Log(str)
+	}
+
+	t.Logf("guy: %s (%d)", guy.host.ID(), kb.CommonPrefixLen(rtval, kb.ConvertPeerID(guy.host.ID())))
+	t.Log("expList")
+	printWithBucketId(rtval, expList)
+	t.Log("exp")
+	printWithBucketId(rtval, exp)
+	t.Log("got")
+	printWithBucketId(rtval, got)
+
+	printRoutingTables(t, dhts)
+	// t.Logf("expected: %v", exp)
+	// t.Logf("got: %v", got)
 	assert.EqualValues(t, exp, got)
 }
 

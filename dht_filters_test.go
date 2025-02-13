@@ -43,6 +43,10 @@ func (m *mockConn) Close() error {
 	m.isClosed.Store(true)
 	return nil
 }
+func (m *mockConn) CloseWithError(network.ConnErrorCode) error {
+	m.isClosed.Store(true)
+	return nil
+}
 func (m *mockConn) NewStream(context.Context) (network.Stream, error) { return nil, nil }
 func (m *mockConn) GetStreams() []network.Stream                      { return []network.Stream{} }
 func (m *mockConn) Stat() network.ConnStats {

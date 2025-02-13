@@ -1442,7 +1442,7 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo, 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		addrsSoFar := make(map[multiaddr.Multiaddr]struct{})
+		addrsSoFar := make(map[string]struct{})
 		for {
 			select {
 			case ai, ok := <-addrsCh:
@@ -1451,10 +1451,10 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo, 
 				}
 
 				for _, a := range ai.Addrs {
-					_, found := addrsSoFar[a]
+					_, found := addrsSoFar[string(a.Bytes())]
 					if !found {
 						newAddrs = append(newAddrs, a)
-						addrsSoFar[a] = struct{}{}
+						addrsSoFar[string(a.Bytes())] = struct{}{}
 					}
 				}
 			case <-ctx.Done():

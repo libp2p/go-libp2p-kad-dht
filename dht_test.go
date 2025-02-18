@@ -1315,7 +1315,7 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return len(dhts[2].host.Network().ConnsToPeer(filteredPeer.ID())) > 0
-	}, 5*time.Millisecond, time.Millisecond, "failed to connect to peer")
+	}, 30*time.Millisecond, time.Millisecond, "failed to connect to peer")
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()

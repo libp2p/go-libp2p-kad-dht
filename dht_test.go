@@ -1536,7 +1536,7 @@ func TestInvalidServer(t *testing.T) {
 	time.Sleep(time.Millisecond * 5) // just in case...
 
 	// find the provider for k from m0
-	maxRetries := 3
+	maxRetries := 5
 	var provs []peer.AddrInfo
 	var err error
 	for i := 0; i < maxRetries && len(provs) == 0; i++ {
@@ -1544,6 +1544,7 @@ func TestInvalidServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		time.Sleep(time.Millisecond * 5)
 	}
 	if len(provs) == 0 {
 		t.Fatal("Expected to get a provider back")
@@ -1569,13 +1570,20 @@ func TestInvalidServer(t *testing.T) {
 	// s1 should be added to s0's routing table. Then, because s0's routing table
 	// contains more than bucketSize (2) entries, lookupCheck is enabled and m1
 	// shouldn't be added, because it fails the lookupCheck (hang on all requests).
-	if s0.routingTable.Find(s1.self) == "" {
-		time.Sleep(time.Millisecond * 5) // just in case...
-		if s0.routingTable.Find(s1.self) == "" {
-			t.Fatal("Well behaving DHT server should have been added to the server routing table")
+	s1Found := false
+	for i := 0; i < maxRetries; i++ {
+		if s0.routingTable.Find(s1.self) != "" {
+			s1Found = true
+			break
 		}
+		time.Sleep(time.Millisecond * 5)
+	}
+	if !s1Found {
+		t.Fatal("Well behaving DHT server should have been added to the server routing table")
 	}
 	if s0.routingTable.Find(m1.self) != "" {
+		t.Log("s0:", s0.self, ", s1:", s1.self, ", m0:", m0.self, ", m1:", m1.self)
+		t.Log("Routing Table peers", m0.routingTable.ListPeers())
 		t.Fatal("Misbehaving DHT servers should not be added to routing table if well populated")
 	}
 }

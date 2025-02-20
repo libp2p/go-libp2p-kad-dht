@@ -9,6 +9,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -132,7 +133,6 @@ func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 		// fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
 		select {
 		case <-ctx.Done():
-			t.Log("wait(): b was still not in a's routing table after context was cancelled")
 			t.Fatal(ctx.Err())
 		case <-time.After(time.Millisecond * 5):
 		}
@@ -180,6 +180,7 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 	}
 	hlprs[1].allow = lan.PeerID()
 	connect(ctx, t, d.LAN, lan)
+	connect(ctx, t, lan, d.LAN)
 
 	return d, wan, lan
 }
@@ -287,7 +288,10 @@ func TestSearchValue(t *testing.T) {
 	d.LAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 
 	err := wan.PutValue(ctx, "/v/hello", []byte("valid"))
-	if err != nil {
+	// it is expected that we get an ErrLookupFailure here, because wan doesn't
+	// have any peers in its routing table (d.WAN is a client). this operation
+	// still puts the record in wan local datastore, which is what we want.
+	if err != kb.ErrLookupFailure {
 		t.Error("error putting value to wan DHT:", err)
 	}
 

@@ -26,7 +26,6 @@ func TestIsRelay(t *testing.T) {
 	if isRelayAddr(a) {
 		t.Fatalf("thought %s was a relay", a)
 	}
-
 }
 
 type mockConn struct {
@@ -48,15 +47,16 @@ func (m *mockConn) GetStreams() []network.Stream                      { return [
 func (m *mockConn) Stat() network.ConnStats {
 	return network.ConnStats{Stats: network.Stats{Direction: network.DirOutbound}}
 }
-func (m *mockConn) Scope() network.ConnScope           { return &network.NullScope{} }
-func (m *mockConn) LocalMultiaddr() ma.Multiaddr       { return m.local.Addrs[0] }
-func (m *mockConn) RemoteMultiaddr() ma.Multiaddr      { return m.remote.Addrs[0] }
-func (m *mockConn) LocalPeer() peer.ID                 { return m.local.ID }
-func (m *mockConn) LocalPrivateKey() ic.PrivKey        { return nil }
-func (m *mockConn) RemotePeer() peer.ID                { return m.remote.ID }
-func (m *mockConn) RemotePublicKey() ic.PubKey         { return nil }
-func (m *mockConn) ConnState() network.ConnectionState { return network.ConnectionState{} }
-func (m *mockConn) IsClosed() bool                     { return m.isClosed.Load() }
+func (m *mockConn) Scope() network.ConnScope                   { return &network.NullScope{} }
+func (m *mockConn) LocalMultiaddr() ma.Multiaddr               { return m.local.Addrs[0] }
+func (m *mockConn) RemoteMultiaddr() ma.Multiaddr              { return m.remote.Addrs[0] }
+func (m *mockConn) LocalPeer() peer.ID                         { return m.local.ID }
+func (m *mockConn) LocalPrivateKey() ic.PrivKey                { return nil }
+func (m *mockConn) RemotePeer() peer.ID                        { return m.remote.ID }
+func (m *mockConn) RemotePublicKey() ic.PubKey                 { return nil }
+func (m *mockConn) ConnState() network.ConnectionState         { return network.ConnectionState{} }
+func (m *mockConn) IsClosed() bool                             { return m.isClosed.Load() }
+func (m *mockConn) CloseWithError(network.ConnErrorCode) error { return m.Close() }
 
 func TestFilterCaching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

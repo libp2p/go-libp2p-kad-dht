@@ -119,7 +119,7 @@ func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	if len(baddr) == 0 {
 		t.Fatal("no addresses for connection.")
 	}
-	a.Host().Peerstore().AddAddrs(bid, baddr, peerstore.TempAddrTTL)
+	a.Host().Peerstore().AddAddrs(bid, baddr, peerstore.AddressTTL)
 	if err := a.Host().Connect(ctx, peer.AddrInfo{ID: bid}); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +132,7 @@ func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 		// fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
 		select {
 		case <-ctx.Done():
+			t.Log("wait(): b was still not in a's routing table after context was cancelled")
 			t.Fatal(ctx.Err())
 		case <-time.After(time.Millisecond * 5):
 		}
@@ -285,7 +286,10 @@ func TestSearchValue(t *testing.T) {
 	d.WAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 	d.LAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 
-	_ = wan.PutValue(ctx, "/v/hello", []byte("valid"))
+	err := wan.PutValue(ctx, "/v/hello", []byte("valid"))
+	if err != nil {
+		t.Error("error putting value to wan DHT:", err)
+	}
 
 	valCh, err := d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
 	if err != nil {
@@ -312,7 +316,7 @@ func TestSearchValue(t *testing.T) {
 
 	err = lan.PutValue(ctx, "/v/hello", []byte("newer"))
 	if err != nil {
-		t.Error(err)
+		t.Error("error putting value to lan DHT:", err)
 	}
 
 	valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))

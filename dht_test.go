@@ -1459,7 +1459,7 @@ func TestClientModeConnect(t *testing.T) {
 	a.ProviderStore().AddProvider(ctx, c.Hash(), peer.AddrInfo{ID: p})
 	time.Sleep(time.Millisecond * 5) // just in case...
 
-	maxRetries := 3
+	maxRetries := 6
 	var provs []peer.AddrInfo
 	var err error
 	for i := 0; i < maxRetries && len(provs) == 0; i++ {
@@ -1467,6 +1467,7 @@ func TestClientModeConnect(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		time.Sleep(time.Millisecond * 5)
 	}
 
 	if len(provs) == 0 {

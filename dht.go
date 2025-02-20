@@ -20,7 +20,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
-	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/internal/metrics"
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
@@ -34,7 +34,6 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
-	"go.opencensus.io/tag"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -912,19 +911,16 @@ func (dht *IpfsDHT) NetworkSize() (int32, error) {
 }
 
 // newContextWithLocalTags returns a new context.Context with the InstanceID and
-// PeerID keys populated. It will also take any extra tags that need adding to
-// the context as tag.Mutators.
-func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraTags ...tag.Mutator) context.Context {
-	extraTags = append(
-		extraTags,
-		tag.Upsert(metrics.KeyPeerID, dht.self.String()),
-		tag.Upsert(metrics.KeyInstanceID, fmt.Sprintf("%p", dht)),
-	)
-	ctx, _ = tag.New(
-		ctx,
-		extraTags...,
-	) // ignoring error as it is unrelated to the actual function of this code.
-	return ctx
+// PeerID keys populated. It will also take any extra attributes that need adding to
+// the context as attribute.KeyValue.
+func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraAttrs ...attribute.KeyValue) context.Context {
+	allAttrs := make([]attribute.KeyValue, 0, len(extraAttrs)+2)
+	copy(allAttrs, extraAttrs)
+	
+	allAttrs = append(allAttrs, attribute.Key(metrics.KeyPeerID).String(dht.self.String()))
+	allAttrs = append(allAttrs, attribute.Key(metrics.KeyInstanceID).String(fmt.Sprintf("%p", dht)))
+
+	return metrics.ContextWithAttributes(ctx, allAttrs...)
 }
 
 func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Duration) {

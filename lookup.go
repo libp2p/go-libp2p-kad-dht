@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
-	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/internal/metrics"
 	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -43,7 +43,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 	}
 
 	if ns, err := dht.nsEstimator.NetworkSize(); err == nil {
-		metrics.NetworkSize.M(int64(ns))
+		metrics.RecordNetworkSize(int64(ns))
 	}
 
 	// Reset the refresh timer for this key's bucket since we've just

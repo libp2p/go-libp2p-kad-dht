@@ -1646,14 +1646,15 @@ func testFindPeerQuery(t *testing.T,
 	leafs, // Number of nodes that might be connected to from the bootstrappers
 	bootstrapConns int, // Number of bootstrappers each leaf should connect to.
 ) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping due to #760")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dhts := setupDHTS(t, ctx, 1+bootstrappers+leafs, BucketSize(4))
+	bucketSize := 4
+	// using bucketSize as Resiliency parameter allows to query to bucketSize
+	// closest peers, since we are looking for the bucketSize closest peers.
+	// Otherwise it is possible that we will miss some and it makes the test
+	// flaky.
+	dhts := setupDHTS(t, ctx, 1+bootstrappers+leafs, BucketSize(bucketSize), Resiliency(bucketSize))
 	defer func() {
 		for _, d := range dhts {
 			d.Close()
@@ -1700,7 +1701,7 @@ func testFindPeerQuery(t *testing.T,
 	waitForWellFormedTables(t, dhts, 4, 0, 5*time.Second)
 
 	var peers []peer.ID
-	for _, d := range others {
+	for _, d := range dhts {
 		peers = append(peers, d.PeerID())
 	}
 
@@ -1716,7 +1717,20 @@ func testFindPeerQuery(t *testing.T,
 
 	exp := kb.SortClosestPeers(peers, rtval)[:minInt(guy.bucketSize, len(peers))]
 	t.Logf("got %d peers", len(outpeers))
+
+	// if guy is among the closest peers, artificially add it to outpeers since
+	// remote peers never tell a peer about itself. If not including self,
+	// results may be inaccurate since we are looking for the X closest peers + 1
+	// (self)
+	for _, p := range exp {
+		if p == guy.self {
+			outpeers = append(outpeers, guy.self)
+		}
+	}
 	got := kb.SortClosestPeers(outpeers, rtval)
+	if len(got) > len(exp) {
+		got = got[:len(exp)]
+	}
 
 	assert.EqualValues(t, exp, got)
 }

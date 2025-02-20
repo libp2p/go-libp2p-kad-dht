@@ -9,6 +9,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -119,7 +120,7 @@ func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 	if len(baddr) == 0 {
 		t.Fatal("no addresses for connection.")
 	}
-	a.Host().Peerstore().AddAddrs(bid, baddr, peerstore.TempAddrTTL)
+	a.Host().Peerstore().AddAddrs(bid, baddr, peerstore.AddressTTL)
 	if err := a.Host().Connect(ctx, peer.AddrInfo{ID: bid}); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +180,7 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 	}
 	hlprs[1].allow = lan.PeerID()
 	connect(ctx, t, d.LAN, lan)
+	connect(ctx, t, lan, d.LAN)
 
 	return d, wan, lan
 }
@@ -285,7 +287,13 @@ func TestSearchValue(t *testing.T) {
 	d.WAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 	d.LAN.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
 
-	_ = wan.PutValue(ctx, "/v/hello", []byte("valid"))
+	err := wan.PutValue(ctx, "/v/hello", []byte("valid"))
+	// it is expected that we get an ErrLookupFailure here, because wan doesn't
+	// have any peers in its routing table (d.WAN is a client). this operation
+	// still puts the record in wan local datastore, which is what we want.
+	if err != kb.ErrLookupFailure {
+		t.Error("error putting value to wan DHT:", err)
+	}
 
 	valCh, err := d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
 	if err != nil {
@@ -312,7 +320,7 @@ func TestSearchValue(t *testing.T) {
 
 	err = lan.PutValue(ctx, "/v/hello", []byte("newer"))
 	if err != nil {
-		t.Error(err)
+		t.Error("error putting value to lan DHT:", err)
 	}
 
 	valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))

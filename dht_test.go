@@ -853,11 +853,6 @@ func TestRefresh(t *testing.T) {
 
 		time.Sleep(time.Microsecond * 50)
 	}
-
-	if testing.Verbose() {
-		// the routing tables should be full now. let's inspect them.
-		printRoutingTables(dhts)
-	}
 }
 
 func TestRefreshBelowMinRTThreshold(t *testing.T) {

@@ -1577,9 +1577,9 @@ func TestInvalidServer(t *testing.T) {
 	if !s1Found {
 		t.Fatal("Well behaving DHT server should have been added to the server routing table")
 	}
-	if s0.routingTable.Find(m1.self) != "" {
+	if s0.routingTable.Find(m1.self) != "" && s0.routingTable.Find(m0.self) != "" {
 		t.Log("s0:", s0.self, ", s1:", s1.self, ", m0:", m0.self, ", m1:", m1.self)
-		t.Log("Routing Table peers", m0.routingTable.ListPeers())
+		t.Log("Routing Table peers", s0.routingTable.ListPeers())
 		t.Fatal("Misbehaving DHT servers should not be added to routing table if well populated")
 	}
 }

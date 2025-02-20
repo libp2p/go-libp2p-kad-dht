@@ -133,7 +133,7 @@ func wait(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
 		// fmt.Fprintf(os.Stderr, "%v\n", a.RoutingTable().GetPeerInfos())
 		select {
 		case <-ctx.Done():
-			t.Fatal(ctx.Err())
+			t.Fatal("error while waiting for b to be included in a's routing table:", ctx.Err())
 		case <-time.After(time.Millisecond * 5):
 		}
 	}
@@ -218,11 +218,11 @@ func TestFindProviderAsync(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 
 	if err := wan.Provide(ctx, wancid, false); err != nil {
-		t.Fatal(err)
+		t.Fatal("error while providing to wan:", err)
 	}
 
 	if err := lan.Provide(ctx, lancid, true); err != nil {
-		t.Fatal(err)
+		t.Fatal("error while providing to lan:", err)
 	}
 
 	wpc := d.FindProvidersAsync(ctx, wancid, 1)

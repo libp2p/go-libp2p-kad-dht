@@ -2416,12 +2416,20 @@ func TestAddrFilter(t *testing.T) {
 		ma.StringCast("/ip4/1.2.3.1/tcp/123"),
 		ma.StringCast("/ip4/160.160.160.160/tcp/1600"),
 		ma.StringCast("/ip6/2001::10/tcp/123"),
+		ma.StringCast("/dns/libp2p.io/tcp/1234"),
+		ma.StringCast("/dns4/libp2p.io/tcp/1234"),
+		ma.StringCast("/dns6/libp2p.io/tcp/1234"),
+		ma.StringCast("/dnsaddr/bootstrap.libp2p.io"),
 	}
 	privAddrs := []ma.Multiaddr{
 		ma.StringCast("/ip4/192.168.1.100/tcp/123"),
 		ma.StringCast("/ip4/172.16.10.10/tcp/123"),
 		ma.StringCast("/ip4/10.10.10.10/tcp/123"),
 		ma.StringCast("/ip6/fc00::10/tcp/123"),
+		ma.StringCast("/dns/libp2p.local/tcp/1234"),
+		ma.StringCast("/dns4/libp2p.local/tcp/1234"),
+		ma.StringCast("/dns6/libp2p.local/tcp/1234"),
+		ma.StringCast("/dnsaddr/bootstrap.libp2p.local"),
 	}
 	loopbackAddrs := []ma.Multiaddr{
 		ma.StringCast("/ip4/127.0.0.100/tcp/123"),

@@ -19,7 +19,9 @@ func TestInvalidMessageSenderTracking(t *testing.T) {
 
 	foo := peer.ID("asdasd")
 
-	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t,
+		swarmt.OptDisableReuseport, swarmt.OptDisableQUIC),
+		new(bhost.HostOpts))
 	require.NoError(t, err)
 	h.Start()
 	defer h.Close()

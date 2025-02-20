@@ -14,7 +14,9 @@ import (
 )
 
 func TestRTPeerDiversityFilter(t *testing.T) {
-	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t,
+		swarmt.OptDisableReuseport, swarmt.OptDisableQUIC),
+		new(bhost.HostOpts))
 	require.NoError(t, err)
 	h.Start()
 	defer h.Close()
@@ -56,7 +58,9 @@ func TestRTPeerDiversityFilter(t *testing.T) {
 
 func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 	ctx := context.Background()
-	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t,
+		swarmt.OptDisableReuseport, swarmt.OptDisableQUIC),
+		new(bhost.HostOpts))
 	require.NoError(t, err)
 	h.Start()
 	defer h.Close()
@@ -116,7 +120,9 @@ func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	h, err := bhost.NewHost(swarmt.GenSwarm(t,
+		swarmt.OptDisableReuseport, swarmt.OptDisableQUIC),
+		new(bhost.HostOpts))
 	require.NoError(t, err)
 	h.Start()
 	defer h.Close()

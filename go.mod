@@ -4,6 +4,8 @@ go 1.23.0
 
 retract v0.24.3 // this includes a breaking change and should have been released as v0.25.0
 
+replace github.com/libp2p/go-libp2p => ./go-libp2p
+
 require (
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0

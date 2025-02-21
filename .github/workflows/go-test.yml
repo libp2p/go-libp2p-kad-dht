@@ -52,6 +52,7 @@ jobs:
         uses: ipdxco/unified-github-workflows/.github/actions/read-go-mod@main
       - name: Determine the Go version to use based on the go.mod file
         id: go
+        shell: bash
         env:
           MATRIX_GO: ${{ matrix.go }}
           GO_MOD_VERSION: ${{ fromJSON(steps.go-mod.outputs.json).Go }}
@@ -102,23 +103,19 @@ jobs:
         if: hashFiles('./.github/actions/go-test-setup') != ''
       - name: Run tests
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
-        # uses: protocol/multiple-go-modules@v1.4
         env:
           GOFLAGS: ${{ format('{0} {1}', env.GOTESTFLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
-        # with:
         run: go test . ./dual
       - name: Run tests (32 bit)
         # can't run 32 bit tests on OSX.
         if: matrix.os != 'macos' &&
           fromJSON(steps.config.outputs.json).skip32bit != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
-        # uses: protocol/multiple-go-modules@v1.4
         env:
           GOARCH: 386
           GOFLAGS: ${{ format('{0} {1}', env.GO386FLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
-        # with:
         run: |
           export "PATH=$PATH_386:$PATH"
           go test . ./dual
@@ -127,11 +124,9 @@ jobs:
         if: matrix.os == 'ubuntu' &&
           fromJSON(steps.config.outputs.json).skipRace != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
-        # uses: protocol/multiple-go-modules@v1.4
         env:
           GOFLAGS: ${{ format('{0} {1}', env.GORACEFLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
-        # with:
         run: go test -race . ./dual
       - name: Collect coverage files
         id: coverages

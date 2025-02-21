@@ -1559,8 +1559,9 @@ func TestInvalidServer(t *testing.T) {
 		t.Fatal("DHT server should have been added to the misbehaving server routing table")
 	}
 
-	// connect s0 to both s1 and m1
+	// connect s0 to s1 first and then m1
 	connectNoSync(t, ctx, s0, s1)
+	wait(t, ctx, s0, s1)
 	connectNoSync(t, ctx, s0, m1)
 
 	// s1 should be added to s0's routing table. Then, because s0's routing table

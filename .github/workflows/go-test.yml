@@ -16,5 +16,7 @@ concurrency:
 jobs:
   go-test:
     uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
+    with:
+      go-versions: '["1.23.x", "1.24.x"]'
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

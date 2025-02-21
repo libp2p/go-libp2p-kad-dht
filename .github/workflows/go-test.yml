@@ -107,7 +107,7 @@ jobs:
           GOFLAGS: ${{ format('{0} {1}', env.GOTESTFLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
         with:
-          run: go test ./ ./dual
+          run: go test . ./dual
       - name: Run tests (32 bit)
         # can't run 32 bit tests on OSX.
         if: matrix.os != 'macos' &&
@@ -121,7 +121,7 @@ jobs:
         with:
           run: |
             export "PATH=$PATH_386:$PATH"
-            go test ./ ./dual
+            go test . ./dual
       - name: Run tests with race detector
         # speed things up. Windows and OSX VMs are slow
         if: matrix.os == 'ubuntu' &&
@@ -132,7 +132,7 @@ jobs:
           GOFLAGS: ${{ format('{0} {1}', env.GORACEFLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
         with:
-          run: go test -race ./ ./dual
+          run: go test -race . ./dual
       - name: Collect coverage files
         id: coverages
         run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT

@@ -916,7 +916,7 @@ func (dht *IpfsDHT) NetworkSize() (int32, error) {
 func (dht *IpfsDHT) newContextWithLocalTags(ctx context.Context, extraAttrs ...attribute.KeyValue) context.Context {
 	allAttrs := make([]attribute.KeyValue, 0, len(extraAttrs)+2)
 	copy(allAttrs, extraAttrs)
-	
+
 	allAttrs = append(allAttrs, attribute.Key(metrics.KeyPeerID).String(dht.self.String()))
 	allAttrs = append(allAttrs, attribute.Key(metrics.KeyInstanceID).String(fmt.Sprintf("%p", dht)))
 

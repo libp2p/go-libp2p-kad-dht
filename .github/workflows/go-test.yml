@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu", "windows", "macos"]
-        go: ["this", "next"]
+        go: ["1.23", "1.24"]
     env:
       GOTESTFLAGS: -cover -coverprofile=module-coverage.txt -coverpkg=./...
       GO386FLAGS: ""
@@ -50,33 +50,6 @@ jobs:
       - name: Read the go.mod file
         id: go-mod
         uses: ipdxco/unified-github-workflows/.github/actions/read-go-mod@main
-      - name: Determine the Go version to use based on the go.mod file
-        id: go
-        shell: bash
-        env:
-          MATRIX_GO: ${{ matrix.go }}
-          GO_MOD_VERSION: ${{ fromJSON(steps.go-mod.outputs.json).Go }}
-        run: |
-          if [[ "$MATRIX_GO" == "this" ]]; then
-            MAJOR=$(echo "$GO_MOD_VERSION" | cut -d. -f1)
-            MINOR=$(echo "$GO_MOD_VERSION" | cut -d. -f2)
-            PATCH=$(echo "$GO_MOD_VERSION" | cut -d. -f3)
-            if [[ -z "$PATCH" ]]; then
-              echo "version=$MAJOR.$MINOR.x" >> $GITHUB_OUTPUT
-            else
-              echo "version=$MAJOR.$MINOR.$PATCH" >> $GITHUB_OUTPUT
-            fi
-          elif [[ "$MATRIX_GO" == "next" ]]; then
-            MAJOR=$(echo "$GO_MOD_VERSION" | cut -d. -f1)
-            MINOR=$(echo "$GO_MOD_VERSION" | cut -d. -f2)
-            echo "version=$MAJOR.$(($MINOR+1)).x" >> $GITHUB_OUTPUT
-          elif [[ "$MATRIX_GO" == "prev" ]]; then
-            MAJOR=$(echo "$GO_MOD_VERSION" | cut -d. -f1)
-            MINOR=$(echo "$GO_MOD_VERSION" | cut -d. -f2)
-            echo "version=$MAJOR.$(($MINOR-1)).x" >> $GITHUB_OUTPUT
-          else
-            echo "version=$MATRIX_GO" >> $GITHUB_OUTPUT
-          fi
       - name: Enable shuffle flag for go test command
         if: toJSON(fromJSON(steps.config.outputs.json).shuffle) != 'false'
         run: |
@@ -89,11 +62,10 @@ jobs:
           echo "GOTESTFLAGS=-v $GOTESTFLAGS" >> $GITHUB_ENV
           echo "GO386FLAGS=-v $GO386FLAGS" >> $GITHUB_ENV
           echo "GORACEFLAGS=-v $GORACEFLAGS" >> $GITHUB_ENV
-      - name: Set up the Go version read from the go.mod file
+      - name: Set up Go version
         uses: actions/setup-go@v5
-        if: steps.go.outputs.version != steps.stable.outputs.go-version
         with:
-          go-version: ${{ steps.go.outputs.version }}
+          go-version: ${{ matrix.go }}
       - name: Display the Go version and environment
         run: |
           go version

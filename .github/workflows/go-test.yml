@@ -112,12 +112,13 @@ jobs:
         if: matrix.os != 'macos' &&
           fromJSON(steps.config.outputs.json).skip32bit != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
+        shell: bash
         env:
           GOARCH: 386
           GOFLAGS: ${{ format('{0} {1}', env.GO386FLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
         run: |
-          export "PATH=$PATH_386:$PATH"
+          export "PATH=${PATH_386}:$PATH"
           go test . ./dual
       - name: Run tests with race detector
         # speed things up. Windows and OSX VMs are slow
@@ -130,7 +131,7 @@ jobs:
         run: go test -race . ./dual
       - name: Collect coverage files
         id: coverages
-        run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
+        run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> ${GITHUB_OUTPUT}
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@13ce06bfc6bbe3ecf90edbbf1bc32fe5978ca1d3 # v5.3.1
         with:

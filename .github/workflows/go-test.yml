@@ -102,37 +102,37 @@ jobs:
         if: hashFiles('./.github/actions/go-test-setup') != ''
       - name: Run tests
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
-        uses: protocol/multiple-go-modules@v1.4
+        # uses: protocol/multiple-go-modules@v1.4
         env:
           GOFLAGS: ${{ format('{0} {1}', env.GOTESTFLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
-        with:
-          run: go test . ./dual
+        # with:
+        run: go test . ./dual
       - name: Run tests (32 bit)
         # can't run 32 bit tests on OSX.
         if: matrix.os != 'macos' &&
           fromJSON(steps.config.outputs.json).skip32bit != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
-        uses: protocol/multiple-go-modules@v1.4
+        # uses: protocol/multiple-go-modules@v1.4
         env:
           GOARCH: 386
           GOFLAGS: ${{ format('{0} {1}', env.GO386FLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
-        with:
-          run: |
-            export "PATH=$PATH_386:$PATH"
-            go test . ./dual
+        # with:
+        run: |
+          export "PATH=$PATH_386:$PATH"
+          go test . ./dual
       - name: Run tests with race detector
         # speed things up. Windows and OSX VMs are slow
         if: matrix.os == 'ubuntu' &&
           fromJSON(steps.config.outputs.json).skipRace != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
-        uses: protocol/multiple-go-modules@v1.4
+        # uses: protocol/multiple-go-modules@v1.4
         env:
           GOFLAGS: ${{ format('{0} {1}', env.GORACEFLAGS, env.GOFLAGS) }}
           CGO_ENABLED: ${{ toJSON(fromJSON(steps.config.outputs.json).cgo) != 'false' }}
-        with:
-          run: go test -race . ./dual
+        # with:
+        run: go test -race . ./dual
       - name: Collect coverage files
         id: coverages
         run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT

@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu", "windows", "macos"]
-        go: ${{ fromJSON(inputs.go-versions) }}
+        go: ["this", "next"]
     env:
       GOTESTFLAGS: -cover -coverprofile=module-coverage.txt -coverpkg=./...
       GO386FLAGS: ""
@@ -90,10 +90,9 @@ jobs:
           echo "GORACEFLAGS=-v $GORACEFLAGS" >> $GITHUB_ENV
       - name: Set up the Go version read from the go.mod file
         uses: actions/setup-go@v5
-        if: steps.go.outputs.version != steps.stable.outputs.go-version || inputs.go-cache != 'false'
+        if: steps.go.outputs.version != steps.stable.outputs.go-version
         with:
           go-version: ${{ steps.go.outputs.version }}
-          cache: ${{ inputs.go-cache }}
       - name: Display the Go version and environment
         run: |
           go version
@@ -142,5 +141,4 @@ jobs:
         with:
           files: ${{ steps.coverages.outputs.files }}
           env_vars: OS=${{ matrix.os }}, GO=${{ steps.go.outputs.version }}
-          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

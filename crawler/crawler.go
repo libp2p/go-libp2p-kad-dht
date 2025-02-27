@@ -137,13 +137,13 @@ type HandleQueryResult func(p peer.ID, rtPeers []*peer.AddrInfo)
 type HandleQueryFail func(p peer.ID, err error)
 
 type peerAddrs struct {
-	peers map[peer.ID]map[string]struct{}
+	peers map[peer.ID]map[string]ma.Multiaddr
 	lk    *sync.RWMutex
 }
 
 func newPeerAddrs() peerAddrs {
 	return peerAddrs{
-		peers: make(map[peer.ID]map[string]struct{}),
+		peers: make(map[peer.ID]map[string]ma.Multiaddr),
 		lk:    new(sync.RWMutex),
 	}
 }
@@ -167,10 +167,10 @@ func (ps peerAddrs) RemoveSourceAndAddPeers(source peer.ID, peers map[peer.ID][]
 func (ps peerAddrs) addAddrsNoLock(peers map[peer.ID][]ma.Multiaddr) {
 	for p, addrs := range peers {
 		if _, ok := ps.peers[p]; !ok {
-			ps.peers[p] = make(map[string]struct{})
+			ps.peers[p] = make(map[string]ma.Multiaddr)
 		}
 		for _, addr := range addrs {
-			ps.peers[p][string(addr.Bytes())] = struct{}{}
+			ps.peers[p][string(addr.Bytes())] = addr
 		}
 	}
 }
@@ -180,13 +180,8 @@ func (ps peerAddrs) PeerInfo(p peer.ID) peer.AddrInfo {
 	defer ps.lk.RUnlock()
 
 	addrs := make([]ma.Multiaddr, 0, len(ps.peers[p]))
-	for addr := range ps.peers[p] {
-		maddr, err := ma.NewMultiaddrBytes([]byte(addr))
-		if err != nil {
-			logger.Errorf("error converting multiaddr: %v", err)
-			continue
-		}
-		addrs = append(addrs, maddr)
+	for _, addr := range ps.peers[p] {
+		addrs = append(addrs, addr)
 	}
 	return peer.AddrInfo{ID: p, Addrs: addrs}
 }

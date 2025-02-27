@@ -136,25 +136,25 @@ type HandleQueryResult func(p peer.ID, rtPeers []*peer.AddrInfo)
 // HandleQueryFail is a callback on failed peer query
 type HandleQueryFail func(p peer.ID, err error)
 
-type tempPeerstore struct {
+type peerAddrs struct {
 	peers map[peer.ID]map[string]struct{}
 	lk    *sync.RWMutex
 }
 
-func newTempPeerstore() tempPeerstore {
-	return tempPeerstore{
+func newPeerAddrs() peerAddrs {
+	return peerAddrs{
 		peers: make(map[peer.ID]map[string]struct{}),
 		lk:    new(sync.RWMutex),
 	}
 }
 
-func (ps tempPeerstore) AddAddrs(peers map[peer.ID][]ma.Multiaddr) {
+func (ps peerAddrs) AddAddrs(peers map[peer.ID][]ma.Multiaddr) {
 	ps.lk.Lock()
 	defer ps.lk.Unlock()
 	ps.addAddrsNoLock(peers)
 }
 
-func (ps tempPeerstore) RemoveSourceAndAddPeers(source peer.ID, peers map[peer.ID][]ma.Multiaddr) {
+func (ps peerAddrs) RemoveSourceAndAddPeers(source peer.ID, peers map[peer.ID][]ma.Multiaddr) {
 	ps.lk.Lock()
 	defer ps.lk.Unlock()
 
@@ -164,7 +164,7 @@ func (ps tempPeerstore) RemoveSourceAndAddPeers(source peer.ID, peers map[peer.I
 	ps.addAddrsNoLock(peers)
 }
 
-func (ps tempPeerstore) addAddrsNoLock(peers map[peer.ID][]ma.Multiaddr) {
+func (ps peerAddrs) addAddrsNoLock(peers map[peer.ID][]ma.Multiaddr) {
 	for p, addrs := range peers {
 		if _, ok := ps.peers[p]; !ok {
 			ps.peers[p] = make(map[string]struct{})
@@ -175,7 +175,7 @@ func (ps tempPeerstore) addAddrsNoLock(peers map[peer.ID][]ma.Multiaddr) {
 	}
 }
 
-func (ps tempPeerstore) PeerInfo(p peer.ID) peer.AddrInfo {
+func (ps peerAddrs) PeerInfo(p peer.ID) peer.AddrInfo {
 	ps.lk.RLock()
 	defer ps.lk.RUnlock()
 
@@ -196,7 +196,7 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 	jobs := make(chan peer.ID, 1)
 	results := make(chan *queryResult, 1)
 
-	peerstore := newTempPeerstore()
+	peerAddrs := newPeerAddrs()
 
 	// Start worker goroutines
 	var wg sync.WaitGroup
@@ -206,7 +206,7 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 			defer wg.Done()
 			for p := range jobs {
 				qctx, cancel := context.WithTimeout(ctx, c.queryTimeout)
-				ai := peerstore.PeerInfo(p)
+				ai := peerAddrs.PeerInfo(p)
 				res := c.queryPeer(qctx, ai)
 				cancel() // do not defer, cleanup after each job
 				results <- res
@@ -221,7 +221,7 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 	peersSeen := make(map[peer.ID]struct{})
 
 	numSkipped := 0
-	peersAddrs := make(map[peer.ID][]ma.Multiaddr)
+	initialPeersAddrs := make(map[peer.ID][]ma.Multiaddr)
 	for _, ai := range startingPeers {
 		extendAddrs := c.host.Peerstore().Addrs(ai.ID)
 		if len(ai.Addrs) > 0 {
@@ -231,12 +231,12 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 			numSkipped++
 			continue
 		}
-		peersAddrs[ai.ID] = extendAddrs
+		initialPeersAddrs[ai.ID] = extendAddrs
 
 		toDial = append(toDial, ai)
 		peersSeen[ai.ID] = struct{}{}
 	}
-	peerstore.AddAddrs(peersAddrs)
+	peerAddrs.AddAddrs(initialPeersAddrs)
 
 	if numSkipped > 0 {
 		logger.Infof("%d starting peers were skipped due to lack of addresses. Starting crawl with %d peers", numSkipped, len(toDial))
@@ -270,7 +270,7 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 					rtPeers = append(rtPeers, ai)
 				}
 				peersQueried[res.peer] = struct{}{}
-				peerstore.RemoveSourceAndAddPeers(res.peer, addrsToUpdate)
+				peerAddrs.RemoveSourceAndAddPeers(res.peer, addrsToUpdate)
 
 				if handleSuccess != nil {
 					handleSuccess(res.peer, rtPeers)

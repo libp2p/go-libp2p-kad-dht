@@ -307,9 +307,10 @@ func (c *DefaultCrawler) queryPeer(ctx context.Context, nextPeer peer.AddrInfo) 
 		logger.Debugf("could not connect to peer %v: %v", nextPeer.ID, err)
 		return &queryResult{nextPeer.ID, nil, err}
 	}
-	// extend peerstore address ttl for addresses whose ttl is below
+	// Extend peerstore address ttl for addresses whose ttl is below
 	// c.dialAddressExtendDur. By now identify has already cleaned up addresses
-	// and only kept the listen addresses advertised by the remote peer
+	// provided to Connect above and only kept the listen addresses advertised by
+	// the remote peer
 	c.host.Peerstore().AddAddrs(nextPeer.ID, c.host.Peerstore().Addrs(nextPeer.ID), c.dialAddressExtendDur)
 
 	localPeers := make(map[peer.ID]*peer.AddrInfo)

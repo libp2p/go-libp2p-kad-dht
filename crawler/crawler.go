@@ -148,12 +148,6 @@ func newPeerAddrs() peerAddrs {
 	}
 }
 
-func (ps peerAddrs) AddAddrs(peers map[peer.ID][]ma.Multiaddr) {
-	ps.lk.Lock()
-	defer ps.lk.Unlock()
-	ps.addAddrsNoLock(peers)
-}
-
 func (ps peerAddrs) RemoveSourceAndAddPeers(source peer.ID, peers map[peer.ID][]ma.Multiaddr) {
 	ps.lk.Lock()
 	defer ps.lk.Unlock()
@@ -166,12 +160,16 @@ func (ps peerAddrs) RemoveSourceAndAddPeers(source peer.ID, peers map[peer.ID][]
 
 func (ps peerAddrs) addAddrsNoLock(peers map[peer.ID][]ma.Multiaddr) {
 	for p, addrs := range peers {
-		if _, ok := ps.peers[p]; !ok {
-			ps.peers[p] = make(map[string]ma.Multiaddr)
-		}
-		for _, addr := range addrs {
-			ps.peers[p][string(addr.Bytes())] = addr
-		}
+		ps.addPeerAddrsNoLock(p, addrs)
+	}
+}
+
+func (ps peerAddrs) addPeerAddrsNoLock(p peer.ID, addrs []ma.Multiaddr) {
+	if _, ok := ps.peers[p]; !ok {
+		ps.peers[p] = make(map[string]ma.Multiaddr)
+	}
+	for _, addr := range addrs {
+		ps.peers[p][string(addr.Bytes())] = addr
 	}
 }
 
@@ -216,7 +214,7 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 	peersSeen := make(map[peer.ID]struct{})
 
 	numSkipped := 0
-	initialPeersAddrs := make(map[peer.ID][]ma.Multiaddr)
+	peerAddrs.lk.Lock()
 	for _, ai := range startingPeers {
 		extendAddrs := c.host.Peerstore().Addrs(ai.ID)
 		if len(ai.Addrs) > 0 {
@@ -226,12 +224,12 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 			numSkipped++
 			continue
 		}
-		initialPeersAddrs[ai.ID] = extendAddrs
+		peerAddrs.addPeerAddrsNoLock(ai.ID, extendAddrs)
 
 		toDial = append(toDial, ai)
 		peersSeen[ai.ID] = struct{}{}
 	}
-	peerAddrs.AddAddrs(initialPeersAddrs)
+	peerAddrs.lk.Unlock()
 
 	if numSkipped > 0 {
 		logger.Infof("%d starting peers were skipped due to lack of addresses. Starting crawl with %d peers", numSkipped, len(toDial))

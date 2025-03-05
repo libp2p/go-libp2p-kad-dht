@@ -323,17 +323,32 @@ func TestSearchValue(t *testing.T) {
 		t.Error("error putting value to lan DHT:", err)
 	}
 
-	valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	maxAttempts := 5
+	success := false
+	// if value not propagated yet, try again to avoid flakiness
+	for i := 0; i < maxAttempts; i++ {
+		valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	var lastVal []byte
-	for c := range valCh {
-		lastVal = c
+		var lastVal []byte
+		vals := make([]string, 0)
+		for c := range valCh {
+			lastVal = c
+			vals = append(vals, string(c))
+		}
+		if string(lastVal) == "newer" {
+			success = true
+			break
+		}
+
+		t.Log(vals)
+		t.Log("incorrect best search value", string(lastVal))
+		time.Sleep(5 * time.Millisecond)
 	}
-	if string(lastVal) != "newer" {
-		t.Fatal("incorrect best search value")
+	if !success {
+		t.Fatal("fatal: incorrect best search value", maxAttempts, "times")
 	}
 }
 

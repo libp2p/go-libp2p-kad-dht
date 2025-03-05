@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
-	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
-
-	"github.com/ipfs/go-cid"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	helper "github.com/libp2p/go-libp2p-routing-helpers"
+	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -22,8 +21,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-
-	"github.com/hashicorp/go-multierror"
+	"go.uber.org/multierr"
 )
 
 const (
@@ -320,7 +318,7 @@ func combineErrors(erra, errb error) error {
 	} else if errb == kb.ErrLookupFailure {
 		return erra
 	}
-	return multierror.Append(erra, errb).ErrorOrNil()
+	return multierr.Append(erra, errb)
 }
 
 // Bootstrap allows callers to hint to the routing system to get into a

@@ -163,7 +163,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 	}
 
 	if fullrtcfg.crawler == nil {
-		fullrtcfg.crawler, err = crawler.NewDefaultCrawler(h, crawler.WithParallelism(200), crawler.WithDialAddrExtendDuration(fullrtcfg.crawlInterval))
+		fullrtcfg.crawler, err = crawler.NewDefaultCrawler(h, crawler.WithParallelism(200))
 		if err != nil {
 			return nil, err
 		}

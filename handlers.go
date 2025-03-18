@@ -350,6 +350,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
+	success := false
 	for _, pi := range pinfos {
 		if pi.ID != p {
 			// we should ignore this provider record! not from originator.
@@ -368,6 +369,10 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		// announcement go through.
 		addrs := dht.filterAddrs(pi.Addrs)
 		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs})
+		success = true
+	}
+	if !success {
+		return nil, fmt.Errorf("handleAddProvider no valid provider")
 	}
 
 	return nil, nil

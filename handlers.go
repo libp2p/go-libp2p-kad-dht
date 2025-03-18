@@ -341,9 +341,9 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
-		return nil, fmt.Errorf("handleAddProvider key size too large")
+		return nil, errors.New("handleAddProvider key size too large")
 	} else if len(key) == 0 {
-		return nil, fmt.Errorf("handleAddProvider key is empty")
+		return nil, errors.New("handleAddProvider key is empty")
 	}
 
 	logger.Debugw("adding provider", "from", p, "key", internal.LoggableProviderRecordBytes(key))
@@ -372,7 +372,7 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		success = true
 	}
 	if !success {
-		return nil, fmt.Errorf("handleAddProvider no valid provider")
+		return nil, errors.New("handleAddProvider no valid provider")
 	}
 
 	return nil, nil

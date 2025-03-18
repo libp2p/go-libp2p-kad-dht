@@ -341,15 +341,16 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
-		return nil, fmt.Errorf("handleAddProvider key size too large")
+		return nil, errors.New("handleAddProvider key size too large")
 	} else if len(key) == 0 {
-		return nil, fmt.Errorf("handleAddProvider key is empty")
+		return nil, errors.New("handleAddProvider key is empty")
 	}
 
 	logger.Debugw("adding provider", "from", p, "key", internal.LoggableProviderRecordBytes(key))
 
 	// add provider should use the address given in the message
 	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
+	success := false
 	for _, pi := range pinfos {
 		if pi.ID != p {
 			// we should ignore this provider record! not from originator.
@@ -368,6 +369,10 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		// announcement go through.
 		addrs := dht.filterAddrs(pi.Addrs)
 		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs})
+		success = true
+	}
+	if !success {
+		return nil, errors.New("handleAddProvider no valid provider")
 	}
 
 	return nil, nil

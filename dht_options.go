@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
 
 	ds "github.com/ipfs/go-datastore"
 	ma "github.com/multiformats/go-multiaddr"
@@ -184,6 +185,21 @@ func BucketSize(bucketSize int) Option {
 func Concurrency(alpha int) Option {
 	return func(c *dhtcfg.Config) error {
 		c.Concurrency = alpha
+		return nil
+	}
+}
+
+// Quorum is a DHT option that tells the DHT how many peers it needs to get
+// values from before returning the best one. Zero means the DHT query
+// should complete instead of returning early.
+//
+// Default: 0
+func Quorum(n int) routing.Option {
+	return func(opts *routing.Options) error {
+		if opts.Other == nil {
+			opts.Other = make(map[interface{}]interface{}, 1)
+		}
+		opts.Other[dhtcfg.QuorumOptionKey{}] = n
 		return nil
 	}
 }

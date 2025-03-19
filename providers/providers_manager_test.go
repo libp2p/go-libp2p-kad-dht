@@ -149,7 +149,7 @@ func TestProvidesExpire(t *testing.T) {
 	pval := ProvideValidity
 	cleanup := defaultCleanupInterval
 	ProvideValidity = time.Second / 2
-	defaultCleanupInterval = time.Second / 2
+	defaultCleanupInterval = time.Second / 10
 	defer func() {
 		ProvideValidity = pval
 		defaultCleanupInterval = cleanup
@@ -181,7 +181,7 @@ func TestProvidesExpire(t *testing.T) {
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]})
 	}
 
-	time.Sleep(time.Second / 4)
+	time.Sleep(ProvideValidity / 2)
 
 	for _, h := range mhs[5:] {
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
@@ -195,7 +195,7 @@ func TestProvidesExpire(t *testing.T) {
 		}
 	}
 
-	time.Sleep(3 * time.Second / 8)
+	time.Sleep(ProvideValidity/2 + 2*defaultCleanupInterval)
 
 	for _, h := range mhs[:5] {
 		out, _ := p.GetProviders(ctx, h)
@@ -211,7 +211,7 @@ func TestProvidesExpire(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second / 2)
+	time.Sleep(ProvideValidity)
 
 	// Stop to prevent data races
 	p.Close()

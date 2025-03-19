@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -101,7 +102,7 @@ func (c *Config) ApplyFallbacks(h host.Host) error {
 				nsval["ipns"] = ipns.Validator{KeyBook: h.Peerstore()}
 			}
 		} else {
-			return fmt.Errorf("the default Validator was changed without being marked as changed")
+			return errors.New("the default Validator was changed without being marked as changed")
 		}
 	}
 	return nil

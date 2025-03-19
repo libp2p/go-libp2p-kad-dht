@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
@@ -34,7 +34,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	// peers should be in the RT because of fixLowPeers
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should have routes")
+			return errors.New("should have routes")
 		}
 		return nil
 	}))
@@ -45,7 +45,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	// peers will still be in the RT because we have decoupled membership from connectivity
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should have routes")
+			return errors.New("should have routes")
 		}
 		return nil
 	}))
@@ -59,7 +59,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should not have routes")
+			return errors.New("should not have routes")
 		}
 		return nil
 	}))
@@ -80,14 +80,14 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	// d1 has d2
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d2) {
-			return fmt.Errorf("should  have routes")
+			return errors.New("should  have routes")
 		}
 		return nil
 	}))
 	// d2 has d3
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d2, d3) {
-			return fmt.Errorf("should  have routes")
+			return errors.New("should  have routes")
 		}
 		return nil
 	}))
@@ -95,7 +95,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	// however, d1 does not know about d3
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if checkRoutingTable(d1, d3) {
-			return fmt.Errorf("should not have routes")
+			return errors.New("should not have routes")
 		}
 		return nil
 	}))
@@ -105,7 +105,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tu.WaitFor(ctx, func() error {
 		if !checkRoutingTable(d1, d3) {
-			return fmt.Errorf("should have routes")
+			return errors.New("should have routes")
 		}
 		return nil
 	}))

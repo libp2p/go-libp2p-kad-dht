@@ -261,7 +261,7 @@ func (dht *FullRT) TriggerRefresh(ctx context.Context) error {
 	case dht.triggerRefresh <- struct{}{}:
 		return nil
 	case <-dht.ctx.Done():
-		return fmt.Errorf("dht is closed")
+		return errors.New("dht is closed")
 	}
 }
 
@@ -520,7 +520,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 			return err
 		}
 		if i != 0 {
-			return fmt.Errorf("can't replace a newer value with an older value")
+			return errors.New("can't replace a newer value with an older value")
 		}
 	}
 
@@ -546,7 +546,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 	}, peers, true)
 
 	if successes == 0 {
-		return fmt.Errorf("failed to complete put")
+		return errors.New("failed to complete put")
 	}
 
 	return nil
@@ -834,7 +834,7 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
-		return fmt.Errorf("invalid cid: undefined")
+		return errors.New("invalid cid: undefined")
 	}
 	keyMH := key.Hash()
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
@@ -895,7 +895,7 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	}
 
 	if successes == 0 {
-		return fmt.Errorf("failed to complete provide")
+		return errors.New("failed to complete provide")
 	}
 
 	return ctx.Err()
@@ -989,7 +989,7 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 	// TODO: We may want to limit the type of addresses in our provider records
 	// For example, in a WAN-only DHT prohibit sharing non-WAN addresses (e.g. 192.168.0.100)
 	if len(pi.Addrs) < 1 {
-		return fmt.Errorf("no known addresses for self, cannot put provider")
+		return errors.New("no known addresses for self, cannot put provider")
 	}
 
 	fn := func(ctx context.Context, p, k peer.ID) error {
@@ -1016,7 +1016,7 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 	}
 
 	if len(keys) != len(values) {
-		return fmt.Errorf("number of keys does not match the number of values")
+		return errors.New("number of keys does not match the number of values")
 	}
 
 	keysAsPeerIDs := make([]peer.ID, 0, len(keys))
@@ -1027,7 +1027,7 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 	}
 
 	if len(keys) != len(keyRecMap) {
-		return fmt.Errorf("does not support duplicate keys")
+		return errors.New("does not support duplicate keys")
 	}
 
 	fn := func(ctx context.Context, p, k peer.ID) error {
@@ -1200,7 +1200,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	if numSendsSuccessful == 0 {
 		logger.Infof("bulk send failed")
-		return fmt.Errorf("failed to complete bulk sending")
+		return errors.New("failed to complete bulk sending")
 	}
 
 	logger.Infof("bulk send complete: %d keys, %d unique, %d successful, %d skipped peers, %d fails",
@@ -1244,7 +1244,7 @@ func (dht *FullRT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInf
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
-		return nil, fmt.Errorf("invalid cid: undefined")
+		return nil, errors.New("invalid cid: undefined")
 	}
 
 	var providers []peer.AddrInfo

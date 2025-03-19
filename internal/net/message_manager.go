@@ -3,7 +3,7 @@ package net
 import (
 	"bufio"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"sync"
 	"time"
@@ -26,7 +26,7 @@ import (
 var dhtReadMessageTimeout = 10 * time.Second
 
 // ErrReadTimeout is an error that occurs when no message is read within the timeout period.
-var ErrReadTimeout = fmt.Errorf("timed out reading response")
+var ErrReadTimeout = errors.New("timed out reading response")
 
 var logger = logging.Logger("dht")
 
@@ -197,7 +197,7 @@ func (ms *peerMessageSender) prepOrInvalidate(ctx context.Context) error {
 
 func (ms *peerMessageSender) prep(ctx context.Context) error {
 	if ms.invalid {
-		return fmt.Errorf("message sender has been invalidated")
+		return errors.New("message sender has been invalidated")
 	}
 	if ms.s != nil {
 		return nil

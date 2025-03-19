@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
@@ -129,7 +129,7 @@ func NamespacedValidator(ns string, v record.Validator) Option {
 	return func(c *dhtcfg.Config) error {
 		nsval, ok := c.Validator.(record.NamespacedValidator)
 		if !ok {
-			return fmt.Errorf("can only add namespaced validators to a NamespacedValidator")
+			return errors.New("can only add namespaced validators to a NamespacedValidator")
 		}
 		nsval[ns] = v
 		return nil

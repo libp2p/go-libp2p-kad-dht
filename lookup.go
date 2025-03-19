@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
@@ -24,7 +24,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 	defer span.End()
 
 	if key == "" {
-		return nil, fmt.Errorf("can't lookup empty key")
+		return nil, errors.New("can't lookup empty key")
 	}
 
 	// TODO: I can break the interface! return []peer.ID

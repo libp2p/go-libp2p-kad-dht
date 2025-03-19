@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -111,7 +111,7 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 	key := string(keyMH)
 
 	if key == "" {
-		return fmt.Errorf("can't lookup empty key")
+		return errors.New("can't lookup empty key")
 	}
 
 	// initialize new context for all putProvider operations.

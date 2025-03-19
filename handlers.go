@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -256,7 +255,7 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 	var closest []peer.ID
 
 	if len(pmes.GetKey()) == 0 {
-		return nil, fmt.Errorf("handleFindPeer with empty key")
+		return nil, errors.New("handleFindPeer with empty key")
 	}
 
 	// if looking for self... special case where we send it on CloserPeers.
@@ -304,9 +303,9 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
-		return nil, fmt.Errorf("handleGetProviders key size too large")
+		return nil, errors.New("handleGetProviders key size too large")
 	} else if len(key) == 0 {
-		return nil, fmt.Errorf("handleGetProviders key is empty")
+		return nil, errors.New("handleGetProviders key is empty")
 	}
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())

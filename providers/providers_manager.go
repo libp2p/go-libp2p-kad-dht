@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -36,11 +37,13 @@ const (
 
 // ProvideValidity is the default time that a Provider Record should last on DHT
 // This value is also known as Provider Record Expiration Interval.
-var ProvideValidity = amino.DefaultProvideValidity
-var defaultCleanupInterval = time.Hour
-var lruCacheSize = 256
-var batchBufferSize = 256
-var log = logging.Logger("providers")
+var (
+	ProvideValidity        = amino.DefaultProvideValidity
+	defaultCleanupInterval = time.Hour
+	lruCacheSize           = 256
+	batchBufferSize        = 256
+	log                    = logging.Logger("providers")
+)
 
 // ProviderStore represents a store that associates peers and their addresses to keys.
 type ProviderStore interface {
@@ -403,7 +406,7 @@ func loadProviderSet(ctx context.Context, dstore ds.Datastore, k []byte) (*provi
 func readTimeValue(data []byte) (time.Time, error) {
 	nsec, n := binary.Varint(data)
 	if n <= 0 {
-		return time.Time{}, fmt.Errorf("failed to parse time")
+		return time.Time{}, errors.New("failed to parse time")
 	}
 
 	return time.Unix(0, nsec), nil

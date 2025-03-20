@@ -8,10 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	pstore "github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -44,6 +46,12 @@ type query struct {
 
 	// seedPeers is the set of peers that seed the query
 	seedPeers []peer.ID
+
+	// If non-zero, define how many closer peers from the same IP block are
+	// allowed to be returned in a response. if response contains more than
+	// maxIPsPerGroup peers from the same IP block, all peers from that IP block
+	// are dropped
+	maxIPsPerGroup int
 
 	// peerTimes contains the duration of each successful query to a peer
 	peerTimes map[peer.ID]time.Duration
@@ -168,18 +176,27 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 		})
 		return nil, nil, kb.ErrLookupFailure
 	}
+	// if the DHT has a diversity filter, reuse the maxForTable value to drop
+	// responses from peers providing too many closer peers in the same IP block
+	var maxIPsPerGroup int
+	if dht.rtPeerDiversityFilter != nil {
+		if filter, ok := dht.rtPeerDiversityFilter.(*rtPeerIPGroupFilter); ok {
+			maxIPsPerGroup = filter.maxForTable
+		}
+	}
 
 	q := &query{
-		id:         uuid.New(),
-		key:        target,
-		ctx:        ctx,
-		dht:        dht,
-		queryPeers: qpeerset.NewQueryPeerset(target),
-		seedPeers:  seedPeers,
-		peerTimes:  make(map[peer.ID]time.Duration),
-		terminated: false,
-		queryFn:    queryFn,
-		stopFn:     stopFn,
+		id:             uuid.New(),
+		key:            target,
+		ctx:            ctx,
+		dht:            dht,
+		queryPeers:     qpeerset.NewQueryPeerset(target),
+		maxIPsPerGroup: maxIPsPerGroup,
+		seedPeers:      seedPeers,
+		peerTimes:      make(map[peer.ID]time.Duration),
+		terminated:     false,
+		queryFn:        queryFn,
+		stopFn:         stopFn,
 	}
 
 	// run the query
@@ -425,11 +442,12 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	// query successful, try to add to RT
 	q.dht.validPeerFound(p)
 
+	newPeers = q.filterPeersByIPDiversity(newPeers)
+
 	// process new peers
 	saw := []peer.ID{}
 	for _, next := range newPeers {
 		if next.ID == q.dht.self { // don't add self.
-			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 			continue
 		}
 
@@ -449,6 +467,69 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	}
 
 	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
+}
+
+func (q *query) filterPeersByIPDiversity(newPeers []*peer.AddrInfo) []*peer.AddrInfo {
+	// If no diversity limit is set, return all peers
+	if q.maxIPsPerGroup == 0 {
+		return newPeers
+	}
+
+	// Count peers per IP group
+	ipGroupCount := make(map[peerdiversity.PeerIPGroupKey]int)
+	for _, p := range newPeers {
+		// Track unique groups for this peer to avoid double counting
+		uniqueGroups := make(map[peerdiversity.PeerIPGroupKey]struct{})
+
+		// Find all IP groups this peer belongs to
+		for _, addr := range p.Addrs {
+			ip, err := manet.ToIP(addr)
+			if err != nil {
+				continue
+			}
+			group := q.dht.routingTable.DiversityFilter.IPGroupKey(ip)
+			if len(group) == 0 {
+				continue
+			}
+			uniqueGroups[group] = struct{}{}
+		}
+		// Increment count for each unique group
+		for group := range uniqueGroups {
+			ipGroupCount[group]++
+		}
+	}
+
+	// Identify overrepresented groups for removal
+	groupsToRemove := make([]peerdiversity.PeerIPGroupKey, 0)
+	for group, count := range ipGroupCount {
+		if count > q.maxIPsPerGroup {
+			groupsToRemove = append(groupsToRemove, group)
+		}
+	}
+	if len(groupsToRemove) == 0 {
+		// No groups are overrepresented, return all peers
+		return newPeers
+	}
+
+	// Filter out peers from overrepresented groups
+	filteredPeers := make([]*peer.AddrInfo, 0)
+PeerLoop:
+	for _, p := range newPeers {
+		for _, addr := range p.Addrs {
+			ip, err := manet.ToIP(addr)
+			if err != nil {
+				continue
+			}
+			group := q.dht.routingTable.DiversityFilter.IPGroupKey(ip)
+			for _, groupToRemove := range groupsToRemove {
+				if group == groupToRemove {
+					continue PeerLoop
+				}
+			}
+		}
+		filteredPeers = append(filteredPeers, p)
+	}
+	return filteredPeers
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {

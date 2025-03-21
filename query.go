@@ -8,12 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	pstore "github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -442,7 +440,9 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	// query successful, try to add to RT
 	q.dht.validPeerFound(p)
 
-	newPeers = q.filterPeersByIPDiversity(newPeers)
+	if q.maxIPsPerGroup != 0 {
+		newPeers = filterPeersByIPDiversity(newPeers, q.maxIPsPerGroup)
+	}
 
 	// process new peers
 	saw := []peer.ID{}
@@ -467,69 +467,6 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	}
 
 	ch <- &queryUpdate{cause: p, heard: saw, queried: []peer.ID{p}, queryDuration: queryDuration}
-}
-
-func (q *query) filterPeersByIPDiversity(newPeers []*peer.AddrInfo) []*peer.AddrInfo {
-	// If no diversity limit is set, return all peers
-	if q.maxIPsPerGroup == 0 {
-		return newPeers
-	}
-
-	// Count peers per IP group
-	ipGroupCount := make(map[peerdiversity.PeerIPGroupKey]int)
-	for _, p := range newPeers {
-		// Track unique groups for this peer to avoid double counting
-		uniqueGroups := make(map[peerdiversity.PeerIPGroupKey]struct{})
-
-		// Find all IP groups this peer belongs to
-		for _, addr := range p.Addrs {
-			ip, err := manet.ToIP(addr)
-			if err != nil {
-				continue
-			}
-			group := peerdiversity.IPGroupKey(ip)
-			if len(group) == 0 {
-				continue
-			}
-			uniqueGroups[group] = struct{}{}
-		}
-		// Increment count for each unique group
-		for group := range uniqueGroups {
-			ipGroupCount[group]++
-		}
-	}
-
-	// Identify overrepresented groups for removal
-	groupsToRemove := make([]peerdiversity.PeerIPGroupKey, 0)
-	for group, count := range ipGroupCount {
-		if count > q.maxIPsPerGroup {
-			groupsToRemove = append(groupsToRemove, group)
-		}
-	}
-	if len(groupsToRemove) == 0 {
-		// No groups are overrepresented, return all peers
-		return newPeers
-	}
-
-	// Filter out peers from overrepresented groups
-	filteredPeers := make([]*peer.AddrInfo, 0)
-PeerLoop:
-	for _, p := range newPeers {
-		for _, addr := range p.Addrs {
-			ip, err := manet.ToIP(addr)
-			if err != nil {
-				continue
-			}
-			group := peerdiversity.IPGroupKey(ip)
-			for _, groupToRemove := range groupsToRemove {
-				if group == groupToRemove {
-					continue PeerLoop
-				}
-			}
-		}
-		filteredPeers = append(filteredPeers, p)
-	}
-	return filteredPeers
 }
 
 func (q *query) updateState(ctx context.Context, up *queryUpdate) {

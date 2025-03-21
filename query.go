@@ -487,7 +487,7 @@ func (q *query) filterPeersByIPDiversity(newPeers []*peer.AddrInfo) []*peer.Addr
 			if err != nil {
 				continue
 			}
-			group := q.dht.routingTable.DiversityFilter.IPGroupKey(ip)
+			group := peerdiversity.IPGroupKey(ip)
 			if len(group) == 0 {
 				continue
 			}
@@ -520,7 +520,7 @@ PeerLoop:
 			if err != nil {
 				continue
 			}
-			group := q.dht.routingTable.DiversityFilter.IPGroupKey(ip)
+			group := peerdiversity.IPGroupKey(ip)
 			for _, groupToRemove := range groupsToRemove {
 				if group == groupToRemove {
 					continue PeerLoop

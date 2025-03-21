@@ -227,8 +227,8 @@ github.com/libp2p/go-libp2p-asn-util v0.4.1/go.mod h1:d/NI6XZ9qxw67b4e+NgpQexCIi
 github.com/libp2p/go-libp2p-core v0.2.4/go.mod h1:STh4fdfa5vDYr0/SzYYeqnt+E6KfEV5VxfIrm0bcI0g=
 github.com/libp2p/go-libp2p-core v0.3.0/go.mod h1:ACp3DmS3/N64c2jDzcV429ukDpicbL6+TrrxANBjPGw=
 github.com/libp2p/go-libp2p-kbucket v0.3.1/go.mod h1:oyjT5O7tS9CQurok++ERgc46YLwEpuGoFq9ubvoUOio=
-github.com/libp2p/go-libp2p-kbucket v0.6.6-0.20250320125952-a30d21cd39ac h1:LJjepIIdXzCPbrbNtKb9W7zDUX0976ds8G87ffYSj8w=
-github.com/libp2p/go-libp2p-kbucket v0.6.6-0.20250320125952-a30d21cd39ac/go.mod h1:ReeoHo/X4keqquk0+YC5QjL0SbEIdCdhsEmEzp2TFwY=
+github.com/libp2p/go-libp2p-kbucket v0.6.6-0.20250321093414-e1b01fa27aea h1:4rbx0p6ghB1JpDS4we2s9a2U2eTLGtpGC0zWhdG4nMg=
+github.com/libp2p/go-libp2p-kbucket v0.6.6-0.20250321093414-e1b01fa27aea/go.mod h1:ReeoHo/X4keqquk0+YC5QjL0SbEIdCdhsEmEzp2TFwY=
 github.com/libp2p/go-libp2p-peerstore v0.1.4/go.mod h1:+4BDbDiiKf4PzpANZDAT+knVdLxvqh7hXOujessqdzs=
 github.com/libp2p/go-libp2p-record v0.3.1 h1:cly48Xi5GjNw5Wq+7gmjfBiG9HCzQVkiZOUZ8kUl+Fg=
 github.com/libp2p/go-libp2p-record v0.3.1/go.mod h1:T8itUkLcWQLCYMqtX7Th6r7SexyUJpIyPgks757td/E=

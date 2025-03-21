@@ -10,6 +10,7 @@ import (
 
 	logging "github.com/ipfs/go-log"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 var dfLog = logging.Logger("dht/RtDiversityFilter")
@@ -105,4 +106,70 @@ func (r *rtPeerIPGroupFilter) PeerAddresses(p peer.ID) []ma.Multiaddr {
 		addr = append(addr, c.RemoteMultiaddr())
 	}
 	return addr
+}
+
+// filterPeersByIPDiversity filters out peers from the response that are overrepresented by IP group.
+// If an IP group has more than `limit` peers, all peers with at least 1 address in that IP group
+// are filtered out.
+func filterPeersByIPDiversity(newPeers []*peer.AddrInfo, limit int) []*peer.AddrInfo {
+	// If no diversity limit is set, return all peers
+	if limit == 0 {
+		return newPeers
+	}
+
+	// Count peers per IP group
+	ipGroupCount := make(map[peerdiversity.PeerIPGroupKey]int)
+	for _, p := range newPeers {
+		// Track unique groups for this peer to avoid double counting
+		uniqueGroups := make(map[peerdiversity.PeerIPGroupKey]struct{})
+
+		// Find all IP groups this peer belongs to
+		for _, addr := range p.Addrs {
+			ip, err := manet.ToIP(addr)
+			if err != nil {
+				continue
+			}
+			group := peerdiversity.IPGroupKey(ip)
+			if len(group) == 0 {
+				continue
+			}
+			uniqueGroups[group] = struct{}{}
+		}
+		// Increment count for each unique group
+		for group := range uniqueGroups {
+			ipGroupCount[group]++
+		}
+	}
+
+	// Identify overrepresented groups for removal
+	groupsToRemove := make([]peerdiversity.PeerIPGroupKey, 0)
+	for group, count := range ipGroupCount {
+		if count > limit {
+			groupsToRemove = append(groupsToRemove, group)
+		}
+	}
+	if len(groupsToRemove) == 0 {
+		// No groups are overrepresented, return all peers
+		return newPeers
+	}
+
+	// Filter out peers from overrepresented groups
+	filteredPeers := make([]*peer.AddrInfo, 0)
+PeerLoop:
+	for _, p := range newPeers {
+		for _, addr := range p.Addrs {
+			ip, err := manet.ToIP(addr)
+			if err != nil {
+				continue
+			}
+			group := peerdiversity.IPGroupKey(ip)
+			for _, groupToRemove := range groupsToRemove {
+				if group == groupToRemove {
+					continue PeerLoop
+				}
+			}
+		}
+		filteredPeers = append(filteredPeers, p)
+	}
+	return filteredPeers
 }

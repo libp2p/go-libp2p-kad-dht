@@ -2,11 +2,13 @@ package dht
 
 import (
 	"context"
+	"crypto/rand"
 	"testing"
 	"time"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
@@ -164,7 +166,11 @@ func TestFilterPeersByIPDiversity(t *testing.T) {
 		addr string
 	}
 	createPeer := func(ips ...addr) *peer.AddrInfo {
-		p := &peer.AddrInfo{ID: "", Addrs: make([]ma.Multiaddr, 0, len(ips))}
+		_, pubKey, err := crypto.GenerateEd25519Key(rand.Reader)
+		require.NoError(t, err)
+		pid, err := peer.IDFromPublicKey(pubKey)
+		require.NoError(t, err)
+		p := &peer.AddrInfo{ID: pid, Addrs: make([]ma.Multiaddr, 0, len(ips))}
 		for _, ip := range ips {
 			var a ma.Multiaddr
 			var err error

@@ -118,11 +118,8 @@ func filterPeersByIPDiversity(newPeers []*peer.AddrInfo, limit int) []*peer.Addr
 	}
 
 	// Count peers per IP group
-	ipGroupCount := make(map[peerdiversity.PeerIPGroupKey]int)
+	ipGroupPeers := make(map[peerdiversity.PeerIPGroupKey]map[peer.ID]struct{})
 	for _, p := range newPeers {
-		// Track unique groups for this peer to avoid double counting
-		uniqueGroups := make(map[peerdiversity.PeerIPGroupKey]struct{})
-
 		// Find all IP groups this peer belongs to
 		for _, addr := range p.Addrs {
 			ip, err := manet.ToIP(addr)
@@ -133,43 +130,34 @@ func filterPeersByIPDiversity(newPeers []*peer.AddrInfo, limit int) []*peer.Addr
 			if len(group) == 0 {
 				continue
 			}
-			uniqueGroups[group] = struct{}{}
-		}
-		// Increment count for each unique group
-		for group := range uniqueGroups {
-			ipGroupCount[group]++
+			if _, ok := ipGroupPeers[group]; !ok {
+				ipGroupPeers[group] = make(map[peer.ID]struct{})
+			}
+			ipGroupPeers[group][p.ID] = struct{}{}
 		}
 	}
 
-	// Identify overrepresented groups for removal
-	groupsToRemove := make([]peerdiversity.PeerIPGroupKey, 0)
-	for group, count := range ipGroupCount {
-		if count > limit {
-			groupsToRemove = append(groupsToRemove, group)
+	// Identify overrepresented groups and tag peers for removal
+	peersToRemove := make(map[peer.ID]struct{})
+	for _, peers := range ipGroupPeers {
+		if len(peers) > limit {
+			for p := range peers {
+				peersToRemove[p] = struct{}{}
+			}
 		}
 	}
-	if len(groupsToRemove) == 0 {
+	if len(peersToRemove) == 0 {
 		// No groups are overrepresented, return all peers
 		return newPeers
 	}
 
 	// Filter out peers from overrepresented groups
 	filteredPeers := make([]*peer.AddrInfo, 0)
-PeerLoop:
 	for _, p := range newPeers {
-		for _, addr := range p.Addrs {
-			ip, err := manet.ToIP(addr)
-			if err != nil {
-				continue
-			}
-			group := peerdiversity.IPGroupKey(ip)
-			for _, groupToRemove := range groupsToRemove {
-				if group == groupToRemove {
-					continue PeerLoop
-				}
-			}
+		if _, ok := peersToRemove[p.ID]; !ok {
+			filteredPeers = append(filteredPeers, p)
 		}
-		filteredPeers = append(filteredPeers, p)
 	}
+
 	return filteredPeers
 }

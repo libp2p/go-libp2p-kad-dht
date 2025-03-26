@@ -491,7 +491,7 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 	for nClosest := 0; nClosest < dht.rt.Size(); nClosest += step {
 		dht.rtLk.RLock()
 		// Get the last `step` closest peers, because we already tried the `nClosest` closest peers
-		closestKeys := kademlia.ClosestN(kadKey, dht.rt, nClosest+step)[nClosest-step:]
+		closestKeys := kademlia.ClosestN(kadKey, dht.rt, nClosest+step)[nClosest:]
 		dht.rtLk.RUnlock()
 
 	PeersLoop:

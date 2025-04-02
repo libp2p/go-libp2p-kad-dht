@@ -45,6 +45,12 @@ type query struct {
 	// seedPeers is the set of peers that seed the query
 	seedPeers []peer.ID
 
+	// If non-zero, define how many closer peers from the same IP block are
+	// allowed to be returned in a response. if response contains more than
+	// maxPeersPerIPGroup peers from the same IP block, all peers from that IP
+	// block are dropped
+	maxPeersPerIPGroup int
+
 	// peerTimes contains the duration of each successful query to a peer
 	peerTimes map[peer.ID]time.Duration
 
@@ -127,7 +133,7 @@ func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, qu
 	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
 	followupsCompleted := 0
 processFollowUp:
-	for i := 0; i < len(queryPeers); i++ {
+	for i := range queryPeers {
 		select {
 		case <-doneCh:
 			followupsCompleted++
@@ -168,18 +174,27 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 		})
 		return nil, nil, kb.ErrLookupFailure
 	}
+	// if the DHT has a diversity filter, reuse the maxForTable value to drop
+	// responses from peers providing too many closer peers in the same IP block
+	var maxPeersPerIPGroup int
+	if dht.rtPeerDiversityFilter != nil {
+		if filter, ok := dht.rtPeerDiversityFilter.(*rtPeerIPGroupFilter); ok {
+			maxPeersPerIPGroup = filter.maxForTable
+		}
+	}
 
 	q := &query{
-		id:         uuid.New(),
-		key:        target,
-		ctx:        ctx,
-		dht:        dht,
-		queryPeers: qpeerset.NewQueryPeerset(target),
-		seedPeers:  seedPeers,
-		peerTimes:  make(map[peer.ID]time.Duration),
-		terminated: false,
-		queryFn:    queryFn,
-		stopFn:     stopFn,
+		id:                 uuid.New(),
+		key:                target,
+		ctx:                ctx,
+		dht:                dht,
+		queryPeers:         qpeerset.NewQueryPeerset(target),
+		maxPeersPerIPGroup: maxPeersPerIPGroup,
+		seedPeers:          seedPeers,
+		peerTimes:          make(map[peer.ID]time.Duration),
+		terminated:         false,
+		queryFn:            queryFn,
+		stopFn:             stopFn,
 	}
 
 	// run the query
@@ -425,11 +440,14 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	// query successful, try to add to RT
 	q.dht.validPeerFound(p)
 
+	if q.maxPeersPerIPGroup != 0 {
+		newPeers = filterPeersByIPDiversity(newPeers, q.maxPeersPerIPGroup)
+	}
+
 	// process new peers
 	saw := []peer.ID{}
 	for _, next := range newPeers {
 		if next.ID == q.dht.self { // don't add self.
-			logger.Debugf("PEERS CLOSER -- worker for: %v found self", p)
 			continue
 		}
 

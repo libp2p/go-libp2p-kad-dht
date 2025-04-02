@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 
+	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -32,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/crawler"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
@@ -113,6 +117,8 @@ type FullRT struct {
 	self peer.ID
 
 	peerConnectednessSubscriber event.Subscription
+
+	ipDiversityFilterLimit int
 }
 
 // NewFullRT creates a DHT client that tracks the full network. It takes a protocol prefix for the given network,
@@ -127,10 +133,11 @@ type FullRT struct {
 // bootstrap peers).
 func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*FullRT, error) {
 	fullrtcfg := config{
-		crawlInterval:       time.Hour,
-		bulkSendParallelism: 20,
-		waitFrac:            0.3,
-		timeoutPerOp:        5 * time.Second,
+		crawlInterval:          time.Hour,
+		bulkSendParallelism:    20,
+		waitFrac:               0.3,
+		timeoutPerOp:           5 * time.Second,
+		ipDiversityFilterLimit: amino.DefaultMaxPeersPerIPGroup,
 	}
 	if err := fullrtcfg.apply(options...); err != nil {
 		return nil, err
@@ -156,7 +163,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		return nil, err
 	}
 
-	ms := net.NewMessageSenderImpl(h, []protocol.ID{dhtcfg.ProtocolPrefix + "/kad/1.0.0"})
+	ms := net.NewMessageSenderImpl(h, amino.Protocols)
 	protoMessenger, err := dht_pb.NewProtocolMessenger(ms)
 	if err != nil {
 		return nil, err
@@ -266,14 +273,9 @@ func (dht *FullRT) TriggerRefresh(ctx context.Context) error {
 }
 
 func (dht *FullRT) Stat() map[string]peer.ID {
-	newMap := make(map[string]peer.ID)
-
 	dht.kMapLk.RLock()
-	for k, v := range dht.keyToPeerMap {
-		newMap[k] = v
-	}
-	dht.kMapLk.RUnlock()
-	return newMap
+	defer dht.kMapLk.RUnlock()
+	return maps.Clone(dht.keyToPeerMap)
 }
 
 // Ready indicates that the routing table has been refreshed recently. It is recommended to be used for operations where
@@ -449,7 +451,7 @@ func (dht *FullRT) CheckPeers(ctx context.Context, peers ...peer.ID) (int, int) 
 func workers(numWorkers int, fn func(peer.AddrInfo), inputs <-chan peer.AddrInfo) {
 	jobs := make(chan peer.AddrInfo)
 	defer close(jobs)
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		go func() {
 			for j := range jobs {
 				fn(j)
@@ -461,30 +463,78 @@ func workers(numWorkers int, fn func(peer.AddrInfo), inputs <-chan peer.AddrInfo
 	}
 }
 
+// GetClosestPeers tries to return the `dht.bucketSize` closest known peers to
+// the given key.
+//
+// If the IP diversity filter limit is set, the returned peers will contain at
+// most `dht.ipDiversityFilterLimit` peers sharing the same IP group. Hence,
+// the peers may not be the absolute closest peers to the given key, but they
+// will be more diverse in terms of IP addresses.
 func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
 	_, span := internal.StartSpan(ctx, "FullRT.GetClosestPeers", trace.WithAttributes(internal.KeyAsAttribute("Key", key)))
 	defer span.End()
 
 	kbID := kb.ConvertKey(key)
 	kadKey := kadkey.KbucketIDToKey(kbID)
-	dht.rtLk.RLock()
-	closestKeys := kademlia.ClosestN(kadKey, dht.rt, dht.bucketSize)
-	dht.rtLk.RUnlock()
 
-	peers := make([]peer.ID, 0, len(closestKeys))
-	for _, k := range closestKeys {
-		dht.kMapLk.RLock()
-		p, ok := dht.keyToPeerMap[string(k)]
-		if !ok {
-			logger.Errorf("key not found in map")
+	ipGroupCounts := make(map[peerdiversity.PeerIPGroupKey]map[peer.ID]struct{})
+	peers := make([]peer.ID, 0, dht.bucketSize)
+
+	// If ipDiversityFilterLimit is non-zero, the step is slightly larger than
+	// the bucket size, allowing to have a few backup peers in case some are
+	// filtered out by the diversity filter. Multiple calls to ClosestN are
+	// expensive, but increasing the `count` parameter is cheap.
+	step := dht.bucketSize + 2*dht.ipDiversityFilterLimit
+	for nClosest := 0; nClosest < dht.rt.Size(); nClosest += step {
+		dht.rtLk.RLock()
+		// Get the last `step` closest peers, because we already tried the `nClosest` closest peers
+		closestKeys := kademlia.ClosestN(kadKey, dht.rt, nClosest+step)[nClosest:]
+		dht.rtLk.RUnlock()
+
+	PeersLoop:
+		for _, k := range closestKeys {
+			dht.kMapLk.RLock()
+			// Recover the peer ID from the key
+			p, ok := dht.keyToPeerMap[string(k)]
+			if !ok {
+				logger.Errorf("key not found in map")
+				continue
+			}
+			dht.kMapLk.RUnlock()
+			dht.peerAddrsLk.RLock()
+			peerAddrs := dht.peerAddrs[p]
+			dht.peerAddrsLk.RUnlock()
+
+			if dht.ipDiversityFilterLimit > 0 {
+				for _, addr := range peerAddrs {
+					ip, err := manet.ToIP(addr)
+					if err != nil {
+						continue
+					}
+					ipGroup := peerdiversity.IPGroupKey(ip)
+					if len(ipGroup) == 0 {
+						continue
+					}
+					if _, ok := ipGroupCounts[ipGroup]; !ok {
+						ipGroupCounts[ipGroup] = make(map[peer.ID]struct{})
+					}
+					if len(ipGroupCounts[ipGroup]) >= dht.ipDiversityFilterLimit {
+						// This ip group is already overrepresented, skip this peer
+						continue PeersLoop
+					}
+					ipGroupCounts[ipGroup][p] = struct{}{}
+				}
+			}
+
+			// Add the peer's known addresses to the peerstore so that it can be
+			// dialed by the caller.
+			dht.h.Peerstore().AddAddrs(p, peerAddrs, peerstore.TempAddrTTL)
+			peers = append(peers, p)
+
+			if len(peers) == dht.bucketSize {
+				return peers, nil
+			}
 		}
-		dht.kMapLk.RUnlock()
-		dht.peerAddrsLk.RLock()
-		peerAddrs := dht.peerAddrs[p]
-		dht.peerAddrsLk.RUnlock()
-
-		dht.h.Peerstore().AddAddrs(p, peerAddrs, peerstore.TempAddrTTL)
-		peers = append(peers, p)
 	}
 	return peers, nil
 }
@@ -615,7 +665,7 @@ func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.
 	}
 
 	stopCh := make(chan struct{})
-	valCh, lookupRes := dht.getValues(ctx, key, stopCh)
+	valCh, lookupRes := dht.getValues(ctx, key)
 
 	out := make(chan []byte)
 	go func() {
@@ -743,7 +793,7 @@ type lookupWithFollowupResult struct {
 	peers []peer.ID // the top K not unreachable peers at the end of the query
 }
 
-func (dht *FullRT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
+func (dht *FullRT) getValues(ctx context.Context, key string) (<-chan RecvdVal, <-chan *lookupWithFollowupResult) {
 	valCh := make(chan RecvdVal, 1)
 	lookupResCh := make(chan *lookupWithFollowupResult, 1)
 
@@ -1004,7 +1054,7 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 		keysAsPeerIDs = append(keysAsPeerIDs, peer.ID(k))
 	}
 
-	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, true)
+	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn)
 }
 
 func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) error {
@@ -1035,10 +1085,10 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 		return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
 	}
 
-	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, false)
+	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn)
 }
 
-func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, target, k peer.ID) error, isProvRec bool) error {
+func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(ctx context.Context, target, k peer.ID) error) error {
 	ctx, span := internal.StartSpan(ctx, "FullRT.BulkMessageSend")
 	defer span.End()
 
@@ -1089,7 +1139,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	workCh := make(chan workMessage, 1)
 	wg := sync.WaitGroup{}
 	wg.Add(dht.bulkSendParallelism)
-	for i := 0; i < dht.bulkSendParallelism; i++ {
+	for range dht.bulkSendParallelism {
 		go func() {
 			defer wg.Done()
 			defer logger.Debugf("bulk send goroutine done")

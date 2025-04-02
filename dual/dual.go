@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
@@ -47,11 +48,6 @@ var (
 	_ routing.PeerRouting    = (*DHT)(nil)
 	_ routing.PubKeyFetcher  = (*DHT)(nil)
 	_ routing.ValueStore     = (*DHT)(nil)
-)
-
-var (
-	maxPrefixCountPerCpl = 2
-	maxPrefixCount       = 3
 )
 
 type config struct {
@@ -106,7 +102,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 		WanDHTOption(
 			dht.QueryFilter(dht.PublicQueryFilter),
 			dht.RoutingTableFilter(dht.PublicRoutingTableFilter),
-			dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, maxPrefixCountPerCpl, maxPrefixCount)),
+			dht.RoutingTablePeerDiversityFilter(dht.NewRTPeerDiversityFilter(h, amino.DefaultMaxPeersPerIPGroupPerCpl, amino.DefaultMaxPeersPerIPGroup)),
 			// filter out all private addresses
 			dht.AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr { return ma.FilterAddrs(addrs, manet.IsPublicAddr) }),
 		),

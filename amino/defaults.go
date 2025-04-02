@@ -47,6 +47,18 @@ const (
 	// After it expires, the returned records will require an extra lookup, to
 	// find the multiaddress associated with the returned peer id.
 	DefaultProviderAddrTTL = 24 * time.Hour
+
+	// DefaultMaxPeersPerIPGroup is the maximal number of peers with addresses in
+	// the same IP group allowed in the routing table. Once this limit is
+	// reached, newly discovered peers with addresses in the same IP group will
+	// not be added to the routing table.
+	DefaultMaxPeersPerIPGroup = 3
+
+	// DefaultMaxPeersPerIPGroupPerCpl is maximal number of peers with addresses
+	// in the same IP group allowed in each routing table bucket, defined by its
+	// common prefix length to self peer id.
+	// also see: `DefaultMaxPeersPerIPGroup`.
+	DefaultMaxPeersPerIPGroupPerCpl = 2
 )
 
 // Protocols is a slice containing all supported protocol IDs for Amino DHT.

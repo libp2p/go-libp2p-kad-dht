@@ -152,7 +152,7 @@ func filterPeersByIPDiversity(newPeers []*peer.AddrInfo, limit int) []*peer.Addr
 	}
 
 	// Filter out peers from overrepresented groups
-	filteredPeers := make([]*peer.AddrInfo, 0)
+	filteredPeers := make([]*peer.AddrInfo, 0, len(newPeers))
 	for _, p := range newPeers {
 		if _, ok := peersToRemove[p.ID]; !ok {
 			filteredPeers = append(filteredPeers, p)

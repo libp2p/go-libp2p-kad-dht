@@ -273,12 +273,9 @@ func (dht *FullRT) TriggerRefresh(ctx context.Context) error {
 }
 
 func (dht *FullRT) Stat() map[string]peer.ID {
-	newMap := make(map[string]peer.ID)
-
 	dht.kMapLk.RLock()
-	maps.Copy(newMap, dht.keyToPeerMap)
-	dht.kMapLk.RUnlock()
-	return newMap
+	defer dht.kMapLk.RUnlock()
+	return maps.Clone(dht.keyToPeerMap)
 }
 
 // Ready indicates that the routing table has been refreshed recently. It is recommended to be used for operations where
@@ -501,6 +498,7 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 			p, ok := dht.keyToPeerMap[string(k)]
 			if !ok {
 				logger.Errorf("key not found in map")
+				continue
 			}
 			dht.kMapLk.RUnlock()
 			dht.peerAddrsLk.RLock()

@@ -133,7 +133,7 @@ func (dht *IpfsDHT) runLookupWithFollowup(ctx context.Context, target string, qu
 	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
 	followupsCompleted := 0
 processFollowUp:
-	for i := 0; i < len(queryPeers); i++ {
+	for i := range queryPeers {
 		select {
 		case <-doneCh:
 			followupsCompleted++

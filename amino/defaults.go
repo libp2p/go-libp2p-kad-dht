@@ -54,11 +54,10 @@ const (
 	// not be added to the routing table.
 	DefaultMaxPeersPerIPGroup = 3
 
-	// DefaultMaxPeersPerIPGroupPerCpl is maxumal number of peers with addresses
+	// DefaultMaxPeersPerIPGroupPerCpl is maximal number of peers with addresses
 	// in the same IP group allowed in each routing table bucket, defined by its
-	// common prefix length to self peer id. The maximal number of peers with
-	// addresses in the same IP group allowed in the routing table is defined by
-	// DefaultMaxPeersPerIPGroup.
+	// common prefix length to self peer id.
+	// also see: `DefaultMaxPeersPerIPGroup`.
 	DefaultMaxPeersPerIPGroupPerCpl = 2
 )
 

@@ -119,9 +119,9 @@ func RecordMessageRecvErr(ctx context.Context, messageType string, msgLen int64)
 	attrSetOpt := metric.WithAttributeSet(ctxAttrSet)
 	attrOpt := metric.WithAttributes(attribute.Key(KeyMessageType).String("UNKNOWN"))
 
-	receivedMessages.Add(ctx, 1, attrSetOpt, attrOpt)
-	receivedMessageErrors.Add(ctx, 1, attrSetOpt, attrOpt)
-	receivedBytes.Record(ctx, msgLen, attrSetOpt, attrOpt)
+	receivedMessages.Add(ctx, 1, attrOpt, attrSetOpt)
+	receivedMessageErrors.Add(ctx, 1, attrOpt, attrSetOpt)
+	receivedBytes.Record(ctx, msgLen, attrOpt, attrSetOpt)
 }
 
 func RecordMessageHandleErr(ctx context.Context) {
@@ -149,11 +149,10 @@ func RecordRequestSendErr(ctx context.Context) {
 func RecordRequestSendOK(ctx context.Context, sentBytesLen int64, latencyMs float64) {
 	ctxAttrSet := AttributesFromContext(ctx)
 	attrSetOpt := metric.WithAttributeSet(ctxAttrSet)
-	attrOpt := metric.WithAttributes(attribute.Key(KeyMessageType).String("UNKNOWN"))
 
-	sentRequests.Add(ctx, 1, attrSetOpt, attrOpt)
-	sentBytes.Record(ctx, 1, attrSetOpt, attrOpt)
-	outboundRequestLatency.Record(ctx, latencyMs, attrSetOpt, attrOpt)
+	sentRequests.Add(ctx, 1, attrSetOpt)
+	sentBytes.Record(ctx, 1, attrSetOpt)
+	outboundRequestLatency.Record(ctx, latencyMs, attrSetOpt)
 }
 
 func RecordMessageSendOK(ctx context.Context, sentBytesLen int64) {

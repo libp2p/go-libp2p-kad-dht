@@ -169,7 +169,11 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 
 	// tracking lookup results for network size estimator as "completed" is true
 	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
-		logger.Warnf("network size estimator track peers: %s", err)
+		if err != netsize.ErrWrongNumOfPeers || dht.routingTable.Size() > dht.bucketSize {
+			// Don't warn if we have a wrong number of peers and the routing table is
+			// small because the network may simply not have enough peers.
+			logger.Warnf("network size estimator track peers: %s", err)
+		}
 	}
 
 	if ns, err := dht.nsEstimator.NetworkSize(); err == nil {

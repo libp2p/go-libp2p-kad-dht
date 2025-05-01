@@ -171,6 +171,6 @@ func RecordMessageSendErr(ctx context.Context) {
 	sentMessageErrors.Add(ctx, 1, attrSetOpt)
 }
 
-func RecordNetworkSize(ns int64) {
-	networkSize.Record(context.Background(), int64(ns))
+func RecordNetworkSize(ctx context.Context, ns int64) {
+	networkSize.Record(ctx, int64(ns))
 }

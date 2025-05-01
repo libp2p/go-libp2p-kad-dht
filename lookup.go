@@ -48,7 +48,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 	}
 
 	if ns, err := dht.nsEstimator.NetworkSize(); err == nil {
-		metrics.RecordNetworkSize(int64(ns))
+		metrics.RecordNetworkSize(dht.ctx, int64(ns))
 	}
 
 	// Reset the refresh timer for this key's bucket since we've just

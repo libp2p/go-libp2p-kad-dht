@@ -31,7 +31,7 @@ func TestProviderManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(ctx, mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestProvidersDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(ctx, mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestProvidesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(mid, ps, ds)
+	p, err := NewProviderManager(ctx, mid, ps, ds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestLargeProvidersSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProviderManager(mid, ps, dstore)
+	p, err := NewProviderManager(ctx, mid, ps, dstore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(ctx, p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestWriteUpdatesCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(ctx, p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}

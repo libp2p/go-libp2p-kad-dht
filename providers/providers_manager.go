@@ -117,7 +117,7 @@ type getProv struct {
 }
 
 // NewProviderManager constructor
-func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
+func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peerstore, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
 	pm := new(ProviderManager)
 	pm.self = local
 	pm.getprovs = make(chan *getProv)
@@ -133,7 +133,7 @@ func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batchin
 	if err := pm.applyOptions(opts...); err != nil {
 		return nil, err
 	}
-	pm.ctx, pm.cancel = context.WithCancel(context.Background())
+	pm.ctx, pm.cancel = context.WithCancel(ctx)
 	pm.run()
 	return pm, nil
 }
@@ -151,7 +151,7 @@ func (pm *ProviderManager) run() {
 			if gcQuery != nil {
 				gcQuery.Close()
 			}
-			if err := pm.dstore.Flush(context.Background()); err != nil {
+			if err := pm.dstore.Flush(pm.ctx); err != nil {
 				log.Error("failed to flush datastore: ", err)
 			}
 		}()

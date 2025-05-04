@@ -1,0 +1,97 @@
+package reprovider
+
+import (
+	"crypto/sha256"
+
+	"github.com/ipfs/go-cid"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
+	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+)
+
+func cidToBit256(c cid.Cid) bit256.Key {
+	hash := sha256.Sum256(c.Hash())
+	return bit256.NewKey(hash[:])
+}
+
+func peerIDToBit256(id peer.ID) bit256.Key {
+	hash := sha256.Sum256([]byte(id))
+	return bit256.NewKey(hash[:])
+}
+
+func flipLastBit(k bitstr.Key) bitstr.Key {
+	l := len(k)
+	lastBit := k[l-1]
+	return k[:l-1] + bitstr.Key(rune('1'-lastBit))
+}
+
+const initMask = (byte(1) << 7) // 0x80
+
+// keyToBytes converts a kad.Key to a byte slice. If the provided key has a
+// size that isn't a multiple of 8, right pad the resulting byte with 0s.
+func keyToBytes[K kad.Key[K]](k K) []byte {
+	bitLen := k.BitLen()
+	byteLen := (bitLen + 7) / 8
+	b := make([]byte, byteLen)
+
+	byteIndex := 0
+	mask := initMask
+	by := byte(0)
+
+	for i := range bitLen {
+		if k.Bit(i) == 1 {
+			by |= mask
+		}
+		mask >>= 1
+
+		if mask == 0 {
+			b[byteIndex] = by
+			byteIndex++
+			by = 0
+			mask = initMask
+		}
+	}
+	if mask != initMask {
+		b[byteIndex] = by
+	}
+	return b
+}
+
+// shortestCoveredPrefix takes as input the `requested` key and the list of
+// sorted closest peers to this key. It returns a prefix of `requested` that is
+// covered by these peers.
+//
+// If every peer shares the same CPL to `requested`, then no deeper zone is
+// covered, we learn that the adjacent sibling branch is empty. In this case we
+// return the prefix one bit deeper (`minCPL+1`) and an empty peer list.
+func shortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, []peer.ID) {
+	if len(peers) == 0 {
+		return requested, peers
+	}
+	minCpl := requested.BitLen()
+	coveredCpl := 0
+	lastCoveredPeerIndex := 0
+	for i, p := range peers {
+		cpl := key.CommonPrefixLength(requested, peerIDToBit256(p))
+		if cpl < minCpl {
+			coveredCpl = minCpl
+			lastCoveredPeerIndex = i
+			minCpl = cpl
+		}
+	}
+	if coveredCpl == requested.BitLen() {
+		// All provided peers share the same CPL with requested. Mark the
+		// neighboring branch as covered even though it is empty.
+		//
+		//              /\
+		//            /\
+		// minCpl-> /\
+		//        /   * -> all provided peers are here
+		//    requested
+		// no peers in this branch
+		return requested[:minCpl+1], []peer.ID{}
+	}
+	return requested[:coveredCpl], peers[:lastCoveredPeerIndex]
+}

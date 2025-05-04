@@ -43,6 +43,17 @@ type KadRouter interface {
 
 // TODO: add queue of cids waiting to be reprovided (if node offline, etc.)
 
+type scheduleEntry struct {
+	key    bitstr.Key
+	offset time.Duration
+}
+
+type provideReq struct {
+	ctx  context.Context
+	cids []multihash.Multihash
+	done chan error
+}
+
 type reprovideSweeper struct {
 	ctx    context.Context
 	host   host.Host
@@ -55,11 +66,15 @@ type reprovideSweeper struct {
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
 
-	cids   *trie.Trie[bit256.Key, cid.Cid]
+	cids   *trie.Trie[bit256.Key, multihash.Multihash]
 	cidsLk *sync.Mutex
 
-	schedule   *trie.Trie[bitstr.Key, time.Duration] // time modulo reprovideInterval
-	scheduleLk *sync.Mutex
+	provideChan   chan provideReq
+	scheduleChan  chan scheduleEntry
+	schedule      *trie.Trie[bitstr.Key, time.Duration]
+	scheduleTimer *time.Timer
+
+	prefixCursor bitstr.Key
 }
 
 // Options should be
@@ -72,7 +87,7 @@ func NewReproviderSweeper(ctx context.Context, host host.Host, router KadRouter,
 	now func() time.Time, reprovideInterval, maxReprovideDelay time.Duration,
 ) Provider {
 	// TODO: options
-	return &reprovideSweeper{
+	sweeper := &reprovideSweeper{
 		host:              host,
 		router:            router,
 		order:             peerIDToBit256(host.ID()),
@@ -80,39 +95,74 @@ func NewReproviderSweeper(ctx context.Context, host host.Host, router KadRouter,
 		cycleStart:        now(),
 		reprovideInterval: reprovideInterval,
 		maxReprovideDelay: maxReprovideDelay,
-		cids:              trie.New[bit256.Key, cid.Cid](),
+		cids:              trie.New[bit256.Key, multihash.Multihash](),
 		cidsLk:            &sync.Mutex{},
+		provideChan:       make(chan provideReq),
+		scheduleChan:      make(chan scheduleEntry),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
-		scheduleLk:        &sync.Mutex{},
+		scheduleTimer:     time.NewTimer(time.Hour),
 	}
+	sweeper.scheduleTimer.Stop()
+	go sweeper.run()
+	return sweeper
 }
 
-// run is only called when the reprovider has its first CIDs to reprovide
 func (s *reprovideSweeper) run() {
-	s.scheduleLk.Lock()
-	// we intentionally want to panic if s.schedule is empty
-	cursor := trie.Closest(s.schedule, bitstr.Key(key.BitString(s.order)), 1)[0]
-	s.scheduleLk.Unlock()
-
-	timer := time.NewTimer(cursor.Data)
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-timer.C:
+		case entry := <-s.scheduleChan:
+			s.schedule.Add(entry.key, entry.offset)
+		case provideRequest := <-s.provideChan:
+			s.handleProvide(provideRequest)
+		case <-s.scheduleTimer.C:
+			s.handleReprovide()
 		}
-		s.scheduleLk.Lock()
-		cursor = nextNonEmptyLeaf(s.schedule, cursor.Key, s.order)
-		s.scheduleLk.Unlock()
-
-		s.reprovideForPrefix(cursor.Key)
-		// TODO: for items in scheduleChan, read and add to schedule
-
-		nextReprovideDelay := cursor.Data - s.currentTimeOffset()
-		timer.Reset(nextReprovideDelay)
-
-		// TODO: add warning if reprovides are falling behind (unlikely, but better check)
 	}
+}
+
+func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
+	if len(provideRequest.cids) == 1 {
+		c := provideRequest.cids[0]
+		k := mhToBit256(c)
+		if added := s.cids.Add(k, c); !added {
+			// cid is already being provided
+			provideRequest.done <- nil
+			return
+		}
+		go func() {
+			err := s.router.Provide(provideRequest.ctx, cid.NewCidV0(c), true)
+			provideRequest.done <- err
+		}()
+
+		if !trieHasPrefixOfKey(s.schedule, k) {
+			// Cid not covered by schedule yet, add it.
+			scheduleKey := bitstr.Key(key.BitString(k))
+			reprovideTime := s.reprovideTimeForPrefix(scheduleKey)
+			s.schedule.Add(scheduleKey, reprovideTime)
+
+			followingKey := nextNonEmptyLeaf(s.schedule, scheduleKey, s.order).Key
+			if s.prefixCursor == "" || s.prefixCursor == followingKey {
+				// Either first cid is added or current cid is next in line for
+				// reproviding.
+				s.prefixCursor = scheduleKey
+				s.scheduleTimer.Reset(reprovideTime)
+			}
+		}
+	}
+	// TODO: handle multiple provides
+}
+
+func (s *reprovideSweeper) handleReprovide() {
+	// Remove prefix from trie, new schedule will be added as needed.
+	s.schedule.Remove(s.prefixCursor)
+	go s.reprovideForPrefix(s.prefixCursor)
+
+	next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
+	s.prefixCursor = next.Key
+	nextReprovideDelay := next.Data - s.currentTimeOffset()
+	s.scheduleTimer.Reset(nextReprovideDelay)
 }
 
 func (s *reprovideSweeper) currentTimeOffset() time.Duration {
@@ -122,7 +172,7 @@ func (s *reprovideSweeper) currentTimeOffset() time.Duration {
 type region struct {
 	prefix bitstr.Key
 	peers  *trie.Trie[bit256.Key, peer.ID]
-	cids   *trie.Trie[bit256.Key, cid.Cid]
+	cids   *trie.Trie[bit256.Key, multihash.Multihash]
 }
 
 // returned regions ordered according to s.order
@@ -253,17 +303,17 @@ func (s *reprovideSweeper) regionReprovide(r region) {
 	}
 }
 
-func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]cid.Cid {
+func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]multihash.Multihash {
 	// TODO: check if prefix longer than r.prefix was reprovided less than
 	// maxReprovideDelay ago, and if yes, don't reprovide these cids
 	//
 	// TODO: this is a very greedy approach, can be greatly optimized
-	keysPerPeer := make(map[peer.ID][]cid.Cid)
+	keysPerPeer := make(map[peer.ID][]multihash.Multihash)
 	for _, cidEntry := range allKeys(r.cids, s.order) {
 		for _, peerEntry := range trie.Closest(r.peers, cidEntry.Key, s.replicationFactor) {
 			pid := peerEntry.Data
 			if _, ok := keysPerPeer[pid]; !ok {
-				keysPerPeer[pid] = []cid.Cid{cidEntry.Data}
+				keysPerPeer[pid] = []multihash.Multihash{cidEntry.Data}
 			} else {
 				keysPerPeer[pid] = append(keysPerPeer[pid], cidEntry.Data)
 			}
@@ -272,14 +322,14 @@ func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]cid.Ci
 	return keysPerPeer
 }
 
-func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []cid.Cid) {
+func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []multihash.Multihash) {
 	// TODO: handle this with custom msgSender
 	// TODO: maybe allow "some" pipelining?
 }
 
-func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Key, cid.Cid]) {
+func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Key, multihash.Multihash]) {
 	for _, entry := range allKeys(cids, s.order) {
-		s.router.Provide(s.ctx, entry.Data, false)
+		s.router.Provide(s.ctx, cid.NewCidV0(entry.Data), false)
 	}
 }
 
@@ -291,10 +341,7 @@ func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Ke
 func (s *reprovideSweeper) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration) {
 	nextReprovideTime := min(s.reprovideTimeForPrefix(prefix), lastReprovide+s.reprovideInterval+s.maxReprovideDelay)
 
-	// TODO: use chan instead of mutex
-	s.scheduleLk.Lock()
-	s.schedule.Add(prefix, nextReprovideTime)
-	s.scheduleLk.Unlock()
+	s.scheduleChan <- scheduleEntry{key: prefix, offset: nextReprovideTime}
 }
 
 const maxPrefixSize = 30
@@ -338,42 +385,26 @@ func (s *reprovideSweeper) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-func (s *reprovideSweeper) Provide(ctx context.Context, c cid.Cid, _ bool) error {
-	k := cidToBit256(c)
-	s.cidsLk.Lock()
-	if added := s.cids.Add(k, c); !added {
-		// cid is already being provided
-		s.cidsLk.Unlock()
-		return nil
+func (s *reprovideSweeper) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
+	if !broadcast {
+		return s.router.Provide(s.ctx, c, false)
 	}
-	s.cidsLk.Unlock()
-
-	if err := s.router.Provide(ctx, c, true); err != nil {
-		// unable to provide the cid, don't reprovide it later
-		s.cidsLk.Lock()
-		defer s.cidsLk.Unlock()
-		s.cids.Remove(k)
-		return err
+	req := provideReq{
+		ctx:  ctx,
+		cids: []multihash.Multihash{c.Hash()},
+		done: make(chan error),
 	}
-
-	// TODO: use chan instead of mutex
-
-	// if k isn't part of a scheduled keyspace region, add it to the schedule
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
-	if !trieHasPrefixOfKey(s.schedule, k) {
-		bitstrK := bitstr.Key(key.BitString(k))
-		// FIXME: this doesn't work, we may need to wake up earlier because of this
-		s.schedule.Add(bitstrK, s.reprovideTimeForPrefix(bitstrK))
-		if s.schedule.Size() == 1 {
-			// first entry added to schedule, start daemon
-			go s.run()
-		}
-	}
-	return nil
+	s.provideChan <- req
+	// Wait for initial provide to complete before returning.
+	return <-req.done
 }
 
 func (s *reprovideSweeper) ProvideMany(ctx context.Context, keys []multihash.Multihash) error {
-	// TODO: implement me
-	return nil
+	req := provideReq{
+		ctx:  ctx,
+		cids: keys,
+		done: make(chan error),
+	}
+	s.provideChan <- req
+	return <-req.done
 }

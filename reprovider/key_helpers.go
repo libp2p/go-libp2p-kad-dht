@@ -3,16 +3,16 @@ package reprovider
 import (
 	"crypto/sha256"
 
-	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multihash"
 	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
-func cidToBit256(c cid.Cid) bit256.Key {
-	hash := sha256.Sum256(c.Hash())
+func mhToBit256(h multihash.Multihash) bit256.Key {
+	hash := sha256.Sum256(h)
 	return bit256.NewKey(hash[:])
 }
 

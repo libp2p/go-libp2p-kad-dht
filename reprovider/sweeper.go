@@ -3,6 +3,7 @@ package reprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ type KadRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
 	Provide(context.Context, cid.Cid, bool) error
 }
+
+var ErrTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 
 // TODO: support resuming reprovide service after a restart
 
@@ -157,6 +160,7 @@ func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
 func (s *reprovideSweeper) handleReprovide() {
 	// Remove prefix from trie, new schedule will be added as needed.
 	s.schedule.Remove(s.prefixCursor)
+	// TODO: handle error if I was unable to provide
 	go s.reprovideForPrefix(s.prefixCursor)
 
 	next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
@@ -198,7 +202,16 @@ func (s *reprovideSweeper) regionsFromPeers(peers []peer.ID) []region {
 
 func (s *reprovideSweeper) reprovideForPrefix(prefix bitstr.Key) error {
 	peers, err := s.closestPeersToPrefix(prefix)
-	_ = err // TODO: handle me, probably print warning that some peers may be missing, but go ahead anyway
+	if err != nil {
+		if err != ErrTooManyIterationsDuringExploration {
+			return err
+		}
+		// TODO: set appropriate logging
+		fmt.Println("warn: prefix key exploration not complete")
+	}
+	if len(peers) == 0 {
+		// TODO: do something
+	}
 	regions := s.regionsFromPeers(peers)
 	for _, r := range regions {
 		// NOTE: allow parallelism here?
@@ -217,7 +230,6 @@ func (s *reprovideSweeper) reprovideForPrefix(prefix bitstr.Key) error {
 // exactly match it.
 // TODO: test this function!
 func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
-	// Prepare result slice with enough space
 	allClosestPeers := make([]peer.ID, 0, 2*s.replicationFactor)
 
 	maxPrefixSearches := 64
@@ -229,7 +241,8 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		fullKey := s.firstFullKeyWithPrefix(nextPrefix)
 		closestPeers, err := s.closestPeersToKey(fullKey)
 		if err != nil {
-			// NOTE: maybe we don't want to return an err, we could have an err counter and only return err after 5 failures?
+			// We only get an err if something really bad happened, e.g no peers in
+			// routing table, invalid key, etc.
 			return allClosestPeers, err
 		}
 		coveredPrefix, coveredPeers := shortestCoveredPrefix(fullKey, closestPeers)
@@ -264,10 +277,10 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		}
 		// Push coveredPrefix to stack
 		coveredPrefixesStack = append(coveredPrefixesStack, coveredPrefix)
-		// flip last bit of last covered prefix
+		// Flip last bit of last covered prefix
 		nextPrefix = flipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
 	}
-	return allClosestPeers, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations") // TODO: handle error
+	return allClosestPeers, ErrTooManyIterationsDuringExploration
 }
 
 func (s *reprovideSweeper) firstFullKeyWithPrefix(k bitstr.Key) bitstr.Key {
@@ -281,15 +294,9 @@ func (s *reprovideSweeper) firstFullKeyWithPrefix(k bitstr.Key) bitstr.Key {
 // TODO: ideally stop depending on go-libp2p-kbucket. we would need to have preimage list in boxo, or elsewhere.
 func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	// TODO: export func in go-libp2p-kbucket so that we don't need to build a rt
-	rt, err := kbucket.NewRoutingTable(0, keyToBytes(k), 0, nil, 0, nil)
-	if err != nil {
-		return nil, err
-	}
+	rt, _ := kbucket.NewRoutingTable(0, keyToBytes(k), 0, nil, 0, nil)
 	// TODO: justify 15 (kubcket.maxCplForRefresh)
-	p, err := rt.GenRandPeerID(min(uint(k.BitLen()), 15))
-	if err != nil {
-		return nil, err
-	}
+	p, _ := rt.GenRandPeerID(min(uint(k.BitLen()), 15))
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
@@ -406,5 +413,6 @@ func (s *reprovideSweeper) ProvideMany(ctx context.Context, keys []multihash.Mul
 		done: make(chan error),
 	}
 	s.provideChan <- req
+	// Wait for all cids to be provided before returning.
 	return <-req.done
 }

@@ -114,7 +114,7 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 		return errors.New("can't lookup empty key")
 	}
 
-	// initialize new context for all putProvider operations.
+	// use dht.ctx for all putProvider operations.
 	// We don't want to give the outer context to the put operations as we return early before all
 	// put operations have finished to avoid the long tail of the latency distribution. If we
 	// provided the outer context the put operations may be cancelled depending on what happens

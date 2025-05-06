@@ -151,7 +151,7 @@ func (pm *ProviderManager) run() {
 			if gcQuery != nil {
 				gcQuery.Close()
 			}
-			if err := pm.dstore.Flush(pm.ctx); err != nil {
+			if err := pm.dstore.Flush(context.Background()); err != nil {
 				log.Error("failed to flush datastore: ", err)
 			}
 		}()

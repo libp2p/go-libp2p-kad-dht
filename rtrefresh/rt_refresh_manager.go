@@ -64,11 +64,11 @@ func NewRtRefreshManager(ctx context.Context, h host.Host, rt *kbucket.RoutingTa
 	refreshQueryTimeout time.Duration,
 	refreshInterval time.Duration,
 	successfulOutboundQueryGracePeriod time.Duration,
-	refreshDoneCh chan struct{}) (*RtRefreshManager, error) {
-
-	ctxo, cancel := context.WithCancel(ctx)
+	refreshDoneCh chan struct{},
+) (*RtRefreshManager, error) {
+	ctx, cancel := context.WithCancel(ctx)
 	return &RtRefreshManager{
-		ctx:       ctxo,
+		ctx:       ctx,
 		cancel:    cancel,
 		h:         h,
 		dhtPeerId: h.ID(),

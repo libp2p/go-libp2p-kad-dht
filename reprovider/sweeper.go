@@ -3,12 +3,14 @@ package reprovider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
+
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -40,9 +42,14 @@ type KadRouter interface {
 	Provide(context.Context, cid.Cid, bool) error
 }
 
+// TODO: add some more logging
+var logger = logging.Logger("dht/ReprovideSweep")
+
 var ErrTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 
 // TODO: support resuming reprovide service after a restart
+// persist cids to disk
+// persist prefixes waiting to be reprovided and last reprovided prefix (with time) on disk
 
 // TODO: add queue of cids waiting to be reprovided (if node offline, etc.)
 
@@ -57,6 +64,12 @@ type provideReq struct {
 	done chan error
 }
 
+type regionReprovideErr struct {
+	region bitstr.Key
+	code   int
+	err    error
+}
+
 type reprovideSweeper struct {
 	ctx    context.Context
 	host   host.Host
@@ -69,15 +82,21 @@ type reprovideSweeper struct {
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
 
+	// TODO: get rid of mutex
 	cids   *trie.Trie[bit256.Key, multihash.Multihash]
 	cidsLk *sync.Mutex
 
-	provideChan   chan provideReq
-	scheduleChan  chan scheduleEntry
-	schedule      *trie.Trie[bitstr.Key, time.Duration]
-	scheduleTimer *time.Timer
+	regionReprovideErrChan chan regionReprovideErr
+	provideChan            chan provideReq
+	scheduleChan           chan scheduleEntry
+	schedule               *trie.Trie[bitstr.Key, time.Duration]
+	scheduleTimer          *time.Timer
 
 	prefixCursor bitstr.Key
+
+	// TODO: add pipelining to protoMessenger for this use case
+	protoMessenger *pb.ProtocolMessenger // NOTE: maybe use another type not to depend on pb
+	getSelfAddrs   func() peer.AddrInfo
 }
 
 // Options should be
@@ -91,19 +110,22 @@ func NewReproviderSweeper(ctx context.Context, host host.Host, router KadRouter,
 ) Provider {
 	// TODO: options
 	sweeper := &reprovideSweeper{
-		host:              host,
-		router:            router,
-		order:             peerIDToBit256(host.ID()),
-		now:               now,
-		cycleStart:        now(),
-		reprovideInterval: reprovideInterval,
-		maxReprovideDelay: maxReprovideDelay,
-		cids:              trie.New[bit256.Key, multihash.Multihash](),
-		cidsLk:            &sync.Mutex{},
-		provideChan:       make(chan provideReq),
-		scheduleChan:      make(chan scheduleEntry),
-		schedule:          trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer:     time.NewTimer(time.Hour),
+		host:                   host,
+		router:                 router,
+		order:                  peerIDToBit256(host.ID()),
+		now:                    now,
+		cycleStart:             now(),
+		reprovideInterval:      reprovideInterval,
+		maxReprovideDelay:      maxReprovideDelay,
+		cids:                   trie.New[bit256.Key, multihash.Multihash](),
+		cidsLk:                 &sync.Mutex{},
+		regionReprovideErrChan: make(chan regionReprovideErr),
+		provideChan:            make(chan provideReq),
+		scheduleChan:           make(chan scheduleEntry),
+		schedule:               trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:          time.NewTimer(time.Hour),
+		protoMessenger:         nil,                                                                               // TODO:
+		getSelfAddrs:           func() peer.AddrInfo { return peer.AddrInfo{ID: host.ID(), Addrs: host.Addrs()} }, // TODO:
 	}
 	sweeper.scheduleTimer.Stop()
 	go sweeper.run()
@@ -115,6 +137,9 @@ func (s *reprovideSweeper) run() {
 		select {
 		case <-s.ctx.Done():
 			return
+		case err := <-s.regionReprovideErrChan:
+			// TODO: handle me
+			_ = err
 		case entry := <-s.scheduleChan:
 			s.schedule.Add(entry.key, entry.offset)
 		case provideRequest := <-s.provideChan:
@@ -129,11 +154,15 @@ func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.cids) == 1 {
 		c := provideRequest.cids[0]
 		k := mhToBit256(c)
+		s.cidsLk.Lock()
 		if added := s.cids.Add(k, c); !added {
+			s.cidsLk.Unlock()
 			// cid is already being provided
 			provideRequest.done <- nil
 			return
 		}
+		s.cidsLk.Unlock()
+
 		go func() {
 			err := s.router.Provide(provideRequest.ctx, cid.NewCidV0(c), true)
 			provideRequest.done <- err
@@ -160,7 +189,6 @@ func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
 func (s *reprovideSweeper) handleReprovide() {
 	// Remove prefix from trie, new schedule will be added as needed.
 	s.schedule.Remove(s.prefixCursor)
-	// TODO: handle error if I was unable to provide
 	go s.reprovideForPrefix(s.prefixCursor)
 
 	next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
@@ -200,27 +228,32 @@ func (s *reprovideSweeper) regionsFromPeers(peers []peer.ID) []region {
 	return regions
 }
 
-func (s *reprovideSweeper) reprovideForPrefix(prefix bitstr.Key) error {
+func (s *reprovideSweeper) reprovideForPrefix(prefix bitstr.Key) {
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
 		if err != ErrTooManyIterationsDuringExploration {
-			return err
+			// TODO: error code
+			s.regionReprovideErrChan <- regionReprovideErr{region: prefix, code: 0, err: err}
+			return
 		}
-		// TODO: set appropriate logging
-		fmt.Println("warn: prefix key exploration not complete")
+		logger.Warnf("prefix key exploration not complete: %s", prefix)
 	}
 	if len(peers) == 0 {
-		// TODO: do something
+		// TODO: error code
+		s.regionReprovideErrChan <- regionReprovideErr{region: prefix, code: 0, err: errors.New("no peers found")}
+		return
 	}
 	regions := s.regionsFromPeers(peers)
+	// TODO: pop all scheduled prefixes matching any of the above regions
+	// TODO: check if any reprovide is ongoing for any region, and if yes abort according regions
+	// maybe logic needs to be implemented in regionsFromPeers
 	for _, r := range regions {
 		// NOTE: allow parallelism here?
-		s.regionReprovide(r)
+		s.regionReprovide(r) // TODO: handle errors
 		s.addCidsToLocalProviderStore(r.cids)
 		s.scheduleNextReprovide(r.prefix, s.currentTimeOffset())
 		// TODO: persist to datastore that region identified by prefix was reprovided `now`
 	}
-	return nil
 }
 
 // closestPeersToPrefix returns more than s.replicationFactor peers
@@ -291,12 +324,8 @@ func (s *reprovideSweeper) firstFullKeyWithPrefix(k bitstr.Key) bitstr.Key {
 	return k + bitstr.Key(key.BitString(s.order))[kLen:]
 }
 
-// TODO: ideally stop depending on go-libp2p-kbucket. we would need to have preimage list in boxo, or elsewhere.
 func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
-	// TODO: export func in go-libp2p-kbucket so that we don't need to build a rt
-	rt, _ := kbucket.NewRoutingTable(0, keyToBytes(k), 0, nil, 0, nil)
-	// TODO: justify 15 (kubcket.maxCplForRefresh)
-	p, _ := rt.GenRandPeerID(min(uint(k.BitLen()), 15))
+	p, _ := kbucket.GenRandPeerIDWithCPL(keyToBytes(k), kbucket.PeerIDPreimageMaxCpl)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
@@ -304,16 +333,14 @@ func (s *reprovideSweeper) regionReprovide(r region) {
 	// assume all peers from region are reachable (we connected to them before)
 	// we don't try again on failure, skip all missing keys
 	cidsAllocations := s.cidsAllocationsToPeers(r)
+	selfAddrs := s.getSelfAddrs()
 	for p, cids := range cidsAllocations {
 		// TODO: allow some reasonable parallelism
-		s.provideCidsToPeer(p, cids)
+		s.provideCidsToPeer(p, cids, selfAddrs)
 	}
 }
 
 func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]multihash.Multihash {
-	// TODO: check if prefix longer than r.prefix was reprovided less than
-	// maxReprovideDelay ago, and if yes, don't reprovide these cids
-	//
 	// TODO: this is a very greedy approach, can be greatly optimized
 	keysPerPeer := make(map[peer.ID][]multihash.Multihash)
 	for _, cidEntry := range allKeys(r.cids, s.order) {
@@ -329,9 +356,10 @@ func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]multih
 	return keysPerPeer
 }
 
-func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []multihash.Multihash) {
-	// TODO: handle this with custom msgSender
-	// TODO: maybe allow "some" pipelining?
+func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []multihash.Multihash, selfAddrs peer.AddrInfo) {
+	for _, mh := range cids {
+		s.protoMessenger.PutProviderAddrs(s.ctx, p, mh, selfAddrs)
+	}
 }
 
 func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Key, multihash.Multihash]) {

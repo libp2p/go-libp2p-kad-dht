@@ -102,3 +102,14 @@ func allKeysAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], 
 	return append(allKeysAtDepth(t.Branch(b), order, depth+1),
 		allKeysAtDepth(t.Branch(1-b), order, depth+1)...)
 }
+
+func subtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
+	branch := t
+	for i := range k.BitLen() {
+		if branch.IsLeaf() {
+			return t, key.CommonPrefixLength(*branch.Key(), k) == k.BitLen()
+		}
+		branch = branch.Branch(int(k.Bit(i)))
+	}
+	return branch, true
+}

@@ -2,12 +2,19 @@ package reprovider
 
 import (
 	"github.com/libp2p/go-libp2p/core/peer"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
+
+type region struct {
+	prefix bitstr.Key
+	peers  *trie.Trie[bit256.Key, peer.ID]
+	cids   *trie.Trie[bit256.Key, mh.Multihash]
+}
 
 // returns the list of all non-overlapping subtries of `t` having more than
 // `size` elements, sorted according to `order`. every element is included in

@@ -2,6 +2,7 @@ package reprovider
 
 import (
 	"crypto/sha256"
+	"sort"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multihash"
@@ -9,6 +10,7 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
 func mhToBit256(h multihash.Multihash) bit256.Key {
@@ -27,10 +29,10 @@ func flipLastBit(k bitstr.Key) bitstr.Key {
 	return k[:l-1] + bitstr.Key(rune('1'-lastBit))
 }
 
-// isBitstrPrefix returns true if k0 is a prefix of k1.
-func isBitstrPrefix(k0 bitstr.Key, k1 bitstr.Key) bool {
-	return len(k0) <= len(k1) && k0 == k1[:len(k0)]
-}
+// // isBitstrPrefix returns true if k0 is a prefix of k1.
+// func isBitstrPrefix(k0 bitstr.Key, k1 bitstr.Key) bool {
+// 	return len(k0) <= len(k1) && k0 == k1[:len(k0)]
+// }
 
 const initMask = (byte(1) << 7) // 0x80
 
@@ -99,4 +101,24 @@ func shortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, [
 		return requested[:minCpl+1], []peer.ID{}
 	}
 	return requested[:coveredCpl], peers[:lastCoveredPeerIndex]
+}
+
+type prefixAndCids struct {
+	prefix bitstr.Key
+	cids   *trie.Trie[bit256.Key, multihash.Multihash]
+}
+
+// sortPrefixesBySize sorts the prefixes by the number of CIDs they contain,
+// largest first.
+func sortPrefixesBySize(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, multihash.Multihash]) []prefixAndCids {
+	out := make([]prefixAndCids, 0, len(prefixes))
+	for prefix, cids := range prefixes {
+		if cids != nil {
+			out = append(out, prefixAndCids{prefix: prefix, cids: cids})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].cids.Size() > out[j].cids.Size()
+	})
+	return out
 }

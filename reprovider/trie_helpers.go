@@ -26,16 +26,16 @@ func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, s
 
 // trieHasPrefixOfKey checks if the trie contains a leave whose key is a prefix
 // (or a match) of the provided k
-func trieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) bool {
+func trieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (bool, K0) {
 	return trieHasPrefixOfKeyAtDepth(t, k, 0)
 }
 
-func trieHasPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) bool {
+func trieHasPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) (bool, K0) {
 	if t.IsLeaf() {
 		if !t.HasKey() {
-			return false
+			return false, *t.Key()
 		}
-		return key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen()
+		return key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen(), *t.Key()
 	}
 	b := int(k.Bit(depth))
 	return trieHasPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
@@ -87,11 +87,11 @@ func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie
 
 // allKeys returns a slice containing all keys in the trie `t` sorted according
 // to the provided `order`.
-func allKeys[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
-	return allKeysAtDepth(t, order, 0)
+func allEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
+	return allEntriesAtDepth(t, order, 0)
 }
 
-func allKeysAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []trie.Entry[K0, D] {
+func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []trie.Entry[K0, D] {
 	if t.IsEmptyLeaf() {
 		return nil
 	}
@@ -99,8 +99,8 @@ func allKeysAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], 
 		return []trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
 	}
 	b := int(order.Bit(depth))
-	return append(allKeysAtDepth(t.Branch(b), order, depth+1),
-		allKeysAtDepth(t.Branch(1-b), order, depth+1)...)
+	return append(allEntriesAtDepth(t.Branch(b), order, depth+1),
+		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
 }
 
 func subtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {

@@ -92,6 +92,15 @@ func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie
 	return trie.Entry[K0, D]{}
 }
 
+func allValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
+	entries := allEntries(t, order)
+	out := make([]D, len(entries))
+	for i, entry := range entries {
+		out[i] = entry.Data
+	}
+	return out
+}
+
 // allKeys returns a slice containing all keys in the trie `t` sorted according
 // to the provided `order`.
 func allEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {

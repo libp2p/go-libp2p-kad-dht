@@ -7,7 +7,9 @@ toolchain go1.22.1
 retract v0.24.3 // this includes a breaking change and should have been released as v0.25.0
 
 require (
+	github.com/emirpasic/gods/v2 v2.0.0-alpha
 	github.com/gogo/protobuf v1.3.2
+	github.com/google/btree v1.1.3
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
@@ -31,6 +33,7 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-multistream v0.5.0
+	github.com/probe-lab/go-kademlia v0.0.0-20240823125516-aed94cdc2c2f
 	github.com/stretchr/testify v1.9.0
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.24.0

@@ -179,7 +179,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 				return
 			}
 
-			for _, p := range l.peers {
+			for _, p := range l.Peers {
 				if _, ok := peersWithBest[p]; !ok {
 					updatePeers = append(updatePeers, p)
 				}
@@ -281,9 +281,9 @@ func (dht *IpfsDHT) updatePeerValues(ctx context.Context, key string, val []byte
 	}
 }
 
-func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan recvdVal, <-chan *lookupWithFollowupResult) {
+func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan struct{}) (<-chan recvdVal, <-chan *LookupWithFollowupResult) {
 	valCh := make(chan recvdVal, 1)
-	lookupResCh := make(chan *lookupWithFollowupResult, 1)
+	lookupResCh := make(chan *LookupWithFollowupResult, 1)
 
 	logger.Debugw("finding value", "key", internal.LoggableRecordKeyString(key))
 
@@ -371,8 +371,8 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 	return valCh, lookupResCh
 }
 
-func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollowupResult) {
-	if lookupRes.completed {
+func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *LookupWithFollowupResult) {
+	if lookupRes.Completed {
 		// refresh the cpl for this key as the query was successful
 		dht.routingTable.ResetCplRefreshedAtForID(key, time.Now())
 	}
@@ -672,12 +672,12 @@ func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo,
 	}
 
 	dialedPeerDuringQuery := false
-	for i, p := range lookupRes.peers {
+	for i, p := range lookupRes.Peers {
 		if p == id {
 			// Note: we consider PeerUnreachable to be a valid state because the peer may not support the DHT protocol
 			// and therefore the peer would fail the query. The fact that a peer that is returned can be a non-DHT
 			// server peer and is not identified as such is a bug.
-			dialedPeerDuringQuery = (lookupRes.state[i] == qpeerset.PeerQueried || lookupRes.state[i] == qpeerset.PeerUnreachable || lookupRes.state[i] == qpeerset.PeerWaiting)
+			dialedPeerDuringQuery = (lookupRes.State[i] == qpeerset.PeerQueried || lookupRes.State[i] == qpeerset.PeerUnreachable || lookupRes.State[i] == qpeerset.PeerWaiting)
 			break
 		}
 	}

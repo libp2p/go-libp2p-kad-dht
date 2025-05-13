@@ -3,9 +3,12 @@ package fullrt
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"github.com/libp2p/go-libp2p-kad-dht/cachert"
+	"github.com/libp2p/go-libp2p-kad-dht/qpeerset"
+	"math/big"
 	"math/rand"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +24,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
-	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 
 	"github.com/gogo/protobuf/proto"
 	u "github.com/ipfs/boxo/util"
@@ -85,8 +87,11 @@ type FullRT struct {
 
 	peerAddrsLk sync.RWMutex
 	peerAddrs   map[peer.ID][]multiaddr.Multiaddr
+	peerAddrsLastModifier map[peer.ID]time.Time
 
 	bootstrapPeers []*peer.AddrInfo
+	crt            *cachert.RT
+	crtLk          sync.RWMutex
 
 	bucketSize int
 
@@ -196,12 +201,60 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		crawlerInterval: fullrtcfg.crawlInterval,
 
 		bulkSendParallelism: fullrtcfg.bulkSendParallelism,
+		crt:                 cachert.NewRT(),
 
 		self: self,
 	}
 
 	rt.wg.Add(1)
-	go rt.runCrawler(ctx)
+	rt.addBootstrapPeers()
+
+	go func() {
+		t := time.NewTicker(fullrtcfg.crawlInterval)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				rt.crtLk.Lock()
+				rt.crt.CollectGarbage(time.Now().Add(-time.Hour))
+				rt.crtLk.Unlock()
+
+				var peersToRemove []peer.ID
+				var keysToRemove []string
+
+				rt.peerAddrsLk.RLock()
+				for k := range rt.peerAddrs {
+					if time.Since(rt.peerAddrsLastModifier[k]) > time.Hour {
+						peersToRemove = append(peersToRemove, k)
+					}
+				}
+				rt.peerAddrsLk.RUnlock()
+
+				for _, k := range peersToRemove {
+					if _, ok := rt.keyToPeerMap[string(kb.ConvertPeerID(k))]; ok {
+						keysToRemove = append(keysToRemove, string(kb.ConvertPeerID(k)))
+					}
+				}
+
+				rt.peerAddrsLk.Lock()
+				rt.kMapLk.Lock()
+				rt.rtLk.Lock()
+				for _, k := range keysToRemove {
+					delete(rt.keyToPeerMap, k)
+					rt.rt.Remove(kadkey.KbucketIDToKey(kb.ID(k)))
+				}
+
+				for _, k := range peersToRemove {
+					delete(rt.peerAddrs, k)
+					delete(rt.peerAddrsLastModifier, k)
+				}
+				rt.rtLk.Unlock()
+				rt.kMapLk.Unlock()
+				rt.peerAddrsLk.Unlock()
+			}
+		}
+	}()
 
 	return rt, nil
 }
@@ -209,6 +262,12 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 type crawlVal struct {
 	addrs []multiaddr.Multiaddr
 	key   kadkey.Key
+}
+
+func (dht *FullRT) GetRanges() []cachert.KeySearchRange {
+	dht.crtLk.RLock()
+	defer dht.crtLk.RUnlock()
+	return dht.crt.GetRanges()
 }
 
 func (dht *FullRT) TriggerRefresh(ctx context.Context) error {
@@ -234,125 +293,17 @@ func (dht *FullRT) Stat() map[string]peer.ID {
 }
 
 func (dht *FullRT) Ready() bool {
-	dht.rtLk.RLock()
-	lastCrawlTime := dht.lastCrawlTime
-	dht.rtLk.RUnlock()
-
-	if time.Since(lastCrawlTime) > dht.crawlerInterval {
-		return false
-	}
-
-	// TODO: This function needs to be better defined. Perhaps based on going through the peer map and seeing when the
-	// last time we were connected to any of them was.
-	dht.peerAddrsLk.RLock()
-	rtSize := len(dht.keyToPeerMap)
-	dht.peerAddrsLk.RUnlock()
-
-	return rtSize > len(dht.bootstrapPeers)+1
+	return true
 }
 
 func (dht *FullRT) Host() host.Host {
 	return dht.h
 }
 
-func (dht *FullRT) runCrawler(ctx context.Context) {
-	defer dht.wg.Done()
-	t := time.NewTicker(dht.crawlerInterval)
-
-	m := make(map[peer.ID]*crawlVal)
-	mxLk := sync.Mutex{}
-
-	initialTrigger := make(chan struct{}, 1)
-	initialTrigger <- struct{}{}
-
-	for {
-		select {
-		case <-t.C:
-		case <-initialTrigger:
-		case <-dht.triggerRefresh:
-		case <-ctx.Done():
-			return
-		}
-
-		var addrs []*peer.AddrInfo
-		dht.peerAddrsLk.Lock()
-		for k := range m {
-			addrs = append(addrs, &peer.AddrInfo{ID: k}) // Addrs: v.addrs
-		}
-
-		addrs = append(addrs, dht.bootstrapPeers...)
-		dht.peerAddrsLk.Unlock()
-
-		for k := range m {
-			delete(m, k)
-		}
-
-		start := time.Now()
-		limitErrOnce := sync.Once{}
-		dht.crawler.Run(ctx, addrs,
-			func(p peer.ID, rtPeers []*peer.AddrInfo) {
-				conns := dht.h.Network().ConnsToPeer(p)
-				var addrs []multiaddr.Multiaddr
-				for _, conn := range conns {
-					addr := conn.RemoteMultiaddr()
-					addrs = append(addrs, addr)
-				}
-
-				if len(addrs) == 0 {
-					logger.Debugf("no connections to %v after successful query. keeping addresses from the peerstore", p)
-					addrs = dht.h.Peerstore().Addrs(p)
-				}
-
-				keep := kaddht.PublicRoutingTableFilter(dht, p)
-				if !keep {
-					return
-				}
-
-				mxLk.Lock()
-				defer mxLk.Unlock()
-				m[p] = &crawlVal{
-					addrs: addrs,
-				}
-			},
-			func(p peer.ID, err error) {
-				dialErr, ok := err.(*swarm.DialError)
-				if ok {
-					for _, transportErr := range dialErr.DialErrors {
-						if errors.Is(transportErr.Cause, network.ErrResourceLimitExceeded) {
-							limitErrOnce.Do(func() { logger.Errorf(rtRefreshLimitsMsg) })
-						}
-					}
-				}
-				// note that DialError implements Unwrap() which returns the Cause, so this covers that case
-				if errors.Is(err, network.ErrResourceLimitExceeded) {
-					limitErrOnce.Do(func() { logger.Errorf(rtRefreshLimitsMsg) })
-				}
-			})
-		dur := time.Since(start)
-		logger.Infof("crawl took %v", dur)
-
-		peerAddrs := make(map[peer.ID][]multiaddr.Multiaddr)
-		kPeerMap := make(map[string]peer.ID)
-		newRt := trie.New()
-		for k, v := range m {
-			v.key = kadkey.KbucketIDToKey(kb.ConvertPeerID(k))
-			peerAddrs[k] = v.addrs
-			kPeerMap[string(v.key)] = k
-			newRt.Add(v.key)
-		}
-
-		dht.peerAddrsLk.Lock()
-		dht.peerAddrs = peerAddrs
-		dht.peerAddrsLk.Unlock()
-
-		dht.kMapLk.Lock()
-		dht.keyToPeerMap = kPeerMap
-		dht.kMapLk.Unlock()
-
-		dht.rtLk.Lock()
-		dht.rt = newRt
-		dht.lastCrawlTime = time.Now()
-		dht.rtLk.Unlock()
+func (dht *FullRT) addBootstrapPeers() {
+	for _, ai := range dht.bootstrapPeers {
+		dht.h.Peerstore().AddAddrs(ai.ID, ai.Addrs, peerstore.PermanentAddrTTL)
+		dht.ValidPeerFound(ai.ID)
 	}
 }
 
@@ -432,6 +383,77 @@ func workers(numWorkers int, fn func(interface{}), inputs <-chan interface{}) {
 	}
 }
 
+var _ kaddht.DhtQueryIface = (*FullRT)(nil)
+
+func (dht *FullRT) Self() peer.ID {
+	return dht.self
+}
+
+func (dht *FullRT) BucketSize() int {
+	return dht.bucketSize
+}
+
+func (dht *FullRT) Beta() int {
+	return 3
+}
+
+func (dht *FullRT) Alpha() int {
+	return 10
+}
+
+func (dht *FullRT) DialPeer(ctx context.Context, id peer.ID) error {
+	// TODO: logging improvements
+	return dht.h.Connect(ctx, peer.AddrInfo{ID: id})
+}
+
+func (dht *FullRT) PeerStoppedDHT(id peer.ID) {
+	k := kb.ConvertPeerID(id)
+	dht.rtLk.Lock()
+	dht.rt.Remove(kadkey.KbucketIDToKey(k))
+	dht.rtLk.Unlock()
+
+	dht.kMapLk.Lock()
+	delete(dht.keyToPeerMap,string(k))
+	dht.kMapLk.Unlock()
+
+	dht.peerAddrsLk.Lock()
+	delete(dht.peerAddrs, id)
+	delete(dht.peerAddrsLastModifier, id)
+	dht.peerAddrsLk.Unlock()
+}
+
+func (dht *FullRT) UpdateLastUsefulAt(id peer.ID, t time.Time) bool {
+	return false
+}
+
+func (dht *FullRT) ValidPeerFound(id peer.ID) {
+	k := kb.ConvertPeerID(id)
+	dht.rtLk.Lock()
+	dht.rt.Add(kadkey.KbucketIDToKey(k))
+	dht.rtLk.Unlock()
+
+	dht.kMapLk.Lock()
+	dht.keyToPeerMap[string(k)] = id
+	dht.kMapLk.Unlock()
+
+	dht.peerAddrsLk.Lock()
+	dht.peerAddrs[id] = dht.Peerstore().Addrs(id)
+	dht.peerAddrsLastModifier[id] = time.Now()
+	dht.peerAddrsLk.Unlock()
+}
+
+func (dht *FullRT) QueryPeerFilter(i interface{}, info peer.AddrInfo) bool {
+	return kaddht.PublicQueryFilter(i, info)
+}
+
+func (dht *FullRT) MaybeAddAddrs(p peer.ID, addrs []multiaddr.Multiaddr, ttl time.Duration) {
+	dht.maybeAddAddrs(p, addrs, ttl)
+}
+
+func (dht *FullRT) Peerstore() peerstore.Peerstore {
+	return dht.h.Peerstore()
+}
+
 func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, error) {
 	_, span := internal.StartSpan(ctx, "FullRT.GetClosestPeers", trace.WithAttributes(internal.KeyAsAttribute("Key", key)))
 	defer span.End()
@@ -441,6 +463,68 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 	dht.rtLk.RLock()
 	closestKeys := kademlia.ClosestN(kadKey, dht.rt, dht.bucketSize)
 	dht.rtLk.RUnlock()
+
+	lowest, highest := getRange(closestKeys, kadKey)
+	dht.crtLk.RLock()
+	rangeCovered := dht.crt.RangeIsCovered(cachert.Key(lowest), cachert.Key(highest))
+	dht.crtLk.RUnlock()
+	if rangeCovered {
+		// Nothing to do
+	} else {
+		// Run a query and then put the results into the caching rt
+		peers := make([]peer.ID, 0, len(closestKeys))
+		for _, k := range closestKeys {
+			dht.kMapLk.RLock()
+			p, ok := dht.keyToPeerMap[string(k)]
+			if !ok {
+				logger.Errorf("key not found in map")
+			}
+			dht.kMapLk.RUnlock()
+			dht.peerAddrsLk.RLock()
+			peerAddrs := dht.peerAddrs[p]
+			dht.peerAddrsLk.RUnlock()
+
+			dht.h.Peerstore().AddAddrs(p, peerAddrs, peerstore.TempAddrTTL)
+			peers = append(peers, p)
+		}
+
+		r, err := kaddht.RunLookupWithFollowup(ctx, key, func(ctx context.Context, id peer.ID) ([]*peer.AddrInfo, error) {
+			return dht.protoMessenger.GetClosestPeers(ctx, id, peer.ID(key))
+		}, func(*qpeerset.QueryPeerset) bool { return false }, peers, dht)
+		if err != nil {
+			return nil, err
+		}
+
+		var kadKeysOfClosestPeers []kadkey.Key
+		queryPeers := make([]peer.ID, 0, len(r.Peers))
+		for i, p := range r.Peers {
+			kadKeysOfClosestPeers = append(kadKeysOfClosestPeers, kadkey.KbucketIDToKey(kb.ConvertPeerID(p)))
+			if state := r.State[i]; state != qpeerset.PeerUnreachable {
+				queryPeers = append(queryPeers, p)
+			}
+		}
+		lowest, highest := getRange(kadKeysOfClosestPeers, kadKey)
+		dht.crtLk.Lock()
+		dht.crt.InsertRange(cachert.Key(lowest), cachert.Key(highest), time.Now())
+		dht.crtLk.Unlock()
+
+		// TODO: add all the peers we've heard of and think may be valid to the routing table
+		dht.rtLk.Lock()
+		dht.kMapLk.Lock()
+		dht.peerAddrsLk.Lock()
+		for _, p := range queryPeers {
+			pKbID := kb.ConvertKey(string(p))
+			pKadKey := kadkey.KbucketIDToKey(pKbID)
+			dht.rt.Add(pKadKey)
+			dht.keyToPeerMap[string(pKbID)] = p
+			dht.peerAddrs[p] = dht.Peerstore().Addrs(p)
+			dht.peerAddrsLastModifier[p] = time.Now()
+		}
+		dht.peerAddrsLk.Unlock()
+		dht.kMapLk.Unlock()
+		closestKeys = kademlia.ClosestN(kadKey, dht.rt, dht.bucketSize)
+		dht.rtLk.Unlock()
+	}
 
 	peers := make([]peer.ID, 0, len(closestKeys))
 	for _, k := range closestKeys {
@@ -458,6 +542,77 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 		peers = append(peers, p)
 	}
 	return peers, nil
+}
+
+var max32Bytes = big.NewInt(0).SetBytes(bytes.Repeat([]byte{0xFF}, 32))
+
+// getRange takes the closest keys to kadKey and returns two keys representative of the lower and upper bounds
+func getRange(closestKeys []kadkey.Key, kadKey kadkey.Key) (kadkey.Key, kadkey.Key) {
+	slices.SortFunc(closestKeys, func(a, b kadkey.Key) int {
+		return bytes.Compare(a, b)
+	})
+	var k, lowerKeyScratch, higherKeyScratch big.Int
+	k.SetBytes(kadKey)
+	lowerKeyScratch.SetBytes(closestKeys[0])
+	lowerKeyScratch.Sub(&k, &lowerKeyScratch) // lowerKeyScratch = key - lowestKey
+	higherKeyScratch.SetBytes(closestKeys[len(closestKeys)-1])
+	higherKeyScratch.Sub(&k, &higherKeyScratch) // higherKeyScratch =  key - highestKey
+
+	var lowest, highest kadkey.Key
+	if lowerKeyScratch.Sign() == -1 {
+		// lowestKey is still higher than the key
+		// So higher = highestKey, lower = key - (highestKey - key)
+		lowerKeyScratch.Add(&k, &higherKeyScratch)
+		lowestBytes := make([]byte, 32)
+		if lowerKeyScratch.Sign() == 1 {
+			lowest = lowerKeyScratch.FillBytes(lowestBytes)
+		} else {
+			lowest = lowestBytes
+		}
+		highest = closestKeys[len(closestKeys)-1]
+	} else if higherKeyScratch.Sign() == 1 {
+		// highestKey is still lower than the key
+		// So lower = lowestKey, higher = key + (key - lowestKey)
+		higherKeyScratch.Add(&k, &lowerKeyScratch)
+		highestBytes := make([]byte, 32)
+		if higherKeyScratch.Cmp(max32Bytes) >= 0 {
+			highest = max32Bytes.FillBytes(highestBytes)
+		} else {
+			highest = higherKeyScratch.FillBytes(highestBytes)
+		}
+		lowest = closestKeys[0]
+	} else { // Handle 0?
+		switch higherKeyScratch.CmpAbs(&lowerKeyScratch) {
+		case -1:
+			// highest - key < key - lowest
+			// So lower = lowestKey, higher = key + (key - lowestKey)
+			lowest = closestKeys[0]
+			higherKeyScratch.Add(&k, &lowerKeyScratch)
+			highestBytes := make([]byte, 32)
+			if higherKeyScratch.Cmp(max32Bytes) >= 0 {
+				highest = max32Bytes.FillBytes(highestBytes)
+			} else {
+				highest = higherKeyScratch.FillBytes(highestBytes)
+			}
+		case 1:
+			// highest - key > key - lowest
+			// So higher = highestKey, lower = key - (highestKey - key)
+			highest = closestKeys[len(closestKeys)-1]
+			lowerKeyScratch.Add(&k, &higherKeyScratch)
+			lowestBytes := make([]byte, 32)
+			if lowerKeyScratch.Sign() == 1 {
+				lowest = lowerKeyScratch.FillBytes(lowestBytes)
+			} else {
+				lowest = lowestBytes
+			}
+		case 0:
+			// TODO: edge case with one peer
+			lowest = closestKeys[0]
+			highest = closestKeys[len(closestKeys)-1]
+		}
+	}
+
+	return lowest, highest
 }
 
 // PutValue adds value corresponding to given Key.
@@ -1043,6 +1198,7 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 	numPeers := len(dht.keyToPeerMap)
 	dht.kMapLk.RUnlock()
 
+	numPeers = 10000
 	chunkSize := (len(sortedKeys) * dht.bucketSize * 2) / numPeers
 	if chunkSize == 0 {
 		chunkSize = 1
@@ -1116,34 +1272,111 @@ func (dht *FullRT) bulkMessageSend(ctx context.Context, keys []peer.ID, fn func(
 
 	keyGroups := divideByChunkSize(sortedKeys, chunkSize)
 	sendsSoFar := 0
-	for _, g := range keyGroups {
-		if ctx.Err() != nil {
-			break
-		}
 
-		keysPerPeer := make(map[peer.ID][]peer.ID)
-		for _, k := range g {
-			peers, err := dht.GetClosestPeers(ctx, string(k))
-			if err == nil {
-				for _, p := range peers {
-					keysPerPeer[p] = append(keysPerPeer[p], k)
+	kgParallelism := 10
+	kgWg := sync.WaitGroup{}
+	kgWg.Add(kgParallelism)
+	parallelKeyGroups := make([][][]peer.ID, kgParallelism)
+	for i, g := range keyGroups {
+		gNum := i % kgParallelism
+		parallelKeyGroups[gNum] = append(parallelKeyGroups[gNum], g)
+	}
+
+	sendCh := make(chan struct {
+		KeysPerPeer map[peer.ID][]peer.ID
+		GroupSize   int
+	})
+	for i := 0; i < kgParallelism; i++ {
+		// split into kgParallelism groups by alternating
+		go func(parallelGroups [][]peer.ID) {
+			defer kgWg.Done()
+
+			for _, g := range parallelGroups {
+				if ctx.Err() != nil {
+					return
+				}
+
+				keysPerPeer := make(map[peer.ID][]peer.ID)
+				for _, k := range g {
+					peers, err := dht.GetClosestPeers(ctx, string(k))
+					if err == nil {
+						for _, p := range peers {
+							keysPerPeer[p] = append(keysPerPeer[p], k)
+						}
+					}
+				}
+
+				select {
+				case sendCh <- struct {
+					KeysPerPeer map[peer.ID][]peer.ID
+					GroupSize   int
+				}{KeysPerPeer: keysPerPeer, GroupSize: len(g)}:
+				case <-ctx.Done():
+					return
 				}
 			}
-		}
-
-		logger.Debugf("bulk send: %d peers for group size %d", len(keysPerPeer), len(g))
-
-	keyloop:
-		for p, workKeys := range keysPerPeer {
-			select {
-			case workCh <- workMessage{p: p, keys: workKeys}:
-			case <-ctx.Done():
-				break keyloop
-			}
-		}
-		sendsSoFar += len(g)
-		logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(keySuccesses)), sendsSoFar, len(keySuccesses))
+		}(parallelKeyGroups[i])
 	}
+
+	go func() {
+		kgWg.Wait()
+		close(sendCh)
+	}()
+
+sendKgLoop:
+	for {
+		select {
+		case o, ok := <-sendCh:
+			if !ok {
+				break sendKgLoop
+			}
+			logger.Debugf("bulk send: %d peers for group size %d", len(o.KeysPerPeer), o.GroupSize)
+
+		keyloop:
+			for p, workKeys := range o.KeysPerPeer {
+				select {
+				case workCh <- workMessage{p: p, keys: workKeys}:
+				case <-ctx.Done():
+					break keyloop
+				}
+			}
+			sendsSoFar += o.GroupSize
+			logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(keySuccesses)), sendsSoFar, len(keySuccesses))
+		case <-ctx.Done():
+			break sendKgLoop
+		}
+	}
+
+	/*
+		for _, g := range keyGroups {
+			if ctx.Err() != nil {
+				break
+			}
+
+			keysPerPeer := make(map[peer.ID][]peer.ID)
+			for _, k := range g {
+				peers, err := dht.GetClosestPeers(ctx, string(k))
+				if err == nil {
+					for _, p := range peers {
+						keysPerPeer[p] = append(keysPerPeer[p], k)
+					}
+				}
+			}
+
+			logger.Debugf("bulk send: %d peers for group size %d", len(keysPerPeer), len(g))
+
+		keyloop:
+			for p, workKeys := range keysPerPeer {
+				select {
+				case workCh <- workMessage{p: p, keys: workKeys}:
+				case <-ctx.Done():
+					break keyloop
+				}
+			}
+			sendsSoFar += len(g)
+			logger.Infof("bulk sending: %.1f%% done - %d/%d done", 100*float64(sendsSoFar)/float64(len(keySuccesses)), sendsSoFar, len(keySuccesses))
+		}
+	*/
 
 	close(workCh)
 

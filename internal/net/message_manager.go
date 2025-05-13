@@ -74,6 +74,8 @@ func (m *messageSenderImpl) OnDisconnect(ctx context.Context, p peer.ID) {
 // measure the RTT for latency measurements.
 func (m *messageSenderImpl) SendRequest(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
+	ctx, cancel := context.WithTimeout(ctx, dhtReadMessageTimeout)
+	defer cancel()
 
 	ms, err := m.messageSenderForPeer(ctx, p)
 	if err != nil {
@@ -109,6 +111,8 @@ func (m *messageSenderImpl) SendRequest(ctx context.Context, p peer.ID, pmes *pb
 // SendMessage sends out a message
 func (m *messageSenderImpl) SendMessage(ctx context.Context, p peer.ID, pmes *pb.Message) error {
 	ctx, _ = tag.New(ctx, metrics.UpsertMessageType(pmes))
+	ctx, cancel := context.WithTimeout(ctx, dhtReadMessageTimeout)
+	defer cancel()
 
 	ms, err := m.messageSenderForPeer(ctx, p)
 	if err != nil {

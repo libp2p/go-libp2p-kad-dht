@@ -150,7 +150,7 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 
 	// Store the provider records with all the closest peers we haven't already contacted/scheduled interaction with.
 	es.peerStatesLk.Lock()
-	for _, p := range lookupRes.peers {
+	for _, p := range lookupRes.Peers {
 		if _, found := es.peerStates[p]; found {
 			continue
 		}
@@ -163,12 +163,12 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 	// wait until a threshold number of RPCs have completed
 	es.waitForRPCs()
 
-	if err := outerCtx.Err(); err != nil || !lookupRes.completed { // likely the "completed" field is false but that's not a given
+	if err := outerCtx.Err(); err != nil || !lookupRes.Completed { // likely the "completed" field is false but that's not a given
 		return err
 	}
 
 	// tracking lookup results for network size estimator as "completed" is true
-	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
+	if err = dht.nsEstimator.Track(key, lookupRes.Closest); err != nil {
 		logger.Warnf("network size estimator track peers: %s", err)
 	}
 

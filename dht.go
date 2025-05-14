@@ -896,6 +896,10 @@ func (dht *IpfsDHT) Host() host.Host {
 	return dht.host
 }
 
+func (dht *IpfsDHT) Protocols() []protocol.ID {
+	return dht.protocols
+}
+
 // Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Ping", trace.WithAttributes(attribute.Stringer("PeerID", p)))
@@ -929,6 +933,10 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 		return
 	}
 	dht.peerstore.AddAddrs(p, dht.filterAddrs(addrs), ttl)
+}
+
+func (dht *IpfsDHT) FilteredAddrs() []ma.Multiaddr {
+	return dht.filterAddrs(dht.host.Addrs())
 }
 
 func (dht *IpfsDHT) filterAddrs(addrs []ma.Multiaddr) []ma.Multiaddr {

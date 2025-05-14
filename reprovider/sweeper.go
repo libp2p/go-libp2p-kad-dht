@@ -12,10 +12,12 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	kbucket "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p/core/host"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key"
@@ -63,7 +65,7 @@ type provideReq struct {
 
 type reprovideSweeper struct {
 	ctx    context.Context
-	host   host.Host // NOTE: maybe useless
+	peerid peer.ID
 	router KadRouter
 	order  bit256.Key
 
@@ -80,7 +82,7 @@ type reprovideSweeper struct {
 
 	provideChan   chan provideReq
 	schedule      *trie.Trie[bitstr.Key, time.Duration]
-	scheduleLk    *sync.Mutex
+	scheduleLk    sync.Mutex
 	scheduleTimer *time.Timer
 
 	failedRegionsChan  chan bitstr.Key
@@ -92,63 +94,77 @@ type reprovideSweeper struct {
 
 	prefixCursor        bitstr.Key
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
-	ongoingReprovidesLk *sync.Mutex
+	ongoingReprovidesLk sync.Mutex
 
 	msgSender               pb.MessageSender
-	getSelfAddrs            func() peer.AddrInfo
+	getSelfAddrs            func() []ma.Multiaddr
 	localNearestPeersToSelf func(int) []peer.ID
 }
 
-// Options should be
-// * reprovideInterval
-// * maxReprovideDelay
-// * now (maybe not even an option)
-// * message sender
+func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
+	cfg := DefaultConfig
+	err := cfg.apply(opts...)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	reprovider := &reprovideSweeper{
+		ctx:    ctx,
+		peerid: cfg.peerid,
+		router: cfg.router,
+		order:  peerIDToBit256(cfg.peerid),
 
-func NewReproviderSweeper(ctx context.Context, host host.Host, router KadRouter,
-	now func() time.Time, reprovideInterval, maxReprovideDelay time.Duration,
-) Provider {
-	// TODO: options
-	sweeper := &reprovideSweeper{
-		host:   host,
-		router: router,
-		order:  peerIDToBit256(host.ID()),
+		replicationFactor: cfg.replicationFactor,
+		reprovideInterval: cfg.reprovideInterval,
+		maxReprovideDelay: cfg.maxReprovideDelay,
 
-		burstProvideParallelism: 4,
+		burstProvideParallelism: cfg.provideWorkers,
 
-		now:               now,
-		cycleStart:        now(),
-		reprovideInterval: reprovideInterval,
-		maxReprovideDelay: maxReprovideDelay,
+		now:        cfg.now,
+		cycleStart: cfg.now(),
+
+		msgSender:               cfg.msgSender,
+		getSelfAddrs:            cfg.selfAddrs,
+		localNearestPeersToSelf: cfg.localNearestPeersToSelf,
 
 		cids: trie.New[bit256.Key, mh.Multihash](),
 
 		provideChan:   make(chan provideReq),
 		schedule:      trie.New[bitstr.Key, time.Duration](),
-		scheduleLk:    &sync.Mutex{},
 		scheduleTimer: time.NewTimer(time.Hour),
 
 		failedRegionsChan:  make(chan bitstr.Key),
-		lateRegionsQueue:   []bitstr.Key{},
 		retryTicker:        time.NewTicker(5 * time.Minute),
-		pendingCids:        []mh.Multihash{},
 		pendingCidsChan:    make(chan []mh.Multihash),
 		catchupPendingChan: make(chan struct{}, 1),
 
-		ongoingReprovides:   trie.New[bitstr.Key, struct{}](),
-		ongoingReprovidesLk: &sync.Mutex{},
-
-		msgSender:               nil,                                                                               // TODO: default msgSender should allow some pipielining
-		getSelfAddrs:            func() peer.AddrInfo { return peer.AddrInfo{ID: host.ID(), Addrs: host.Addrs()} }, // NOTE: addrs filters should be passed here
-		localNearestPeersToSelf: nil,
+		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 	}
 	// Don't need to start schedule timer yet
-	sweeper.scheduleTimer.Stop()
+	reprovider.scheduleTimer.Stop()
 	// Start in online state
-	sweeper.online.Store(true)
+	reprovider.online.Store(true)
 
-	go sweeper.run()
-	return sweeper
+	go reprovider.run()
+
+	return reprovider, nil
+}
+
+func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (Provider, error) {
+	localNearestPeersToSelf := func(count int) []peer.ID {
+		return dht.RoutingTable().NearestPeers(dht.PeerKey(), count)
+	}
+	opts = append([]Option{
+		WithPeerID(dht.Host().ID()),
+		WithRouter(dht),
+		WithSelfAddrs(dht.FilteredAddrs),
+		WithLocalNearestPeersToSelf(localNearestPeersToSelf),
+		WithMessageSender(net.NewMessageSenderImpl(dht.Host(), dht.Protocols())),
+	}, opts...,
+	)
+	return NewReprovider(ctx, opts...)
 }
 
 func (s *reprovideSweeper) run() {
@@ -549,7 +565,7 @@ func (s *reprovideSweeper) firstFullKeyWithPrefix(k bitstr.Key) bitstr.Key {
 // the provided key. Note that the returned peer IDs aren't random, they are
 // taken from a static list of preimages.
 func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
-	p, _ := kbucket.GenRandPeerIDWithCPL(keyToBytes(k), kbucket.PeerIDPreimageMaxCpl)
+	p, _ := kb.GenRandPeerIDWithCPL(keyToBytes(k), kb.PeerIDPreimageMaxCpl)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
@@ -624,9 +640,9 @@ const minimalRegionReachablePeersRatio float32 = 0.2
 // offline.
 func (s *reprovideSweeper) regionReprovide(r region) error {
 	cidsAllocations := s.cidsAllocationsToPeers(r)
-	selfAddrs := s.getSelfAddrs()
+	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
-	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{selfAddrs})
+	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
 
 	errCount := 0
 	for p, cids := range cidsAllocations {
@@ -783,7 +799,7 @@ func (s *reprovideSweeper) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 // If the state changed from offline to online, signal that we can catch up on
 // pending work.
 func (s *reprovideSweeper) onlineCheck() {
-	peers, err := s.router.GetClosestPeers(s.ctx, string(s.host.ID()))
+	peers, err := s.router.GetClosestPeers(s.ctx, string(s.peerid))
 	isOnline := err == nil && len(peers) > 0
 	wasOnline := s.online.Load()
 	if wasOnline != isOnline {

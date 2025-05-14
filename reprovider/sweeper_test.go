@@ -47,3 +47,6 @@ func TestKeyToBytes(t *testing.T) {
 }
 
 // TODO: Test that the peers returned by GetClosestPeers are sorted by distance to the requested key
+
+func TestProvide(t *testing.T) {
+}

@@ -1,6 +1,8 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
-go 1.23.0
+go 1.23.8
+
+toolchain go1.24.3
 
 require (
 	github.com/google/gopacket v1.1.19
@@ -10,10 +12,10 @@ require (
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-datastore v0.8.2
 	github.com/ipfs/go-detect-race v0.0.1
-	github.com/ipfs/go-log/v2 v2.5.1
+	github.com/ipfs/go-log/v2 v2.6.0
 	github.com/ipfs/go-test v0.2.1
 	github.com/libp2p/go-libp2p v0.41.1
-	github.com/libp2p/go-libp2p-kbucket v0.7.1-0.20250506114957-e034916ef18e
+	github.com/libp2p/go-libp2p-kbucket v0.7.1-0.20250514131430-6bb8b16e312b
 	github.com/libp2p/go-libp2p-record v0.3.1
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.5
 	github.com/libp2p/go-libp2p-testing v0.12.0
@@ -125,16 +127,16 @@ require (
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/fx v1.23.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
+	golang.org/x/crypto v0.38.0 // indirect
+	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6 // indirect
 	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
-	golang.org/x/tools v0.32.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/sync v0.14.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/tools v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	lukechampine.com/blake3 v1.4.0 // indirect
+	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
 retract v0.29.2 // this includes a breaking change and should have been released as v0.30.0

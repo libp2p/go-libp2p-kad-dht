@@ -49,7 +49,10 @@ type KadRouter interface {
 // TODO: add some more logging
 var logger = logging.Logger("dht/ReprovideSweep")
 
-var errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
+var (
+	ErrClientNotBoostrapped               = errors.New("reprovider: waiting for DHT client to bootstrap")
+	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
+)
 
 const keyLen = bit256.KeyLen * 8 // 256
 
@@ -242,6 +245,10 @@ func (s *reprovideSweeper) networkProvide(cids []mh.Multihash) error {
 	}
 	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
 	avgPrefixLen := s.getAvgPrefixLen()
+	if avgPrefixLen == 0 {
+		s.pendingCidsChan <- cids
+		return ErrClientNotBoostrapped
+	}
 	for _, c := range cids {
 		k := mhToBit256(c)
 		// Add cid to s.cids if not there already, and add fresh cids to new cids
@@ -846,22 +853,6 @@ func (s *reprovideSweeper) catchupPendingWork() {
 	go s.networkProvide(cidsInNoRegions)
 }
 
-// localNearestPeersToSelf returns the CommonPrefixLength of all the
-// replicationFactor closest peers to self locally stored share.
-func (s *reprovideSweeper) localNearestPeersCPL() int {
-	closestToSelf := s.localNearestPeersToSelf(s.replicationFactor)
-	if len(closestToSelf) == 0 {
-		// This means that all cids will be provided under the empty prefix. Not
-		// optimized, but we won't make a wild static guess on the network size.
-		return 0
-	}
-	minCpl := keyLen
-	for _, p := range closestToSelf {
-		minCpl = min(minCpl, s.order.CommonPrefixLength(peerIDToBit256(p)))
-	}
-	return minCpl
-}
-
 func (s *reprovideSweeper) getAvgPrefixLen() int {
 	prefixLenSum := 0
 	s.scheduleLk.Lock()
@@ -876,6 +867,22 @@ func (s *reprovideSweeper) getAvgPrefixLen() int {
 		prefixLenSum += len(entry.Key)
 	}
 	return prefixLenSum / scheduleSize
+}
+
+// localNearestPeersToSelf returns the CommonPrefixLength of all the
+// replicationFactor closest peers to self locally stored share.
+func (s *reprovideSweeper) localNearestPeersCPL() int {
+	closestToSelf := s.localNearestPeersToSelf(s.replicationFactor)
+	if len(closestToSelf) == 0 {
+		// This means that all cids will be provided under the empty prefix. Not
+		// optimized, but we won't make a wild static guess on the network size.
+		return 0
+	}
+	minCpl := keyLen
+	for _, p := range closestToSelf {
+		minCpl = min(minCpl, s.order.CommonPrefixLength(peerIDToBit256(p)))
+	}
+	return minCpl
 }
 
 // Provide returns an error if the cid failed to be provided to the network.

@@ -40,7 +40,8 @@ func trieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, 
 func trieHasPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) (bool, K0) {
 	if t.IsLeaf() {
 		if !t.HasKey() {
-			return false, *t.Key()
+			var zero K0
+			return false, zero
 		}
 		return key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen(), *t.Key()
 	}

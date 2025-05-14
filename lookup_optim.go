@@ -114,12 +114,12 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 		return errors.New("can't lookup empty key")
 	}
 
-	// initialize new context for all putProvider operations.
+	// use dht.ctx for all putProvider operations.
 	// We don't want to give the outer context to the put operations as we return early before all
 	// put operations have finished to avoid the long tail of the latency distribution. If we
 	// provided the outer context the put operations may be cancelled depending on what happens
 	// with the context on the user side.
-	putCtx, putCtxCancel := context.WithTimeout(context.Background(), time.Minute)
+	putCtx, putCtxCancel := context.WithTimeout(dht.ctx, time.Minute)
 
 	es, err := dht.newOptimisticState(putCtx, key)
 	if err != nil {
@@ -177,7 +177,7 @@ func (dht *IpfsDHT) optimisticProvide(outerCtx context.Context, keyMH multihash.
 	}
 
 	if ns, err := dht.nsEstimator.NetworkSize(); err == nil {
-		metrics.RecordNetworkSize(int64(ns))
+		metrics.RecordNetworkSize(dht.ctx, int64(ns))
 	}
 
 	// refresh the cpl for this key as the query was successful

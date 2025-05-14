@@ -195,7 +195,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		return nil, err
 	}
 
-	dht, err := makeDHT(h, cfg)
+	dht, err := makeDHT(ctx, h, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
 	}
@@ -280,7 +280,7 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 	return dht
 }
 
-func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
+func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 	var protocols, serverProtocols []protocol.ID
 
 	v1proto := cfg.ProtocolPrefix + kad1
@@ -352,20 +352,20 @@ func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 		dht.optProvJobsPool = make(chan struct{}, cfg.OptimisticProvideJobsPoolSize)
 	}
 
+	// create a tagged context derived from the original context
+	// the DHT context should be done when the process is closed
+	dht.ctx, dht.cancel = context.WithCancel(dht.newContextWithLocalTags(ctx))
+
 	// rt refresh manager
 	dht.rtRefreshManager, err = makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct RT Refresh Manager,err=%s", err)
 	}
 
-	// create a tagged context derived from the original context
-	// the DHT context should be done when the process is closed
-	dht.ctx, dht.cancel = context.WithCancel(dht.newContextWithLocalTags(context.Background()))
-
 	if cfg.ProviderStore != nil {
 		dht.providerStore = cfg.ProviderStore
 	} else {
-		dht.providerStore, err = providers.NewProviderManager(h.ID(), dht.peerstore, cfg.Datastore)
+		dht.providerStore, err = providers.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.Datastore)
 		if err != nil {
 			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
 		}
@@ -402,6 +402,7 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 	}
 
 	r, err := rtrefresh.NewRtRefreshManager(
+		dht.ctx,
 		dht.host, dht.routingTable, cfg.RoutingTable.AutoRefresh,
 		keyGenFnc,
 		queryFnc,

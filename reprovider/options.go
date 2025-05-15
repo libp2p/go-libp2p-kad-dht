@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/filecoin-project/go-clock"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -24,8 +25,7 @@ type config struct {
 	localNearestPeersToSelf func(int) []peer.ID
 
 	provideWorkers int
-
-	now func() time.Time
+	clock          clock.Clock
 }
 
 func (cfg *config) apply(opts ...Option) error {
@@ -64,7 +64,7 @@ var DefaultConfig = config{
 	maxReprovideDelay: 1 * time.Hour,
 
 	provideWorkers: 16,
-	now:            time.Now,
+	clock:          clock.New(),
 }
 
 func WithReplicationFactor(n int) Option {
@@ -130,9 +130,9 @@ func WithProvideWorkers(n int) Option {
 	}
 }
 
-func WithNowFunc(f func() time.Time) Option {
+func WithClock(c clock.Clock) Option {
 	return func(cfg *config) error {
-		cfg.now = f
+		cfg.clock = c
 		return nil
 	}
 }

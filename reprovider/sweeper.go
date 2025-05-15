@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/filecoin-project/go-clock"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 
@@ -50,7 +51,7 @@ type KadRouter interface {
 var logger = logging.Logger("dht/ReprovideSweep")
 
 var (
-	ErrClientNotBoostrapped               = errors.New("reprovider: waiting for DHT client to bootstrap")
+	ErrNodeOffline                        = errors.New("reprovider: node is offline")
 	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 )
 
@@ -76,7 +77,7 @@ type reprovideSweeper struct {
 	burstProvideParallelism int
 
 	replicationFactor int
-	now               func() time.Time
+	clock             clock.Clock
 	cycleStart        time.Time
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
@@ -86,11 +87,11 @@ type reprovideSweeper struct {
 	provideChan   chan provideReq
 	schedule      *trie.Trie[bitstr.Key, time.Duration]
 	scheduleLk    sync.Mutex
-	scheduleTimer *time.Timer
+	scheduleTimer *clock.Timer
 
 	failedRegionsChan  chan bitstr.Key
 	lateRegionsQueue   []bitstr.Key
-	retryTicker        *time.Ticker
+	retryTicker        *clock.Ticker
 	pendingCids        []mh.Multihash
 	pendingCidsChan    chan []mh.Multihash
 	catchupPendingChan chan struct{}
@@ -125,8 +126,8 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 
 		burstProvideParallelism: cfg.provideWorkers,
 
-		now:        cfg.now,
-		cycleStart: cfg.now(),
+		clock:      cfg.clock,
+		cycleStart: cfg.clock.Now(),
 
 		msgSender:               cfg.msgSender,
 		getSelfAddrs:            cfg.selfAddrs,
@@ -136,10 +137,10 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 
 		provideChan:   make(chan provideReq),
 		schedule:      trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer: time.NewTimer(time.Hour),
+		scheduleTimer: cfg.clock.Timer(time.Hour),
 
 		failedRegionsChan:  make(chan bitstr.Key),
-		retryTicker:        time.NewTicker(5 * time.Minute),
+		retryTicker:        cfg.clock.Ticker(5 * time.Minute),
 		pendingCidsChan:    make(chan []mh.Multihash),
 		catchupPendingChan: make(chan struct{}, 1),
 
@@ -205,66 +206,123 @@ func (s *reprovideSweeper) run() {
 	}
 }
 
+// addCids adds the provided cids to the reprovider tracked cids, and add the
+// appropriate prefix to the schedule if cid isn't covered by a prefix already
+// in the schedule.
+//
+// It returns a map of prefixes to fresh cids (that weren't tracked so far).
+func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
+	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
+	var avgPrefixLen int
+	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
+	for _, c := range cids {
+		prefixConsolidation := false
+		k := mhToBit256(c)
+		// Add cid to s.cids if not there already, and add fresh cids to newCids.
+		// Deduplication is handled here.
+		if added := s.cids.Add(k, c); added {
+			// If prefix of c not scheduled yet, add it to the schedule.
+			scheduled, prefix := trieHasPrefixOfKey(s.schedule, k)
+			if !scheduled {
+				if avgPrefixLen == 0 {
+					avgPrefixLen = s.getAvgPrefixLenNoLock()
+				}
+				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
+				if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
+					// If generated prefix is a prefix of existing scheduled keyspace
+					// zones, consolidate these zones around the shorter prefix.
+					for _, entry := range allEntries(subtrie, s.order) {
+						s.schedule.Remove(entry.Key)
+					}
+					prefixConsolidation = true
+				}
+				// Add prefix to schedule
+				reprovideTime := s.reprovideTimeForPrefix(prefix)
+				s.schedule.Add(prefix, reprovideTime)
+
+				followingKey := nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
+				if s.prefixCursor == followingKey || s.prefixCursor == "" {
+					// Next prefix to be reprovided is the prefix we just added to the
+					// schedule. Reschedule the alarm.
+					s.prefixCursor = prefix
+					s.scheduleTimer.Reset(reprovideTime)
+				}
+			}
+			if _, ok := prefixes[prefix]; !ok {
+				prefixes[prefix] = trie.New[bit256.Key, mh.Multihash]()
+			}
+			prefixes[prefix].Add(k, c)
+			if prefixConsolidation {
+				// prefix is a shorted prefix of a prefix already in the schedule.
+				// Consolidate everything into prefix.
+				for p, t := range prefixes {
+					if isBitstrPrefix(p, prefix) {
+						for _, entry := range allEntries(t, s.order) {
+							prefixes[prefix].Add(entry.Key, entry.Data)
+						}
+						delete(prefixes, p)
+					}
+				}
+			}
+		}
+	}
+	return prefixes
+}
+
+func (s *reprovideSweeper) getPrefixesForCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
+	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
+	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
+	for _, c := range cids {
+		k := mhToBit256(c)
+		scheduled, prefix := trieHasPrefixOfKey(s.schedule, k)
+		if scheduled {
+			if _, ok := prefixes[prefix]; !ok {
+				prefixes[prefix] = trie.New[bit256.Key, mh.Multihash]()
+			}
+			prefixes[prefix].Add(k, c)
+		}
+	}
+	return prefixes
+}
+
 func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.cids) == 0 {
 		provideRequest.done <- nil
 		return
 	}
-	newCids := make([]mh.Multihash, 0, len(provideRequest.cids))
-	for _, c := range provideRequest.cids {
-		k := mhToBit256(c)
-		// Add cid to s.cids if not there already, and add fresh cids to newCids.
-		// Deduplication is handled here.
-		if added := s.cids.Add(k, c); added {
-			newCids = append(newCids, c)
-		}
-	}
+	prefixes := s.addCids(provideRequest.cids)
 
-	if len(newCids) == 0 {
+	if len(prefixes) == 0 {
 		// All cids are already tracked and have been provided.
 		provideRequest.done <- nil
 		return
 	}
 
 	if !s.online.Load() {
-		s.pendingCidsChan <- provideRequest.cids
-		provideRequest.done <- errors.New("node is offline")
+		cids := make([]mh.Multihash, len(provideRequest.cids))
+		for _, t := range prefixes {
+			cids = append(cids, allValues(t, s.order)...)
+		}
+		s.pendingCids = append(s.pendingCids, cids...)
+		provideRequest.done <- ErrNodeOffline
 		return
 	}
 
 	go func() {
-		err := s.networkProvide(newCids)
+		err := s.networkProvide(prefixes)
 		provideRequest.done <- err
 	}()
 }
 
-func (s *reprovideSweeper) networkProvide(cids []mh.Multihash) error {
-	if len(cids) == 0 {
-		// No cids to provide.
-		return nil
-	}
-	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
-	avgPrefixLen := s.getAvgPrefixLen()
-	if avgPrefixLen == 0 {
-		s.pendingCidsChan <- cids
-		return ErrClientNotBoostrapped
-	}
-	for _, c := range cids {
-		k := mhToBit256(c)
-		// Add cid to s.cids if not there already, and add fresh cids to new cids
-		// trie. Deduplication is handled here.
-		// Spread cids by prefixes of avgPrefixLen
-		prefix := bitstr.Key(key.BitString(k)[:avgPrefixLen])
-		if _, ok := prefixes[prefix]; !ok {
-			prefixes[prefix] = trie.New[bit256.Key, mh.Multihash]()
-		}
-		prefixes[prefix].Add(k, c)
-	}
-
-	if len(cids) == 1 {
-		// Provide a single cid (NOT ProvideMany)
+func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash]) error {
+	if len(prefixes) == 1 {
 		for prefix, cid := range prefixes {
-			return s.provideForPrefix(prefix, cid, initialProvide)
+			// Provide a single cid (NOT ProvideMany)
+			if cid.Size() == 1 {
+				return s.provideForPrefix(prefix, cid, initialProvide)
+			}
 		}
 	}
 
@@ -298,7 +356,7 @@ func (s *reprovideSweeper) networkProvide(cids []mh.Multihash) error {
 	}
 
 	// Feed jobs to the workers.
-	onlineTicker := time.NewTicker(5 * time.Second)
+	onlineTicker := s.clock.Ticker(5 * time.Second)
 	defer onlineTicker.Stop()
 
 	earlyExit := -1
@@ -348,8 +406,15 @@ func (s *reprovideSweeper) handleReprovide() {
 	next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
 	currentPrefix := s.prefixCursor
 
-	s.prefixCursor = next.Key
-	nextReprovideDelay := next.Data - s.currentTimeOffset()
+	var nextReprovideDelay time.Duration
+	if next.Key.BitLen() == 0 {
+		// Empty schedule, keep current prefixCursor, and wake up in
+		// reprovideInterval.
+		nextReprovideDelay = s.reprovideInterval
+	} else {
+		s.prefixCursor = next.Key
+		nextReprovideDelay = next.Data - s.currentTimeOffset()
+	}
 	s.scheduleTimer.Reset(nextReprovideDelay)
 	s.scheduleLk.Unlock()
 
@@ -716,31 +781,13 @@ func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Ke
 	}
 }
 
-// scheduleNextReprovide schedules the next reprovide for the given prefix,
-// according to the kind of provide that just happened.
+// scheduleNextReprovide schedules the next periodical reprovide for the given
+// prefix, if the current operation is a regular reprovide (not if initial
+// provide or late reprovide).
 //
 // If the given prefix is already on the schedule, this function is a no op.
 func (s *reprovideSweeper) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration, op provideType) {
-	switch op {
-	case initialProvide:
-		// Prefix may never have been scheduled before, so we may need to add it to
-		// the schedule at the corresponding time.
-		s.scheduleLk.Lock()
-		if ok, _ := trieHasPrefixOfKey(s.schedule, prefix); !ok {
-			// Prefix not covered by schedule yet, add it.
-			reprovideTime := s.reprovideTimeForPrefix(prefix)
-			s.schedule.Add(prefix, reprovideTime)
-
-			followingKey := nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
-			if s.prefixCursor == "" || s.prefixCursor == followingKey {
-				// Next prefix to be reprovided is the prefix we just added to the
-				// schedule. Advance the alarm.
-				s.prefixCursor = prefix
-				s.scheduleTimer.Reset(reprovideTime)
-			}
-		}
-		s.scheduleLk.Unlock()
-	case regularReprovide:
+	if op == regularReprovide {
 		// Schedule next reprovide given that the prefix was just reprovided on
 		// schedule. In the case the next reprovide time should be delayed due to a
 		// growth in the number of network peers matching the prefix, don't delay
@@ -749,14 +796,12 @@ func (s *reprovideSweeper) scheduleNextReprovide(prefix bitstr.Key, lastReprovid
 		s.scheduleLk.Lock()
 		s.schedule.Add(prefix, nextReprovideTime)
 		s.scheduleLk.Unlock()
-	case lateRegionReprovide:
-		// Do nothing, next reprovide is already scheduled.
 	}
 }
 
 // currentTimeOffset returns the current time offset in the reprovide cycle.
 func (s *reprovideSweeper) currentTimeOffset() time.Duration {
-	return s.now().Sub(s.cycleStart) % s.reprovideInterval
+	return s.clock.Now().Sub(s.cycleStart) % s.reprovideInterval
 }
 
 const maxPrefixSize = 24
@@ -850,13 +895,14 @@ func (s *reprovideSweeper) catchupPendingWork() {
 		go s.provideForPrefix(r, allCids, lateRegionReprovide)
 	}
 	// 3. ProvideMany the remaining cids (that haven't been provided yet)
-	go s.networkProvide(cidsInNoRegions)
+	go s.networkProvide(s.getPrefixesForCids(cidsInNoRegions))
 }
 
-func (s *reprovideSweeper) getAvgPrefixLen() int {
+// getAvgPrefixLenNoLock returns the average prefix length of all scheduled
+// prefixes.
+func (s *reprovideSweeper) getAvgPrefixLenNoLock() int {
+	// NOTE: result should be cached, since there is no need to compute average for every new provide
 	prefixLenSum := 0
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
 	scheduleSize := s.schedule.Size()
 	if scheduleSize == 0 {
 		// No reprovide has been scheduled yet. Try to get a good prefix length
@@ -876,7 +922,7 @@ func (s *reprovideSweeper) localNearestPeersCPL() int {
 	if len(closestToSelf) == 0 {
 		// This means that all cids will be provided under the empty prefix. Not
 		// optimized, but we won't make a wild static guess on the network size.
-		return 0
+		return keyLen
 	}
 	minCpl := keyLen
 	for _, p := range closestToSelf {

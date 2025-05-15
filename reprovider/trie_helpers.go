@@ -121,6 +121,9 @@ func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D
 }
 
 func subtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
+	if t.IsEmptyLeaf() {
+		return t, false
+	}
 	branch := t
 	for i := range k.BitLen() {
 		if branch.IsLeaf() {

@@ -29,10 +29,10 @@ func flipLastBit(k bitstr.Key) bitstr.Key {
 	return k[:l-1] + bitstr.Key(rune('1'-lastBit))
 }
 
-// // isBitstrPrefix returns true if k0 is a prefix of k1.
-// func isBitstrPrefix(k0 bitstr.Key, k1 bitstr.Key) bool {
-// 	return len(k0) <= len(k1) && k0 == k1[:len(k0)]
-// }
+// isBitstrPrefix returns true if k0 is a prefix of k1.
+func isBitstrPrefix(k0 bitstr.Key, k1 bitstr.Key) bool {
+	return len(k0) <= len(k1) && k0 == k1[:len(k0)]
+}
 
 const initMask = (byte(1) << 7) // 0x80
 

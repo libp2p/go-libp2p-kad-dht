@@ -407,7 +407,7 @@ func (s *reprovideSweeper) handleReprovide() {
 	currentPrefix := s.prefixCursor
 
 	var nextReprovideDelay time.Duration
-	if next.Key.BitLen() == 0 {
+	if next == nil {
 		// Empty schedule, keep current prefixCursor, and wake up in
 		// reprovideInterval.
 		nextReprovideDelay = s.reprovideInterval

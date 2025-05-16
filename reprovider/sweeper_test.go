@@ -3,7 +3,6 @@ package reprovider
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +21,10 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	bitsPerByte = 8
 )
 
 func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
@@ -71,6 +74,33 @@ func genCids(n int) []cid.Cid {
 		cids[i] = c
 	}
 	return cids
+}
+
+func genBalancedCids(exponent int) []cid.Cid {
+	cids := make(map[bitstr.Key]cid.Cid)
+	for i := 0; len(cids) < (1 << exponent); i++ {
+		h, err := mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
+		if err != nil {
+			panic(err)
+		}
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:exponent])
+		if _, ok := cids[prefix]; !ok {
+			cids[prefix] = cid.NewCidV1(cid.Raw, h)
+		}
+	}
+	out := make([]cid.Cid, 0, len(cids))
+	for _, c := range cids {
+		out = append(out, c)
+	}
+	return out
+}
+
+func cidsToMhs(cids []cid.Cid) []mh.Multihash {
+	mhs := make([]mh.Multihash, len(cids))
+	for i, c := range cids {
+		mhs[i] = c.Hash()
+	}
+	return mhs
 }
 
 var _ KadRouter = (*mockRouter)(nil)
@@ -151,6 +181,61 @@ func TestProvideNoBootstrap(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestLocalNearstPeersCPL(t *testing.T) {
+	selfKey := [32]byte{}
+	nPeers := 15
+	localPeers := make([]peer.ID, nPeers)
+	var err error
+	for i := range nPeers {
+		// localPeers[i] share a common prefix with selfKey of nPeers-i
+		localPeers[i], err = kb.GenRandPeerIDWithCPL(selfKey[:], uint(nPeers-i))
+		require.NoError(t, err)
+	}
+
+	reprovider := &reprovideSweeper{
+		replicationFactor: 0,
+		order:             bit256.NewKey(selfKey[:]),
+		localNearestPeersToSelf: func(n int) []peer.ID {
+			return localPeers[:n]
+		},
+	}
+
+	// localNearestPeersCPL should return keyLen if replication factor is 0
+	require.Equal(t, keyLen, reprovider.localNearestPeersCPL())
+
+	for i := range nPeers {
+		reprovider.replicationFactor = i + 1
+		cpl := reprovider.localNearestPeersCPL()
+		require.Equal(t, nPeers-i, cpl)
+	}
+}
+
+func TestGetAvgPrefixLenEmptySchedule(t *testing.T) {
+	selfKey := [32]byte{}
+	targetCpl := 10
+	nPeers := 16
+	localPeers := make([]peer.ID, nPeers)
+	var err error
+	for i := range nPeers {
+		// localPeers[:nPeers/2] all have cpl of targetCpl
+		// localPeers[nPeers/2:] all have cpl of targetCpl+1
+		localPeers[i], err = kb.GenRandPeerIDWithCPL(selfKey[:], uint(targetCpl+i/(nPeers/2)))
+		require.NoError(t, err)
+	}
+	reprovider := reprovideSweeper{
+		replicationFactor: 20,
+		order:             bit256.NewKey(selfKey[:]),
+		schedule:          trie.New[bitstr.Key, time.Duration](),
+		localNearestPeersToSelf: func(n int) []peer.ID {
+			return localPeers[:min(n, len(localPeers))]
+		},
+	}
+
+	reprovider.scheduleLk.Lock()
+	require.Equal(t, targetCpl, reprovider.getAvgPrefixLenNoLock())
+	reprovider.scheduleLk.Unlock()
+}
+
 func TestProvideSingle(t *testing.T) {
 	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
@@ -228,8 +313,6 @@ func TestProvideSingle(t *testing.T) {
 	require.Equal(t, 0, getClosestPeersCount)
 	require.Equal(t, 1, provideCount)
 
-	fmt.Println(reprovider.prefixCursor)
-
 	// Verify reprovide happens as scheduled.
 	mockClock.Add(reprovideTime - 1)
 	require.Equal(t, 0, getClosestPeersCount)
@@ -237,62 +320,86 @@ func TestProvideSingle(t *testing.T) {
 	mockClock.Add(1)
 	require.Equal(t, 0, getClosestPeersCount)
 	require.Equal(t, 2, provideCount)
-	mockClock.Add(reprovideInterval)
+	mockClock.Add(reprovideInterval - 1)
+	require.Equal(t, 0, getClosestPeersCount)
+	require.Equal(t, 2, provideCount)
+	mockClock.Add(1)
 	require.Equal(t, 0, getClosestPeersCount)
 	require.Equal(t, 3, provideCount)
 }
 
-func TestLocalNearstPeersCPL(t *testing.T) {
-	selfKey := [32]byte{}
-	nPeers := 15
-	localPeers := make([]peer.ID, nPeers)
-	var err error
+func TestProvideMany(t *testing.T) {
+	t.Skip()
+	ctx := context.Background()
+
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+
+	nCidsExponent := 10
+	nCids := 1 << nCidsExponent
+	cids := genBalancedCids(nCidsExponent)
+	mhs := cidsToMhs(cids)
+
+	replicationFactor := 4
+	peerPrefixBitlen := 6
+	require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+	var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
+	peers := make([]peer.ID, nPeers)
 	for i := range nPeers {
-		// localPeers[i] share a common prefix with selfKey of nPeers-i
-		localPeers[i], err = kb.GenRandPeerIDWithCPL(selfKey[:], uint(nPeers-i))
+		b := i << (bitsPerByte - peerPrefixBitlen)
+		k := [32]byte{b}
+		peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
 		require.NoError(t, err)
 	}
 
-	reprovider := &reprovideSweeper{
-		replicationFactor: 0,
-		order:             bit256.NewKey(selfKey[:]),
-		localNearestPeersToSelf: func(n int) []peer.ID {
-			return localPeers[:n]
+	mockClock := clock.NewMock()
+	reprovideInterval := time.Hour
+
+	mutex := sync.Mutex{}
+	getClosestPeersCount := 0
+	provideCount := 0
+	router := &modularMockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			mutex.Lock()
+			defer mutex.Unlock()
+			getClosestPeersCount++
+			sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+			return sortedPeers[:min(replicationFactor, len(peers))], nil
+		},
+		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
+			mutex.Lock()
+			defer mutex.Unlock()
+			provideCount++
+			return nil
 		},
 	}
-
-	// localNearestPeersCPL should return keyLen if replication factor is 0
-	require.Equal(t, keyLen, reprovider.localNearestPeersCPL())
-
-	for i := range nPeers {
-		reprovider.replicationFactor = i + 1
-		cpl := reprovider.localNearestPeersCPL()
-		require.Equal(t, nPeers-i, cpl)
-	}
-}
-
-func TestGetAvgPrefixLenEmptySchedule(t *testing.T) {
-	selfKey := [32]byte{}
-	targetCpl := 10
-	nPeers := 16
-	localPeers := make([]peer.ID, nPeers)
-	var err error
-	for i := range nPeers {
-		// localPeers[:nPeers/2] all have cpl of targetCpl
-		// localPeers[nPeers/2:] all have cpl of targetCpl+1
-		localPeers[i], err = kb.GenRandPeerIDWithCPL(selfKey[:], uint(targetCpl+i/(nPeers/2)))
+	msgSender := &mockMessageSender{}
+	nLocalPeers := 16
+	prefixLen := 12
+	localPeers := make([]peer.ID, nLocalPeers)
+	for i := range localPeers {
+		localPeers[i], err = kb.GenRandPeerIDWithCPL(kb.ConvertPeerID(pid), uint(prefixLen))
 		require.NoError(t, err)
 	}
-	reprovider := reprovideSweeper{
-		replicationFactor: 20,
-		order:             bit256.NewKey(selfKey[:]),
-		schedule:          trie.New[bitstr.Key, time.Duration](),
-		localNearestPeersToSelf: func(n int) []peer.ID {
+	opts := []Option{
+		WithReprovideInterval(reprovideInterval),
+		WithReplicationFactor(replicationFactor),
+		WithPeerID(pid),
+		WithRouter(router),
+		WithMessageSender(msgSender),
+		WithSelfAddrs(func() []ma.Multiaddr {
+			return nil
+		}),
+		WithLocalNearestPeersToSelf(func(n int) []peer.ID {
 			return localPeers[:min(n, len(localPeers))]
-		},
+		}),
+		WithClock(mockClock),
 	}
+	prov, err := NewReprovider(ctx, opts...)
+	require.NoError(t, err)
 
-	reprovider.scheduleLk.Lock()
-	require.Equal(t, targetCpl, reprovider.getAvgPrefixLenNoLock())
-	reprovider.scheduleLk.Unlock()
+	reprovider := prov.(*reprovideSweeper)
+	reprovider.ProvideMany(ctx, mhs)
+	_ = nCids
+	t.Fail()
 }

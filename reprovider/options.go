@@ -63,7 +63,7 @@ var DefaultConfig = config{
 	reprovideInterval: 22 * time.Hour,
 	maxReprovideDelay: 1 * time.Hour,
 
-	provideWorkers: 16,
+	provideWorkers: 4,
 	clock:          clock.New(),
 }
 

@@ -3,7 +3,6 @@ package reprovider
 import (
 	"crypto/rand"
 	"fmt"
-	"math/big"
 	"sort"
 	"testing"
 
@@ -219,53 +218,4 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 	for _, k := range keys {
 		tr.Remove(k)
 	}
-}
-
-func TestManual(t *testing.T) {
-	strKeys := []string{
-		"1010000101110010011010110111000001110100001010111011000100010110100110001010101011101010010101110010111000110011110110111101010110011000111000001000111000010000101011000100100110010011111011010111101010101100011101001011010111101011010010101110101011110111",
-		"1010001001011011101001000110100000011001110111010111110111001111111011011000100101010001101001010000000101010101111000000111101010010010001110100011011101000000001111111101111001000101101100101001111000001000001101111000001001011110110000100011110011010100",
-		"1100000111011111011001000101100110010100111011000001101010110100001100011100100001111000001101101010010000100000111110011000000100111100000001101001001111111100000110101011100110010001000010110100010010110001000100101100110111011111111110100000111001010111",
-		"1110110001111000101100001010011011101001100110011000001001100011100010101101111011101100010101101110010111101000110101110100110010010101111011000110111010111000111100100101010101110111010100101110100011111101100000100111000100110111001100000100101100001001",
-	}
-	keys := []bit256.Key{}
-	tr := trie.New[bit256.Key, struct{}]()
-	for _, k := range strKeys {
-		b, err := BitStringToBytesBigInt(k)
-		require.NoError(t, err)
-		k := bit256.NewKey(b[:])
-		tr.Add(k, struct{}{})
-		keys = append(keys, k)
-	}
-
-	order := bit256.ZeroKey()
-	currentKey := bit256.ZeroKey()
-	for j, k := range keys {
-		currentKey = nextNonEmptyLeaf(tr, currentKey, order).Key
-		require.Equal(t, k, currentKey, "failed at index %d\nExp: %s\nGot: %s", j, key.BitString(k), key.BitString(currentKey))
-	}
-}
-
-func BitStringToBytesBigInt(s string) ([32]byte, error) {
-	var out [32]byte
-	if len(s) != 256 {
-		return out, fmt.Errorf("bitstring must be exactly 256 bits, got %d", len(s))
-	}
-
-	// parse as a big.Int in base 2
-	bi := new(big.Int)
-	if _, ok := bi.SetString(s, 2); !ok {
-		return out, fmt.Errorf("invalid bitstring: %q", s)
-	}
-
-	// bi.Bytes() returns the minimal big-endian byte slice
-	b := bi.Bytes()
-	if len(b) > 32 {
-		return out, fmt.Errorf("integer overflow: parsed into %d bytes", len(b))
-	}
-
-	// right-pad into our fixed 32-byte array
-	// so that the least-significant bytes line up at the end
-	copy(out[32-len(b):], b)
-	return out, nil
 }

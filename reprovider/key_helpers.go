@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"sort"
 
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multihash"
 	"github.com/probe-lab/go-libdht/kad"
@@ -24,9 +25,11 @@ func peerIDToBit256(id peer.ID) bit256.Key {
 }
 
 func flipLastBit(k bitstr.Key) bitstr.Key {
-	l := len(k)
-	lastBit := k[l-1]
-	return k[:l-1] + bitstr.Key(rune('1'-lastBit))
+	if len(k) == 0 {
+		return k
+	}
+	flipped := byte('0' + '1' - k[len(k)-1])
+	return k[:len(k)-1] + bitstr.Key(flipped)
 }
 
 // isBitstrPrefix returns true if k0 is a prefix of k1.
@@ -67,7 +70,7 @@ func keyToBytes[K kad.Key[K]](k K) []byte {
 }
 
 // shortestCoveredPrefix takes as input the `requested` key and the list of
-// sorted closest peers to this key. It returns a prefix of `requested` that is
+// closest peers to this key. It returns a prefix of `requested` that is
 // covered by these peers.
 //
 // If every peer shares the same CPL to `requested`, then no deeper zone is
@@ -77,28 +80,19 @@ func shortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, [
 	if len(peers) == 0 {
 		return requested, peers
 	}
-	minCpl := requested.BitLen()
+	// Sort the peers by their distance to the requested key.
+	peers = kb.SortClosestPeers(peers, keyToBytes(requested))
+
+	minCpl := requested.BitLen() // key bitlen
 	coveredCpl := 0
 	lastCoveredPeerIndex := 0
 	for i, p := range peers {
 		cpl := key.CommonPrefixLength(requested, peerIDToBit256(p))
 		if cpl < minCpl {
-			coveredCpl = minCpl
+			coveredCpl = cpl + 1
 			lastCoveredPeerIndex = i
 			minCpl = cpl
 		}
-	}
-	if coveredCpl == requested.BitLen() {
-		// All provided peers share the same CPL with requested. Mark the
-		// neighboring branch as covered even though it is empty.
-		//
-		//              /\
-		//            /\
-		// minCpl-> /\
-		//        /   * -> all provided peers are here
-		//    requested
-		// no peers in this branch
-		return requested[:minCpl+1], []peer.ID{}
 	}
 	return requested[:coveredCpl], peers[:lastCoveredPeerIndex]
 }

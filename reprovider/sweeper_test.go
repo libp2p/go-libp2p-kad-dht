@@ -13,6 +13,7 @@ import (
 	"github.com/ipfs/go-cid"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
@@ -236,6 +237,60 @@ func TestGetAvgPrefixLenEmptySchedule(t *testing.T) {
 	reprovider.scheduleLk.Unlock()
 }
 
+func genRandPeerID(t *testing.T) peer.ID {
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	require.NoError(t, err)
+	pid, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	return pid
+}
+
+func TestClosestPeersToPrefixRandom(t *testing.T) {
+	replicationFactor := 10
+	nPeers := 128
+	peers := make([]peer.ID, nPeers)
+	peersTrie := trie.New[bit256.Key, peer.ID]()
+	for i := range peers {
+		p := genRandPeerID(t)
+		peers[i] = p
+		peersTrie.Add(peerIDToBit256(p), p)
+	}
+
+	router := &modularMockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+			return sortedPeers[:min(replicationFactor, len(peers))], nil
+		},
+		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
+			return nil
+		},
+	}
+
+	r := reprovideSweeper{
+		router:            router,
+		replicationFactor: replicationFactor,
+	}
+
+	for _, prefix := range []bitstr.Key{"", "0", "1", "00", "01", "10", "11", "000", "001", "010", "011", "100", "101", "110", "111"} {
+		closestPeers, err := r.closestPeersToPrefix(prefix)
+		require.NoError(t, err)
+		subtrieSize := 0
+		currPrefix := prefix
+		// Reduce prefix if necessary as closestPeersToPrefix always returns at
+		// least replicationFactor peers if possible.
+		for {
+			subtrie, ok := subtrieMatchingPrefix(peersTrie, currPrefix)
+			require.True(t, ok)
+			subtrieSize = subtrie.Size()
+			if subtrieSize > replicationFactor {
+				break
+			}
+			currPrefix = currPrefix[:len(currPrefix)-1]
+		}
+		require.Len(t, closestPeers, subtrieSize, "prefix: %s", prefix)
+	}
+}
+
 func TestProvideSingle(t *testing.T) {
 	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
@@ -374,16 +429,10 @@ func TestProvideMany(t *testing.T) {
 		},
 	}
 	msgSender := &mockMessageSender{}
-	nLocalPeers := 16
-	prefixLen := 12
-	localPeers := make([]peer.ID, nLocalPeers)
-	for i := range localPeers {
-		localPeers[i], err = kb.GenRandPeerIDWithCPL(kb.ConvertPeerID(pid), uint(prefixLen))
-		require.NoError(t, err)
-	}
 	opts := []Option{
 		WithReprovideInterval(reprovideInterval),
 		WithReplicationFactor(replicationFactor),
+		WithProvideWorkers(1),
 		WithPeerID(pid),
 		WithRouter(router),
 		WithMessageSender(msgSender),
@@ -391,7 +440,9 @@ func TestProvideMany(t *testing.T) {
 			return nil
 		}),
 		WithLocalNearestPeersToSelf(func(n int) []peer.ID {
-			return localPeers[:min(n, len(localPeers))]
+			peers, err := router.GetClosestPeers(ctx, string(pid))
+			require.NoError(t, err)
+			return peers[:min(n, len(peers))]
 		}),
 		WithClock(mockClock),
 	}

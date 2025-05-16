@@ -3,7 +3,6 @@ package reprovider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -604,9 +603,10 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 				// replaced by 001, unless 000 was also in the stack, etc.
 				coveredPrefixesStack = coveredPrefixesStack[:len(coveredPrefixesStack)-1]
 				coveredPrefix = coveredPrefix[:len(coveredPrefix)-1]
+				coveredPrefixLen = len(coveredPrefix)
 
 				if len(coveredPrefixesStack) == 0 {
-					if len(allClosestPeers) > s.replicationFactor {
+					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) > s.replicationFactor {
 						return allClosestPeers, nil
 					}
 					// Not enough peers -> add coveredPrefix to stack and continue.
@@ -628,7 +628,7 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 func (s *reprovideSweeper) firstFullKeyWithPrefix(k bitstr.Key) bitstr.Key {
 	kLen := k.BitLen()
 	if kLen > keyLen {
-		panic(fmt.Errorf("bitstr.Key: key length exceeds %d bits", keyLen))
+		return k[:keyLen]
 	}
 	return k + bitstr.Key(key.BitString(s.order))[kLen:]
 }

@@ -496,11 +496,12 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 			dht.kMapLk.RLock()
 			// Recover the peer ID from the key
 			p, ok := dht.keyToPeerMap[string(k)]
+			dht.kMapLk.RUnlock()
 			if !ok {
 				logger.Errorf("key not found in map")
 				continue
 			}
-			dht.kMapLk.RUnlock()
+
 			dht.peerAddrsLk.RLock()
 			peerAddrs := dht.peerAddrs[p]
 			dht.peerAddrsLk.RUnlock()

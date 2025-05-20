@@ -25,8 +25,8 @@ func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, s
 	}
 	if t.Branch(0).Size() > size && t.Branch(1).Size() > size {
 		b := int(order.Bit(len(path)))
-		return append(extractMinimalRegions(t.Branch(b), path+bitstr.Key(rune('0'+b)), size, order),
-			extractMinimalRegions(t.Branch(1-b), path+bitstr.Key(rune('1'-b)), size, order)...)
+		return append(extractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
+			extractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
 	}
 	return []region{{prefix: path, peers: t}}
 }

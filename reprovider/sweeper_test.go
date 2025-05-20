@@ -3,6 +3,7 @@ package reprovider
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -235,6 +236,119 @@ func TestGetAvgPrefixLenEmptySchedule(t *testing.T) {
 	reprovider.scheduleLk.Lock()
 	require.Equal(t, targetCpl, reprovider.getAvgPrefixLenNoLock())
 	reprovider.scheduleLk.Unlock()
+}
+
+func TestIndividualProvideForPrefixSingle(t *testing.T) {
+	ctx := context.Background()
+	cids := genCids(1)
+	k := cids[0].Hash()
+	prefix := bitstr.Key("1011101111")
+	router := &modularMockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			return nil, nil
+		},
+		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
+			return nil
+		},
+	}
+	r := reprovideSweeper{
+		router:            router,
+		clock:             clock.NewMock(),
+		reprovideInterval: time.Hour,
+		pendingCidsChan:   make(chan []mh.Multihash, 1),
+		failedRegionsChan: make(chan bitstr.Key, 1),
+		schedule:          trie.New[bitstr.Key, time.Duration](),
+	}
+
+	// Providing no cids returns no error
+	err := r.individualProvideForPrefix(ctx, prefix, nil, initialProvide)
+	require.NoError(t, err)
+
+	// Providing a single cid - success
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, initialProvide)
+	require.NoError(t, err)
+
+	// Providing a single cid - failure
+	router.provideFunc = func(ctx context.Context, k cid.Cid, broadcast bool) error {
+		return errors.New("provide error")
+	}
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, initialProvide)
+	require.Error(t, err)
+	require.Equal(t, []mh.Multihash{k}, <-r.pendingCidsChan)
+
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, regularReprovide)
+	require.Error(t, err)
+	require.Equal(t, prefix, <-r.failedRegionsChan)
+}
+
+func TestIndividualProvideForPrefixMultiple(t *testing.T) {
+	ctx := context.Background()
+	cids := genCids(2)
+	ks := make([]mh.Multihash, len(cids))
+	for i := range ks {
+		ks[i] = cids[i].Hash()
+	}
+	prefix := bitstr.Key("10111011")
+	router := &modularMockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			return nil, nil
+		},
+		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
+			return nil
+		},
+	}
+	r := reprovideSweeper{
+		router:            router,
+		clock:             clock.NewMock(),
+		reprovideInterval: time.Hour,
+		pendingCidsChan:   make(chan []mh.Multihash, len(ks)),
+		failedRegionsChan: make(chan bitstr.Key, 1),
+		schedule:          trie.New[bitstr.Key, time.Duration](),
+	}
+
+	// Providing two cids - 2 successes
+	err := r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
+	require.NoError(t, err)
+
+	// Providing two cids - 2 failures
+	router.provideFunc = func(ctx context.Context, k cid.Cid, broadcast bool) error {
+		return errors.New("provide error")
+	}
+	err = r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
+	require.Error(t, err)
+	pendingCids := append(<-r.pendingCidsChan, <-r.pendingCidsChan...)
+	require.Len(t, pendingCids, len(ks))
+	require.Contains(t, pendingCids, ks[0])
+	require.Contains(t, pendingCids, ks[1])
+
+	err = r.individualProvideForPrefix(ctx, prefix, ks, regularReprovide)
+	require.Error(t, err)
+	require.Equal(t, prefix, <-r.failedRegionsChan)
+
+	// Providing two cids - 1 success, 1 failure
+	lk := sync.Mutex{}
+	counter := 0
+	router.provideFunc = func(ctx context.Context, k cid.Cid, broadcast bool) (err error) {
+		lk.Lock()
+		defer lk.Unlock()
+		if counter%2 == 0 {
+			err = errors.New("provide error")
+		}
+		counter++
+		return
+	}
+
+	err = r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
+	require.NoError(t, err)
+	require.Len(t, r.pendingCidsChan, 1)
+	pendingCids = <-r.pendingCidsChan
+	require.Len(t, pendingCids, 1)
+	require.Contains(t, ks, pendingCids[0])
+
+	err = r.individualProvideForPrefix(ctx, prefix, ks, regularReprovide)
+	require.NoError(t, err)
+	require.Len(t, r.failedRegionsChan, 0)
+	require.Len(t, r.pendingCidsChan, 0)
 }
 
 func genRandPeerID(t *testing.T) peer.ID {

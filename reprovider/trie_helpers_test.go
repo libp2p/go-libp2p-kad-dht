@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
@@ -218,4 +220,69 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 	for _, k := range keys {
 		tr.Remove(k)
 	}
+}
+
+func TestExtractMinimalRegions(t *testing.T) {
+	replicationFactor := 3
+	selfID := [32]byte{}
+	order := bit256.NewKey(selfID[:])
+
+	genPeerWithPrefix := func(prefix bitstr.Key) peer.ID {
+		k := firstFullKeyWithPrefix(prefix, order)
+		bs := keyToBytes(k)
+		pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
+		require.NoError(t, err)
+		return pid
+	}
+
+	prefixes := []bitstr.Key{
+		"00000",
+		"00001",
+		"00101",
+		"00110",
+		"01000",
+		"01001",
+		"01011",
+		"01100",
+		"10100",
+		"11000",
+		"11001",
+		"11010",
+		"11110",
+		"11111",
+	}
+
+	// Binary trie of peers
+	//                                     ____________I___________
+	//                                    /                        \
+	//                 __________________/__                      __\_______
+	//                /                     \                    /          \
+	//         ______/_                     _\_                 /           _\_______
+	//        /        \                   /   \               /           /         \
+	//       /         _\_             ___/_    \             /       ____/_          \
+	//      /         /   \           /     \    \           /       /      \          \
+	//     / \       /     \        / \      \    \         /       / \      \        / \
+	// 00000 00001 00101 00110  01000 01001 01011 01100  10100  11000 11001 11010 11110 11111
+	//
+	// Groups are expected to be:
+	// * [00000, 00001, 00101, 00110]
+	// * [01000, 01001, 01011, 01100]
+	// * [10100, 11000, 11001, 11010, 11110, 11111]
+
+	pids := make([]peer.ID, len(prefixes))
+	peersTrie := trie.New[bit256.Key, peer.ID]()
+	for i := range pids {
+		pid := genPeerWithPrefix(prefixes[i])
+		pids[i] = pid
+		peersTrie.Add(peerIDToBit256(pid), pid)
+	}
+
+	regions := extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	require.Len(t, regions, 3)
+	require.Equal(t, bitstr.Key("00"), regions[0].prefix)
+	require.Equal(t, bitstr.Key("01"), regions[1].prefix)
+	require.Equal(t, bitstr.Key("1"), regions[2].prefix)
+	require.Equal(t, 4, regions[0].peers.Size())
+	require.Equal(t, 4, regions[1].peers.Size())
+	require.Equal(t, 6, regions[2].peers.Size())
 }

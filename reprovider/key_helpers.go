@@ -32,6 +32,16 @@ func flipLastBit(k bitstr.Key) bitstr.Key {
 	return k[:len(k)-1] + bitstr.Key(flipped)
 }
 
+// flipLastBit returns to closest 256-bit key to order, starting with the
+// given k as a prefix.
+func firstFullKeyWithPrefix[K kad.Key[K]](k bitstr.Key, order K) bitstr.Key {
+	kLen := k.BitLen()
+	if kLen > keyLen {
+		return k[:keyLen]
+	}
+	return k + bitstr.Key(key.BitString(order))[kLen:]
+}
+
 // isBitstrPrefix returns true if k0 is a prefix of k1.
 func isBitstrPrefix(k0 bitstr.Key, k1 bitstr.Key) bool {
 	return len(k0) <= len(k1) && k0 == k1[:len(k0)]

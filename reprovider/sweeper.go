@@ -574,7 +574,7 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 
 	// Go down the trie to fully cover prefix.
 	for i := range maxPrefixSearches {
-		fullKey := s.firstFullKeyWithPrefix(nextPrefix)
+		fullKey := firstFullKeyWithPrefix(nextPrefix, s.order)
 		closestPeers, err := s.closestPeersToKey(fullKey)
 		if err != nil {
 			// We only get an err if something really bad happened, e.g no peers in
@@ -621,16 +621,6 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		nextPrefix = flipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
 	}
 	return allClosestPeers, errTooManyIterationsDuringExploration
-}
-
-// flipLastBit returns to closest 256-bit key to s.order, starting with the
-// given k as a prefix.
-func (s *reprovideSweeper) firstFullKeyWithPrefix(k bitstr.Key) bitstr.Key {
-	kLen := k.BitLen()
-	if kLen > keyLen {
-		return k[:keyLen]
-	}
-	return k + bitstr.Key(key.BitString(s.order))[kLen:]
 }
 
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with

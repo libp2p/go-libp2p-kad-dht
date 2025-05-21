@@ -236,18 +236,9 @@ func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Tri
 					}
 					prefixConsolidation = true
 				}
-				// Add prefix to schedule
-				reprovideTime := s.reprovideTimeForPrefix(prefix)
-				s.schedule.Add(prefix, reprovideTime)
-
-				followingKey := nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
-				if s.prefixCursor == followingKey || s.prefixCursor == "" {
-					// Next prefix to be reprovided is the prefix we just added to the
-					// schedule. Reschedule the alarm.
-					s.prefixCursor = prefix
-					s.scheduleTimer.Reset(reprovideTime)
-				}
+				s.addPrefixToScheduleNoLock(prefix)
 			}
+
 			if _, ok := prefixes[prefix]; !ok {
 				prefixes[prefix] = trie.New[bit256.Key, mh.Multihash]()
 			}
@@ -267,6 +258,35 @@ func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Tri
 		}
 	}
 	return prefixes
+}
+
+func (s *reprovideSweeper) addPrefixToScheduleNoLock(prefix bitstr.Key) {
+	reprovideTime := s.reprovideTimeForPrefix(prefix)
+	s.schedule.Add(prefix, reprovideTime)
+
+	currentTimeOffset := s.currentTimeOffset()
+	timeUntilReprovide := (reprovideTime - currentTimeOffset + s.reprovideInterval) % s.reprovideInterval
+	if s.prefixCursor == "" {
+		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+	} else {
+		followingKey := nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
+		if s.prefixCursor == followingKey {
+			found, scheduledAlarm := trie.Find(s.schedule, s.prefixCursor)
+			if !found {
+				s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+			} else {
+				timeUntilScheduledAlarm := (scheduledAlarm - currentTimeOffset + s.reprovideInterval) % s.reprovideInterval
+				if timeUntilReprovide < timeUntilScheduledAlarm {
+					s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+				}
+			}
+		}
+	}
+}
+
+func (s *reprovideSweeper) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
+	s.prefixCursor = prefix
+	s.scheduleTimer.Reset(timeUntilReprovide)
 }
 
 func (s *reprovideSweeper) getPrefixesForCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
@@ -337,12 +357,11 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 	// success
 	var anySuccess uint32
 	jobChan := make(chan prefixAndCids, 1)
-	defer close(jobChan)
 	wg := sync.WaitGroup{}
 
 	// Start workers to handle the provides.
+	wg.Add(nWorkers)
 	for range nWorkers {
-		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for p := range jobChan {
@@ -374,6 +393,7 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 			break
 		}
 	}
+	close(jobChan)
 
 	if earlyExit != -1 {
 		// Add cids that haven't been provided yet to the pending queue.
@@ -404,17 +424,19 @@ func (s *reprovideSweeper) handleReprovide() {
 	// Get next prefix to reprovide, and set timer for it.
 	next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
 	currentPrefix := s.prefixCursor
+	// TODO: for all prefixes between next.Data and s.currentTimeOffset(), add them to failedRegionsChan
 
 	var nextReprovideDelay time.Duration
+	nextPrefix := currentPrefix
 	if next == nil {
 		// Empty schedule, keep current prefixCursor, and wake up in
 		// reprovideInterval.
 		nextReprovideDelay = s.reprovideInterval
 	} else {
-		s.prefixCursor = next.Key
-		nextReprovideDelay = next.Data - s.currentTimeOffset()
+		nextPrefix = next.Key
+		nextReprovideDelay = (s.reprovideInterval + next.Data - s.currentTimeOffset()) % s.reprovideInterval
 	}
-	s.scheduleTimer.Reset(nextReprovideDelay)
+	s.scheduleNextReprovideNoLock(nextPrefix, nextReprovideDelay)
 	s.scheduleLk.Unlock()
 
 	// If we are offline, don't even try to reprovide region.
@@ -475,10 +497,13 @@ func (s *reprovideSweeper) provideForPrefix(prefix bitstr.Key, cids *trie.Trie[b
 
 	regions, coveredPrefix := s.regionsFromPeers(peers, cids)
 
-	if (op == regularReprovide || op == lateRegionReprovide) && explorationErr != errTooManyIterationsDuringExploration {
+	claimRegions := (op == regularReprovide || op == lateRegionReprovide) && explorationErr != errTooManyIterationsDuringExploration
+	if claimRegions {
 		// When reproviding a region, remove all scheduled regions starting with
 		// the currently covered prefix.
 		s.unscheduleSubsumedPrefixes(coveredPrefix)
+		// NOTE: provideMany can be optimized the same way
+		//
 		// Claim the regions to be reprovided, so that no other thread will try to
 		// reprovdie them concurrently.
 		regions = s.claimRegionReprovide(regions)
@@ -494,7 +519,9 @@ func (s *reprovideSweeper) provideForPrefix(prefix bitstr.Key, cids *trie.Trie[b
 			s.handleProvideError(r.prefix, r.cids, op)
 			continue
 		}
-		s.releaseRegionReprovide(r.prefix)
+		if claimRegions {
+			s.releaseRegionReprovide(r.prefix)
+		}
 
 		s.scheduleNextReprovide(r.prefix, s.currentTimeOffset(), op)
 		if op == regularReprovide || op == lateRegionReprovide {
@@ -646,11 +673,11 @@ func (s *reprovideSweeper) regionsFromPeers(peers []peer.ID, cids *trie.Trie[bit
 		peersTrie.Add(k, p)
 		minCpl = min(minCpl, firstPeerKey.CommonPrefixLength(k))
 	}
-	regions := extractMinimalRegions(peersTrie, "", s.replicationFactor, s.order)
+	commonPrefix := bitstr.Key(key.BitString(firstPeerKey)[:minCpl])
+	regions := extractMinimalRegions(peersTrie, commonPrefix, s.replicationFactor, s.order)
 	for i, r := range regions {
 		regions[i].cids, _ = subtrieMatchingPrefix(cids, r.prefix)
 	}
-	commonPrefix := bitstr.Key(key.BitString(firstPeerKey)[:minCpl])
 	return regions, commonPrefix
 }
 
@@ -659,7 +686,17 @@ func (s *reprovideSweeper) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 	// Pop prefixes scheduled in the future being covered by the explored peers.
 	if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
 		for _, entry := range allEntries(subtrie, s.order) {
-			s.schedule.Remove(entry.Key)
+			if s.schedule.Remove(entry.Key) {
+				if s.prefixCursor == entry.Key {
+					next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
+					if next == nil {
+						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
+					} else {
+						timeUntilReprovide := (s.reprovideInterval + next.Data - s.currentTimeOffset()) % s.reprovideInterval
+						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+					}
+				}
+			}
 		}
 	}
 	s.scheduleLk.Unlock()

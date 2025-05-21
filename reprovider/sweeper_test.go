@@ -3,9 +3,9 @@ package reprovider
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -105,82 +105,57 @@ func cidsToMhs(cids []cid.Cid) []mh.Multihash {
 	return mhs
 }
 
+// var _ KadRouter = (*mockRouter)(nil)
+//
+// type mockRouter struct {
+// 	peers *trie.Trie[bit256.Key, peer.ID]
+// }
+//
+// func (r *mockRouter) GetClosestPeers(ctx context.Context, k string) ([]peer.ID, error) {
+// 	return allValues(r.peers, bitstr.Key(strings.Repeat("0", 256))), nil
+// }
+//
+// func (r *mockRouter) Provide(ctx context.Context, c cid.Cid, _ bool) error {
+// 	return nil
+// }
+
 var _ KadRouter = (*mockRouter)(nil)
 
 type mockRouter struct {
-	peers *trie.Trie[bit256.Key, peer.ID]
-}
-
-func (r *mockRouter) GetClosestPeers(ctx context.Context, k string) ([]peer.ID, error) {
-	return allValues(r.peers, bitstr.Key(strings.Repeat("0", 256))), nil
-}
-
-func (r *mockRouter) Provide(ctx context.Context, c cid.Cid, _ bool) error {
-	return nil
-}
-
-var _ KadRouter = (*modularMockRouter)(nil)
-
-type modularMockRouter struct {
 	getClosestPeersFunc func(ctx context.Context, k string) ([]peer.ID, error)
 	provideFunc         func(ctx context.Context, c cid.Cid, _ bool) error
 }
 
-func (r *modularMockRouter) GetClosestPeers(ctx context.Context, k string) ([]peer.ID, error) {
+func (r *mockRouter) GetClosestPeers(ctx context.Context, k string) ([]peer.ID, error) {
+	if r.getClosestPeersFunc == nil {
+		return nil, nil
+	}
 	return r.getClosestPeersFunc(ctx, k)
 }
 
-func (r *modularMockRouter) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
+func (r *mockRouter) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
+	if r.provideFunc == nil {
+		return nil
+	}
 	return r.provideFunc(ctx, c, broadcast)
 }
 
-var _ pb.MessageSender = (*mockMessageSender)(nil)
+var _ pb.MessageSender = (*mockMsgSender)(nil)
 
-type mockMessageSender struct{}
+type mockMsgSender struct {
+	sendMessageFunc func(ctx context.Context, p peer.ID, m *pb.Message) error
+}
 
-func (msg *mockMessageSender) SendRequest(ctx context.Context, p peer.ID, m *pb.Message) (*pb.Message, error) {
+func (ms *mockMsgSender) SendRequest(ctx context.Context, p peer.ID, m *pb.Message) (*pb.Message, error) {
+	// Unused
 	return nil, nil
 }
 
-func (msg *mockMessageSender) SendMessage(ctx context.Context, p peer.ID, m *pb.Message) error {
-	return nil
-}
-
-func TestProvideNoBootstrap(t *testing.T) {
-	ctx := context.Background()
-	pid, err := peer.Decode("12BoooooPEER")
-	require.NoError(t, err)
-	router := &mockRouter{
-		peers: trie.New[bit256.Key, peer.ID](),
+func (ms *mockMsgSender) SendMessage(ctx context.Context, p peer.ID, m *pb.Message) error {
+	if ms.sendMessageFunc == nil {
+		return nil
 	}
-	msgSender := &mockMessageSender{}
-	opts := []Option{
-		WithPeerID(pid),
-		WithRouter(router),
-		WithMessageSender(msgSender),
-		WithSelfAddrs(func() []ma.Multiaddr {
-			return nil
-		}),
-		WithLocalNearestPeersToSelf(func(int) []peer.ID {
-			return nil
-		}),
-	}
-	prov, err := NewReprovider(ctx, opts...)
-	reprovider := prov.(*reprovideSweeper)
-	require.NoError(t, err)
-
-	_ = reprovider
-	c := genCids(1)[0]
-
-	// Set the reprovider as offline
-	reprovider.online.Store(false)
-	err = prov.Provide(ctx, c, true)
-	require.ErrorIs(t, ErrNodeOffline, err)
-
-	// Set the reprovider as online, but don't bootstrap it
-	reprovider.online.Store(true)
-	err = prov.Provide(ctx, c, true)
-	require.NoError(t, err)
+	return ms.sendMessageFunc(ctx, p, m)
 }
 
 func TestLocalNearstPeersCPL(t *testing.T) {
@@ -243,7 +218,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	cids := genCids(1)
 	k := cids[0].Hash()
 	prefix := bitstr.Key("1011101111")
-	router := &modularMockRouter{
+	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			return nil, nil
 		},
@@ -289,7 +264,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		ks[i] = cids[i].Hash()
 	}
 	prefix := bitstr.Key("10111011")
-	router := &modularMockRouter{
+	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			return nil, nil
 		},
@@ -370,7 +345,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		peersTrie.Add(peerIDToBit256(p), p)
 	}
 
-	router := &modularMockRouter{
+	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
 			return sortedPeers[:min(replicationFactor, len(peers))], nil
@@ -405,6 +380,84 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 	}
 }
 
+func TestCidsAllocationsToPeers(t *testing.T) {
+	nCids := 1024
+	nPeers := 128
+	replicationFactor := 10
+
+	reprovider := reprovideSweeper{
+		replicationFactor: replicationFactor,
+		order:             bit256.ZeroKey(),
+	}
+
+	cids := cidsToMhs(genCids(nCids))
+	cidsTrie := trie.New[bit256.Key, mh.Multihash]()
+	for _, c := range cids {
+		cidsTrie.Add(mhToBit256(c), c)
+	}
+	peers := make([]peer.ID, nPeers)
+	peersTrie := trie.New[bit256.Key, peer.ID]()
+	for i := range peers {
+		peers[i] = genRandPeerID(t)
+		peersTrie.Add(peerIDToBit256(peers[i]), peers[i])
+	}
+	r := region{
+		prefix: bitstr.Key(""),
+		peers:  peersTrie,
+		cids:   cidsTrie,
+	}
+	cidsAllocations := reprovider.cidsAllocationsToPeers(r)
+	for _, c := range cids {
+		k := sha256.Sum256(c)
+		closestPeers := kb.SortClosestPeers(peers, k[:])[:replicationFactor]
+		for _, p := range closestPeers[:replicationFactor] {
+			require.Contains(t, cidsAllocations[p], c)
+		}
+		for _, p := range closestPeers[replicationFactor:] {
+			require.NotContains(t, cidsAllocations[p], c)
+		}
+	}
+}
+
+func TestProvideCidsToPeer(t *testing.T) {
+	// TODO: test behavior with errors
+}
+
+func TestProvideNoBootstrap(t *testing.T) {
+	ctx := context.Background()
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+	router := &mockRouter{}
+	msgSender := &mockMsgSender{}
+	opts := []Option{
+		WithPeerID(pid),
+		WithRouter(router),
+		WithMessageSender(msgSender),
+		WithSelfAddrs(func() []ma.Multiaddr {
+			return nil
+		}),
+		WithLocalNearestPeersToSelf(func(int) []peer.ID {
+			return nil
+		}),
+	}
+	prov, err := NewReprovider(ctx, opts...)
+	reprovider := prov.(*reprovideSweeper)
+	require.NoError(t, err)
+
+	_ = reprovider
+	c := genCids(1)[0]
+
+	// Set the reprovider as offline
+	reprovider.online.Store(false)
+	err = prov.Provide(ctx, c, true)
+	require.ErrorIs(t, ErrNodeOffline, err)
+
+	// Set the reprovider as online, but don't bootstrap it
+	reprovider.online.Store(true)
+	err = prov.Provide(ctx, c, true)
+	require.NoError(t, err)
+}
+
 func TestProvideSingle(t *testing.T) {
 	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
@@ -417,7 +470,7 @@ func TestProvideSingle(t *testing.T) {
 	mutex := sync.Mutex{}
 	getClosestPeersCount := 0
 	provideCount := 0
-	router := &modularMockRouter{
+	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -434,7 +487,7 @@ func TestProvideSingle(t *testing.T) {
 			return nil
 		},
 	}
-	msgSender := &mockMessageSender{}
+	msgSender := &mockMsgSender{}
 	nLocalPeers := 16
 	prefixLen := 12
 	localPeers := make([]peer.ID, nLocalPeers)
@@ -498,7 +551,6 @@ func TestProvideSingle(t *testing.T) {
 }
 
 func TestProvideMany(t *testing.T) {
-	t.Skip()
 	ctx := context.Background()
 
 	pid, err := peer.Decode("12BoooooPEER")
@@ -527,7 +579,7 @@ func TestProvideMany(t *testing.T) {
 	mutex := sync.Mutex{}
 	getClosestPeersCount := 0
 	provideCount := 0
-	router := &modularMockRouter{
+	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -538,11 +590,28 @@ func TestProvideMany(t *testing.T) {
 		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
 			mutex.Lock()
 			defer mutex.Unlock()
-			provideCount++
+			if broadcast {
+				provideCount++
+			}
 			return nil
 		},
 	}
-	msgSender := &mockMessageSender{}
+	msgSenderLk := sync.Mutex{}
+	addProviderRpcs := make(map[string][]peer.ID) // cid -> peerid
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			msgSenderLk.Lock()
+			defer msgSenderLk.Unlock()
+			_, k, err := mh.MHFromBytes(m.GetKey())
+			require.NoError(t, err)
+			if _, ok := addProviderRpcs[string(k)]; !ok {
+				addProviderRpcs[string(k)] = []peer.ID{p}
+			} else {
+				addProviderRpcs[string(k)] = append(addProviderRpcs[string(k)], p)
+			}
+			return nil
+		},
+	}
 	opts := []Option{
 		WithReprovideInterval(reprovideInterval),
 		WithReplicationFactor(replicationFactor),
@@ -564,7 +633,44 @@ func TestProvideMany(t *testing.T) {
 	require.NoError(t, err)
 
 	reprovider := prov.(*reprovideSweeper)
-	reprovider.ProvideMany(ctx, mhs)
-	_ = nCids
-	t.Fail()
+	err = reprovider.ProvideMany(ctx, mhs)
+	require.NoError(t, err)
+
+	// No individual provides.
+	require.Equal(t, 0, provideCount)
+	// Each cid should have been provided at least once.
+	require.Len(t, addProviderRpcs, nCids)
+	for _, peers := range addProviderRpcs {
+		// Verify that all cids have been provided to exactly replicationFactor
+		// distinct peers.
+		require.Len(t, peers, replicationFactor)
+	}
+
+	// Test reprovides
+	clear(addProviderRpcs)
+	mockClock.Add(reprovideInterval - 1)
+	require.Equal(t, 0, provideCount)
+	require.Equal(t, nCids, len(addProviderRpcs))
+	require.Len(t, addProviderRpcs, nCids)
+	for _, peers := range addProviderRpcs {
+		// Verify that all cids have been provided to exactly replicationFactor
+		// distinct peers.
+		require.Len(t, peers, replicationFactor)
+	}
+
+	// Test reprovides again
+	clear(addProviderRpcs)
+	mockClock.Add(reprovideInterval - 1)
+	require.Equal(t, 0, provideCount)
+	require.Equal(t, nCids, len(addProviderRpcs))
+	require.Len(t, addProviderRpcs, nCids)
+	for _, peers := range addProviderRpcs {
+		// Verify that all cids have been provided to exactly replicationFactor
+		// distinct peers.
+		require.Len(t, peers, replicationFactor)
+	}
+}
+
+func TestProvideManyUnstableNetwork(t *testing.T) {
+	// TODO: test online check and catchup pending work
 }

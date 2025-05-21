@@ -292,9 +292,9 @@ func (dht *FullRT) Ready() bool {
 
 	// TODO: This function needs to be better defined. Perhaps based on going through the peer map and seeing when the
 	// last time we were connected to any of them was.
-	dht.peerAddrsLk.RLock()
+	dht.kMapLk.RLock()
 	rtSize := len(dht.keyToPeerMap)
-	dht.peerAddrsLk.RUnlock()
+	dht.kMapLk.RUnlock()
 
 	return rtSize > len(dht.bootstrapPeers)+1
 }

@@ -323,13 +323,12 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		}
 
 		var addrs []*peer.AddrInfo
-		dht.peerAddrsLk.Lock()
+		foundPeersLk.Lock()
 		for k := range foundPeers {
 			addrs = append(addrs, &peer.AddrInfo{ID: k}) // Addrs: v.addrs
 		}
-
+		foundPeersLk.Unlock()
 		addrs = append(addrs, dht.bootstrapPeers...)
-		dht.peerAddrsLk.Unlock()
 
 		clear(foundPeers)
 
@@ -480,31 +479,35 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 	ipGroupCounts := make(map[peerdiversity.PeerIPGroupKey]map[peer.ID]struct{})
 	peers := make([]peer.ID, 0, dht.bucketSize)
 
+	// Lock routing table, keyToPeerMap and peer addresses so that they cannot be
+	// changed during a GetClosestPeers call. Otherwise peers may be removed,
+	// resulting in keys missing in maps.
+	dht.rtLk.RLock()
+	defer dht.rtLk.RUnlock()
+	dht.kMapLk.RLock()
+	defer dht.kMapLk.RUnlock()
+	dht.peerAddrsLk.RLock()
+	defer dht.peerAddrsLk.RUnlock()
+
 	// If ipDiversityFilterLimit is non-zero, the step is slightly larger than
 	// the bucket size, allowing to have a few backup peers in case some are
 	// filtered out by the diversity filter. Multiple calls to ClosestN are
 	// expensive, but increasing the `count` parameter is cheap.
 	step := dht.bucketSize + 2*dht.ipDiversityFilterLimit
 	for nClosest := 0; nClosest < dht.rt.Size(); nClosest += step {
-		dht.rtLk.RLock()
 		// Get the last `step` closest peers, because we already tried the `nClosest` closest peers
 		closestKeys := kademlia.ClosestN(kadKey, dht.rt, nClosest+step)[nClosest:]
-		dht.rtLk.RUnlock()
 
 	PeersLoop:
 		for _, k := range closestKeys {
-			dht.kMapLk.RLock()
 			// Recover the peer ID from the key
 			p, ok := dht.keyToPeerMap[string(k)]
-			dht.kMapLk.RUnlock()
 			if !ok {
 				logger.Errorf("key not found in map")
 				continue
 			}
 
-			dht.peerAddrsLk.RLock()
 			peerAddrs := dht.peerAddrs[p]
-			dht.peerAddrsLk.RUnlock()
 
 			if dht.ipDiversityFilterLimit > 0 {
 				for _, addr := range peerAddrs {

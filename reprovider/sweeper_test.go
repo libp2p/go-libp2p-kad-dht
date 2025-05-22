@@ -576,20 +576,20 @@ func TestProvideMany(t *testing.T) {
 	mockClock := clock.NewMock()
 	reprovideInterval := time.Hour
 
-	mutex := sync.Mutex{}
+	routerLk := sync.Mutex{}
 	getClosestPeersCount := 0
 	provideCount := 0
 	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-			mutex.Lock()
-			defer mutex.Unlock()
+			routerLk.Lock()
+			defer routerLk.Unlock()
 			getClosestPeersCount++
 			sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
 			return sortedPeers[:min(replicationFactor, len(peers))], nil
 		},
 		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
-			mutex.Lock()
-			defer mutex.Unlock()
+			routerLk.Lock()
+			defer routerLk.Unlock()
 			if broadcast {
 				provideCount++
 			}
@@ -637,8 +637,11 @@ func TestProvideMany(t *testing.T) {
 	require.NoError(t, err)
 
 	// No individual provides.
+	routerLk.Lock()
 	require.Equal(t, 0, provideCount)
+	routerLk.Unlock()
 	// Each cid should have been provided at least once.
+	msgSenderLk.Lock()
 	require.Len(t, addProviderRpcs, nCids)
 	for _, peers := range addProviderRpcs {
 		// Verify that all cids have been provided to exactly replicationFactor
@@ -648,8 +651,14 @@ func TestProvideMany(t *testing.T) {
 
 	// Test reprovides
 	clear(addProviderRpcs)
-	mockClock.Add(reprovideInterval - 1)
+	msgSenderLk.Unlock()
+	for range (reprovideInterval - 1) / time.Minute {
+		mockClock.Add(time.Minute)
+	}
+	routerLk.Lock()
 	require.Equal(t, 0, provideCount)
+	routerLk.Unlock()
+	msgSenderLk.Lock()
 	require.Equal(t, nCids, len(addProviderRpcs))
 	require.Len(t, addProviderRpcs, nCids)
 	for _, peers := range addProviderRpcs {
@@ -660,8 +669,14 @@ func TestProvideMany(t *testing.T) {
 
 	// Test reprovides again
 	clear(addProviderRpcs)
-	mockClock.Add(reprovideInterval - 1)
+	msgSenderLk.Unlock()
+	for range (reprovideInterval - 1) / time.Minute {
+		mockClock.Add(time.Minute)
+	}
+	routerLk.Lock()
 	require.Equal(t, 0, provideCount)
+	routerLk.Unlock()
+	msgSenderLk.Lock()
 	require.Equal(t, nCids, len(addProviderRpcs))
 	require.Len(t, addProviderRpcs, nCids)
 	for _, peers := range addProviderRpcs {
@@ -669,6 +684,7 @@ func TestProvideMany(t *testing.T) {
 		// distinct peers.
 		require.Len(t, peers, replicationFactor)
 	}
+	msgSenderLk.Unlock()
 }
 
 func TestProvideManyUnstableNetwork(t *testing.T) {

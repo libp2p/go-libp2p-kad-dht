@@ -3,6 +3,7 @@ package reprovider
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,7 @@ var logger = logging.Logger("dht/ReprovideSweep")
 
 var (
 	ErrNodeOffline                        = errors.New("reprovider: node is offline")
+	ErrNoKeyProvided                      = errors.New("reprovider: failed to provide any key")
 	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 )
 
@@ -83,10 +85,11 @@ type reprovideSweeper struct {
 
 	cids *trie.Trie[bit256.Key, mh.Multihash]
 
-	provideChan   chan provideReq
-	schedule      *trie.Trie[bitstr.Key, time.Duration]
-	scheduleLk    sync.Mutex
-	scheduleTimer *clock.Timer
+	provideChan            chan provideReq
+	schedule               *trie.Trie[bitstr.Key, time.Duration]
+	scheduleLk             sync.Mutex
+	scheduleTimer          *clock.Timer
+	scheduleTimerStartedAt time.Time
 
 	failedRegionsChan  chan bitstr.Key
 	lateRegionsQueue   []bitstr.Key
@@ -184,7 +187,9 @@ func (s *reprovideSweeper) run() {
 		case <-s.scheduleTimer.C:
 			s.handleReprovide()
 		case prefix := <-s.failedRegionsChan:
-			s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
+			if !slices.Contains(s.lateRegionsQueue, prefix) {
+				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
+			}
 			if s.online.Load() {
 				go s.onlineCheck()
 			}
@@ -265,7 +270,7 @@ func (s *reprovideSweeper) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	s.schedule.Add(prefix, reprovideTime)
 
 	currentTimeOffset := s.currentTimeOffset()
-	timeUntilReprovide := (reprovideTime - currentTimeOffset + s.reprovideInterval) % s.reprovideInterval
+	timeUntilReprovide := (reprovideTime-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
 	if s.prefixCursor == "" {
 		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 	} else {
@@ -287,6 +292,7 @@ func (s *reprovideSweeper) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 func (s *reprovideSweeper) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
 	s.prefixCursor = prefix
 	s.scheduleTimer.Reset(timeUntilReprovide)
+	s.scheduleTimerStartedAt = s.clock.Now()
 }
 
 func (s *reprovideSweeper) getPrefixesForCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
@@ -408,7 +414,7 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 	}
 
 	if atomic.LoadUint32(&anySuccess) == 0 {
-		return errors.New("failed to provide any cid")
+		return ErrNoKeyProvided
 	}
 	return nil
 }
@@ -416,33 +422,82 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 func (s *reprovideSweeper) handleReprovide() {
 	online := s.online.Load()
 	s.scheduleLk.Lock()
-	if online {
-		// Remove prefix from trie if online, new schedule will be added as needed
-		// after reprovide.
-		s.schedule.Remove(s.prefixCursor)
-	}
-	// Get next prefix to reprovide, and set timer for it.
-	next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
 	currentPrefix := s.prefixCursor
-	// TODO: for all prefixes between next.Data and s.currentTimeOffset(), add them to failedRegionsChan
+	// Get next prefix to reprovide, and set timer for it.
+	next := nextNonEmptyLeaf(s.schedule, currentPrefix, s.order)
 
-	var nextReprovideDelay time.Duration
-	nextPrefix := currentPrefix
 	if next == nil {
-		// Empty schedule, keep current prefixCursor, and wake up in
-		// reprovideInterval.
-		nextReprovideDelay = s.reprovideInterval
-	} else {
-		nextPrefix = next.Key
-		nextReprovideDelay = (s.reprovideInterval + next.Data - s.currentTimeOffset()) % s.reprovideInterval
+		// Schedule is empty, don't reprovide anything.
+		s.scheduleLk.Unlock()
+		return
 	}
-	s.scheduleNextReprovideNoLock(nextPrefix, nextReprovideDelay)
+
+	currentTimeOffset := s.currentTimeOffset()
+	var nextPrefix bitstr.Key
+	var timeUntilNextReprovide time.Duration
+	if next.Key == currentPrefix {
+		// There is a single prefix in the schedule.
+		nextPrefix = currentPrefix
+		timeUntilNextReprovide = (s.reprovideTimeForPrefix(currentPrefix)-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+	} else {
+		timeSinceTimerRunning := (currentTimeOffset - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
+		timeSinceTimerUntilNext := (next.Data - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
+
+		if s.scheduleTimerStartedAt.Add(s.reprovideInterval).Before(s.clock.Now()) {
+			// Alarm was programmed more than reprovideInterval ago, which means that
+			// no regions has been reprovided since. Add all regions to
+			// failedRegionsChan. This only happens if the main thread gets blocked
+			// for more than reprovideInterval.
+			nextKeyFound := false
+			scheduleEntries := allEntries(s.schedule, s.order)
+			for _, entry := range scheduleEntries {
+				if !nextKeyFound && entry.Data > currentTimeOffset {
+					next = entry
+					nextKeyFound = true
+				}
+				s.failedRegionsChan <- entry.Key
+			}
+			if !nextKeyFound {
+				next = scheduleEntries[0]
+			}
+			timeUntilNextReprovide = (next.Data-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+			// Don't reprovide any region now, but schedule the next one. All regions
+			// are expected to be reprovided when the provider is catching up with
+			// failed regions.
+			s.scheduleNextReprovideNoLock(next.Key, timeUntilNextReprovide)
+			s.scheduleLk.Unlock()
+			return
+		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
+			// next is scheduled in the past. While next is in the past, add next to
+			// failedRegions and take nextLeaf as next.
+
+			for timeSinceTimerUntilNext < timeSinceTimerRunning {
+				s.failedRegionsChan <- next.Key
+				next = nextNonEmptyLeaf(s.schedule, next.Key, s.order)
+				timeSinceTimerUntilNext = (next.Data - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
+			}
+		}
+		// next is in the future
+		nextPrefix = next.Key
+		timeUntilNextReprovide = (next.Data-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+	}
+
+	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilNextReprovide)
 	s.scheduleLk.Unlock()
 
 	// If we are offline, don't even try to reprovide region.
 	if !online {
 		s.failedRegionsChan <- currentPrefix
 		return
+	}
+
+	// Remove prefix that is about to be reprovided from the late regions queue
+	// if present.
+	for i, r := range s.lateRegionsQueue {
+		if r == currentPrefix {
+			s.lateRegionsQueue = slices.Delete(s.lateRegionsQueue, i, i+1)
+			break
+		}
 	}
 
 	cids := s.cids.Copy() // NOTE: if many cids, this may have a large memory footprint
@@ -692,7 +747,7 @@ func (s *reprovideSweeper) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 					if next == nil {
 						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
 					} else {
-						timeUntilReprovide := (s.reprovideInterval + next.Data - s.currentTimeOffset()) % s.reprovideInterval
+						timeUntilReprovide := (s.reprovideInterval+next.Data-s.currentTimeOffset()-1)%s.reprovideInterval + 1
 						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
 					}
 				}
@@ -828,7 +883,13 @@ func (s *reprovideSweeper) scheduleNextReprovide(prefix bitstr.Key, lastReprovid
 
 // currentTimeOffset returns the current time offset in the reprovide cycle.
 func (s *reprovideSweeper) currentTimeOffset() time.Duration {
-	return s.clock.Now().Sub(s.cycleStart) % s.reprovideInterval
+	return s.timeOffset(s.clock.Now())
+}
+
+// timeOffset returns the time offset in the reprovide cycle for the given
+// time.
+func (s *reprovideSweeper) timeOffset(t time.Time) time.Duration {
+	return t.Sub(s.cycleStart) % s.reprovideInterval
 }
 
 const maxPrefixSize = 24

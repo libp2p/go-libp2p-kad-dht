@@ -122,16 +122,16 @@ func allValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 
 // allKeys returns a slice containing all keys in the trie `t` sorted according
 // to the provided `order`.
-func allEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
+func allEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
 	return allEntriesAtDepth(t, order, 0)
 }
 
-func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []trie.Entry[K0, D] {
+func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []*trie.Entry[K0, D] {
 	if t.IsEmptyLeaf() {
 		return nil
 	}
 	if t.IsNonEmptyLeaf() {
-		return []trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
+		return []*trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
 	}
 	b := int(order.Bit(depth))
 	return append(allEntriesAtDepth(t.Branch(b), order, depth+1),

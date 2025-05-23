@@ -631,6 +631,7 @@ func TestProvideMany(t *testing.T) {
 	}
 	prov, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
+	mockClock.Add(reprovideInterval - 1)
 
 	reprovider := prov.(*reprovideSweeper)
 	err = reprovider.ProvideMany(ctx, mhs)
@@ -652,7 +653,7 @@ func TestProvideMany(t *testing.T) {
 	// Test reprovides
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range (reprovideInterval - 1) / time.Minute {
+	for range reprovideInterval / time.Minute {
 		mockClock.Add(time.Minute)
 	}
 	routerLk.Lock()
@@ -670,7 +671,7 @@ func TestProvideMany(t *testing.T) {
 	// Test reprovides again
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range (reprovideInterval - 1) / time.Minute {
+	for range reprovideInterval / time.Minute {
 		mockClock.Add(time.Minute)
 	}
 	routerLk.Lock()

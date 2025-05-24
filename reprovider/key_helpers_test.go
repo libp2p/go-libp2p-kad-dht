@@ -95,3 +95,15 @@ func TestShortestCoveredPrefix(t *testing.T) {
 		require.Equal(t, targetBitstr[:minCpl+1], prefix)
 	}
 }
+
+func TestIsBitstrPrefix(t *testing.T) {
+	fullKey := bitstr.Key("000")
+	require.True(t, isBitstrPrefix(bitstr.Key(""), fullKey))
+	require.True(t, isBitstrPrefix(bitstr.Key("0"), fullKey))
+	require.True(t, isBitstrPrefix(bitstr.Key("00"), fullKey))
+	require.True(t, isBitstrPrefix(bitstr.Key("000"), fullKey))
+	require.False(t, isBitstrPrefix(bitstr.Key("1"), fullKey))
+	require.False(t, isBitstrPrefix(bitstr.Key("01"), fullKey))
+	require.False(t, isBitstrPrefix(bitstr.Key("001"), fullKey))
+	require.False(t, isBitstrPrefix(bitstr.Key("0000"), fullKey))
+}

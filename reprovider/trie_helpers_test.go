@@ -271,13 +271,17 @@ func TestExtractMinimalRegions(t *testing.T) {
 
 	pids := make([]peer.ID, len(prefixes))
 	peersTrie := trie.New[bit256.Key, peer.ID]()
+
+	// Test behavior when trie is empty
+	regions := extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	require.Nil(t, regions)
 	for i := range pids {
 		pid := genPeerWithPrefix(prefixes[i])
 		pids[i] = pid
 		peersTrie.Add(peerIDToBit256(pid), pid)
 	}
 
-	regions := extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	regions = extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Len(t, regions, 3)
 	require.Equal(t, bitstr.Key("00"), regions[0].prefix)
 	require.Equal(t, bitstr.Key("01"), regions[1].prefix)

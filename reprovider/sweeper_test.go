@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -420,7 +422,40 @@ func TestCidsAllocationsToPeers(t *testing.T) {
 }
 
 func TestProvideCidsToPeer(t *testing.T) {
-	// TODO: test behavior with errors
+	msgCount := 0
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			msgCount++
+			return errors.New("error")
+		},
+	}
+	reprovider := reprovideSweeper{
+		msgSender: msgSender,
+	}
+
+	nCids := 16
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+	mhs := cidsToMhs(genCids(nCids))
+	pmes := &pb.Message{}
+
+	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
+	err = reprovider.provideCidsToPeer(pid, mhs, pmes)
+	require.Error(t, err)
+	require.Equal(t, maxConsecutiveProvideFailuresAllowed+1, msgCount)
+
+	// Only fail 33% of requests. The operation should be considered a success.
+	msgCount = 0
+	msgSender.sendMessageFunc = func(ctx context.Context, p peer.ID, m *pb.Message) error {
+		msgCount++
+		if msgCount%3 == 0 {
+			return errors.New("error")
+		}
+		return nil
+	}
+	err = reprovider.provideCidsToPeer(pid, mhs, pmes)
+	require.NoError(t, err)
+	require.Equal(t, nCids, msgCount)
 }
 
 func TestProvideNoBootstrap(t *testing.T) {
@@ -456,6 +491,50 @@ func TestProvideNoBootstrap(t *testing.T) {
 	reprovider.online.Store(true)
 	err = prov.Provide(ctx, c, true)
 	require.NoError(t, err)
+}
+
+func TestProviderOffline(t *testing.T) {
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+	routerOnline := false
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			if routerOnline {
+				return []peer.ID{pid}, nil
+			}
+			return nil, errors.New("offline")
+		},
+		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
+			return nil
+		},
+	}
+	reprovider := reprovideSweeper{
+		router:             router,
+		catchupPendingChan: make(chan struct{}, 1),
+	}
+
+	// offline -> offline
+	reprovider.onlineCheck()
+	require.False(t, reprovider.online.Load())
+	require.Len(t, reprovider.catchupPendingChan, 0)
+
+	// offline -> online
+	routerOnline = true
+	reprovider.onlineCheck()
+	require.True(t, reprovider.online.Load())
+	require.Len(t, reprovider.catchupPendingChan, 1)
+	<-reprovider.catchupPendingChan
+
+	// online -> online
+	reprovider.onlineCheck()
+	require.True(t, reprovider.online.Load())
+	require.Len(t, reprovider.catchupPendingChan, 0)
+
+	// online -> offline
+	routerOnline = false
+	reprovider.onlineCheck()
+	require.False(t, reprovider.online.Load())
+	require.Len(t, reprovider.catchupPendingChan, 0)
 }
 
 func TestProvideSingle(t *testing.T) {
@@ -689,5 +768,143 @@ func TestProvideMany(t *testing.T) {
 }
 
 func TestProvideManyUnstableNetwork(t *testing.T) {
-	// TODO: test online check and catchup pending work
+	ctx := context.Background()
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+
+	nCidsExponent := 2 // 10
+	nCids := 1 << nCidsExponent
+	cids := genBalancedCids(nCidsExponent)
+	mhs := cidsToMhs(cids)
+
+	replicationFactor := 4
+	peerPrefixBitlen := 6
+	require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+	var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
+	peers := make([]peer.ID, nPeers)
+	for i := range nPeers {
+		b := i << (bitsPerByte - peerPrefixBitlen)
+		k := [32]byte{b}
+		peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
+		require.NoError(t, err)
+	}
+
+	mockClock := clock.NewMock()
+	reprovideInterval := time.Hour
+	connectivityCheckInterval := time.Minute
+
+	routerLk := sync.Mutex{}
+	routerOffline := atomic.Bool{}
+	routerOffline.Store(true)
+	getClosestPeersCount := 0
+	provideCount := 0
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			routerLk.Lock()
+			defer routerLk.Unlock()
+			getClosestPeersCount++
+			if routerOffline.Load() {
+				return nil, errors.New("offline")
+			}
+			sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+			return sortedPeers[:min(replicationFactor, len(peers))], nil
+		},
+		provideFunc: func(ctx context.Context, k cid.Cid, broadcast bool) error {
+			routerLk.Lock()
+			defer routerLk.Unlock()
+			if routerOffline.Load() {
+				return errors.New("offline")
+			}
+			if broadcast {
+				provideCount++
+			}
+			return nil
+		},
+	}
+	msgSenderLk := sync.Mutex{}
+	addProviderRpcs := make(map[string][]peer.ID) // cid -> peerid
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			msgSenderLk.Lock()
+			defer msgSenderLk.Unlock()
+			if routerOffline.Load() {
+				return errors.New("offline")
+			}
+			_, k, err := mh.MHFromBytes(m.GetKey())
+			require.NoError(t, err)
+			if _, ok := addProviderRpcs[string(k)]; !ok {
+				addProviderRpcs[string(k)] = []peer.ID{p}
+			} else {
+				addProviderRpcs[string(k)] = append(addProviderRpcs[string(k)], p)
+			}
+			return nil
+		},
+	}
+	opts := []Option{
+		WithReprovideInterval(reprovideInterval),
+		WithReplicationFactor(replicationFactor),
+		WithProvideWorkers(1),
+		WithPeerID(pid),
+		WithRouter(router),
+		WithMessageSender(msgSender),
+		WithSelfAddrs(func() []ma.Multiaddr {
+			return nil
+		}),
+		WithLocalNearestPeersToSelf(func(n int) []peer.ID {
+			peers := kb.SortClosestPeers(peers, kb.ConvertPeerID(pid))
+			return peers[:min(n, len(peers))]
+		}),
+		WithClock(mockClock),
+		WithConnectivityCheckInterval(connectivityCheckInterval),
+	}
+	prov, err := NewReprovider(ctx, opts...)
+	require.NoError(t, err)
+
+	reprovider := prov.(*reprovideSweeper)
+	routerLk.Lock()
+	fmt.Println("getCLosestPeersCount before provideMany", getClosestPeersCount)
+	routerLk.Unlock()
+	err = reprovider.ProvideMany(ctx, mhs)
+	require.Error(t, err)
+
+	// Wait for the onlineCheck, which calls getClosestPeers. This is triggered
+	// by ProvideMany is node is offline.
+	routerLk.Lock()
+	for getClosestPeersCount < 2 {
+		routerLk.Unlock()
+		time.Sleep(time.Millisecond)
+		routerLk.Lock()
+	}
+	routerLk.Unlock()
+
+	require.False(t, reprovider.online.Load())
+	// reprovider.pendingCids should have nCids elements, but cannot test because
+	// it would create a race.
+	fmt.Println("advancing time")
+	mockClock.Add(connectivityCheckInterval)
+
+	// Wait for the onlineCheck, which calls getClosestPeers. This one is the
+	// periodical check, but the node is NOT back online yet.
+	routerLk.Lock()
+	for getClosestPeersCount < 3 {
+		routerLk.Unlock()
+		time.Sleep(time.Millisecond)
+		routerLk.Lock()
+	}
+	routerLk.Unlock()
+
+	routerOffline.Store(false)
+	fmt.Println("setting router offline to false")
+	mockClock.Add(connectivityCheckInterval)
+	require.True(t, reprovider.online.Load())
+
+	msgSenderLk.Lock()
+	require.Len(t, addProviderRpcs, nCids)
+	for _, peers := range addProviderRpcs {
+		// Verify that all cids have been provided to exactly replicationFactor
+		// distinct peers.
+		fmt.Println(len(peers))
+		require.Len(t, peers, replicationFactor)
+	}
+	msgSenderLk.Unlock()
 }

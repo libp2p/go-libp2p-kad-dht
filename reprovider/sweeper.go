@@ -3,6 +3,7 @@ package reprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"sync"
@@ -75,6 +76,7 @@ type reprovideSweeper struct {
 	order  bit256.Key
 
 	online                  atomic.Bool
+	ongoingOnlineCheck      atomic.Bool
 	burstProvideParallelism int
 
 	replicationFactor int
@@ -91,12 +93,12 @@ type reprovideSweeper struct {
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
 
-	failedRegionsChan  chan bitstr.Key
-	lateRegionsQueue   []bitstr.Key
-	retryTicker        *clock.Ticker
-	pendingCids        []mh.Multihash
-	pendingCidsChan    chan []mh.Multihash
-	catchupPendingChan chan struct{}
+	failedRegionsChan       chan bitstr.Key
+	lateRegionsQueue        []bitstr.Key
+	connectivityCheckTicker *clock.Ticker
+	pendingCids             []mh.Multihash
+	pendingCidsChan         chan []mh.Multihash
+	catchupPendingChan      chan struct{}
 
 	prefixCursor        bitstr.Key
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
@@ -141,10 +143,10 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 		schedule:      trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer: cfg.clock.Timer(time.Hour),
 
-		failedRegionsChan:  make(chan bitstr.Key),
-		retryTicker:        cfg.clock.Ticker(5 * time.Minute),
-		pendingCidsChan:    make(chan []mh.Multihash),
-		catchupPendingChan: make(chan struct{}, 1),
+		failedRegionsChan:       make(chan bitstr.Key, 1),
+		connectivityCheckTicker: cfg.clock.Ticker(cfg.connectivityCheckInterval),
+		pendingCidsChan:         make(chan []mh.Multihash),
+		catchupPendingChan:      make(chan struct{}, 1),
 
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 	}
@@ -174,7 +176,7 @@ func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (Pr
 }
 
 func (s *reprovideSweeper) run() {
-	defer s.retryTicker.Stop()
+	defer s.connectivityCheckTicker.Stop()
 	defer s.scheduleTimer.Stop()
 
 	for {
@@ -191,15 +193,18 @@ func (s *reprovideSweeper) run() {
 				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 			}
 			if s.online.Load() {
+				fmt.Println("failed regions online check")
 				go s.onlineCheck()
 			}
 		case cids := <-s.pendingCidsChan:
 			s.pendingCids = append(s.pendingCids, cids...)
 			if s.online.Load() {
+				fmt.Println("failed cids online check")
 				go s.onlineCheck()
 			}
-		case <-s.retryTicker.C:
+		case <-s.connectivityCheckTicker.C:
 			if !s.online.Load() {
+				fmt.Println("periodic online check")
 				go s.onlineCheck()
 			} else {
 				s.catchupPendingWork()
@@ -231,6 +236,7 @@ func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Tri
 			if !scheduled {
 				if avgPrefixLen == 0 {
 					avgPrefixLen = s.getAvgPrefixLenNoLock()
+					fmt.Println(avgPrefixLen, "abgPrefixLen")
 				}
 				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
 				if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
@@ -407,6 +413,7 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 		for _, prefix := range sortedPrefixes[earlyExit:] {
 			cids = append(cids, allValues(prefix.cids, s.order)...)
 		}
+		fmt.Println("early exit provide many")
 		s.pendingCidsChan <- cids
 	} else {
 		// Wait for workers to finish before reporting completion.
@@ -455,7 +462,10 @@ func (s *reprovideSweeper) handleReprovide() {
 					next = entry
 					nextKeyFound = true
 				}
-				s.failedRegionsChan <- entry.Key
+				prefix := entry.Key
+				if !slices.Contains(s.lateRegionsQueue, prefix) {
+					s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
+				}
 			}
 			if !nextKeyFound {
 				next = scheduleEntries[0]
@@ -466,15 +476,32 @@ func (s *reprovideSweeper) handleReprovide() {
 			// failed regions.
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilNextReprovide)
 			s.scheduleLk.Unlock()
+			if s.online.Load() {
+				go s.onlineCheck()
+			}
 			return
 		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
 			// failedRegions and take nextLeaf as next.
 
-			for timeSinceTimerUntilNext < timeSinceTimerRunning {
-				s.failedRegionsChan <- next.Key
+			count := 0
+			scheduleSize := s.schedule.Size()
+			for timeSinceTimerUntilNext < timeSinceTimerRunning && count < scheduleSize {
+				prefix := next.Key
+				if !slices.Contains(s.lateRegionsQueue, prefix) {
+					s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
+				}
 				next = nextNonEmptyLeaf(s.schedule, next.Key, s.order)
 				timeSinceTimerUntilNext = (next.Data - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
+				count++
+			}
+			if s.online.Load() {
+				go s.onlineCheck()
+			}
+			if count == scheduleSize {
+				// No reprovides are scheduled in the future, return here.
+				s.scheduleLk.Unlock()
+				return
 			}
 		}
 		// next is in the future
@@ -515,6 +542,7 @@ const (
 func (s *reprovideSweeper) handleProvideError(prefix bitstr.Key, cids *trie.Trie[bit256.Key, mh.Multihash], op provideType) {
 	switch op {
 	case initialProvide:
+		fmt.Println("handleProvideError")
 		s.pendingCidsChan <- allValues(cids, s.order)
 	case regularReprovide, lateRegionReprovide:
 		s.failedRegionsChan <- prefix
@@ -601,6 +629,7 @@ func (s *reprovideSweeper) individualProvideForPrefix(ctx context.Context, prefi
 	if len(cids) == 1 {
 		err = s.vanillaProvide(ctx, cids[0])
 		if err != nil && !fullRegionReprovide {
+			fmt.Println("individual provide failed")
 			s.pendingCidsChan <- cids
 		}
 	} else {
@@ -710,6 +739,7 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 // taken from a static list of preimages.
 func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	p, _ := kb.GenRandPeerIDWithCPL(keyToBytes(k), kb.PeerIDPreimageMaxCpl)
+	fmt.Println("closestPeersToKey", k, "peerID", p)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
@@ -831,25 +861,28 @@ func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]mh.Mul
 	return keysPerPeer
 }
 
-const (
-	reprovideFailureTolerence       float32 = 0.5
-	reprovideInitialFailuresAllowed int     = 3
-)
+// maxConsecutiveProvideFailuresAllowed is the maximum number of consecutive
+// provides that are allowed to fail to the same remote peer before cancelling
+// all pending requests to this peer.
+const maxConsecutiveProvideFailuresAllowed = 2
 
 // provideCidsToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given cids.
 func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []mh.Multihash, pmes *pb.Message) error {
 	errCount := 0
-	for i, mh := range cids {
+	for _, mh := range cids {
 		pmes.Key = mh
 		err := s.msgSender.SendMessage(s.ctx, p, pmes)
 		if err != nil {
 			logger.Infow("providing", "cid", mh, "to", p, "error", err)
 			errCount++
 
-			if i > reprovideInitialFailuresAllowed && errCount > int(float32(i)*reprovideFailureTolerence) {
+			if errCount > maxConsecutiveProvideFailuresAllowed {
 				return errors.New("failed to reprovide to " + string(p.String()))
 			}
+		} else if errCount > 0 {
+			// Reset error count
+			errCount = 0
 		}
 	}
 	return nil
@@ -933,21 +966,41 @@ func (s *reprovideSweeper) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
+// offlineSuspected
+// if node is currently offline, do nothing
+// if last probe was less than checkInterval ago, do nothing
+// if last probe was more than checkInterval ago, check if node is online
+// * if it is, do nothing
+// * if it isn't:
+//   - set online to false
+//   - start periodic onlineCheck, until node is online again
+//   - when node is online again, signal that we can catch up on pending work
+
 // onlineCheck checks if the node is online by making a GetClosestPeers network
 // request. It updates s.online accordingly.
 //
 // If the state changed from offline to online, signal that we can catch up on
 // pending work.
 func (s *reprovideSweeper) onlineCheck() {
+	if !s.ongoingOnlineCheck.CompareAndSwap(false, true) {
+		// Another online check is already in progress.
+		return
+	}
+	defer s.ongoingOnlineCheck.Store(false)
+
+	fmt.Println("performing online check now")
 	peers, err := s.router.GetClosestPeers(s.ctx, string(s.peerid))
 	isOnline := err == nil && len(peers) > 0
+	fmt.Println("onlineCheck", isOnline)
 	wasOnline := s.online.Load()
 	if wasOnline != isOnline {
+		fmt.Println("change online to", isOnline)
 		// We just changed connectivity state.
 		s.online.Store(isOnline)
 		if isOnline {
 			// Signal that we are able to catch up on pending work.
 			s.catchupPendingChan <- struct{}{}
+			fmt.Println("wrote to catchupPendingChan")
 		}
 	}
 }

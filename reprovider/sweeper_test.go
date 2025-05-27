@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -493,7 +492,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration) {
+func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args ...any) {
 	step := time.Millisecond
 	for range maxDelay / step {
 		if condition() {
@@ -501,7 +500,7 @@ func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration) {
 		}
 		time.Sleep(step)
 	}
-	t.Fail()
+	t.Fatal(args...)
 }
 
 func TestProviderOffline(t *testing.T) {
@@ -528,10 +527,19 @@ func TestProviderOffline(t *testing.T) {
 		},
 	}
 
+	checked := func() bool {
+		return checkFuncCalled.Load()
+	}
+	nodeOnline := func() bool {
+		return reprovider.connectivity.online.Load()
+	}
+	nodeOffline := func() bool {
+		return !reprovider.connectivity.online.Load()
+	}
 	// offline -> offline
 	reprovider.connectivity.triggerCheck()
-	waitUntil(t, func() bool { return checkFuncCalled.Load() }, 10*time.Millisecond)
-	waitUntil(t, func() bool { return !reprovider.connectivity.online.Load() }, 10*time.Millisecond)
+	waitUntil(t, checked, 10*time.Millisecond)
+	waitUntil(t, nodeOffline, 10*time.Millisecond)
 	require.Len(t, reprovider.catchupPendingChan, 0)
 
 	// Wait before modifying online status
@@ -540,8 +548,8 @@ func TestProviderOffline(t *testing.T) {
 
 	// offline -> online
 	mockClock.Add(checkInterval)
-	waitUntil(t, func() bool { return checkFuncCalled.Load() }, 10*time.Millisecond)
-	waitUntil(t, func() bool { return reprovider.connectivity.online.Load() }, 10*time.Millisecond)
+	waitUntil(t, checked, 10*time.Millisecond)
+	waitUntil(t, nodeOnline, 10*time.Millisecond)
 	require.Len(t, catchupPendingChan, 1)
 	<-catchupPendingChan
 
@@ -549,8 +557,8 @@ func TestProviderOffline(t *testing.T) {
 	checkFuncCalled.Store(false)
 	// online -> online
 	reprovider.connectivity.triggerCheck()
-	waitUntil(t, func() bool { return checkFuncCalled.Load() }, 10*time.Millisecond)
-	waitUntil(t, func() bool { return reprovider.connectivity.online.Load() }, 10*time.Millisecond)
+	waitUntil(t, checked, 10*time.Millisecond)
+	waitUntil(t, nodeOnline, 10*time.Millisecond)
 	require.Len(t, reprovider.catchupPendingChan, 0)
 
 	checkFuncCalled.Store(false)
@@ -559,8 +567,8 @@ func TestProviderOffline(t *testing.T) {
 
 	// online -> offline
 	reprovider.connectivity.triggerCheck()
-	waitUntil(t, func() bool { return checkFuncCalled.Load() }, 10*time.Millisecond)
-	waitUntil(t, func() bool { return !reprovider.connectivity.online.Load() }, 10*time.Millisecond)
+	waitUntil(t, checked, 10*time.Millisecond)
+	waitUntil(t, nodeOffline, 10*time.Millisecond)
 }
 
 func TestProvideSingle(t *testing.T) {
@@ -656,7 +664,6 @@ func TestProvideSingle(t *testing.T) {
 }
 
 func TestProvideMany(t *testing.T) {
-	t.Skip()
 	ctx := context.Background()
 
 	pid, err := peer.Decode("12BoooooPEER")
@@ -795,12 +802,11 @@ func TestProvideMany(t *testing.T) {
 }
 
 func TestProvideManyUnstableNetwork(t *testing.T) {
-	t.Skip()
 	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
-	nCidsExponent := 2 // 10
+	nCidsExponent := 10
 	nCids := 1 << nCidsExponent
 	cids := genBalancedCids(nCidsExponent)
 	mhs := cidsToMhs(cids)
@@ -889,50 +895,46 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	require.NoError(t, err)
 
 	reprovider := prov.(*reprovideSweeper)
-	routerLk.Lock()
-	fmt.Println("getCLosestPeersCount before provideMany", getClosestPeersCount)
-	routerLk.Unlock()
+	reprovider.connectivity = connectivityChecker{
+		ctx:                  ctx,
+		clock:                mockClock,
+		onlineCheckInterval:  connectivityCheckInterval,
+		offlineCheckInterval: connectivityCheckInterval,
+		checkFunc: func() bool {
+			peers, err := router.GetClosestPeers(ctx, string(pid))
+			return err == nil && len(peers) > 0
+		},
+		backOnlineNotify: reprovider.catchupPendingNotify,
+	}
+	reprovider.connectivity.online.Store(true)
+
 	err = reprovider.ProvideMany(ctx, mhs)
 	require.Error(t, err)
 
-	// Wait for the onlineCheck, which calls getClosestPeers. This is triggered
-	// by ProvideMany is node is offline.
-	routerLk.Lock()
-	for getClosestPeersCount < 2 {
-		routerLk.Unlock()
-		time.Sleep(time.Millisecond)
-		routerLk.Lock()
+	nodeOffline := func() bool {
+		return !reprovider.connectivity.isOnline()
 	}
-	routerLk.Unlock()
-
-	require.False(t, reprovider.connectivity.isOnline())
-	// reprovider.pendingCids should have nCids elements, but cannot test because
-	// it would create a race.
-	fmt.Println("advancing time")
+	waitUntil(t, nodeOffline, 10*time.Millisecond, "waiting for node to be offline")
 	mockClock.Add(connectivityCheckInterval)
-
-	// Wait for the onlineCheck, which calls getClosestPeers. This one is the
-	// periodical check, but the node is NOT back online yet.
-	routerLk.Lock()
-	for getClosestPeersCount < 3 {
-		routerLk.Unlock()
-		time.Sleep(time.Millisecond)
-		routerLk.Lock()
-	}
-	routerLk.Unlock()
 
 	routerOffline.Store(false)
-	fmt.Println("setting router offline to false")
 	mockClock.Add(connectivityCheckInterval)
-	require.True(t, reprovider.connectivity.isOnline())
+	waitUntil(t, reprovider.connectivity.isOnline, 10*time.Millisecond, "waiting for node to come back online")
 
-	msgSenderLk.Lock()
-	require.Len(t, addProviderRpcs, nCids)
-	for _, peers := range addProviderRpcs {
-		// Verify that all cids have been provided to exactly replicationFactor
-		// distinct peers.
-		fmt.Println(len(peers))
-		require.Len(t, peers, replicationFactor)
+	providedAllCids := func() bool {
+		msgSenderLk.Lock()
+		defer msgSenderLk.Unlock()
+		if len(addProviderRpcs) != nCids {
+			return false
+		}
+		for _, peers := range addProviderRpcs {
+			// Verify that all cids have been provided to exactly replicationFactor
+			// distinct peers.
+			if len(peers) != replicationFactor {
+				return false
+			}
+		}
+		return true
 	}
-	msgSenderLk.Unlock()
+	waitUntil(t, providedAllCids, 100*time.Millisecond, "waiting for all cids to be provided")
 }

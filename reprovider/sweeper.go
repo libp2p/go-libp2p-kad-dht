@@ -3,7 +3,6 @@ package reprovider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"sync"
@@ -93,12 +92,11 @@ type reprovideSweeper struct {
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
 
-	failedRegionsChan       chan bitstr.Key
-	lateRegionsQueue        []bitstr.Key
-	connectivityCheckTicker *clock.Ticker
-	pendingCids             []mh.Multihash
-	pendingCidsChan         chan []mh.Multihash
-	catchupPendingChan      chan struct{}
+	failedRegionsChan  chan bitstr.Key
+	lateRegionsQueue   []bitstr.Key
+	pendingCids        []mh.Multihash
+	pendingCidsChan    chan []mh.Multihash
+	catchupPendingChan chan struct{}
 
 	prefixCursor        bitstr.Key
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
@@ -152,10 +150,9 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 		schedule:      trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer: cfg.clock.Timer(time.Hour),
 
-		failedRegionsChan:       make(chan bitstr.Key, 1),
-		connectivityCheckTicker: cfg.clock.Ticker(cfg.connectivityCheckInterval),
-		pendingCidsChan:         make(chan []mh.Multihash),
-		catchupPendingChan:      make(chan struct{}, 1),
+		failedRegionsChan:  make(chan bitstr.Key, 1),
+		pendingCidsChan:    make(chan []mh.Multihash),
+		catchupPendingChan: make(chan struct{}, 1),
 
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 	}
@@ -186,7 +183,6 @@ func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (Pr
 }
 
 func (s *reprovideSweeper) run() {
-	defer s.connectivityCheckTicker.Stop()
 	defer s.scheduleTimer.Stop()
 
 	for {
@@ -206,8 +202,6 @@ func (s *reprovideSweeper) run() {
 		case cids := <-s.pendingCidsChan:
 			s.pendingCids = append(s.pendingCids, cids...)
 			s.connectivity.triggerCheck()
-		case <-s.connectivityCheckTicker.C:
-			s.catchupPendingWork()
 		case <-s.catchupPendingChan:
 			s.catchupPendingWork()
 		}
@@ -235,7 +229,6 @@ func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Tri
 			if !scheduled {
 				if avgPrefixLen == 0 {
 					avgPrefixLen = s.getAvgPrefixLenNoLock()
-					fmt.Println(avgPrefixLen, "abgPrefixLen")
 				}
 				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
 				if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
@@ -412,7 +405,6 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 		for _, prefix := range sortedPrefixes[earlyExit:] {
 			cids = append(cids, allValues(prefix.cids, s.order)...)
 		}
-		fmt.Println("early exit provide many")
 		s.pendingCidsChan <- cids
 	} else {
 		// Wait for workers to finish before reporting completion.
@@ -537,7 +529,6 @@ const (
 func (s *reprovideSweeper) handleProvideError(prefix bitstr.Key, cids *trie.Trie[bit256.Key, mh.Multihash], op provideType) {
 	switch op {
 	case initialProvide:
-		fmt.Println("handleProvideError")
 		s.pendingCidsChan <- allValues(cids, s.order)
 	case regularReprovide, lateRegionReprovide:
 		s.failedRegionsChan <- prefix
@@ -624,7 +615,6 @@ func (s *reprovideSweeper) individualProvideForPrefix(ctx context.Context, prefi
 	if len(cids) == 1 {
 		err = s.vanillaProvide(ctx, cids[0])
 		if err != nil && !fullRegionReprovide {
-			fmt.Println("individual provide failed")
 			s.pendingCidsChan <- cids
 		}
 	} else {
@@ -734,7 +724,6 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 // taken from a static list of preimages.
 func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	p, _ := kb.GenRandPeerIDWithCPL(keyToBytes(k), kb.PeerIDPreimageMaxCpl)
-	fmt.Println("closestPeersToKey", k, "peerID", p)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 

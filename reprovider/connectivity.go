@@ -48,6 +48,7 @@ func (c *connectivityChecker) triggerCheck() {
 		c.online.Store(false)
 
 		ticker := c.clock.Ticker(c.offlineCheckInterval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-c.ctx.Done():

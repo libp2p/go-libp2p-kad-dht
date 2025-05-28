@@ -31,7 +31,7 @@ const (
 )
 
 func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
-	s := reprovideSweeper{
+	s := SweepingReprovider{
 		reprovideInterval: 16 * time.Second,
 		order:             bit256.ZeroKey(),
 	}
@@ -45,7 +45,7 @@ func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
 }
 
 func TestReprovideTimeForPrefixWithCustomOrder(t *testing.T) {
-	s := reprovideSweeper{
+	s := SweepingReprovider{
 		reprovideInterval: 16 * time.Second,
 		order:             bit256.NewKey(bytes.Repeat([]byte{0xFF}, 32)), // 111...1
 	}
@@ -170,7 +170,7 @@ func TestLocalNearstPeersCPL(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	reprovider := &reprovideSweeper{
+	reprovider := &SweepingReprovider{
 		replicationFactor: 0,
 		order:             bit256.NewKey(selfKey[:]),
 		localNearestPeersToSelf: func(n int) []peer.ID {
@@ -200,7 +200,7 @@ func TestGetAvgPrefixLenEmptySchedule(t *testing.T) {
 		localPeers[i], err = kb.GenRandPeerIDWithCPL(selfKey[:], uint(targetCpl+i/(nPeers/2)))
 		require.NoError(t, err)
 	}
-	reprovider := reprovideSweeper{
+	reprovider := SweepingReprovider{
 		replicationFactor: 20,
 		order:             bit256.NewKey(selfKey[:]),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
@@ -227,7 +227,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 			return nil
 		},
 	}
-	r := reprovideSweeper{
+	r := SweepingReprovider{
 		router:            router,
 		clock:             clock.NewMock(),
 		reprovideInterval: time.Hour,
@@ -273,7 +273,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 			return nil
 		},
 	}
-	r := reprovideSweeper{
+	r := SweepingReprovider{
 		router:            router,
 		clock:             clock.NewMock(),
 		reprovideInterval: time.Hour,
@@ -356,7 +356,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		},
 	}
 
-	r := reprovideSweeper{
+	r := SweepingReprovider{
 		router:            router,
 		replicationFactor: replicationFactor,
 	}
@@ -386,7 +386,7 @@ func TestCidsAllocationsToPeers(t *testing.T) {
 	nPeers := 128
 	replicationFactor := 10
 
-	reprovider := reprovideSweeper{
+	reprovider := SweepingReprovider{
 		replicationFactor: replicationFactor,
 		order:             bit256.ZeroKey(),
 	}
@@ -428,7 +428,7 @@ func TestProvideCidsToPeer(t *testing.T) {
 			return errors.New("error")
 		},
 	}
-	reprovider := reprovideSweeper{
+	reprovider := SweepingReprovider{
 		msgSender: msgSender,
 	}
 
@@ -475,7 +475,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 		}),
 	}
 	prov, err := NewReprovider(ctx, opts...)
-	reprovider := prov.(*reprovideSweeper)
+	reprovider := prov.(*SweepingReprovider)
 	require.NoError(t, err)
 
 	_ = reprovider
@@ -511,7 +511,7 @@ func TestProviderOffline(t *testing.T) {
 	mockClock := clock.NewMock()
 	checkInterval := time.Minute
 	catchupPendingChan := make(chan struct{}, 1)
-	reprovider := reprovideSweeper{
+	reprovider := SweepingReprovider{
 		connectivity: connectivityChecker{
 			ctx:                  ctx,
 			clock:                mockClock,
@@ -631,7 +631,7 @@ func TestProvideSingle(t *testing.T) {
 	require.Equal(t, 1, provideCount)
 
 	// Verify reprovide is scheduled.
-	reprovider := prov.(*reprovideSweeper)
+	reprovider := prov.(*SweepingReprovider)
 	prefix := bitstr.Key(key.BitString(mhToBit256(c.Hash()))[:prefixLen])
 	reprovider.scheduleLk.Lock()
 	require.Equal(t, 1, reprovider.schedule.Size())
@@ -746,7 +746,7 @@ func TestProvideMany(t *testing.T) {
 	require.NoError(t, err)
 	mockClock.Add(reprovideInterval - 1)
 
-	reprovider := prov.(*reprovideSweeper)
+	reprovider := prov.(*SweepingReprovider)
 	err = reprovider.ProvideMany(ctx, mhs)
 	require.NoError(t, err)
 
@@ -894,7 +894,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	prov, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
 
-	reprovider := prov.(*reprovideSweeper)
+	reprovider := prov.(*SweepingReprovider)
 	reprovider.connectivity = connectivityChecker{
 		ctx:                  ctx,
 		clock:                mockClock,

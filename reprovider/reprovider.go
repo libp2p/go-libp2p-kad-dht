@@ -38,8 +38,8 @@ type ProvideMany interface {
 }
 
 var (
-	_ Provider    = &reprovideSweeper{}
-	_ ProvideMany = &reprovideSweeper{}
+	_ Provider    = &SweepingReprovider{}
+	_ ProvideMany = &SweepingReprovider{}
 )
 
 type KadRouter interface {
@@ -68,7 +68,7 @@ type provideReq struct {
 	done chan error
 }
 
-type reprovideSweeper struct {
+type SweepingReprovider struct {
 	ctx    context.Context
 	peerid peer.ID
 	router KadRouter
@@ -116,7 +116,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	reprovider := &reprovideSweeper{
+	reprovider := &SweepingReprovider{
 		ctx:    ctx,
 		router: cfg.router,
 		order:  peerIDToBit256(cfg.peerid),
@@ -182,7 +182,7 @@ func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (Pr
 	return NewReprovider(ctx, opts...)
 }
 
-func (s *reprovideSweeper) run() {
+func (s *SweepingReprovider) run() {
 	defer s.scheduleTimer.Stop()
 
 	for {
@@ -213,7 +213,7 @@ func (s *reprovideSweeper) run() {
 // in the schedule.
 //
 // It returns a map of prefixes to fresh cids (that weren't tracked so far).
-func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
+func (s *SweepingReprovider) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
 	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
 	var avgPrefixLen int
 	s.scheduleLk.Lock()
@@ -263,7 +263,7 @@ func (s *reprovideSweeper) addCids(cids []mh.Multihash) map[bitstr.Key]*trie.Tri
 	return prefixes
 }
 
-func (s *reprovideSweeper) addPrefixToScheduleNoLock(prefix bitstr.Key) {
+func (s *SweepingReprovider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	reprovideTime := s.reprovideTimeForPrefix(prefix)
 	s.schedule.Add(prefix, reprovideTime)
 
@@ -287,13 +287,13 @@ func (s *reprovideSweeper) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	}
 }
 
-func (s *reprovideSweeper) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
+func (s *SweepingReprovider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
 	s.prefixCursor = prefix
 	s.scheduleTimer.Reset(timeUntilReprovide)
 	s.scheduleTimerStartedAt = s.clock.Now()
 }
 
-func (s *reprovideSweeper) getPrefixesForCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
+func (s *SweepingReprovider) getPrefixesForCids(cids []mh.Multihash) map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash] {
 	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
@@ -310,7 +310,7 @@ func (s *reprovideSweeper) getPrefixesForCids(cids []mh.Multihash) map[bitstr.Ke
 	return prefixes
 }
 
-func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
+func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.cids) == 0 {
 		provideRequest.done <- nil
 		return
@@ -339,7 +339,7 @@ func (s *reprovideSweeper) handleProvide(provideRequest provideReq) {
 	}()
 }
 
-func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash]) error {
+func (s *SweepingReprovider) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash]) error {
 	if len(prefixes) == 1 {
 		for prefix, cid := range prefixes {
 			// Provide a single cid (NOT ProvideMany)
@@ -417,7 +417,7 @@ func (s *reprovideSweeper) networkProvide(prefixes map[bitstr.Key]*trie.Trie[bit
 	return nil
 }
 
-func (s *reprovideSweeper) handleReprovide() {
+func (s *SweepingReprovider) handleReprovide() {
 	online := s.connectivity.isOnline()
 	s.scheduleLk.Lock()
 	currentPrefix := s.prefixCursor
@@ -526,7 +526,7 @@ const (
 	initialProvide
 )
 
-func (s *reprovideSweeper) handleProvideError(prefix bitstr.Key, cids *trie.Trie[bit256.Key, mh.Multihash], op provideType) {
+func (s *SweepingReprovider) handleProvideError(prefix bitstr.Key, cids *trie.Trie[bit256.Key, mh.Multihash], op provideType) {
 	switch op {
 	case initialProvide:
 		s.pendingCidsChan <- allValues(cids, s.order)
@@ -538,7 +538,7 @@ func (s *reprovideSweeper) handleProvideError(prefix bitstr.Key, cids *trie.Trie
 	s.scheduleNextReprovide(prefix, s.currentTimeOffset(), op)
 }
 
-func (s *reprovideSweeper) provideForPrefix(prefix bitstr.Key, cids *trie.Trie[bit256.Key, mh.Multihash], op provideType) error {
+func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie[bit256.Key, mh.Multihash], op provideType) error {
 	subtrie, ok := subtrieMatchingPrefix(cids, prefix)
 	if !ok {
 		// There was no cid matching prefix to provide
@@ -604,7 +604,7 @@ func (s *reprovideSweeper) provideForPrefix(prefix bitstr.Key, cids *trie.Trie[b
 	return nil
 }
 
-func (s *reprovideSweeper) individualProvideForPrefix(ctx context.Context, prefix bitstr.Key, cids []mh.Multihash, op provideType) error {
+func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, prefix bitstr.Key, cids []mh.Multihash, op provideType) error {
 	if len(cids) == 0 {
 		return nil
 	}
@@ -652,7 +652,7 @@ func (s *reprovideSweeper) individualProvideForPrefix(ctx context.Context, prefi
 // optimization. It should be used for providing a small number of cids
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of cids.
-func (s *reprovideSweeper) vanillaProvide(ctx context.Context, mh mh.Multihash) error {
+func (s *SweepingReprovider) vanillaProvide(ctx context.Context, mh mh.Multihash) error {
 	return s.router.Provide(ctx, cid.NewCidV0(mh), true)
 }
 
@@ -661,7 +661,7 @@ func (s *reprovideSweeper) vanillaProvide(ctx context.Context, mh mh.Multihash) 
 // prefix. In the case there aren't enough peers matching the provided prefix,
 // it will find and return the closest peers to the prefix, even if they don't
 // exactly match it.
-func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
+func (s *SweepingReprovider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
 	allClosestPeers := make([]peer.ID, 0, 2*s.replicationFactor)
 
 	maxPrefixSearches := 64
@@ -722,7 +722,7 @@ func (s *reprovideSweeper) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with
 // the provided key. Note that the returned peer IDs aren't random, they are
 // taken from a static list of preimages.
-func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
+func (s *SweepingReprovider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	p, _ := kb.GenRandPeerIDWithCPL(keyToBytes(k), kb.PeerIDPreimageMaxCpl)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
@@ -730,7 +730,7 @@ func (s *reprovideSweeper) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 // regionsFromPeers build the keyspace regions from the given peers, and
 // assigns cids to the appropriate region. It returns the created regions
 // ordered according to s.order and the Common Prefix shared by all peers.
-func (s *reprovideSweeper) regionsFromPeers(peers []peer.ID, cids *trie.Trie[bit256.Key, mh.Multihash]) ([]region, bitstr.Key) {
+func (s *SweepingReprovider) regionsFromPeers(peers []peer.ID, cids *trie.Trie[bit256.Key, mh.Multihash]) ([]region, bitstr.Key) {
 	if len(peers) == 0 {
 		return []region{}, ""
 	}
@@ -750,7 +750,7 @@ func (s *reprovideSweeper) regionsFromPeers(peers []peer.ID, cids *trie.Trie[bit
 	return regions, commonPrefix
 }
 
-func (s *reprovideSweeper) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
+func (s *SweepingReprovider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 	s.scheduleLk.Lock()
 	// Pop prefixes scheduled in the future being covered by the explored peers.
 	if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
@@ -773,7 +773,7 @@ func (s *reprovideSweeper) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 
 // claimRegionReprovide checks if the region is already being reprovided by
 // another thread. If not it marks the region as being currently reprovided.
-func (s *reprovideSweeper) claimRegionReprovide(regions []region) []region {
+func (s *SweepingReprovider) claimRegionReprovide(regions []region) []region {
 	out := regions[:0]
 	s.ongoingReprovidesLk.Lock()
 	defer s.ongoingReprovidesLk.Unlock()
@@ -790,7 +790,7 @@ func (s *reprovideSweeper) claimRegionReprovide(regions []region) []region {
 }
 
 // releaseRegionReprovide marks the region as no longer being reprovided.
-func (s *reprovideSweeper) releaseRegionReprovide(prefix bitstr.Key) {
+func (s *SweepingReprovider) releaseRegionReprovide(prefix bitstr.Key) {
 	s.ongoingReprovidesLk.Lock()
 	defer s.ongoingReprovidesLk.Unlock()
 	s.ongoingReprovides.Remove(prefix)
@@ -806,7 +806,7 @@ const minimalRegionReachablePeersRatio float32 = 0.2
 // peers. In this case, the region reprovide is considered failed and the
 // caller is responsible for trying again. This allows detecting if we are
 // offline.
-func (s *reprovideSweeper) regionReprovide(r region) error {
+func (s *SweepingReprovider) regionReprovide(r region) error {
 	cidsAllocations := s.cidsAllocationsToPeers(r)
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
@@ -829,7 +829,7 @@ func (s *reprovideSweeper) regionReprovide(r region) error {
 
 // cidsAllocationsToPeers assigns each cid of the provided region to the
 // replicationFactor closest peers from the region (XOR distance).
-func (s *reprovideSweeper) cidsAllocationsToPeers(r region) map[peer.ID][]mh.Multihash {
+func (s *SweepingReprovider) cidsAllocationsToPeers(r region) map[peer.ID][]mh.Multihash {
 	// TODO: this is a very greedy approach, can be greatly optimized
 	keysPerPeer := make(map[peer.ID][]mh.Multihash)
 	for _, cidEntry := range allEntries(r.cids, s.order) {
@@ -852,7 +852,7 @@ const maxConsecutiveProvideFailuresAllowed = 2
 
 // provideCidsToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given cids.
-func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []mh.Multihash, pmes *pb.Message) error {
+func (s *SweepingReprovider) provideCidsToPeer(p peer.ID, cids []mh.Multihash, pmes *pb.Message) error {
 	errCount := 0
 	for _, mh := range cids {
 		pmes.Key = mh
@@ -874,7 +874,7 @@ func (s *reprovideSweeper) provideCidsToPeer(p peer.ID, cids []mh.Multihash, pme
 
 // addCidsToLocalProviderStore adds the cids to the local DHT node provider
 // store.
-func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Key, mh.Multihash]) {
+func (s *SweepingReprovider) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Key, mh.Multihash]) {
 	for _, entry := range allEntries(cids, s.order) {
 		s.router.Provide(s.ctx, cid.NewCidV0(entry.Data), false)
 	}
@@ -885,7 +885,7 @@ func (s *reprovideSweeper) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Ke
 // provide or late reprovide).
 //
 // If the given prefix is already on the schedule, this function is a no op.
-func (s *reprovideSweeper) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration, op provideType) {
+func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration, op provideType) {
 	if op == regularReprovide {
 		// Schedule next reprovide given that the prefix was just reprovided on
 		// schedule. In the case the next reprovide time should be delayed due to a
@@ -899,13 +899,13 @@ func (s *reprovideSweeper) scheduleNextReprovide(prefix bitstr.Key, lastReprovid
 }
 
 // currentTimeOffset returns the current time offset in the reprovide cycle.
-func (s *reprovideSweeper) currentTimeOffset() time.Duration {
+func (s *SweepingReprovider) currentTimeOffset() time.Duration {
 	return s.timeOffset(s.clock.Now())
 }
 
 // timeOffset returns the time offset in the reprovide cycle for the given
 // time.
-func (s *reprovideSweeper) timeOffset(t time.Time) time.Duration {
+func (s *SweepingReprovider) timeOffset(t time.Time) time.Duration {
 	return t.Sub(s.cycleStart) % s.reprovideInterval
 }
 
@@ -928,7 +928,7 @@ const maxPrefixSize = 24
 // This method ensures a deterministic and evenly distributed reprovide
 // schedule, where the temporal position within the cycle is based on the
 // binary representation of the key's prefix.
-func (s *reprovideSweeper) reprovideTimeForPrefix(prefix bitstr.Key) time.Duration {
+func (s *SweepingReprovider) reprovideTimeForPrefix(prefix bitstr.Key) time.Duration {
 	if len(prefix) == 0 {
 		// Empty prefix: all reprovides occur at the beginning of the cycle.
 		return 0
@@ -950,14 +950,14 @@ func (s *reprovideSweeper) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-func (s *reprovideSweeper) catchupPendingNotify() {
+func (s *SweepingReprovider) catchupPendingNotify() {
 	select {
 	case s.catchupPendingChan <- struct{}{}:
 	default:
 	}
 }
 
-func (s *reprovideSweeper) catchupPendingWork() {
+func (s *SweepingReprovider) catchupPendingWork() {
 	pendingCids := s.pendingCids
 	lateRegions := s.lateRegionsQueue
 	if len(pendingCids) == 0 && len(lateRegions) == 0 {
@@ -993,7 +993,7 @@ func (s *reprovideSweeper) catchupPendingWork() {
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
 // prefixes.
-func (s *reprovideSweeper) getAvgPrefixLenNoLock() int {
+func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
 	// NOTE: result should be cached, since there is no need to compute average for every new provide
 	prefixLenSum := 0
 	scheduleSize := s.schedule.Size()
@@ -1010,7 +1010,7 @@ func (s *reprovideSweeper) getAvgPrefixLenNoLock() int {
 
 // localNearestPeersToSelf returns the CommonPrefixLength of all the
 // replicationFactor closest peers to self locally stored share.
-func (s *reprovideSweeper) localNearestPeersCPL() int {
+func (s *SweepingReprovider) localNearestPeersCPL() int {
 	closestToSelf := s.localNearestPeersToSelf(s.replicationFactor)
 	if len(closestToSelf) == 0 {
 		// This means that all cids will be provided under the empty prefix. Not
@@ -1027,7 +1027,7 @@ func (s *reprovideSweeper) localNearestPeersCPL() int {
 // Provide returns an error if the cid failed to be provided to the network.
 // However, it will keep reproviding the cid regardless of whether the first
 // provide succeeded.
-func (s *reprovideSweeper) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
+func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
 	if !broadcast {
 		return s.router.Provide(s.ctx, c, false)
 	}
@@ -1044,7 +1044,7 @@ func (s *reprovideSweeper) Provide(ctx context.Context, c cid.Cid, broadcast boo
 // ProvideMany provides multiple cids to the network. It will return an error
 // if none of the cids could be provided, however it will keep reproviding
 // these cids regardless of the initial provide success.
-func (s *reprovideSweeper) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
+func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
 	req := provideReq{
 		ctx:  ctx,
 		cids: keys,

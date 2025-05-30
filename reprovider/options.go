@@ -25,8 +25,11 @@ type config struct {
 	selfAddrs               func() []ma.Multiaddr
 	localNearestPeersToSelf func(int) []peer.ID
 
-	provideWorkers int
-	clock          clock.Clock
+	clock clock.Clock
+
+	maxWorkers               int
+	dedicatedPeriodicWorkers int
+	dedicatedBurstWorkers    int
 }
 
 func (cfg *config) apply(opts ...Option) error {
@@ -54,6 +57,9 @@ func (c *config) validate() error {
 	if c.localNearestPeersToSelf == nil {
 		return errors.New("reprovider config: local nearest peers to self func is required")
 	}
+	if c.dedicatedPeriodicWorkers+c.dedicatedBurstWorkers > c.maxWorkers {
+		return errors.New("reprovider config: total dedicated workers exceed max workers")
+	}
 	return nil
 }
 
@@ -65,8 +71,11 @@ var DefaultConfig = config{
 	maxReprovideDelay:         1 * time.Hour,
 	connectivityCheckInterval: 5 * time.Minute,
 
-	provideWorkers: 4,
-	clock:          clock.New(),
+	clock: clock.New(),
+
+	maxWorkers:               4,
+	dedicatedPeriodicWorkers: 2,
+	dedicatedBurstWorkers:    1,
 }
 
 func WithReplicationFactor(n int) Option {
@@ -132,16 +141,39 @@ func WithLocalNearestPeersToSelf(f func(int) []peer.ID) Option {
 	}
 }
 
-func WithProvideWorkers(n int) Option {
+func WithClock(c clock.Clock) Option {
 	return func(cfg *config) error {
-		cfg.provideWorkers = n
+		cfg.clock = c
 		return nil
 	}
 }
 
-func WithClock(c clock.Clock) Option {
+func WithMaxWorkers(n int) Option {
 	return func(cfg *config) error {
-		cfg.clock = c
+		if n < 0 {
+			return errors.New("reprovider config: max workers must be non-negative")
+		}
+		cfg.maxWorkers = n
+		return nil
+	}
+}
+
+func WithDedicatedPeriodicWorkers(n int) Option {
+	return func(cfg *config) error {
+		if n < 0 {
+			return errors.New("reprovider config: dedicated periodic workers must be non-negative")
+		}
+		cfg.dedicatedPeriodicWorkers = n
+		return nil
+	}
+}
+
+func WithDedicatedBurstWorkers(n int) Option {
+	return func(cfg *config) error {
+		if n < 0 {
+			return errors.New("reprovider config: dedicated burst workers must be non-negative")
+		}
+		cfg.dedicatedBurstWorkers = n
 		return nil
 	}
 }

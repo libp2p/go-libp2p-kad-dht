@@ -252,7 +252,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, []mh.Multihash{k}, <-r.pendingCidsChan)
 
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, regularReprovide)
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, periodicReprovide)
 	require.Error(t, err)
 	require.Equal(t, prefix, <-r.failedRegionsChan)
 }
@@ -297,7 +297,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.Contains(t, pendingCids, ks[0])
 	require.Contains(t, pendingCids, ks[1])
 
-	err = r.individualProvideForPrefix(ctx, prefix, ks, regularReprovide)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, periodicReprovide)
 	require.Error(t, err)
 	require.Equal(t, prefix, <-r.failedRegionsChan)
 
@@ -321,7 +321,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.Len(t, pendingCids, 1)
 	require.Contains(t, ks, pendingCids[0])
 
-	err = r.individualProvideForPrefix(ctx, prefix, ks, regularReprovide)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, periodicReprovide)
 	require.NoError(t, err)
 	require.Len(t, r.failedRegionsChan, 0)
 	require.Len(t, r.pendingCidsChan, 0)
@@ -728,7 +728,9 @@ func TestProvideMany(t *testing.T) {
 	opts := []Option{
 		WithReprovideInterval(reprovideInterval),
 		WithReplicationFactor(replicationFactor),
-		WithProvideWorkers(1),
+		WithMaxWorkers(1),
+		WithDedicatedBurstWorkers(0),
+		WithDedicatedPeriodicWorkers(0),
 		WithPeerID(pid),
 		WithRouter(router),
 		WithMessageSender(msgSender),
@@ -877,7 +879,9 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	opts := []Option{
 		WithReprovideInterval(reprovideInterval),
 		WithReplicationFactor(replicationFactor),
-		WithProvideWorkers(1),
+		WithMaxWorkers(1),
+		WithDedicatedBurstWorkers(0),
+		WithDedicatedPeriodicWorkers(0),
 		WithPeerID(pid),
 		WithRouter(router),
 		WithMessageSender(msgSender),

@@ -86,7 +86,8 @@ type SweepingReprovider struct {
 
 	connectivity connectivityChecker
 
-	workerPool *pool.Pool[workerType]
+	workerPool               *pool.Pool[workerType]
+	maxProvideConnsPerWorker int
 
 	replicationFactor int
 	clock             clock.Clock
@@ -150,6 +151,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 			periodicWorker: cfg.dedicatedPeriodicWorkers,
 			burstWorker:    cfg.dedicatedBurstWorkers,
 		}),
+		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
 
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),
@@ -829,6 +831,11 @@ func (s *SweepingReprovider) releaseRegionReprovide(prefix bitstr.Key) {
 
 const minimalRegionReachablePeersRatio float32 = 0.2
 
+type provideJob struct {
+	pid  peer.ID
+	cids []mh.Multihash
+}
+
 // regionReprovide manages reprovides for all cids matching the region's prefix
 // to appropriate peers in this keyspace region. Upon failure to reprovide a
 // CID, or to connect to a peer, it will NOT retry.
@@ -840,19 +847,35 @@ const minimalRegionReachablePeersRatio float32 = 0.2
 func (s *SweepingReprovider) regionReprovide(r region) error {
 	cidsAllocations := s.cidsAllocationsToPeers(r)
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
-	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
-	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
 
-	errCount := 0
-	for p, cids := range cidsAllocations {
-		// TODO: allow some reasonable parallelism
-		err := s.provideCidsToPeer(p, cids, pmes)
-		if err != nil {
-			logger.Warn(err)
-			errCount++
-		}
+	errCount := atomic.Uint32{}
+	nWorkers := s.maxProvideConnsPerWorker
+	jobChan := make(chan provideJob, nWorkers)
+
+	wg := sync.WaitGroup{}
+	wg.Add(nWorkers)
+	for range nWorkers {
+		go func() {
+			pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
+			pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
+			defer wg.Done()
+			for job := range jobChan {
+				err := s.provideCidsToPeer(job.pid, job.cids, pmes)
+				if err != nil {
+					logger.Warn(err)
+					errCount.Add(1)
+				}
+			}
+		}()
 	}
-	if errCount > int(float32(len(cidsAllocations))*minimalRegionReachablePeersRatio) {
+
+	for p, cids := range cidsAllocations {
+		jobChan <- provideJob{p, cids}
+	}
+	close(jobChan)
+	wg.Wait()
+
+	if errCount.Load() > uint32(float32(len(cidsAllocations))*minimalRegionReachablePeersRatio) {
 		return errors.New("unable to reprovide to enough peers in region" + string(r.prefix))
 	}
 	return nil

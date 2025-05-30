@@ -30,6 +30,7 @@ type config struct {
 	maxWorkers               int
 	dedicatedPeriodicWorkers int
 	dedicatedBurstWorkers    int
+	maxProvideConnsPerWorker int
 }
 
 func (cfg *config) apply(opts ...Option) error {
@@ -76,6 +77,7 @@ var DefaultConfig = config{
 	maxWorkers:               4,
 	dedicatedPeriodicWorkers: 2,
 	dedicatedBurstWorkers:    1,
+	maxProvideConnsPerWorker: 20,
 }
 
 func WithReplicationFactor(n int) Option {
@@ -174,6 +176,16 @@ func WithDedicatedBurstWorkers(n int) Option {
 			return errors.New("reprovider config: dedicated burst workers must be non-negative")
 		}
 		cfg.dedicatedBurstWorkers = n
+		return nil
+	}
+}
+
+func WithMaxProvideConnsPerWorker(n int) Option {
+	return func(cfg *config) error {
+		if n <= 0 {
+			return errors.New("reprovider config: max provide conns per worker must be greater than 0")
+		}
+		cfg.maxProvideConnsPerWorker = n
 		return nil
 	}
 }

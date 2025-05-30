@@ -620,11 +620,13 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 	}
 
 	errCount := 0
+	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
 	for _, r := range regions {
 		s.addCidsToLocalProviderStore(r.cids)
-		err := s.regionReprovide(r)
+		cidsAllocations := s.cidsAllocationsToPeers(r)
+		err := s.sendProviderRecords(cidsAllocations, addrInfo)
 		if err != nil {
-			logger.Error(err)
+			logger.Error(err, ": region", r.prefix)
 			errCount++
 			s.handleProvideError(r.prefix, r.cids, op)
 			continue
@@ -651,13 +653,15 @@ func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, pre
 	}
 
 	fullRegionReprovide := op == periodicReprovide || op == lateRegionReprovide
-	var err error
+	var provideErr error
 
 	if len(cids) == 1 {
-		err = s.vanillaProvide(ctx, cids[0])
+		coveredPrefix, err := s.vanillaProvide(ctx, cids[0])
 		if err != nil && !fullRegionReprovide {
 			s.pendingCidsChan <- cids
 		}
+		provideErr = err
+		s.scheduleNextReprovide(coveredPrefix, s.currentTimeOffset(), op)
 	} else {
 		wg := sync.WaitGroup{}
 		success := atomic.Bool{}
@@ -665,7 +669,7 @@ func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, pre
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := s.vanillaProvide(ctx, cid)
+				_, err := s.vanillaProvide(ctx, cid)
 				if err == nil {
 					success.Store(true)
 				} else if !fullRegionReprovide {
@@ -675,26 +679,40 @@ func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, pre
 			}()
 		}
 		wg.Wait()
+
 		if !success.Load() {
-			err = errors.New("all individual provides failed for prefix " + string(prefix))
+			provideErr = errors.New("all individual provides failed for prefix " + string(prefix))
 		}
+		s.scheduleNextReprovide(prefix, s.currentTimeOffset(), op)
 	}
 	if fullRegionReprovide {
 		// TODO: persist to datastore that region identified by prefix was reprovided `now`
-		if err != nil {
+		if provideErr != nil {
 			s.failedRegionsChan <- prefix
 		}
 	}
-	s.scheduleNextReprovide(prefix, s.currentTimeOffset(), op)
-	return err
+	return provideErr
 }
 
 // vanillaProvide provides a single cid to the network without any
 // optimization. It should be used for providing a small number of cids
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of cids.
-func (s *SweepingReprovider) vanillaProvide(ctx context.Context, mh mh.Multihash) error {
-	return s.router.Provide(ctx, cid.NewCidV0(mh), true)
+func (s *SweepingReprovider) vanillaProvide(ctx context.Context, k mh.Multihash) (bitstr.Key, error) {
+	// Add provider record to local provider store.
+	s.router.Provide(ctx, cid.NewCidV0(k), false)
+	// Get peers to which the record will be allocated.
+	peers, err := s.closestPeersToKey(bitstr.Key(key.BitString(mhToBit256(k))))
+	if err != nil {
+		return "", err
+	}
+	coveredPrefix, _ := shortestCoveredPrefix(bitstr.Key(key.BitString(mhToBit256(k))), peers)
+	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
+	cidsAllocations := make(map[peer.ID][]mh.Multihash)
+	for _, p := range peers {
+		cidsAllocations[p] = []mh.Multihash{k}
+	}
+	return coveredPrefix, s.sendProviderRecords(cidsAllocations, addrInfo)
 }
 
 // closestPeersToPrefix returns more than s.replicationFactor peers
@@ -844,18 +862,15 @@ type provideJob struct {
 	cids []mh.Multihash
 }
 
-// regionReprovide manages reprovides for all cids matching the region's prefix
-// to appropriate peers in this keyspace region. Upon failure to reprovide a
-// CID, or to connect to a peer, it will NOT retry.
+// sendProviderRecords manages reprovides for all given peer ids and allocated
+// cids. Upon failure to reprovide a CID, or to connect to a peer, it will NOT
+// retry.
 //
 // Returns an error if we were unable to reprovide cids to a given threshold of
 // peers. In this case, the region reprovide is considered failed and the
 // caller is responsible for trying again. This allows detecting if we are
 // offline.
-func (s *SweepingReprovider) regionReprovide(r region) error {
-	cidsAllocations := s.cidsAllocationsToPeers(r)
-	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
-
+func (s *SweepingReprovider) sendProviderRecords(cidsAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo) error {
 	errCount := atomic.Uint32{}
 	nWorkers := s.maxProvideConnsPerWorker
 	jobChan := make(chan provideJob, nWorkers)
@@ -864,8 +879,7 @@ func (s *SweepingReprovider) regionReprovide(r region) error {
 	wg.Add(nWorkers)
 	for range nWorkers {
 		go func() {
-			pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
-			pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
+			pmes := genProvideMessage(addrInfo)
 			defer wg.Done()
 			for job := range jobChan {
 				err := s.provideCidsToPeer(job.pid, job.cids, pmes)
@@ -884,7 +898,7 @@ func (s *SweepingReprovider) regionReprovide(r region) error {
 	wg.Wait()
 
 	if errCount.Load() > uint32(float32(len(cidsAllocations))*minimalRegionReachablePeersRatio) {
-		return errors.New("unable to reprovide to enough peers in region" + string(r.prefix))
+		return errors.New("unable to reprovide to enough peers")
 	}
 	return nil
 }
@@ -905,6 +919,12 @@ func (s *SweepingReprovider) cidsAllocationsToPeers(r region) map[peer.ID][]mh.M
 		}
 	}
 	return keysPerPeer
+}
+
+func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
+	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
+	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
+	return pmes
 }
 
 // maxConsecutiveProvideFailuresAllowed is the maximum number of consecutive
@@ -955,7 +975,20 @@ func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprov
 		// more than s.maxReprovideDelay.
 		nextReprovideTime := min(s.reprovideTimeForPrefix(prefix), lastReprovide+s.reprovideInterval+s.maxReprovideDelay)
 		s.scheduleLk.Lock()
+		// If schedule contains keys starting with prefix, remove them to avoid
+		// overlap.
+		if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
+			for _, entry := range allEntries(subtrie, s.order) {
+				s.schedule.Remove(entry.Key)
+			}
+		} else if ok, _ := trieHasPrefixOfKey(s.schedule, prefix); ok {
+			return
+		}
 		s.schedule.Add(prefix, nextReprovideTime)
+		if s.schedule.Size() == 1 {
+			timeUntilReprovide := (nextReprovideTime-s.currentTimeOffset()+s.reprovideInterval-1)%s.reprovideInterval + 1
+			s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+		}
 		s.scheduleLk.Unlock()
 	}
 }
@@ -1092,6 +1125,9 @@ func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
 // localNearestPeersToSelf returns the CommonPrefixLength of all the
 // replicationFactor closest peers to self locally stored share.
 func (s *SweepingReprovider) localNearestPeersCPL() int {
+	if s.localNearestPeersToSelf == nil {
+		return keyLen
+	}
 	closestToSelf := s.localNearestPeersToSelf(s.replicationFactor)
 	if len(closestToSelf) == 0 {
 		// This means that all cids will be provided under the empty prefix. Not

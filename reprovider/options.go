@@ -56,9 +56,6 @@ func (c *config) validate() error {
 	if c.selfAddrs == nil {
 		return errors.New("reprovider config: self addrs func is required")
 	}
-	if c.localNearestPeersToSelf == nil {
-		return errors.New("reprovider config: local nearest peers to self func is required")
-	}
 	if c.dedicatedPeriodicWorkers+c.dedicatedBurstWorkers > c.maxWorkers {
 		return errors.New("reprovider config: total dedicated workers exceed max workers")
 	}

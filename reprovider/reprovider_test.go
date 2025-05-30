@@ -228,13 +228,16 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 			return nil
 		},
 	}
+	mockClock := clock.NewMock()
 	r := SweepingReprovider{
 		router:            router,
-		clock:             clock.NewMock(),
+		clock:             mockClock,
 		reprovideInterval: time.Hour,
 		pendingCidsChan:   make(chan []mh.Multihash, 1),
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:     mockClock.Timer(time.Hour),
+		getSelfAddrs:      func() []ma.Multiaddr { return nil },
 	}
 
 	// Providing no cids returns no error
@@ -246,8 +249,8 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Providing a single cid - failure
-	router.provideFunc = func(ctx context.Context, k cid.Cid, broadcast bool) error {
-		return errors.New("provide error")
+	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
+		return nil, errors.New("GetClosestPeers error")
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, initialProvide)
 	require.Error(t, err)
@@ -274,13 +277,16 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 			return nil
 		},
 	}
+	mockClock := clock.NewMock()
 	r := SweepingReprovider{
 		router:            router,
-		clock:             clock.NewMock(),
+		clock:             mockClock,
 		reprovideInterval: time.Hour,
 		pendingCidsChan:   make(chan []mh.Multihash, len(ks)),
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:     mockClock.Timer(time.Hour),
+		getSelfAddrs:      func() []ma.Multiaddr { return nil },
 	}
 
 	// Providing two cids - 2 successes
@@ -288,8 +294,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.NoError(t, err)
 
 	// Providing two cids - 2 failures
-	router.provideFunc = func(ctx context.Context, k cid.Cid, broadcast bool) error {
-		return errors.New("provide error")
+	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
+		return nil, errors.New("GetClosestPeers error")
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
 	require.Error(t, err)
@@ -305,11 +311,11 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	// Providing two cids - 1 success, 1 failure
 	lk := sync.Mutex{}
 	counter := 0
-	router.provideFunc = func(ctx context.Context, k cid.Cid, broadcast bool) (err error) {
+	router.getClosestPeersFunc = func(ctx context.Context, k string) (peers []peer.ID, err error) {
 		lk.Lock()
 		defer lk.Unlock()
 		if counter%2 == 0 {
-			err = errors.New("provide error")
+			err = errors.New("GetClosestPeers error")
 		}
 		counter++
 		return
@@ -628,7 +634,7 @@ func TestProvideSingle(t *testing.T) {
 	// Blocks until cid is provided
 	err = prov.Provide(ctx, c, true)
 	require.NoError(t, err)
-	require.Equal(t, 0, getClosestPeersCount)
+	require.Equal(t, 1, getClosestPeersCount)
 	require.Equal(t, 1, provideCount)
 
 	// Verify reprovide is scheduled.
@@ -643,25 +649,25 @@ func TestProvideSingle(t *testing.T) {
 	require.Equal(t, reprovider.reprovideTimeForPrefix(prefix), reprovideTime)
 	reprovider.scheduleLk.Unlock()
 
-	// Try to reprovide the same cid. Returns no error, but it is a noop.
+	// Try to provide the same cid again. Returns no error, but it is a noop.
 	err = prov.Provide(ctx, c, true)
 	require.NoError(t, err)
-	require.Equal(t, 0, getClosestPeersCount)
+	require.Equal(t, 1, getClosestPeersCount)
 	require.Equal(t, 1, provideCount)
 
 	// Verify reprovide happens as scheduled.
 	mockClock.Add(reprovideTime - 1)
-	require.Equal(t, 0, getClosestPeersCount)
+	require.Equal(t, 1, getClosestPeersCount)
 	require.Equal(t, 1, provideCount)
 	mockClock.Add(1)
-	require.Equal(t, 0, getClosestPeersCount)
+	require.Equal(t, 2, getClosestPeersCount)
 	require.Equal(t, 2, provideCount)
 	mockClock.Add(reprovideInterval - 1)
-	require.Equal(t, 0, getClosestPeersCount)
+	require.Equal(t, 2, getClosestPeersCount)
 	require.Equal(t, 2, provideCount)
-	mockClock.Add(1)
-	require.Equal(t, 0, getClosestPeersCount)
-	require.Equal(t, 3, provideCount)
+	mockClock.Add(reprovideInterval) // 1
+	require.Equal(t, 2, getClosestPeersCount)
+	require.Equal(t, 2, provideCount)
 }
 
 func TestProvideMany(t *testing.T) {

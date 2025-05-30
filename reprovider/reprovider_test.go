@@ -207,6 +207,7 @@ func TestGetAvgPrefixLenEmptySchedule(t *testing.T) {
 		localNearestPeersToSelf: func(n int) []peer.ID {
 			return localPeers[:min(n, len(localPeers))]
 		},
+		clock: clock.New(),
 	}
 
 	reprovider.scheduleLk.Lock()
@@ -893,7 +894,8 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 			return peers[:min(n, len(peers))]
 		}),
 		WithClock(mockClock),
-		WithConnectivityCheckInterval(connectivityCheckInterval),
+		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
+		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
 	prov, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)

@@ -13,10 +13,11 @@ import (
 )
 
 type config struct {
-	replicationFactor         int
-	reprovideInterval         time.Duration
-	maxReprovideDelay         time.Duration
-	connectivityCheckInterval time.Duration
+	replicationFactor                int
+	reprovideInterval                time.Duration
+	maxReprovideDelay                time.Duration
+	connectivityCheckOnlineInterval  time.Duration
+	connectivityCheckOfflineInterval time.Duration
 
 	peerid peer.ID
 	router KadRouter
@@ -67,10 +68,11 @@ func (c *config) validate() error {
 type Option func(opt *config) error
 
 var DefaultConfig = config{
-	replicationFactor:         amino.DefaultBucketSize,
-	reprovideInterval:         22 * time.Hour,
-	maxReprovideDelay:         1 * time.Hour,
-	connectivityCheckInterval: 5 * time.Minute,
+	replicationFactor:                amino.DefaultBucketSize,
+	reprovideInterval:                22 * time.Hour,
+	maxReprovideDelay:                1 * time.Hour,
+	connectivityCheckOnlineInterval:  time.Minute,
+	connectivityCheckOfflineInterval: 5 * time.Minute,
 
 	clock: clock.New(),
 
@@ -101,9 +103,16 @@ func WithMaxReprovideDelay(d time.Duration) Option {
 	}
 }
 
-func WithConnectivityCheckInterval(d time.Duration) Option {
+func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
-		cfg.connectivityCheckInterval = d
+		cfg.connectivityCheckOnlineInterval = d
+		return nil
+	}
+}
+
+func WithConnectivityCheckOfflineInterval(d time.Duration) Option {
+	return func(cfg *config) error {
+		cfg.connectivityCheckOfflineInterval = d
 		return nil
 	}
 }

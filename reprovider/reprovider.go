@@ -95,6 +95,11 @@ type SweepingReprovider struct {
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
 
+	avgPrefixLenLk       sync.Mutex
+	cachedAvgPrefixLen   int
+	lastAvgPrefixLen     time.Time
+	avgPrefixLenValidity time.Duration
+
 	cids *trie.Trie[bit256.Key, mh.Multihash]
 
 	provideChan            chan provideReq
@@ -140,8 +145,8 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 		connectivity: connectivityChecker{
 			ctx:                  ctx,
 			clock:                cfg.clock,
-			onlineCheckInterval:  cfg.connectivityCheckInterval, // NOTE: adapt this
-			offlineCheckInterval: cfg.connectivityCheckInterval, // NOTE: adapt this
+			onlineCheckInterval:  cfg.connectivityCheckOnlineInterval,
+			offlineCheckInterval: cfg.connectivityCheckOfflineInterval,
 			checkFunc: func() bool {
 				peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 				return err == nil && len(peers) > 0
@@ -152,6 +157,8 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 			burstWorker:    cfg.dedicatedBurstWorkers,
 		}),
 		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
+
+		avgPrefixLenValidity: 5 * time.Minute,
 
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),
@@ -588,7 +595,6 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 			s.handleProvideError(prefix, subtrie, op)
 			return explorationErr
 		}
-		// NOTE: there is probably a better way to handle this error
 		logger.Errorf("prefix key exploration not complete: %s", prefix)
 	}
 	if len(peers) == 0 {
@@ -604,8 +610,10 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 		// When reproviding a region, remove all scheduled regions starting with
 		// the currently covered prefix.
 		s.unscheduleSubsumedPrefixes(coveredPrefix)
-		// NOTE: provideMany can be optimized the same way
-		//
+
+		// NOTE: same can be done for provideMany, this would remove incentive to find initial prefix len.
+		// region reprovide should unschedule provieMany, but not the opposite
+
 		// Claim the regions to be reprovided, so that no other thread will try to
 		// reprovdie them concurrently.
 		regions = s.claimRegionReprovide(regions)
@@ -1059,18 +1067,26 @@ func (s *SweepingReprovider) catchupPendingWork() {
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
 // prefixes.
 func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
-	// NOTE: result should be cached, since there is no need to compute average for every new provide
+	s.avgPrefixLenLk.Lock()
+	defer s.avgPrefixLenLk.Unlock()
+	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(s.clock.Now()) {
+		// Return cached value if it is still valid.
+		return s.cachedAvgPrefixLen
+	}
 	prefixLenSum := 0
 	scheduleSize := s.schedule.Size()
 	if scheduleSize == 0 {
 		// No reprovide has been scheduled yet. Try to get a good prefix length
 		// estimate from the routing table.
-		return s.localNearestPeersCPL()
+		s.cachedAvgPrefixLen = s.localNearestPeersCPL()
+	} else {
+		// Take average prefix length of all scheduled prefixes.
+		for _, entry := range allEntries(s.schedule, s.order) {
+			prefixLenSum += len(entry.Key)
+		}
+		s.cachedAvgPrefixLen = prefixLenSum / scheduleSize
 	}
-	for _, entry := range allEntries(s.schedule, s.order) {
-		prefixLenSum += len(entry.Key)
-	}
-	return prefixLenSum / scheduleSize
+	return s.cachedAvgPrefixLen
 }
 
 // localNearestPeersToSelf returns the CommonPrefixLength of all the

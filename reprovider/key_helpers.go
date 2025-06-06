@@ -6,7 +6,7 @@ import (
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multihash"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
@@ -14,7 +14,7 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
-func mhToBit256(h multihash.Multihash) bit256.Key {
+func mhToBit256(h mh.Multihash) bit256.Key {
 	hash := sha256.Sum256(h)
 	return bit256.NewKey(hash[:])
 }
@@ -109,12 +109,12 @@ func shortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, [
 
 type prefixAndCids struct {
 	prefix bitstr.Key
-	cids   *trie.Trie[bit256.Key, multihash.Multihash]
+	cids   *trie.Trie[bit256.Key, mh.Multihash]
 }
 
 // sortPrefixesBySize sorts the prefixes by the number of CIDs they contain,
 // largest first.
-func sortPrefixesBySize(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, multihash.Multihash]) []prefixAndCids {
+func sortPrefixesBySize(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash]) []prefixAndCids {
 	out := make([]prefixAndCids, 0, len(prefixes))
 	for prefix, cids := range prefixes {
 		if cids != nil {

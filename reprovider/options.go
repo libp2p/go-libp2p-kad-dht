@@ -22,9 +22,8 @@ type config struct {
 	peerid peer.ID
 	router KadRouter
 
-	msgSender               pb.MessageSender
-	selfAddrs               func() []ma.Multiaddr
-	localNearestPeersToSelf func(int) []peer.ID
+	msgSender pb.MessageSender
+	selfAddrs func() []ma.Multiaddr
 
 	clock clock.Clock
 
@@ -138,13 +137,6 @@ func WithMessageSender(m pb.MessageSender) Option {
 func WithSelfAddrs(f func() []ma.Multiaddr) Option {
 	return func(cfg *config) error {
 		cfg.selfAddrs = f
-		return nil
-	}
-}
-
-func WithLocalNearestPeersToSelf(f func(int) []peer.ID) Option {
-	return func(cfg *config) error {
-		cfg.localNearestPeersToSelf = f
 		return nil
 	}
 }

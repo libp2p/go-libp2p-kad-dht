@@ -28,6 +28,9 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Provider announces blocks to the network
@@ -120,6 +123,8 @@ type SweepingReprovider struct {
 
 	msgSender    pb.MessageSender
 	getSelfAddrs func() []ma.Multiaddr
+
+	provideCounter metric.Int64Counter
 }
 
 func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
@@ -129,6 +134,14 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 		return nil, err
 	}
 	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/reprovider")
+	providerCounter, err := meter.Int64Counter(
+		"total_provide_count",
+		metric.WithDescription("Number of successful provides since node is running"),
+	)
+	if err != nil {
 		return nil, err
 	}
 	reprovider := &SweepingReprovider{
@@ -176,6 +189,8 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 		catchupPendingChan: make(chan struct{}, 1),
 
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
+
+		provideCounter: providerCounter,
 	}
 	// Don't need to start schedule timer yet
 	reprovider.scheduleTimer.Stop()
@@ -695,6 +710,7 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 			s.handleProvideError(r.prefix, r.cids, op)
 			continue
 		}
+		s.provideCounter.Add(s.ctx, int64(r.cids.Size()))
 
 		s.scheduleNextReprovide(r.prefix, s.currentTimeOffset(), op)
 		if op == periodicReprovide || op == lateRegionReprovide {

@@ -80,6 +80,12 @@ type provideReq struct {
 	done chan error
 }
 
+type resetCidsReq struct {
+	ctx  context.Context
+	cids chan mh.Multihash
+	done chan error
+}
+
 type SweepingReprovider struct {
 	ctx    context.Context
 	peerid peer.ID
@@ -102,7 +108,8 @@ type SweepingReprovider struct {
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
 
-	cids *trie.Trie[bit256.Key, mh.Multihash]
+	cids          *trie.Trie[bit256.Key, mh.Multihash]
+	resetCidsChan chan resetCidsReq
 
 	provideChan            chan provideReq
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
@@ -127,7 +134,7 @@ type SweepingReprovider struct {
 	provideCounter metric.Int64Counter
 }
 
-func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
+func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, error) {
 	cfg := DefaultConfig
 	err := cfg.apply(opts...)
 	if err != nil {
@@ -178,7 +185,8 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 		msgSender:    cfg.msgSender,
 		getSelfAddrs: cfg.selfAddrs,
 
-		cids: trie.New[bit256.Key, mh.Multihash](),
+		cids:          trie.New[bit256.Key, mh.Multihash](),
+		resetCidsChan: make(chan resetCidsReq, 1),
 
 		provideChan:   make(chan provideReq),
 		schedule:      trie.New[bitstr.Key, time.Duration](),
@@ -204,7 +212,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (Provider, error) {
 	return reprovider, nil
 }
 
-func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (Provider, error) {
+func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (*SweepingReprovider, error) {
 	opts = append([]Option{
 		WithPeerID(dht.Host().ID()),
 		WithRouter(dht),
@@ -245,6 +253,8 @@ func (s *SweepingReprovider) run() {
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
 			s.catchupPendingWork()
+		case req := <-s.resetCidsChan:
+			s.resetCids(req)
 		}
 	}
 }
@@ -301,7 +311,7 @@ func (s *SweepingReprovider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	s.schedule.Add(prefix, reprovideTime)
 
 	currentTimeOffset := s.currentTimeOffset()
-	timeUntilReprovide := (reprovideTime-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+	timeUntilReprovide := s.timeBetween(currentTimeOffset, reprovideTime)
 	if s.prefixCursor == "" {
 		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 	} else {
@@ -311,7 +321,7 @@ func (s *SweepingReprovider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 			if !found {
 				s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 			} else {
-				timeUntilScheduledAlarm := (scheduledAlarm - currentTimeOffset + s.reprovideInterval) % s.reprovideInterval
+				timeUntilScheduledAlarm := s.timeBetween(currentTimeOffset, scheduledAlarm)
 				if timeUntilReprovide < timeUntilScheduledAlarm {
 					s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 				}
@@ -536,10 +546,10 @@ func (s *SweepingReprovider) handleReprovide() {
 	if next.Key == currentPrefix {
 		// There is a single prefix in the schedule.
 		nextPrefix = currentPrefix
-		timeUntilNextReprovide = (s.reprovideTimeForPrefix(currentPrefix)-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+		timeUntilNextReprovide = s.timeBetween(currentTimeOffset, s.reprovideTimeForPrefix(currentPrefix))
 	} else {
-		timeSinceTimerRunning := (currentTimeOffset - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
-		timeSinceTimerUntilNext := (next.Data - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
+		timeSinceTimerRunning := s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), currentTimeOffset)
+		timeSinceTimerUntilNext := s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 
 		if s.scheduleTimerStartedAt.Add(s.reprovideInterval).Before(s.clock.Now()) {
 			// Alarm was programmed more than reprovideInterval ago, which means that
@@ -561,7 +571,7 @@ func (s *SweepingReprovider) handleReprovide() {
 			if !nextKeyFound {
 				next = scheduleEntries[0]
 			}
-			timeUntilNextReprovide = (next.Data-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+			timeUntilNextReprovide = s.timeBetween(currentTimeOffset, next.Data)
 			// Don't reprovide any region now, but schedule the next one. All regions
 			// are expected to be reprovided when the provider is catching up with
 			// failed regions.
@@ -581,7 +591,7 @@ func (s *SweepingReprovider) handleReprovide() {
 					s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 				}
 				next = nextNonEmptyLeaf(s.schedule, next.Key, s.order)
-				timeSinceTimerUntilNext = (next.Data - s.timeOffset(s.scheduleTimerStartedAt) + s.reprovideInterval) % s.reprovideInterval
+				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
 			}
 			s.connectivity.triggerCheck()
@@ -593,7 +603,7 @@ func (s *SweepingReprovider) handleReprovide() {
 		}
 		// next is in the future
 		nextPrefix = next.Key
-		timeUntilNextReprovide = (next.Data-currentTimeOffset+s.reprovideInterval-1)%s.reprovideInterval + 1
+		timeUntilNextReprovide = s.timeBetween(currentTimeOffset, next.Data)
 	}
 
 	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilNextReprovide)
@@ -936,7 +946,7 @@ func (s *SweepingReprovider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 					if next == nil {
 						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
 					} else {
-						timeUntilReprovide := (s.reprovideInterval+next.Data-s.currentTimeOffset()-1)%s.reprovideInterval + 1
+						timeUntilReprovide := s.timeUntil(next.Data)
 						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
 					}
 				}
@@ -1110,7 +1120,7 @@ func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprov
 		}
 		s.schedule.Add(prefix, nextReprovideTime)
 		if s.schedule.Size() == 1 {
-			timeUntilReprovide := (nextReprovideTime-s.currentTimeOffset()+s.reprovideInterval-1)%s.reprovideInterval + 1
+			timeUntilReprovide := s.timeUntil(nextReprovideTime)
 			s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 		}
 		s.scheduleLk.Unlock()
@@ -1126,6 +1136,17 @@ func (s *SweepingReprovider) currentTimeOffset() time.Duration {
 // time.
 func (s *SweepingReprovider) timeOffset(t time.Time) time.Duration {
 	return t.Sub(s.cycleStart) % s.reprovideInterval
+}
+
+// timeUntil returns the time left (duration) until the given time offset.
+func (s *SweepingReprovider) timeUntil(d time.Duration) time.Duration {
+	return s.timeBetween(s.currentTimeOffset(), d)
+}
+
+// timeBetween returns the duration between the two provided offsets, assuming
+// it is no more than s.reprovideInterval.
+func (s *SweepingReprovider) timeBetween(from, to time.Duration) time.Duration {
+	return (to-from+s.reprovideInterval-1)%s.reprovideInterval + 1
 }
 
 const maxPrefixSize = 24
@@ -1167,6 +1188,17 @@ func (s *SweepingReprovider) reprovideTimeForPrefix(prefix bitstr.Key) time.Dura
 	val, _ := strconv.ParseInt(string(k), 2, 64)
 	// Calculate the time offset as a fraction of the overall reprovide interval.
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
+}
+
+// nextPrefixToReprovide returns the next prefix to reprovide, based on the
+// current time offset.
+func (s *SweepingReprovider) nextPrefixToReprovideNoLock() bitstr.Key {
+	now := s.currentTimeOffset()
+	maxVal := time.Duration(1 << maxPrefixSize)
+
+	intPrefix := now * maxVal / s.reprovideInterval
+	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
+	return nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
 }
 
 func (s *SweepingReprovider) catchupPendingNotify() {
@@ -1267,9 +1299,82 @@ func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihas
 	req := provideReq{
 		ctx:  ctx,
 		cids: keys,
-		done: make(chan error),
+		done: make(chan error, 1),
 	}
 	s.provideChan <- req
 	// Wait for all cids to be provided before returning.
 	return <-req.done
+}
+
+func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan chan mh.Multihash) error {
+	req := resetCidsReq{
+		ctx:  ctx,
+		cids: keyChan,
+		done: make(chan error, 1),
+	}
+	s.resetCidsChan <- req
+	// Wait for the reset to complete before returning.
+	return <-req.done
+}
+
+func (s *SweepingReprovider) clearPendingWork() {
+	s.lateRegionsQueue = s.lateRegionsQueue[:0]
+	s.pendingCids = s.pendingCids[:0]
+	// Emtpy chans with pending work
+	for {
+		select {
+		case <-s.failedRegionsChan:
+		case <-s.pendingCidsChan:
+		case <-s.catchupPendingChan:
+		default:
+			return
+		}
+	}
+}
+
+func (s *SweepingReprovider) resetCids(req resetCidsReq) {
+	var err error
+	s.cids = trie.New[bit256.Key, mh.Multihash]()
+
+	s.scheduleLk.Lock()
+	prefixLen := s.getAvgPrefixLenNoLock()
+	newSchedule := trie.New[bitstr.Key, time.Duration]()
+
+loop:
+	for {
+		select {
+		case <-req.ctx.Done():
+			err = req.ctx.Err()
+			break loop
+		case h, ok := <-req.cids:
+			if !ok {
+				break loop // all keys processed
+			}
+			k := mhToBit256(h)
+			// Add new key to cids trie
+			s.cids.Add(k, h)
+
+			// Add to local provider store
+			s.router.Provide(s.ctx, cid.NewCidV0(h), false)
+
+			// Add according prefix to schedule if needed
+			if ok, _ := trieHasPrefixOfKey(newSchedule, k); !ok {
+				var prefix bitstr.Key
+				if ok, p := trieHasPrefixOfKey(s.schedule, k); ok {
+					prefix = p
+				} else {
+					prefix = bitstr.Key(key.BitString(k)[:prefixLen])
+				}
+				newSchedule.Add(prefix, s.reprovideTimeForPrefix(prefix))
+			}
+		}
+	}
+	nextPrefix := s.nextPrefixToReprovideNoLock()
+	timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix))
+	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
+	s.scheduleLk.Unlock()
+
+	s.clearPendingWork()
+
+	req.done <- err
 }

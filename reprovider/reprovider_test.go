@@ -430,8 +430,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 			return nil
 		}),
 	}
-	prov, err := NewReprovider(ctx, opts...)
-	reprovider := prov.(*SweepingReprovider)
+	reprovider, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
 
 	_ = reprovider
@@ -439,12 +438,12 @@ func TestProvideNoBootstrap(t *testing.T) {
 
 	// Set the reprovider as offline
 	reprovider.connectivity.online.Store(false)
-	err = prov.Provide(ctx, c, true)
+	err = reprovider.Provide(ctx, c, true)
 	require.ErrorIs(t, ErrNodeOffline, err)
 
 	// Set the reprovider as online, but don't bootstrap it
 	reprovider.connectivity.online.Store(true)
-	err = prov.Provide(ctx, c, true)
+	err = reprovider.Provide(ctx, c, true)
 	require.NoError(t, err)
 }
 
@@ -576,17 +575,16 @@ func TestProvideSingle(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	prov, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
 
 	// Blocks until cid is provided
-	err = prov.Provide(ctx, c, true)
+	err = reprovider.Provide(ctx, c, true)
 	require.NoError(t, err)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, 1, int(provideCount.Load()))
 
 	// Verify reprovide is scheduled.
-	reprovider := prov.(*SweepingReprovider)
 	prefix := bitstr.Key(key.BitString(mhToBit256(c.Hash()))[:prefixLen])
 	reprovider.scheduleLk.Lock()
 	require.Equal(t, 1, reprovider.schedule.Size())
@@ -600,7 +598,7 @@ func TestProvideSingle(t *testing.T) {
 	reprovider.scheduleLk.Unlock()
 
 	// Try to provide the same cid again. Returns no error, but it is a noop.
-	err = prov.Provide(ctx, c, true)
+	err = reprovider.Provide(ctx, c, true)
 	require.NoError(t, err)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, 1, int(provideCount.Load()))
@@ -684,11 +682,10 @@ func TestProvideMany(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	prov, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
 	mockClock.Add(reprovideInterval - 1)
 
-	reprovider := prov.(*SweepingReprovider)
 	err = reprovider.ProvideMany(ctx, mhs)
 	require.NoError(t, err)
 
@@ -828,12 +825,11 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
-	prov, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
 	time.Sleep(time.Millisecond)
 	routerOffline.Store(true)
 
-	reprovider := prov.(*SweepingReprovider)
 	reprovider.connectivity = connectivityChecker{
 		ctx:                  ctx,
 		clock:                mockClock,

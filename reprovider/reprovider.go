@@ -77,13 +77,13 @@ const (
 type provideReq struct {
 	ctx  context.Context
 	cids []mh.Multihash
-	done chan error
+	done chan<- error
 }
 
 type resetCidsReq struct {
 	ctx  context.Context
-	cids chan mh.Multihash
-	done chan error
+	cids <-chan mh.Multihash
+	done chan<- error
 }
 
 type SweepingReprovider struct {
@@ -212,7 +212,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	return reprovider, nil
 }
 
-func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (*SweepingReprovider, error) {
+func NewDHTReprovider(dht *dht.IpfsDHT, opts ...Option) (*SweepingReprovider, error) {
 	opts = append([]Option{
 		WithPeerID(dht.Host().ID()),
 		WithRouter(dht),
@@ -220,7 +220,7 @@ func NewDHTReprovider(ctx context.Context, dht *dht.IpfsDHT, opts ...Option) (*S
 		WithMessageSender(net.NewMessageSenderImpl(dht.Host(), dht.Protocols())),
 	}, opts...,
 	)
-	return NewReprovider(ctx, opts...)
+	return NewReprovider(dht.Context(), opts...)
 }
 
 func (s *SweepingReprovider) run() {
@@ -1253,70 +1253,6 @@ func (s *SweepingReprovider) catchupPendingWork() {
 	}()
 }
 
-// getAvgPrefixLenNoLock returns the average prefix length of all scheduled
-// prefixes.
-func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
-	s.avgPrefixLenLk.Lock()
-	defer s.avgPrefixLenLk.Unlock()
-	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(s.clock.Now()) {
-		// Return cached value if it is still valid.
-		return s.cachedAvgPrefixLen
-	}
-	prefixLenSum := 0
-	scheduleSize := s.schedule.Size()
-	if scheduleSize > 0 {
-		// Take average prefix length of all scheduled prefixes.
-		for _, entry := range allEntries(s.schedule, s.order) {
-			prefixLenSum += len(entry.Key)
-		}
-		s.cachedAvgPrefixLen = prefixLenSum / scheduleSize
-		s.lastAvgPrefixLen = s.clock.Now()
-	}
-	return s.cachedAvgPrefixLen
-}
-
-// Provide returns an error if the cid failed to be provided to the network.
-// However, it will keep reproviding the cid regardless of whether the first
-// provide succeeded.
-func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
-	if !broadcast {
-		return s.router.Provide(s.ctx, c, false)
-	}
-	req := provideReq{
-		ctx:  ctx,
-		cids: []mh.Multihash{c.Hash()},
-		done: make(chan error),
-	}
-	s.provideChan <- req
-	// Wait for initial provide to complete before returning.
-	return <-req.done
-}
-
-// ProvideMany provides multiple cids to the network. It will return an error
-// if none of the cids could be provided, however it will keep reproviding
-// these cids regardless of the initial provide success.
-func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
-	req := provideReq{
-		ctx:  ctx,
-		cids: keys,
-		done: make(chan error, 1),
-	}
-	s.provideChan <- req
-	// Wait for all cids to be provided before returning.
-	return <-req.done
-}
-
-func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan chan mh.Multihash) error {
-	req := resetCidsReq{
-		ctx:  ctx,
-		cids: keyChan,
-		done: make(chan error, 1),
-	}
-	s.resetCidsChan <- req
-	// Wait for the reset to complete before returning.
-	return <-req.done
-}
-
 func (s *SweepingReprovider) clearPendingWork() {
 	s.lateRegionsQueue = s.lateRegionsQueue[:0]
 	s.pendingCids = s.pendingCids[:0]
@@ -1377,4 +1313,71 @@ loop:
 	s.clearPendingWork()
 
 	req.done <- err
+}
+
+// getAvgPrefixLenNoLock returns the average prefix length of all scheduled
+// prefixes.
+func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
+	s.avgPrefixLenLk.Lock()
+	defer s.avgPrefixLenLk.Unlock()
+	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(s.clock.Now()) {
+		// Return cached value if it is still valid.
+		return s.cachedAvgPrefixLen
+	}
+	prefixLenSum := 0
+	scheduleSize := s.schedule.Size()
+	if scheduleSize > 0 {
+		// Take average prefix length of all scheduled prefixes.
+		for _, entry := range allEntries(s.schedule, s.order) {
+			prefixLenSum += len(entry.Key)
+		}
+		s.cachedAvgPrefixLen = prefixLenSum / scheduleSize
+		s.lastAvgPrefixLen = s.clock.Now()
+	}
+	return s.cachedAvgPrefixLen
+}
+
+// Provide returns an error if the cid failed to be provided to the network.
+// However, it will keep reproviding the cid regardless of whether the first
+// provide succeeded.
+func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
+	if !broadcast {
+		return s.router.Provide(s.ctx, c, false)
+	}
+	doneChan := make(chan error, 1)
+	req := provideReq{
+		ctx:  ctx,
+		cids: []mh.Multihash{c.Hash()},
+		done: doneChan,
+	}
+	s.provideChan <- req
+	// Wait for initial provide to complete before returning.
+	return <-doneChan
+}
+
+// ProvideMany provides multiple cids to the network. It will return an error
+// if none of the cids could be provided, however it will keep reproviding
+// these cids regardless of the initial provide success.
+func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
+	doneChan := make(chan error, 1)
+	req := provideReq{
+		ctx:  ctx,
+		cids: keys,
+		done: doneChan,
+	}
+	s.provideChan <- req
+	// Wait for all cids to be provided before returning.
+	return <-doneChan
+}
+
+func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {
+	doneChan := make(chan error, 1)
+	req := resetCidsReq{
+		ctx:  ctx,
+		cids: keyChan,
+		done: doneChan,
+	}
+	s.resetCidsChan <- req
+	// Wait for the reset to complete before returning.
+	return <-doneChan
 }

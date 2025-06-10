@@ -5,14 +5,13 @@ package dual
 import (
 	"context"
 	"fmt"
-	"sync"
-
 	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
+	"github.com/libp2p/go-libp2p-record/pb"
 	helper "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p-routing-helpers/tracing"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
@@ -23,6 +22,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"go.uber.org/multierr"
+	"sync"
 )
 
 const (
@@ -246,6 +246,55 @@ func (dht *DHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) 
 		}
 	}()
 	return outCh
+}
+
+// PutRecordTo Stores a record at specific peers
+func (dht *DHT) PutRecordTo(ctx context.Context, record *pb.Record, peers []peer.AddrInfo, updateLocalStorage bool) error {
+	if dht.WANActive() {
+		err := dht.WAN.PutRecordAtPeer(ctx, record, peers)
+		if err != nil {
+			return err
+		}
+	}
+
+	if updateLocalStorage {
+		err := dht.LAN.PutRecordAtPeer(ctx, record, peers)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// StoreRecord stores a record locally as well as at the nodes closest to the key as per the xor distance metric.
+func (dht *DHT) StoreRecord(ctx context.Context, key string, rec *pb.Record) error {
+	err := dht.LAN.StoreRecord(ctx, key, rec)
+	if err != nil {
+		return err
+	}
+
+	if dht.WANActive() {
+		peers, err := dht.WAN.GetClosestPeers(ctx, key)
+		if err != nil {
+			return err
+		}
+
+		peerAddrBook := make([]peer.AddrInfo, len(peers))
+		for _, id := range peers {
+			peerAddr, err := dht.WAN.FindPeer(ctx, id)
+			if err != nil {
+				return err
+			}
+			peerAddrBook = append(peerAddrBook, peerAddr)
+		}
+		err = dht.WAN.PutRecordAtPeer(ctx, rec, peerAddrBook)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // FindPeer searches for a peer with given ID

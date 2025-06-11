@@ -299,16 +299,8 @@ func (dht *FullRT) Ready() bool {
 	return rtSize > len(dht.bootstrapPeers)+1
 }
 
-func (dht *FullRT) Context() context.Context {
-	return dht.ctx
-}
-
 func (dht *FullRT) Host() host.Host {
 	return dht.h
-}
-
-func (dht *FullRT) MessageSender() dht_pb.MessageSender {
-	return dht.messageSender
 }
 
 func (dht *FullRT) runCrawler(ctx context.Context) {

@@ -897,10 +897,6 @@ func (dht *IpfsDHT) Host() host.Host {
 	return dht.host
 }
 
-func (dht *IpfsDHT) Protocols() []protocol.ID {
-	return dht.protocols
-}
-
 func (dht *IpfsDHT) MessageSender() pb.MessageSender {
 	return dht.msgSender
 }

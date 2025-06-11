@@ -48,9 +48,8 @@ var (
 	_ ProvideMany = &SweepingReprovider{}
 )
 
-type KadRouter interface {
+type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
-	Provide(context.Context, cid.Cid, bool) error
 }
 
 var logger = logging.Logger("dht/SweepingReprovider")
@@ -89,7 +88,7 @@ type resetCidsReq struct {
 type SweepingReprovider struct {
 	ctx    context.Context
 	peerid peer.ID
-	router KadRouter
+	router KadClosestPeersRouter
 	order  bit256.Key
 
 	connectivity connectivityChecker
@@ -128,8 +127,9 @@ type SweepingReprovider struct {
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
 	ongoingReprovidesLk sync.Mutex
 
-	msgSender    pb.MessageSender
-	getSelfAddrs func() []ma.Multiaddr
+	msgSender      pb.MessageSender
+	getSelfAddrs   func() []ma.Multiaddr
+	addLocalRecord func(mh.Multihash) error
 
 	provideCounter metric.Int64Counter
 }
@@ -182,8 +182,9 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),
 
-		msgSender:    cfg.msgSender,
-		getSelfAddrs: cfg.selfAddrs,
+		msgSender:      cfg.msgSender,
+		getSelfAddrs:   cfg.selfAddrs,
+		addLocalRecord: cfg.addLocalRecord,
 
 		cids:          trie.New[bit256.Key, mh.Multihash](),
 		resetCidsChan: make(chan resetCidsReq, 1),
@@ -218,6 +219,9 @@ func NewDHTReprovider(dht *dht.IpfsDHT, opts ...Option) (*SweepingReprovider, er
 		WithRouter(dht),
 		WithSelfAddrs(dht.FilteredAddrs),
 		WithMessageSender(net.NewMessageSenderImpl(dht.Host(), dht.Protocols())),
+		WithAddLocalRecord(func(h mh.Multihash) error {
+			return dht.Provide(dht.Context(), cid.NewCidV0(h), false)
+		}),
 	}, opts...,
 	)
 	return NewReprovider(dht.Context(), opts...)
@@ -708,7 +712,10 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 			}
 			continue
 		}
-		s.addCidsToLocalProviderStore(r.cids)
+		// Add keys to local provider store
+		for _, entry := range allEntries(r.cids, s.order) {
+			s.addLocalRecord(entry.Data)
+		}
 		cidsAllocations := s.cidsAllocationsToPeers(r)
 		err := s.sendProviderRecords(cidsAllocations, addrInfo)
 		if claimRegions {
@@ -787,9 +794,9 @@ func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, pre
 // overhead for a small number of cids.
 func (s *SweepingReprovider) vanillaProvide(ctx context.Context, k mh.Multihash) (bitstr.Key, error) {
 	// Add provider record to local provider store.
-	s.router.Provide(ctx, cid.NewCidV0(k), false)
+	s.addLocalRecord(k)
 	// Get peers to which the record will be allocated.
-	peers, err := s.router.GetClosestPeers(s.ctx, string(k))
+	peers, err := s.router.GetClosestPeers(ctx, string(k))
 	if err != nil {
 		return "", err
 	}
@@ -1088,14 +1095,6 @@ func (s *SweepingReprovider) provideCidsToPeer(p peer.ID, cids []mh.Multihash, p
 	return nil
 }
 
-// addCidsToLocalProviderStore adds the cids to the local DHT node provider
-// store.
-func (s *SweepingReprovider) addCidsToLocalProviderStore(cids *trie.Trie[bit256.Key, mh.Multihash]) {
-	for _, entry := range allEntries(cids, s.order) {
-		s.router.Provide(s.ctx, cid.NewCidV0(entry.Data), false)
-	}
-}
-
 // scheduleNextReprovide schedules the next periodical reprovide for the given
 // prefix, if the current operation is a periodic reprovide (not if initial
 // provide or late reprovide).
@@ -1291,7 +1290,7 @@ loop:
 			s.cids.Add(k, h)
 
 			// Add to local provider store
-			s.router.Provide(s.ctx, cid.NewCidV0(h), false)
+			s.addLocalRecord(h)
 
 			// Add according prefix to schedule if needed
 			if ok, _ := trieHasPrefixOfKey(newSchedule, k); !ok {
@@ -1342,7 +1341,7 @@ func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
 // provide succeeded.
 func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
 	if !broadcast {
-		return s.router.Provide(s.ctx, c, false)
+		s.addLocalRecord(c.Hash())
 	}
 	doneChan := make(chan error, 1)
 	req := provideReq{

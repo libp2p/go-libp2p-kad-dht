@@ -10,6 +10,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
+	mh "github.com/multiformats/go-multihash"
 )
 
 type config struct {
@@ -20,10 +21,11 @@ type config struct {
 	connectivityCheckOfflineInterval time.Duration
 
 	peerid peer.ID
-	router KadRouter
+	router KadClosestPeersRouter
 
-	msgSender pb.MessageSender
-	selfAddrs func() []ma.Multiaddr
+	msgSender      pb.MessageSender
+	selfAddrs      func() []ma.Multiaddr
+	addLocalRecord func(mh.Multihash) error
 
 	clock clock.Clock
 
@@ -76,6 +78,8 @@ var DefaultConfig = config{
 	dedicatedPeriodicWorkers: 2,
 	dedicatedBurstWorkers:    1,
 	maxProvideConnsPerWorker: 20,
+
+	addLocalRecord: func(mh mh.Multihash) error { return nil },
 }
 
 func WithReplicationFactor(n int) Option {
@@ -120,7 +124,7 @@ func WithPeerID(p peer.ID) Option {
 	}
 }
 
-func WithRouter(r KadRouter) Option {
+func WithRouter(r KadClosestPeersRouter) Option {
 	return func(cfg *config) error {
 		cfg.router = r
 		return nil
@@ -137,6 +141,16 @@ func WithMessageSender(m pb.MessageSender) Option {
 func WithSelfAddrs(f func() []ma.Multiaddr) Option {
 	return func(cfg *config) error {
 		cfg.selfAddrs = f
+		return nil
+	}
+}
+
+func WithAddLocalRecord(f func(mh.Multihash) error) Option {
+	return func(cfg *config) error {
+		if f == nil {
+			return errors.New("reprovider config: add local record function cannot be nil")
+		}
+		cfg.addLocalRecord = f
 		return nil
 	}
 }

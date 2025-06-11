@@ -4,10 +4,16 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ipfs/boxo/provider"
 	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
 	mh "github.com/multiformats/go-multihash"
+)
+
+var (
+	_ provider.System     = (*SweepingReprovider)(nil)
+	_ reprovider.Provider = (*SweepingReprovider)(nil)
 )
 
 type SweepingReprovider struct {
@@ -59,6 +65,18 @@ func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, announce bo
 	wg.Wait()
 	err := combineErrors(errLan, errWan)
 	return err
+}
+
+func (s *SweepingReprovider) Reprovide(context.Context) error {
+	return nil
+}
+
+func (s *SweepingReprovider) Close() error {
+	return nil
+}
+
+func (s *SweepingReprovider) Stat() (provider.ReproviderStats, error) {
+	return provider.ReproviderStats{}, nil
 }
 
 func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {

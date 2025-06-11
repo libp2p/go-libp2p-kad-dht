@@ -6,12 +6,12 @@ require (
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru v1.0.2
-	github.com/ipfs/boxo v0.30.0
+	github.com/ipfs/boxo v0.31.0
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-datastore v0.8.2
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-log/v2 v2.6.0
-	github.com/ipfs/go-test v0.2.1
+	github.com/ipfs/go-test v0.2.2
 	github.com/libp2p/go-libp2p v0.41.1
 	github.com/libp2p/go-libp2p-kbucket v0.7.0
 	github.com/libp2p/go-libp2p-record v0.3.1
@@ -58,8 +58,7 @@ require (
 	github.com/google/pprof v0.0.0-20250208200701-d0013a598941 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
-	github.com/ipfs/go-block-format v0.2.0 // indirect
-	github.com/ipfs/go-ipfs-util v0.0.3 // indirect
+	github.com/ipfs/go-block-format v0.2.1 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect

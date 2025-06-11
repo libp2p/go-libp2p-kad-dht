@@ -901,6 +901,10 @@ func (dht *IpfsDHT) Protocols() []protocol.ID {
 	return dht.protocols
 }
 
+func (dht *IpfsDHT) MessageSender() pb.MessageSender {
+	return dht.msgSender
+}
+
 // Ping sends a ping message to the passed peer and waits for a response.
 func (dht *IpfsDHT) Ping(ctx context.Context, p peer.ID) error {
 	ctx, span := internal.StartSpan(ctx, "IpfsDHT.Ping", trace.WithAttributes(attribute.Stringer("PeerID", p)))

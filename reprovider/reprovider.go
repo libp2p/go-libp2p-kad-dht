@@ -16,8 +16,6 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -211,20 +209,6 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	go reprovider.run()
 
 	return reprovider, nil
-}
-
-func NewDHTReprovider(dht *dht.IpfsDHT, opts ...Option) (*SweepingReprovider, error) {
-	opts = append([]Option{
-		WithPeerID(dht.Host().ID()),
-		WithRouter(dht),
-		WithSelfAddrs(dht.FilteredAddrs),
-		WithMessageSender(net.NewMessageSenderImpl(dht.Host(), dht.Protocols())),
-		WithAddLocalRecord(func(h mh.Multihash) error {
-			return dht.Provide(dht.Context(), cid.NewCidV0(h), false)
-		}),
-	}, opts...,
-	)
-	return NewReprovider(dht.Context(), opts...)
 }
 
 func (s *SweepingReprovider) run() {

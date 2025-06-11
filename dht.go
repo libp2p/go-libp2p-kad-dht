@@ -855,6 +855,10 @@ func (dht *IpfsDHT) RoutingTable() *kb.RoutingTable {
 	return dht.routingTable
 }
 
+func (dht *IpfsDHT) BucketSize() int {
+	return dht.bucketSize
+}
+
 // Close calls Process Close.
 func (dht *IpfsDHT) Close() error {
 	dht.cancel()

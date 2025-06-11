@@ -8,12 +8,12 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/guillaumemichel/reservedpool v0.0.0-20250528150143-39abfe9e5b68
 	github.com/hashicorp/golang-lru v1.0.2
-	github.com/ipfs/boxo v0.30.0
+	github.com/ipfs/boxo v0.31.0
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-datastore v0.8.2
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-log/v2 v2.6.0
-	github.com/ipfs/go-test v0.2.1
+	github.com/ipfs/go-test v0.2.2
 	github.com/libp2p/go-libp2p v0.41.1
 	github.com/libp2p/go-libp2p-kbucket v0.7.1-0.20250514131430-6bb8b16e312b
 	github.com/libp2p/go-libp2p-record v0.3.1
@@ -61,8 +61,7 @@ require (
 	github.com/google/pprof v0.0.0-20250208200701-d0013a598941 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
-	github.com/ipfs/go-block-format v0.2.0 // indirect
-	github.com/ipfs/go-ipfs-util v0.0.3 // indirect
+	github.com/ipfs/go-block-format v0.2.1 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
@@ -95,12 +94,12 @@ require (
 	github.com/pion/dtls/v2 v2.2.12 // indirect
 	github.com/pion/dtls/v3 v3.0.4 // indirect
 	github.com/pion/ice/v4 v4.0.8 // indirect
-	github.com/pion/interceptor v0.1.37 // indirect
+	github.com/pion/interceptor v0.1.39 // indirect
 	github.com/pion/logging v0.2.3 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.15 // indirect
-	github.com/pion/rtp v1.8.11 // indirect
+	github.com/pion/rtp v1.8.18 // indirect
 	github.com/pion/sctp v1.8.37 // indirect
 	github.com/pion/sdp/v3 v3.0.10 // indirect
 	github.com/pion/srtp/v3 v3.0.4 // indirect

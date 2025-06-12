@@ -1288,6 +1288,7 @@ loop:
 			}
 		}
 	}
+	s.schedule = newSchedule
 	nextPrefix := s.nextPrefixToReprovideNoLock()
 	timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix))
 	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)

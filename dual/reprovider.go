@@ -88,11 +88,14 @@ func (s *SweepingReprovider) Stat() (provider.ReproviderStats, error) {
 
 func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {
 	var errLan, errWan error
-	var keyChanLan, keyChanWan chan mh.Multihash
+	keyChanLan := make(chan mh.Multihash, 1)
+	keyChanWan := make(chan mh.Multihash, 1)
 	wg := sync.WaitGroup{}
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
+		defer close(keyChanLan)
+		defer close(keyChanWan)
 		for key := range keyChan {
 			keyChanLan <- key
 			keyChanWan <- key

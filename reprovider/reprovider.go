@@ -648,7 +648,8 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 	}
 	selfAddrs := s.getSelfAddrs()
 	if len(selfAddrs) == 0 {
-		return errors.New("no self addresses available for providing cids")
+		// FIXME:
+		// return errors.New("no self addresses available for providing cids")
 	}
 	if subtrie.Size() <= 2 {
 		// Region has 1 or 2 cids, it is more optimized to provide them naively.

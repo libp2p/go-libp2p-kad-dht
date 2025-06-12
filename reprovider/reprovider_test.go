@@ -778,7 +778,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	}
 	reprovider, err := NewReprovider(ctx, opts...)
 	require.NoError(t, err)
-	time.Sleep(time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)
 
 	reprovider.connectivity = connectivityChecker{

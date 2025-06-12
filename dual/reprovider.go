@@ -9,6 +9,7 @@ import (
 	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	mh "github.com/multiformats/go-multihash"
 )
 
@@ -70,6 +71,10 @@ func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, announce bo
 		errWan = s.WAN.Provide(ctx, c, announce)
 	}()
 	wg.Wait()
+	if errLan == kb.ErrLookupFailure {
+		// Ignore empty routing table in lan DHT.
+		errLan = nil
+	}
 	err := combineErrors(errLan, errWan)
 	return err
 }

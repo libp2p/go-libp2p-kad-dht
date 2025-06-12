@@ -2,7 +2,6 @@ package reprovider
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"slices"
@@ -254,42 +253,43 @@ const initialGetClosestPeers = 4
 //
 // This function blocks until GetClosestPeers succeeds.
 func (s *SweepingReprovider) measureInitialPrefixLen() {
-	cplSum := atomic.Int32{}
-	cplSamples := atomic.Int32{}
-	wg := sync.WaitGroup{}
-	wg.Add(initialGetClosestPeers)
-	for range initialGetClosestPeers {
-		go func() {
-			defer wg.Done()
-			bytes := [32]byte{}
-			rand.Read(bytes[:])
-			for {
-				peers, err := s.router.GetClosestPeers(s.ctx, string(bytes[:]))
-				if err == nil && len(peers) > 0 {
-					if len(peers) <= 2 {
-						return // Ignore result if only 2 other peers in DHT.
-					}
-					cpl := keyLen
-					firstPeerKey := peerIDToBit256(peers[0])
-					for _, p := range peers[1:] {
-						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, peerIDToBit256(p)))
-					}
-					cplSum.Add(int32(cpl))
-					cplSamples.Add(1)
-					return
-				}
-				s.clock.Sleep(500 * time.Millisecond)
-			}
-		}()
-	}
-	wg.Wait()
-
-	nSamples := cplSamples.Load()
-	if nSamples == 0 {
-		s.cachedAvgPrefixLen = 0
-	} else {
-		s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
-	}
+	s.cachedAvgPrefixLen = 8 // FIXME:
+	// cplSum := atomic.Int32{}
+	// cplSamples := atomic.Int32{}
+	// wg := sync.WaitGroup{}
+	// wg.Add(initialGetClosestPeers)
+	// for range initialGetClosestPeers {
+	// 	go func() {
+	// 		defer wg.Done()
+	// 		bytes := [32]byte{}
+	// 		rand.Read(bytes[:])
+	// 		for {
+	// 			peers, err := s.router.GetClosestPeers(s.ctx, string(bytes[:]))
+	// 			if err == nil && len(peers) > 0 {
+	// 				if len(peers) <= 2 {
+	// 					return // Ignore result if only 2 other peers in DHT.
+	// 				}
+	// 				cpl := keyLen
+	// 				firstPeerKey := peerIDToBit256(peers[0])
+	// 				for _, p := range peers[1:] {
+	// 					cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, peerIDToBit256(p)))
+	// 				}
+	// 				cplSum.Add(int32(cpl))
+	// 				cplSamples.Add(1)
+	// 				return
+	// 			}
+	// 			s.clock.Sleep(500 * time.Millisecond)
+	// 		}
+	// 	}()
+	// }
+	// wg.Wait()
+	//
+	// nSamples := cplSamples.Load()
+	// if nSamples == 0 {
+	// 	s.cachedAvgPrefixLen = 0
+	// } else {
+	// 	s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
+	// }
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
 }

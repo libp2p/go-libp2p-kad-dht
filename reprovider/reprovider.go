@@ -2,6 +2,7 @@ package reprovider
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"slices"
@@ -253,43 +254,44 @@ const initialGetClosestPeers = 4
 //
 // This function blocks until GetClosestPeers succeeds.
 func (s *SweepingReprovider) measureInitialPrefixLen() {
-	s.cachedAvgPrefixLen = 8 // FIXME:
-	// cplSum := atomic.Int32{}
-	// cplSamples := atomic.Int32{}
-	// wg := sync.WaitGroup{}
-	// wg.Add(initialGetClosestPeers)
-	// for range initialGetClosestPeers {
-	// 	go func() {
-	// 		defer wg.Done()
-	// 		bytes := [32]byte{}
-	// 		rand.Read(bytes[:])
-	// 		for {
-	// 			peers, err := s.router.GetClosestPeers(s.ctx, string(bytes[:]))
-	// 			if err == nil && len(peers) > 0 {
-	// 				if len(peers) <= 2 {
-	// 					return // Ignore result if only 2 other peers in DHT.
-	// 				}
-	// 				cpl := keyLen
-	// 				firstPeerKey := peerIDToBit256(peers[0])
-	// 				for _, p := range peers[1:] {
-	// 					cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, peerIDToBit256(p)))
-	// 				}
-	// 				cplSum.Add(int32(cpl))
-	// 				cplSamples.Add(1)
-	// 				return
-	// 			}
-	// 			s.clock.Sleep(500 * time.Millisecond)
-	// 		}
-	// 	}()
-	// }
-	// wg.Wait()
-	//
-	// nSamples := cplSamples.Load()
-	// if nSamples == 0 {
-	// 	s.cachedAvgPrefixLen = 0
-	// } else {
-	// 	s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
-	// }
+	cplSum := atomic.Int32{}
+	cplSamples := atomic.Int32{}
+	wg := sync.WaitGroup{}
+	wg.Add(initialGetClosestPeers)
+	// NOTE: since this function blocks until the GCP operation succeeds, it
+	// makes the kubo tests time out...
+	for range initialGetClosestPeers {
+		go func() {
+			defer wg.Done()
+			bytes := [32]byte{}
+			rand.Read(bytes[:])
+			for {
+				peers, err := s.router.GetClosestPeers(s.ctx, string(bytes[:]))
+				if err == nil && len(peers) > 0 {
+					if len(peers) <= 2 {
+						return // Ignore result if only 2 other peers in DHT.
+					}
+					cpl := keyLen
+					firstPeerKey := peerIDToBit256(peers[0])
+					for _, p := range peers[1:] {
+						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, peerIDToBit256(p)))
+					}
+					cplSum.Add(int32(cpl))
+					cplSamples.Add(1)
+					return
+				}
+				s.clock.Sleep(500 * time.Millisecond)
+			}
+		}()
+	}
+	wg.Wait()
+
+	nSamples := cplSamples.Load()
+	if nSamples == 0 {
+		s.cachedAvgPrefixLen = 0
+	} else {
+		s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
+	}
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
 }
@@ -380,7 +382,7 @@ func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 func (s *SweepingReprovider) addCids(cids []mh.Multihash) (map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash], int) {
 	prefixes := make(map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash])
 	count := 0
-	var avgPrefixLen int
+	avgPrefixLen := 0
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
 	for _, c := range cids {
@@ -648,8 +650,9 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids *trie.Trie
 	}
 	selfAddrs := s.getSelfAddrs()
 	if len(selfAddrs) == 0 {
-		// FIXME:
-		// return errors.New("no self addresses available for providing cids")
+		// NOTE: kubo doesn't like no being able to provide eventough sometimes no
+		// valid addresses are provided. This makes the kubo tests fail.
+		return errors.New("no self addresses available for providing cids")
 	}
 	if subtrie.Size() <= 2 {
 		// Region has 1 or 2 cids, it is more optimized to provide them naively.

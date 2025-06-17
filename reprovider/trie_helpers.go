@@ -31,6 +31,17 @@ func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, s
 	return []region{{prefix: path, peers: t}}
 }
 
+func assignCidsToRegions(regions []region, cids []mh.Multihash) []region {
+	cidsTrie := trie.New[bit256.Key, mh.Multihash]()
+	for _, c := range cids {
+		cidsTrie.Add(mhToBit256(c), c)
+	}
+	for i, r := range regions {
+		regions[i].cids, _ = subtrieMatchingPrefix(cidsTrie, r.prefix)
+	}
+	return regions
+}
+
 // trieHasPrefixOfKey checks if the trie contains a leave whose key is a prefix
 // (or a match) of the provided k
 func trieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (bool, K0) {

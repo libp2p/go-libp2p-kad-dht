@@ -161,22 +161,22 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	}
 
 	// Providing no cids returns no error
-	err := r.individualProvideForPrefix(ctx, prefix, nil, initialProvide)
+	err := r.individualProvideForPrefix(ctx, prefix, nil, false, false)
 	require.NoError(t, err)
 
 	// Providing a single cid - success
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, initialProvide)
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
 	require.NoError(t, err)
 
 	// Providing a single cid - failure
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, errors.New("GetClosestPeers error")
 	}
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, initialProvide)
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
 	require.Error(t, err)
 	require.Equal(t, []mh.Multihash{k}, <-r.pendingCidsChan)
 
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, periodicReprovide)
+	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, true, true)
 	require.Error(t, err)
 	require.Equal(t, prefix, <-r.failedRegionsChan)
 }
@@ -208,21 +208,21 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	}
 
 	// Providing two cids - 2 successes
-	err := r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
+	err := r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
 
 	// Providing two cids - 2 failures
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, errors.New("GetClosestPeers error")
 	}
-	err = r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.Error(t, err)
 	pendingCids := append(<-r.pendingCidsChan, <-r.pendingCidsChan...)
 	require.Len(t, pendingCids, len(ks))
 	require.Contains(t, pendingCids, ks[0])
 	require.Contains(t, pendingCids, ks[1])
 
-	err = r.individualProvideForPrefix(ctx, prefix, ks, periodicReprovide)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.Error(t, err)
 	require.Equal(t, prefix, <-r.failedRegionsChan)
 
@@ -239,14 +239,14 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		return
 	}
 
-	err = r.individualProvideForPrefix(ctx, prefix, ks, initialProvide)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
 	require.Len(t, r.pendingCidsChan, 1)
 	pendingCids = <-r.pendingCidsChan
 	require.Len(t, pendingCids, 1)
 	require.Contains(t, ks, pendingCids[0])
 
-	err = r.individualProvideForPrefix(ctx, prefix, ks, periodicReprovide)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.NoError(t, err)
 	require.Len(t, r.failedRegionsChan, 0)
 	require.Len(t, r.pendingCidsChan, 0)

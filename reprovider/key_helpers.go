@@ -11,7 +11,6 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
-	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
 func mhToBit256(h mh.Multihash) bit256.Key {
@@ -109,12 +108,12 @@ func shortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, [
 
 type prefixAndCids struct {
 	prefix bitstr.Key
-	cids   *trie.Trie[bit256.Key, mh.Multihash]
+	cids   []mh.Multihash
 }
 
 // sortPrefixesBySize sorts the prefixes by the number of CIDs they contain,
 // largest first.
-func sortPrefixesBySize(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multihash]) []prefixAndCids {
+func sortPrefixesBySize(prefixes map[bitstr.Key][]mh.Multihash) []prefixAndCids {
 	out := make([]prefixAndCids, 0, len(prefixes))
 	for prefix, cids := range prefixes {
 		if cids != nil {
@@ -122,7 +121,7 @@ func sortPrefixesBySize(prefixes map[bitstr.Key]*trie.Trie[bit256.Key, mh.Multih
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].cids.Size() > out[j].cids.Size()
+		return len(out[i].cids) > len(out[j].cids)
 	})
 	return out
 }

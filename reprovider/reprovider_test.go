@@ -645,10 +645,11 @@ func TestProvideMany(t *testing.T) {
 
 	err = reprovider.ProvideMany(ctx, mhs)
 	require.NoError(t, err)
+	time.Sleep(20 * time.Millisecond) // wait for ProvideMany to finish
 
 	// Each cid should have been provided at least once.
 	msgSenderLk.Lock()
-	require.Len(t, addProviderRpcs, nCids)
+	require.Equal(t, nCids, len(addProviderRpcs))
 	for k, holders := range addProviderRpcs {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.
@@ -667,9 +668,10 @@ func TestProvideMany(t *testing.T) {
 	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
+	time.Sleep(20 * time.Millisecond) // wait for reprovide to finish
 
 	msgSenderLk.Lock()
-	require.Len(t, addProviderRpcs, nCids)
+	require.Equal(t, nCids, len(addProviderRpcs))
 	for k, holders := range addProviderRpcs {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.
@@ -688,8 +690,10 @@ func TestProvideMany(t *testing.T) {
 	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
+	time.Sleep(20 * time.Millisecond) // wait for reprovide to finish
+
 	msgSenderLk.Lock()
-	require.Len(t, addProviderRpcs, nCids)
+	require.Equal(t, nCids, len(addProviderRpcs))
 	for k, holders := range addProviderRpcs {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.

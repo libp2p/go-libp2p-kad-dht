@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -106,8 +105,9 @@ type SweepingReprovider struct {
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
 
-	cids          map[bitstr.Key]map[string]struct{} // bitstr -> unique multihash
-	cidsLk        sync.Mutex
+	mhStore *MHStore
+	// cids          map[bitstr.Key]map[string]struct{} // bitstr -> unique multihash
+	// cidsLk        sync.Mutex
 	resetCidsChan chan resetCidsReq
 
 	provideChan            chan provideReq
@@ -135,12 +135,16 @@ type SweepingReprovider struct {
 }
 
 func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, error) {
-	cfg := DefaultConfig
-	err := cfg.apply(opts...)
+	var cfg config
+	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
 		return nil, err
 	}
 	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	mhStore, err := NewMHStore(cfg.mhStore)
+	if err != nil {
 		return nil, err
 	}
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/reprovider")
@@ -186,7 +190,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 		getSelfAddrs:   cfg.selfAddrs,
 		addLocalRecord: cfg.addLocalRecord,
 
-		cids:          make(map[bitstr.Key]map[string]struct{}),
+		mhStore:       mhStore,
 		resetCidsChan: make(chan resetCidsReq, 1),
 
 		provideChan:   make(chan provideReq),
@@ -355,7 +359,11 @@ func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 		provideRequest.done <- nil
 		return
 	}
-	prefixes, newCidsCount := s.addCids(provideRequest.cids)
+	prefixes, newCidsCount, err := s.addCids(provideRequest.cids)
+	if err != nil {
+		provideRequest.done <- err
+		return
+	}
 
 	if len(prefixes) == 0 {
 		// All cids are already tracked and have been provided.
@@ -381,121 +389,6 @@ func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 	}()
 }
 
-// cidsMatchingPrefix returns the persisted cids matching the requested prefix.
-func (s *SweepingReprovider) cidsMatchingPrefix(prefix bitstr.Key) []mh.Multihash {
-	s.cidsLk.Lock()
-	defer s.cidsLk.Unlock()
-	mhStrs, ok := s.cids[prefix]
-	if ok {
-		cids := make([]mh.Multihash, 0, len(mhStrs))
-		for s := range mhStrs {
-			cids = append(cids, mh.Multihash(s))
-		}
-		return cids
-	}
-
-	// No entry matches the provided prefix, let's check for longer entries
-	// starting with prefix.
-	cids := make([]mh.Multihash, 0)
-	for p, mhStrs := range s.cids {
-		if isBitstrPrefix(prefix, p) {
-			for s := range mhStrs {
-				cids = append(cids, mh.Multihash(s))
-			}
-		}
-	}
-	if len(cids) > 0 {
-		return cids
-	}
-
-	// Now look for entries that are prefixes to `prefix`.
-	for p, mhStrs := range s.cids {
-		if isBitstrPrefix(p, prefix) {
-			for s := range mhStrs {
-				h := mh.Multihash(s)
-				hBitstr := bitstr.Key(key.BitString(mhToBit256(h)))
-				if isBitstrPrefix(prefix, hBitstr) {
-					cids = append(cids, h)
-				}
-			}
-		}
-	}
-	return cids
-}
-
-// persistCidNoLock persists the given cid to the set of cids to be reprovided.
-// Returns false if cid was already present, true otherwise.
-//
-// s.cidsLk and s.scheduleLk must be locked.
-func (s *SweepingReprovider) persistCidNoLock(h mh.Multihash, k bit256.Key) bool {
-	prefix := s.prefixForKeyNoLock(k)
-
-	m := s.cids[prefix]
-	if m == nil {
-		m = make(map[string]struct{})
-		s.cids[prefix] = m
-	}
-	strKey := string(h)
-	if _, exists := m[strKey]; exists {
-		return false
-	}
-	m[strKey] = struct{}{}
-	return true
-}
-
-// consolidateCidsStorage consolidate the storage of all cids starting with
-// prefix under prefix. Previously they could be indexed under longer prefixes.
-func (s *SweepingReprovider) consolidateCidsStorage(prefix bitstr.Key) {
-	cids := make(map[string]struct{})
-	s.cidsLk.Lock()
-	defer s.cidsLk.Unlock()
-	for p, mhStrs := range s.cids {
-		if isBitstrPrefix(prefix, p) {
-			for s := range mhStrs {
-				cids[string(s)] = struct{}{}
-			}
-			delete(s.cids, p)
-		}
-	}
-	s.cids[prefix] = cids
-}
-
-// splitCidsStorage splits the cids stored under the the key `oldPrefix` to the
-// multiple new provided keys. The new keys are expected to be non overlapping
-// and to fully cover the old prefix.
-//
-// E.g if oldPrefix was 001, a set of valid newPrefixes can be [0010, 00110,
-// 00111].
-func (s *SweepingReprovider) splitCidsStorage(oldPrefix bitstr.Key, newPrefixes []bitstr.Key) {
-	s.cidsLk.Lock()
-	defer s.cidsLk.Unlock()
-
-	mhStrs, ok := s.cids[oldPrefix]
-	delete(s.cids, oldPrefix)
-	if !ok {
-		logger.Errorf("splitCidsStorage: no cids found for prefix %s", oldPrefix)
-		return
-	}
-	newCidsGroups := make(map[bitstr.Key]map[string]struct{}, len(newPrefixes))
-	maxPrefixLen := 0
-	for _, p := range newPrefixes {
-		newCidsGroups[p] = make(map[string]struct{})
-		maxPrefixLen = max(maxPrefixLen, len(p))
-	}
-	for mhStr := range mhStrs {
-		h := mh.Multihash(mhStr)
-		hBitstrPrefix := bitstr.Key(key.BitString(mhToBit256(h))[:maxPrefixLen])
-		for _, p := range newPrefixes {
-			if isBitstrPrefix(p, hBitstrPrefix) {
-				newCidsGroups[p][mhStr] = struct{}{}
-			}
-		}
-	}
-	for prefix, group := range newCidsGroups {
-		maps.Copy(s.cids[prefix], group)
-	}
-}
-
 // prefixForKeyNoLock returns the prefix corresponding to the region in which
 // the given key belongs. The prefix corresponding to the region depends on the
 // peers in the DHT swarms.
@@ -512,69 +405,68 @@ func (s *SweepingReprovider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
 // in the schedule.
 //
 // It returns a map of prefixes to fresh cids (that weren't tracked so far).
-func (s *SweepingReprovider) addCids(cids []mh.Multihash) (map[bitstr.Key][]mh.Multihash, int) {
+func (s *SweepingReprovider) addCids(cids []mh.Multihash) (map[bitstr.Key][]mh.Multihash, int, error) {
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	count := 0
 	avgPrefixLen := 0
+
+	cids, err := s.mhStore.Put(s.ctx, cids...)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
-	s.cidsLk.Lock()
-	defer s.cidsLk.Unlock()
 	for _, c := range cids {
 		prefixConsolidation := false
 		k := mhToBit256(c)
 		// Add cid to s.cids if not there already, and add fresh cids to newCids.
 		// Deduplication is handled here.
-		if freshCid := s.persistCidNoLock(c, k); freshCid {
-			count++
-			// If prefix of c not scheduled yet, add it to the schedule.
-			scheduled, prefix := trieHasPrefixOfKey(s.schedule, k)
-			if !scheduled {
-				if avgPrefixLen == 0 {
-					avgPrefixLen = s.getAvgPrefixLenNoLock()
-				}
-				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
-				if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
-					// If generated prefix is a prefix of existing scheduled keyspace
-					// zones, consolidate these zones around the shorter prefix.
-					for _, entry := range allEntries(subtrie, s.order) {
-						s.schedule.Remove(entry.Key)
-					}
-					prefixConsolidation = true
-				}
-				s.addPrefixToScheduleNoLock(prefix)
+		// If prefix of c not scheduled yet, add it to the schedule.
+		scheduled, prefix := trieHasPrefixOfKey(s.schedule, k)
+		if !scheduled {
+			if avgPrefixLen == 0 {
+				avgPrefixLen = s.getAvgPrefixLenNoLock()
 			}
+			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
+			if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
+				// If generated prefix is a prefix of existing scheduled keyspace
+				// zones, consolidate these zones around the shorter prefix.
+				for _, entry := range allEntries(subtrie, s.order) {
+					s.schedule.Remove(entry.Key)
+				}
+				prefixConsolidation = true
+			}
+			s.addPrefixToScheduleNoLock(prefix)
+		}
 
-			if _, ok := prefixes[prefix]; !ok {
-				prefixes[prefix] = []mh.Multihash{c}
-			} else {
-				prefixes[prefix] = append(prefixes[prefix], c)
-			}
-			if prefixConsolidation {
-				// prefix is a shorted prefix of a prefix already in the schedule.
-				// Consolidate everything into prefix.
-				for p, cids := range prefixes {
-					if isBitstrPrefix(p, prefix) {
-						seen := make(map[string]struct{})
-						for _, k := range prefixes[prefix] {
-							seen[string(k)] = struct{}{}
-						}
-						for _, c := range cids {
-							strKey := string(c)
-							if _, ok := seen[strKey]; ok {
-								continue
-							}
-							seen[strKey] = struct{}{}
-							prefixes[prefix] = append(prefixes[prefix], c)
-						}
-						delete(prefixes, p)
+		if _, ok := prefixes[prefix]; !ok {
+			prefixes[prefix] = []mh.Multihash{c}
+		} else {
+			prefixes[prefix] = append(prefixes[prefix], c)
+		}
+		if prefixConsolidation {
+			// prefix is a shorted prefix of a prefix already in the schedule.
+			// Consolidate everything into prefix.
+			for p, cids := range prefixes {
+				if isBitstrPrefix(p, prefix) {
+					seen := make(map[string]struct{})
+					for _, k := range prefixes[prefix] {
+						seen[string(k)] = struct{}{}
 					}
+					for _, c := range cids {
+						strKey := string(c)
+						if _, ok := seen[strKey]; ok {
+							continue
+						}
+						seen[strKey] = struct{}{}
+						prefixes[prefix] = append(prefixes[prefix], c)
+					}
+					delete(prefixes, p)
 				}
 			}
 		}
 	}
-	return prefixes, count
+	return prefixes, len(cids), nil
 }
 
 func (s *SweepingReprovider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash) error {
@@ -777,8 +669,14 @@ func (s *SweepingReprovider) reprovideForPrefix(prefix bitstr.Key, periodicRepro
 		// valid addresses are provided. This makes the kubo tests fail.
 		return errors.New("no self addresses available for providing cids")
 	}
-	cids := s.cidsMatchingPrefix(prefix)
-	if len(cids) == 0 {
+	cids, err := s.mhStore.Get(s.ctx, prefix)
+	if err != nil {
+		s.failedRegionsChan <- prefix
+		if periodicReprovide {
+			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+		}
+		return fmt.Errorf("couldn't reprovide, error when loading cids: %s", err)
+	} else if len(cids) == 0 {
 		logger.Errorf("No cids to reprovide for prefix %s", prefix)
 		return nil
 	} else if len(cids) <= 2 {
@@ -805,19 +703,16 @@ func (s *SweepingReprovider) reprovideForPrefix(prefix bitstr.Key, periodicRepro
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
 	regions, coveredPrefix := s.regionsFromPeers(peers)
-	if len(regions) > 1 {
-		// TODO: separate cids storage into multiple keys
-		newGroups := make([]bitstr.Key, len(regions))
-		for i, r := range regions {
-			newGroups[i] = r.prefix
-		}
-		s.splitCidsStorage(coveredPrefix, newGroups)
-	}
 	if len(coveredPrefix) < len(prefix) {
 		// We need to load more cids
-		cids = s.cidsMatchingPrefix(coveredPrefix)
-		// TODO: consolidate cids storage
-		s.consolidateCidsStorage(coveredPrefix)
+		cids, err = s.mhStore.Get(s.ctx, coveredPrefix)
+		if err != nil {
+			s.failedRegionsChan <- prefix
+			if periodicReprovide {
+				s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+			}
+			return fmt.Errorf("couldn't reprovide, error when loading cids: %s", err)
+		}
 	}
 	regions = assignCidsToRegions(regions, cids)
 	logger.Debugf("requested prefix: %s (len %d), prefix covered: %s (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
@@ -1450,30 +1345,27 @@ func (s *SweepingReprovider) clearPendingWork() {
 }
 
 func (s *SweepingReprovider) resetCids(req resetCidsReq) {
-	var err error
+	cids := make([]mh.Multihash, 0)
+	newSchedule := trie.New[bitstr.Key, time.Duration]()
 
 	s.scheduleLk.Lock()
 	prefixLen := s.getAvgPrefixLenNoLock()
-	newSchedule := trie.New[bitstr.Key, time.Duration]()
-
-	s.cidsLk.Lock()
-	clear(s.cids)
 loop:
 	for {
 		select {
 		case <-req.ctx.Done():
-			err = req.ctx.Err()
-			break loop
+			req.done <- req.ctx.Err()
+			return
 		case h, ok := <-req.cids:
 			if !ok {
 				break loop // all keys processed
 			}
-			k := mhToBit256(h)
-			s.persistCidNoLock(h, k)
+			cids = append(cids, h)
 
 			// Add to local provider store
 			s.addLocalRecord(h)
 
+			k := mhToBit256(h)
 			// Add according prefix to schedule if needed
 			if ok, _ := trieHasPrefixOfKey(newSchedule, k); !ok {
 				var prefix bitstr.Key
@@ -1486,7 +1378,6 @@ loop:
 			}
 		}
 	}
-	s.cidsLk.Unlock()
 	s.schedule = newSchedule
 	nextPrefix := s.nextPrefixToReprovideNoLock()
 	timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix))
@@ -1494,6 +1385,7 @@ loop:
 	s.scheduleLk.Unlock()
 
 	s.clearPendingWork()
+	_, err := s.mhStore.Reset(req.ctx, cids...)
 
 	req.done <- err
 }

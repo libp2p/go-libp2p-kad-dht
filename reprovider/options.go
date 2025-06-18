@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-clock"
+	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -22,6 +23,8 @@ type config struct {
 
 	peerid peer.ID
 	router KadClosestPeersRouter
+
+	mhStore ds.Batching
 
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
@@ -65,21 +68,24 @@ func (c *config) validate() error {
 
 type Option func(opt *config) error
 
-var DefaultConfig = config{
-	replicationFactor:                amino.DefaultBucketSize,
-	reprovideInterval:                22 * time.Hour,
-	maxReprovideDelay:                1 * time.Hour,
-	connectivityCheckOnlineInterval:  time.Minute,
-	connectivityCheckOfflineInterval: 5 * time.Minute,
+var DefaultConfig = func(cfg *config) error {
+	cfg.replicationFactor = amino.DefaultBucketSize
+	cfg.reprovideInterval = 22 * time.Hour
+	cfg.maxReprovideDelay = 1 * time.Hour
+	cfg.connectivityCheckOnlineInterval = 1 * time.Minute
+	cfg.connectivityCheckOfflineInterval = 5 * time.Minute
 
-	clock: clock.New(),
+	cfg.mhStore = ds.NewMapDatastore()
+	cfg.clock = clock.New()
 
-	maxWorkers:               4,
-	dedicatedPeriodicWorkers: 2,
-	dedicatedBurstWorkers:    1,
-	maxProvideConnsPerWorker: 20,
+	cfg.maxWorkers = 4
+	cfg.dedicatedPeriodicWorkers = 2
+	cfg.dedicatedBurstWorkers = 1
+	cfg.maxProvideConnsPerWorker = 20
 
-	addLocalRecord: func(mh mh.Multihash) error { return nil },
+	cfg.addLocalRecord = func(mh mh.Multihash) error { return nil }
+
+	return nil
 }
 
 func WithReplicationFactor(n int) Option {
@@ -198,6 +204,16 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 			return errors.New("reprovider config: max provide conns per worker must be greater than 0")
 		}
 		cfg.maxProvideConnsPerWorker = n
+		return nil
+	}
+}
+
+func WithMHStore(mhStore ds.Batching) Option {
+	return func(cfg *config) error {
+		if mhStore == nil {
+			return errors.New("reprovider config: multihash store cannot be nil")
+		}
+		cfg.mhStore = mhStore
 		return nil
 	}
 }

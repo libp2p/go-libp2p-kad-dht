@@ -16,8 +16,6 @@ import (
 
 // MHStore stores multihashes grouped by their first prefixLen bits in a
 // datastore.
-// MHStore stores multihashes grouped by their first prefixLen bits in a
-// datastore under `DefaultStorePrefix`.
 type MHStore struct {
 	ds        ds.Batching
 	lk        sync.Mutex
@@ -88,7 +86,8 @@ func (s *MHStore) dsKey(prefix bitstr.Key) ds.Key {
 	return s.base.ChildString(string(prefix))
 }
 
-// putLocked stores the provided multihashes while assuming s.lk is already held.
+// putLocked stores the provided multihashes while assuming s.lk is already
+// held.
 func (s *MHStore) putLocked(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihash, error) {
 	groups := make(map[bitstr.Key][]mh.Multihash)
 	newMhs := make([]mh.Multihash, 0, len(mhs))
@@ -134,9 +133,9 @@ func (s *MHStore) putLocked(ctx context.Context, mhs ...mh.Multihash) ([]mh.Mult
 	return newMhs, nil
 }
 
-// Put persists the given multihashes in the underlying datastore. Multihashes
-// are grouped by their first prefixLen bits. Returns the new multihashes that
-// weren't stored so far.
+// Put stores the provided multihashes in the underlying datastore, grouping them
+// by the first prefixLen bits. It returns only the multihashes that were not
+// previously persisted in the datastore (i.e., newly added multihashes).
 func (s *MHStore) Put(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihash, error) {
 	if len(mhs) == 0 {
 		return nil, nil
@@ -208,7 +207,8 @@ func (s *MHStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, e
 }
 
 // Reset deletes all entries under the given datastore prefix and stores the
-// provided hashes. Returns the deduplicated multihashes that are now stored.
+// provided hashes. Returns the deduplicated multihashes that have been
+// persisted.
 func (s *MHStore) Reset(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihash, error) {
 	s.lk.Lock()
 	defer s.lk.Unlock()

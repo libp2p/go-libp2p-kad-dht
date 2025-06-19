@@ -61,7 +61,6 @@ var (
 const keyLen = bit256.KeyLen * 8 // 256
 
 // TODO: support resuming reprovide service after a restart
-// persist cids to disk
 // persist prefixes waiting to be reprovided and last reprovided prefix (with time) on disk
 
 type workerType uint8
@@ -105,9 +104,7 @@ type SweepingReprovider struct {
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
 
-	mhStore *MHStore
-	// cids          map[bitstr.Key]map[string]struct{} // bitstr -> unique multihash
-	// cidsLk        sync.Mutex
+	mhStore       *MHStore
 	resetCidsChan chan resetCidsReq
 
 	provideChan            chan provideReq
@@ -356,18 +353,24 @@ func (s *SweepingReprovider) groupCidsByPrefix(cids []mh.Multihash) map[bitstr.K
 
 func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.cids) == 0 {
-		provideRequest.done <- nil
+		if provideRequest.done != nil {
+			provideRequest.done <- nil
+		}
 		return
 	}
 	prefixes, newCidsCount, err := s.addCids(provideRequest.cids)
 	if err != nil {
-		provideRequest.done <- err
+		if provideRequest.done != nil {
+			provideRequest.done <- err
+		}
 		return
 	}
 
 	if len(prefixes) == 0 {
 		// All cids are already tracked and have been provided.
-		provideRequest.done <- nil
+		if provideRequest.done != nil {
+			provideRequest.done <- nil
+		}
 		return
 	}
 
@@ -378,14 +381,18 @@ func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 			dedupCids = append(dedupCids, cids...)
 		}
 		s.pendingCids = append(s.pendingCids, dedupCids...)
-		provideRequest.done <- ErrNodeOffline
+		if provideRequest.done != nil {
+			provideRequest.done <- ErrNodeOffline
+		}
 		return
 	}
 
 	logger.Debugf("Providing %d new cids with %d different prefixes", newCidsCount, len(prefixes))
 	go func() {
 		err := s.networkProvide(prefixes)
-		provideRequest.done <- err
+		if provideRequest.done != nil {
+			provideRequest.done <- err
+		}
 	}()
 }
 
@@ -1385,6 +1392,8 @@ loop:
 	s.scheduleLk.Unlock()
 
 	s.clearPendingWork()
+	// NOTE: in order to optimize memory usage, cap the amount of cids to be
+	// written to datastore at once e.g using s.mhStore.Empty.
 	_, err := s.mhStore.Reset(req.ctx, cids...)
 
 	req.done <- err
@@ -1455,4 +1464,42 @@ func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-ch
 	s.resetCidsChan <- req
 	// Wait for the reset to complete before returning.
 	return <-doneChan
+}
+
+// StartProviding provides the given keys to the DHT swarm unless they were
+// already provided in the past. The keys will be periodically reprovided until
+// StopProviding is called for the same keys or user defined garbage collection
+// deletes the keys.
+func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
+	s.provideChan <- provideReq{
+		ctx:  context.Background(),
+		cids: keys,
+	}
+}
+
+// StopProviding stops reproviding the given keys to the DHT swarm. The node
+// stops being referred as a provider when the provider records in the DHT
+// swarm expire.
+func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
+	err := s.mhStore.Delete(s.ctx, keys...)
+	if err != nil {
+		logger.Errorf("failed to stop providing keys: %s", err)
+	}
+}
+
+// InstantProvide only sends provider records for the given keys out to the DHT
+// swarm. It does NOT take the responsibility to reprovide these keys.
+func (s *SweepingReprovider) InstantProvide(keys ...mh.Multihash) error {
+	// TODO: implement me
+	return nil
+}
+
+// ForceProvide is similar to StartProviding, but it sends provider records out
+// to the DHT even if the keys were already provided in the past.
+func (s *SweepingReprovider) ForceProvide(keys ...mh.Multihash) error {
+	// TODO: implement me
+
+	// try to add to mhStore
+	// InstantProvide
+	return nil
 }

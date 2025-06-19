@@ -206,6 +206,34 @@ func (s *MHStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, e
 	return result, nil
 }
 
+// emptyLocked deletes all entries under the datastore prefix, assuming s.lk is
+// already held.
+func (s *MHStore) emptyLocked(ctx context.Context) error {
+	res, err := s.ds.Query(ctx, query.Query{Prefix: s.base.String()})
+	if err != nil {
+		return err
+	}
+	defer res.Close()
+
+	for r := range res.Next() {
+		if r.Error != nil {
+			return r.Error
+		}
+		if err := s.ds.Delete(ctx, ds.NewKey(r.Key)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Empty deletes all entries under the datastore prefix.
+func (s *MHStore) Empty(ctx context.Context) error {
+	s.lk.Lock()
+	defer s.lk.Unlock()
+
+	return s.emptyLocked(ctx)
+}
+
 // Reset deletes all entries under the given datastore prefix and stores the
 // provided hashes. Returns the deduplicated multihashes that have been
 // persisted.
@@ -213,19 +241,9 @@ func (s *MHStore) Reset(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihas
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
-	res, err := s.ds.Query(ctx, query.Query{Prefix: s.base.String()})
+	err := s.emptyLocked(ctx)
 	if err != nil {
 		return nil, err
-	}
-	defer res.Close()
-
-	for r := range res.Next() {
-		if r.Error != nil {
-			return nil, r.Error
-		}
-		if err := s.ds.Delete(ctx, ds.NewKey(r.Key)); err != nil {
-			return nil, err
-		}
 	}
 
 	if len(mhs) == 0 {

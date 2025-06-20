@@ -14,6 +14,7 @@ import (
 	"github.com/filecoin-project/go-clock"
 	pool "github.com/guillaumemichel/reservedpool"
 	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -147,11 +148,15 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.validate(); err != nil {
-		return nil, err
+	if cfg.mhStore == nil {
+		// Setup MHStore if missing
+		mhStore, err := NewMHStore(ctx, ds.NewMapDatastore())
+		if err != nil {
+			return nil, err
+		}
+		cfg.mhStore = mhStore
 	}
-	mhStore, err := NewMHStore(ctx, cfg.mhStore)
-	if err != nil {
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/reprovider")
@@ -197,7 +202,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 		getSelfAddrs:   cfg.selfAddrs,
 		addLocalRecord: cfg.addLocalRecord,
 
-		mhStore:       mhStore,
+		mhStore:       cfg.mhStore,
 		resetCidsChan: make(chan resetCidsReq, 1),
 
 		provideChan:   make(chan provideReq),

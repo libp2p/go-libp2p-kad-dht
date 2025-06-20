@@ -41,9 +41,17 @@ type ProvideMany interface {
 	ProvideMany(ctx context.Context, keys []mh.Multihash) error
 }
 
+type Reprovider interface {
+	StartProviding(...mh.Multihash)
+	StopProviding(...mh.Multihash)
+	InstantProvide(context.Context, ...mh.Multihash) error
+	ForceProvide(context.Context, ...mh.Multihash) error
+}
+
 var (
 	_ Provider    = &SweepingReprovider{}
 	_ ProvideMany = &SweepingReprovider{}
+	_ Reprovider  = &SweepingReprovider{}
 )
 
 type KadClosestPeersRouter interface {

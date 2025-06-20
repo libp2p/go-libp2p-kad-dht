@@ -3,10 +3,11 @@ package dual
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
-	"github.com/ipfs/boxo/provider"
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -14,14 +15,18 @@ import (
 )
 
 var (
-	_ provider.System     = (*SweepingReprovider)(nil)
-	_ reprovider.Provider = (*SweepingReprovider)(nil)
+	_ reprovider.Provider    = &SweepingReprovider{}
+	_ reprovider.ProvideMany = &SweepingReprovider{}
+	_ reprovider.Reprovider  = &SweepingReprovider{}
 )
 
+var rLogger = logging.Logger("dht/dual/reprovider")
+
 type SweepingReprovider struct {
-	dht *DHT
-	LAN *reprovider.SweepingReprovider
-	WAN *reprovider.SweepingReprovider
+	dht     *DHT
+	LAN     *reprovider.SweepingReprovider
+	WAN     *reprovider.SweepingReprovider
+	mhStore *reprovider.MHStore
 }
 
 func (d *DHT) NewSweepingReprovider(opts ...reprovider.Option) (*SweepingReprovider, error) {
@@ -58,37 +63,89 @@ func (d *DHT) NewSweepingReprovider(opts ...reprovider.Option) (*SweepingReprovi
 	}, nil
 }
 
-func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, announce bool) error {
+func (s *SweepingReprovider) runOnBoth(fn func(r *reprovider.SweepingReprovider) error) error {
 	var errLan, errWan error
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(2)
+
 	go func() {
 		defer wg.Done()
-		errLan = s.LAN.Provide(ctx, c, announce)
+		errLan = fn(s.LAN)
 	}()
 	go func() {
 		defer wg.Done()
-		errWan = s.WAN.Provide(ctx, c, announce)
+		errWan = fn(s.WAN)
 	}()
+
 	wg.Wait()
+
+	// ignore empty LAN-table errors
 	if errLan == kb.ErrLookupFailure {
-		// Ignore empty routing table in lan DHT.
 		errLan = nil
 	}
-	err := combineErrors(errLan, errWan)
-	return err
+
+	return combineErrors(errLan, errWan)
 }
 
-func (s *SweepingReprovider) Reprovide(context.Context) error {
-	return nil
+// Provide returns an error if the cid failed to be provided to either network.
+// However, it will keep reproviding the cid to both networks regardless of
+// whether the first provide succeeded.
+func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, announce bool) error {
+	return s.runOnBoth(func(r *reprovider.SweepingReprovider) error {
+		return r.Provide(ctx, c, announce)
+	})
 }
 
-func (s *SweepingReprovider) Close() error {
-	return nil
+// ProvideMany provides multiple cids to the network. It will return an error
+// if none of the cids could be provided in either DHT, however it will keep
+// reproviding these cids to both networks regardless of the initial provide
+// success.
+func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
+	return s.runOnBoth(func(r *reprovider.SweepingReprovider) error {
+		return r.ProvideMany(ctx, keys)
+	})
 }
 
-func (s *SweepingReprovider) Stat() (provider.ReproviderStats, error) {
-	return provider.ReproviderStats{}, nil
+// StartProviding provides the given keys to both DHT swarms unless they are
+// currently being reprovided. The keys will be periodically reprovided until
+// StopProviding is called for the same keys or user defined garbage collection
+// deletes the keys.
+func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
+	ctx := context.Background()
+	cids, err := s.mhStore.Put(ctx, keys...)
+	if err != nil {
+		rLogger.Errorf("failed to store multihashes: %v", err)
+		return
+	}
+	go s.InstantProvide(ctx, cids...)
+}
+
+// StopProviding stops reproviding the given keys to both DHT swarms. The node
+// stops being referred as a provider when the provider records in both DHT
+// swarms expire.
+func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
+	err := s.mhStore.Delete(context.Background(), keys...)
+	if err != nil {
+		rLogger.Errorf("failed to stop providing keys: %s", err)
+	}
+}
+
+// InstantProvide only sends provider records for the given keys out to both
+// DHT swarms. It does NOT take the responsibility to reprovide these keys.
+func (s *SweepingReprovider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
+	return s.runOnBoth(func(r *reprovider.SweepingReprovider) error {
+		return r.InstantProvide(ctx, keys...)
+	})
+}
+
+// ForceProvide is similar to StartProviding, but it sends provider records out
+// to the DHTs even if the keys were already provided in the past.
+func (s *SweepingReprovider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
+	_, err := s.mhStore.Put(ctx, keys...)
+	if err != nil {
+		return fmt.Errorf("failed to store multihashes: %w", err)
+	}
+	return s.InstantProvide(ctx, keys...)
 }
 
 func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {

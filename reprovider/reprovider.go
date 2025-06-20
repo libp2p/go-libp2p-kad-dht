@@ -87,12 +87,6 @@ type provideReq struct {
 	forceProvide  bool
 }
 
-type resetCidsReq struct {
-	ctx  context.Context
-	cids <-chan mh.Multihash
-	done chan<- error
-}
-
 type SweepingReprovider struct {
 	ctx    context.Context
 	peerid peer.ID
@@ -115,8 +109,7 @@ type SweepingReprovider struct {
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
 
-	mhStore       *MHStore
-	resetCidsChan chan resetCidsReq
+	mhStore *MHStore
 
 	provideChan            chan provideReq
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
@@ -202,8 +195,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 		getSelfAddrs:   cfg.selfAddrs,
 		addLocalRecord: cfg.addLocalRecord,
 
-		mhStore:       cfg.mhStore,
-		resetCidsChan: make(chan resetCidsReq, 1),
+		mhStore: cfg.mhStore,
 
 		provideChan:   make(chan provideReq),
 		schedule:      trie.New[bitstr.Key, time.Duration](),
@@ -259,8 +251,6 @@ func (s *SweepingReprovider) run() {
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
 			s.catchupPendingWork()
-		case req := <-s.resetCidsChan:
-			s.resetCids(req)
 		}
 	}
 }
@@ -1305,16 +1295,18 @@ func (s *SweepingReprovider) reprovideTimeForPrefix(prefix bitstr.Key) time.Dura
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
+// TODO: remove if not needed
+//
 // nextPrefixToReprovide returns the next prefix to reprovide, based on the
 // current time offset.
-func (s *SweepingReprovider) nextPrefixToReprovideNoLock() bitstr.Key {
-	now := s.currentTimeOffset()
-	maxVal := time.Duration(1 << maxPrefixSize)
-
-	intPrefix := now * maxVal / s.reprovideInterval
-	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
-	return nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
-}
+// func (s *SweepingReprovider) nextPrefixToReprovideNoLock() bitstr.Key {
+// 	now := s.currentTimeOffset()
+// 	maxVal := time.Duration(1 << maxPrefixSize)
+//
+// 	intPrefix := now * maxVal / s.reprovideInterval
+// 	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
+// 	return nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
+// }
 
 func (s *SweepingReprovider) catchupPendingNotify() {
 	select {
@@ -1368,69 +1360,6 @@ func (s *SweepingReprovider) catchupPendingWork() {
 		//    a late region.
 		s.networkProvide(s.groupCidsByPrefix(cidsInNoRegions), true)
 	}()
-}
-
-func (s *SweepingReprovider) clearPendingWork() {
-	s.lateRegionsQueue = s.lateRegionsQueue[:0]
-	s.pendingCids = s.pendingCids[:0]
-	// Emtpy chans with pending work
-	for {
-		select {
-		case <-s.failedRegionsChan:
-		case <-s.pendingCidsChan:
-		case <-s.catchupPendingChan:
-		default:
-			return
-		}
-	}
-}
-
-func (s *SweepingReprovider) resetCids(req resetCidsReq) {
-	cids := make([]mh.Multihash, 0)
-	newSchedule := trie.New[bitstr.Key, time.Duration]()
-
-	s.scheduleLk.Lock()
-	prefixLen := s.getAvgPrefixLenNoLock()
-loop:
-	for {
-		select {
-		case <-req.ctx.Done():
-			req.done <- req.ctx.Err()
-			return
-		case h, ok := <-req.cids:
-			if !ok {
-				break loop // all keys processed
-			}
-			cids = append(cids, h)
-
-			// Add to local provider store
-			s.addLocalRecord(h)
-
-			k := mhToBit256(h)
-			// Add according prefix to schedule if needed
-			if ok, _ := trieHasPrefixOfKey(newSchedule, k); !ok {
-				var prefix bitstr.Key
-				if ok, p := trieHasPrefixOfKey(s.schedule, k); ok {
-					prefix = p
-				} else {
-					prefix = bitstr.Key(key.BitString(k)[:prefixLen])
-				}
-				newSchedule.Add(prefix, s.reprovideTimeForPrefix(prefix))
-			}
-		}
-	}
-	s.schedule = newSchedule
-	nextPrefix := s.nextPrefixToReprovideNoLock()
-	timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix))
-	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
-	s.scheduleLk.Unlock()
-
-	s.clearPendingWork()
-	// NOTE: in order to optimize memory usage, cap the amount of cids to be
-	// written to datastore at once e.g using s.mhStore.Empty.
-	_, err := s.mhStore.Reset(req.ctx, cids...)
-
-	req.done <- err
 }
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
@@ -1545,17 +1474,5 @@ func (s *SweepingReprovider) ForceProvide(ctx context.Context, keys ...mh.Multih
 	}
 	s.provideChan <- req
 	// Wait for initial provide to complete before returning.
-	return <-doneChan
-}
-
-func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {
-	doneChan := make(chan error, 1)
-	req := resetCidsReq{
-		ctx:  ctx,
-		cids: keyChan,
-		done: doneChan,
-	}
-	s.resetCidsChan <- req
-	// Wait for the reset to complete before returning.
 	return <-doneChan
 }

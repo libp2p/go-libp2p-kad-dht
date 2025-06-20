@@ -71,9 +71,11 @@ const (
 )
 
 type provideReq struct {
-	ctx  context.Context
-	cids []mh.Multihash
-	done chan<- error
+	ctx           context.Context
+	cids          []mh.Multihash
+	done          chan<- error
+	reprovideKeys bool
+	forceProvide  bool
 }
 
 type resetCidsReq struct {
@@ -329,28 +331,6 @@ func (s *SweepingReprovider) scheduleNextReprovideNoLock(prefix bitstr.Key, time
 	s.scheduleTimerStartedAt = s.clock.Now()
 }
 
-func (s *SweepingReprovider) groupCidsByPrefix(cids []mh.Multihash) map[bitstr.Key][]mh.Multihash {
-	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	seen := make(map[bit256.Key]struct{})
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
-	for _, c := range cids {
-		k := mhToBit256(c)
-		// Don't add duplicates
-		if _, ok := seen[k]; ok {
-			continue
-		}
-		seen[k] = struct{}{}
-		prefix := s.prefixForKeyNoLock(k)
-		if _, ok := prefixes[prefix]; !ok {
-			prefixes[prefix] = []mh.Multihash{c}
-		} else {
-			prefixes[prefix] = append(prefixes[prefix], c)
-		}
-	}
-	return prefixes
-}
-
 func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.cids) == 0 {
 		if provideRequest.done != nil {
@@ -358,38 +338,57 @@ func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 		}
 		return
 	}
-	prefixes, newCidsCount, err := s.addCids(provideRequest.cids)
-	if err != nil {
-		if provideRequest.done != nil {
-			provideRequest.done <- err
+
+	var err error
+	var cids []mh.Multihash
+	var prefixes map[bitstr.Key][]mh.Multihash
+	if provideRequest.reprovideKeys {
+		// Add cids to list of cids to be reprovided. Returned cids are deduplicated
+		// newly added cids.
+		cids, err = s.mhStore.Put(s.ctx, provideRequest.cids...)
+		if err != nil {
+			if provideRequest.done != nil {
+				provideRequest.done <- err
+			}
+			return
+		} else if len(cids) == 0 {
+			// All cids are already tracked and have been provided.
+			if provideRequest.done != nil {
+				provideRequest.done <- nil
+			}
+			return
 		}
-		return
+		prefixes = s.groupCidsAndAddToSchedule(cids)
 	}
 
-	if len(prefixes) == 0 {
-		// All cids are already tracked and have been provided.
-		if provideRequest.done != nil {
-			provideRequest.done <- nil
+	if !provideRequest.reprovideKeys || provideRequest.forceProvide {
+		// Don't filter out cids that are already being reprovided.
+		cids = make([]mh.Multihash, 0, len(provideRequest.cids))
+		seen := make(map[string]struct{})
+		for _, cid := range provideRequest.cids {
+			k := string(cid)
+			if _, ok := seen[k]; !ok {
+				seen[k] = struct{}{}
+				cids = append(cids, cid)
+			}
 		}
-		return
+		prefixes = s.groupCidsByPrefix(cids)
 	}
 
 	if !s.connectivity.isOnline() {
 		logger.Warn("Node is offline, cannot provide requested cids.")
-		dedupCids := make([]mh.Multihash, len(provideRequest.cids))
-		for _, cids := range prefixes {
-			dedupCids = append(dedupCids, cids...)
+		if provideRequest.reprovideKeys {
+			s.pendingCids = append(s.pendingCids, cids...)
 		}
-		s.pendingCids = append(s.pendingCids, dedupCids...)
 		if provideRequest.done != nil {
 			provideRequest.done <- ErrNodeOffline
 		}
 		return
 	}
 
-	logger.Debugf("Providing %d new cids with %d different prefixes", newCidsCount, len(prefixes))
+	logger.Debugf("Providing %d new cids with %d different prefixes", len(cids), len(prefixes))
 	go func() {
-		err := s.networkProvide(prefixes)
+		err := s.networkProvide(prefixes, provideRequest.reprovideKeys)
 		if provideRequest.done != nil {
 			provideRequest.done <- err
 		}
@@ -407,19 +406,11 @@ func (s *SweepingReprovider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
 	return bitstr.Key(key.BitString(k)[:avgPrefixLen])
 }
 
-// addCids adds the provided cids to the reprovider tracked cids, and add the
-// appropriate prefix to the schedule if cid isn't covered by a prefix already
-// in the schedule.
-//
-// It returns a map of prefixes to fresh cids (that weren't tracked so far).
-func (s *SweepingReprovider) addCids(cids []mh.Multihash) (map[bitstr.Key][]mh.Multihash, int, error) {
+// groupCidsAndAddToSchedule groups cids by common prefix used in the schedule.
+// If the common prefix isn't included in the schedule, add it.
+func (s *SweepingReprovider) groupCidsAndAddToSchedule(cids []mh.Multihash) map[bitstr.Key][]mh.Multihash {
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
 	avgPrefixLen := 0
-
-	cids, err := s.mhStore.Put(s.ctx, cids...)
-	if err != nil {
-		return nil, 0, err
-	}
 
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
@@ -473,15 +464,39 @@ func (s *SweepingReprovider) addCids(cids []mh.Multihash) (map[bitstr.Key][]mh.M
 			}
 		}
 	}
-	return prefixes, len(cids), nil
+	return prefixes
 }
 
-func (s *SweepingReprovider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash) error {
+// groupCidsBySchedulePrefix groups cids by their common prefix that is
+// currently used in the schedule.
+func (s *SweepingReprovider) groupCidsByPrefix(cids []mh.Multihash) map[bitstr.Key][]mh.Multihash {
+	prefixes := make(map[bitstr.Key][]mh.Multihash)
+	seen := make(map[bit256.Key]struct{})
+	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
+	for _, c := range cids {
+		k := mhToBit256(c)
+		// Don't add duplicates
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		prefix := s.prefixForKeyNoLock(k)
+		if _, ok := prefixes[prefix]; !ok {
+			prefixes[prefix] = []mh.Multihash{c}
+		} else {
+			prefixes[prefix] = append(prefixes[prefix], c)
+		}
+	}
+	return prefixes
+}
+
+func (s *SweepingReprovider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash, retryOnFailure bool) error {
 	if len(prefixes) == 1 {
 		for prefix, cids := range prefixes {
 			// Provide a single cid (NOT ProvideMany)
 			if len(cids) == 1 {
-				return s.provideForPrefix(prefix, cids)
+				return s.provideForPrefix(prefix, cids, retryOnFailure)
 			}
 		}
 	}
@@ -519,7 +534,7 @@ workerLoop:
 				defer wg.Done()
 				defer s.workerPool.Release(burstWorker)
 
-				if err := s.provideForPrefix(p.prefix, p.cids); err != nil {
+				if err := s.provideForPrefix(p.prefix, p.cids, retryOnFailure); err != nil {
 					logger.Error(err)
 				} else {
 					// Track if we were able to provide at least one cid.
@@ -766,7 +781,7 @@ func (s *SweepingReprovider) reprovideForPrefix(prefix bitstr.Key, periodicRepro
 	return nil
 }
 
-func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids []mh.Multihash) error {
+func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids []mh.Multihash, retryOnFailure bool) error {
 	if len(cids) == 0 {
 		return nil
 	}
@@ -783,14 +798,18 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids []mh.Multi
 	logger.Debugf("Starting to explore prefix %s for %d matching cids", prefix, len(cids))
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
-		s.pendingCidsChan <- cids
+		if retryOnFailure {
+			s.pendingCidsChan <- cids
+		}
 		if err == errTooManyIterationsDuringExploration {
 			logger.Errorf("prefix key exploration not complete: %s", prefix)
 		}
 		return err
 	}
 	if len(peers) == 0 {
-		s.pendingCidsChan <- cids
+		if retryOnFailure {
+			s.pendingCidsChan <- cids
+		}
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
 
@@ -814,7 +833,9 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids []mh.Multi
 		if err != nil {
 			logger.Warn(err, ": region ", r.prefix)
 			errCount++
-			s.pendingCidsChan <- allValues(r.cids, s.order)
+			if retryOnFailure {
+				s.pendingCidsChan <- allValues(r.cids, s.order)
+			}
 			continue
 		}
 		s.provideCounter.Add(s.ctx, int64(r.cids.Size()))
@@ -1332,7 +1353,7 @@ func (s *SweepingReprovider) catchupPendingWork() {
 
 		// 3. Provide the remaining cids that haven't been provided yet as part of
 		//    a late region.
-		s.networkProvide(s.groupCidsByPrefix(cidsInNoRegions))
+		s.networkProvide(s.groupCidsByPrefix(cidsInNoRegions), true)
 	}()
 }
 
@@ -1430,9 +1451,11 @@ func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast b
 	}
 	doneChan := make(chan error, 1)
 	req := provideReq{
-		ctx:  ctx,
-		cids: []mh.Multihash{c.Hash()},
-		done: doneChan,
+		ctx:           ctx,
+		cids:          []mh.Multihash{c.Hash()},
+		done:          doneChan,
+		reprovideKeys: true,
+		forceProvide:  false,
 	}
 	s.provideChan <- req
 	// Wait for initial provide to complete before returning.
@@ -1445,24 +1468,14 @@ func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast b
 func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
 	doneChan := make(chan error, 1)
 	req := provideReq{
-		ctx:  ctx,
-		cids: keys,
-		done: doneChan,
+		ctx:           ctx,
+		cids:          keys,
+		done:          doneChan,
+		reprovideKeys: true,
+		forceProvide:  false,
 	}
 	s.provideChan <- req
 	// Wait for all cids to be provided before returning.
-	return <-doneChan
-}
-
-func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {
-	doneChan := make(chan error, 1)
-	req := resetCidsReq{
-		ctx:  ctx,
-		cids: keyChan,
-		done: doneChan,
-	}
-	s.resetCidsChan <- req
-	// Wait for the reset to complete before returning.
 	return <-doneChan
 }
 
@@ -1472,8 +1485,11 @@ func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-ch
 // deletes the keys.
 func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
 	s.provideChan <- provideReq{
-		ctx:  context.Background(),
-		cids: keys,
+		ctx:           context.Background(),
+		cids:          keys,
+		done:          nil,
+		reprovideKeys: true,
+		forceProvide:  false,
 	}
 }
 
@@ -1489,17 +1505,44 @@ func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
 
 // InstantProvide only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingReprovider) InstantProvide(keys ...mh.Multihash) error {
-	// TODO: implement me
-	return nil
+func (s *SweepingReprovider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
+	doneChan := make(chan error, 1)
+	req := provideReq{
+		ctx:           ctx,
+		cids:          keys,
+		done:          doneChan,
+		reprovideKeys: false,
+		forceProvide:  true,
+	}
+	s.provideChan <- req
+	// Wait for provide to complete before returning potential error.
+	return <-doneChan
 }
 
 // ForceProvide is similar to StartProviding, but it sends provider records out
 // to the DHT even if the keys were already provided in the past.
-func (s *SweepingReprovider) ForceProvide(keys ...mh.Multihash) error {
-	// TODO: implement me
+func (s *SweepingReprovider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
+	doneChan := make(chan error, 1)
+	req := provideReq{
+		ctx:           ctx,
+		cids:          keys,
+		done:          doneChan,
+		reprovideKeys: true,
+		forceProvide:  true,
+	}
+	s.provideChan <- req
+	// Wait for initial provide to complete before returning.
+	return <-doneChan
+}
 
-	// try to add to mhStore
-	// InstantProvide
-	return nil
+func (s *SweepingReprovider) ResetReprovideSet(ctx context.Context, keyChan <-chan mh.Multihash) error {
+	doneChan := make(chan error, 1)
+	req := resetCidsReq{
+		ctx:  ctx,
+		cids: keyChan,
+		done: doneChan,
+	}
+	s.resetCidsChan <- req
+	// Wait for the reset to complete before returning.
+	return <-doneChan
 }

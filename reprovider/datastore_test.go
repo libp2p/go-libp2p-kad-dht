@@ -12,7 +12,7 @@ import (
 )
 
 func TestMHStoreStoreAndGet(t *testing.T) {
-	store, err := NewMHStore(ds.NewMapDatastore())
+	store, err := NewMHStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestMHStoreStoreAndGet(t *testing.T) {
 }
 
 func TestMHStoreReset(t *testing.T) {
-	store, err := NewMHStore(ds.NewMapDatastore())
+	store, err := NewMHStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestMHStoreReset(t *testing.T) {
 }
 
 func TestMHStoreDelete(t *testing.T) {
-	store, err := NewMHStore(ds.NewMapDatastore())
+	store, err := NewMHStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}

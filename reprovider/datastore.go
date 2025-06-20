@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	query "github.com/ipfs/go-datastore/query"
 	mh "github.com/multiformats/go-multihash"
@@ -17,19 +19,31 @@ import (
 // MHStore stores multihashes grouped by their first prefixLen bits in a
 // datastore.
 type MHStore struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	lk     sync.Mutex
+
 	ds        ds.Batching
-	lk        sync.Mutex
-	prefixLen int
 	base      ds.Key
+	prefixLen int
+
+	gcFunc     KeyChanFunc // optional function to get keys for garbage collection
+	gcInterval time.Duration
 }
 
 type mhStoreCfg struct {
-	prefixLen int
 	base      string
+	prefixLen int
+
+	gcFunc     KeyChanFunc
+	gcInterval time.Duration
 }
 
 // MHStoreOption configures MHStore behaviour.
 type MHStoreOption func(*mhStoreCfg) error
+
+type KeyChanFunc func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
 
 const (
 	DefaultMHStorePrefixLen  = 10
@@ -66,8 +80,25 @@ func WithDatastorePrefix(base string) MHStoreOption {
 	}
 }
 
+func WithGCFunc(gcFunc KeyChanFunc) MHStoreOption {
+	return func(cfg *mhStoreCfg) error {
+		cfg.gcFunc = gcFunc
+		return nil
+	}
+}
+
+func WithGCInterval(interval time.Duration) MHStoreOption {
+	return func(cfg *mhStoreCfg) error {
+		if interval <= 0 {
+			return fmt.Errorf("invalid garbage collection interval %s", interval)
+		}
+		cfg.gcInterval = interval
+		return nil
+	}
+}
+
 // NewMHStore creates a new MHStore backed by the provided datastore.
-func NewMHStore(d ds.Batching, opts ...MHStoreOption) (*MHStore, error) {
+func NewMHStore(ctx context.Context, d ds.Batching, opts ...MHStoreOption) (*MHStore, error) {
 	var cfg mhStoreCfg
 	opts = append([]MHStoreOption{MHStoreDefaultCfg}, opts...)
 	for i, o := range opts {
@@ -75,11 +106,52 @@ func NewMHStore(d ds.Batching, opts ...MHStoreOption) (*MHStore, error) {
 			return nil, fmt.Errorf("MHStore option %d failed: %w", i, err)
 		}
 	}
-	return &MHStore{
-		ds:        d,
-		prefixLen: cfg.prefixLen,
-		base:      ds.NewKey(cfg.base),
-	}, nil
+	mhStoreCtx, cancel := context.WithCancel(ctx)
+	mhStore := MHStore{
+		ctx:        mhStoreCtx,
+		cancel:     cancel,
+		ds:         d,
+		prefixLen:  cfg.prefixLen,
+		base:       ds.NewKey(cfg.base),
+		gcFunc:     cfg.gcFunc,
+		gcInterval: cfg.gcInterval,
+	}
+	if cfg.gcFunc != nil && cfg.gcInterval > 0 {
+		go mhStore.runGC()
+	}
+	return &mhStore, nil
+}
+
+func (s *MHStore) Close() error {
+	s.cancel()
+	s.wg.Wait()
+	return s.ds.Close()
+}
+
+func (s *MHStore) runGC() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	ticker := time.NewTicker(s.gcInterval)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			cidsChan, err := s.gcFunc(s.ctx)
+			if err != nil {
+				logger.Errorf("MHStore garbage collection failed: %v", err)
+				continue
+			}
+			mhs := make([]mh.Multihash, 0)
+			for c := range cidsChan {
+				mhs = append(mhs, c.Hash())
+			}
+			_, err = s.Reset(s.ctx, mhs...)
+			if err != nil {
+				logger.Errorf("MHStore reset failed during garbage collection: %v", err)
+			}
+		}
+	}
 }
 
 func (s *MHStore) dsKey(prefix bitstr.Key) ds.Key {

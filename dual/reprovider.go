@@ -33,6 +33,7 @@ func (d *DHT) NewSweepingReprovider(opts ...reprovider.Option) (*SweepingReprovi
 	if d == nil || (d.LAN == nil && d.WAN == nil) {
 		return nil, errors.New("cannot create sweeping reprovider for nil dual DHT")
 	}
+
 	sweepingReproviders := make([]*reprovider.SweepingReprovider, 2)
 	var err error
 	for i, dht := range []*dht.IpfsDHT{d.LAN, d.WAN} {

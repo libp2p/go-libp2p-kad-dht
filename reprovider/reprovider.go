@@ -150,7 +150,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	mhStore, err := NewMHStore(cfg.mhStore)
+	mhStore, err := NewMHStore(ctx, cfg.mhStore)
 	if err != nil {
 		return nil, err
 	}

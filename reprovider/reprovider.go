@@ -269,8 +269,6 @@ func (s *SweepingReprovider) measureInitialPrefixLen() {
 	cplSamples := atomic.Int32{}
 	wg := sync.WaitGroup{}
 	wg.Add(initialGetClosestPeers)
-	// NOTE: since this function blocks until the GCP operation succeeds, it
-	// makes the kubo tests time out...
 	for range initialGetClosestPeers {
 		go func() {
 			defer wg.Done()

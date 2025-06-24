@@ -105,6 +105,7 @@ type SweepingReprovider struct {
 	maxReprovideDelay time.Duration
 
 	avgPrefixLenLk       sync.Mutex
+	avgPrefixLenReady    chan struct{}
 	cachedAvgPrefixLen   int
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
@@ -187,6 +188,8 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
 
 		avgPrefixLenValidity: 5 * time.Minute,
+		cachedAvgPrefixLen:   -1,
+		avgPrefixLenReady:    make(chan struct{}, 1),
 
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),
@@ -223,7 +226,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 
 func (s *SweepingReprovider) run() {
 	logger.Debug("Starting SweepingReprovider")
-	s.measureInitialPrefixLen()
+	go s.measureInitialPrefixLen()
 	defer s.scheduleTimer.Stop()
 	defer s.workerPool.Close()
 
@@ -295,6 +298,8 @@ func (s *SweepingReprovider) measureInitialPrefixLen() {
 	wg.Wait()
 
 	nSamples := cplSamples.Load()
+	s.avgPrefixLenLk.Lock()
+	defer s.avgPrefixLenLk.Unlock()
 	if nSamples == 0 {
 		s.cachedAvgPrefixLen = 0
 	} else {
@@ -302,6 +307,7 @@ func (s *SweepingReprovider) measureInitialPrefixLen() {
 	}
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
+	s.avgPrefixLenReady <- struct{}{}
 }
 
 func (s *SweepingReprovider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
@@ -1367,6 +1373,16 @@ func (s *SweepingReprovider) catchupPendingWork() {
 func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
 	s.avgPrefixLenLk.Lock()
 	defer s.avgPrefixLenLk.Unlock()
+
+	if s.cachedAvgPrefixLen == -1 {
+		// Wait for initial measurement to complete. Requires the node to come
+		// online.
+		s.avgPrefixLenLk.Unlock()
+		<-s.avgPrefixLenReady
+		s.avgPrefixLenLk.Lock()
+		return s.cachedAvgPrefixLen
+	}
+
 	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(s.clock.Now()) {
 		// Return cached value if it is still valid.
 		return s.cachedAvgPrefixLen

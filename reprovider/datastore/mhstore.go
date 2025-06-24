@@ -51,7 +51,7 @@ type mhStoreCfg struct {
 // MHStoreOption configures MHStore behaviour.
 type MHStoreOption func(*mhStoreCfg) error
 
-type KeyChanFunc func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
+type KeyChanFunc = func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
 
 const (
 	DefaultMHStorePrefixLen  = 10

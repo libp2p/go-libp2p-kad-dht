@@ -8,13 +8,13 @@ import (
 	"github.com/filecoin-project/go-clock"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 )
 
 const (
-	DefaultReprovideInterval                = 22 * time.Hour
 	DefaultMaxReprovideDelay                = 1 * time.Hour
 	DefaultConnectivityCheckOnlineInterval  = 1 * time.Minute
 	DefaultConnectivityCheckOfflineInterval = 5 * time.Minute
@@ -30,7 +30,7 @@ type config struct {
 	peerid peer.ID
 	router KadClosestPeersRouter
 
-	mhStore *MHStore
+	mhStore *datastore.MHStore
 
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
@@ -76,7 +76,7 @@ type Option func(opt *config) error
 
 var DefaultConfig = func(cfg *config) error {
 	cfg.replicationFactor = amino.DefaultBucketSize
-	cfg.reprovideInterval = DefaultReprovideInterval
+	cfg.reprovideInterval = amino.DefaultReprovideInterval
 	cfg.maxReprovideDelay = DefaultMaxReprovideDelay
 	cfg.connectivityCheckOnlineInterval = DefaultConnectivityCheckOnlineInterval
 	cfg.connectivityCheckOfflineInterval = DefaultConnectivityCheckOfflineInterval
@@ -213,7 +213,7 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 	}
 }
 
-func WithMHStore(mhStore *MHStore) Option {
+func WithMHStore(mhStore *datastore.MHStore) Option {
 	return func(cfg *config) error {
 		if mhStore == nil {
 			return errors.New("reprovider config: multihash store cannot be nil")

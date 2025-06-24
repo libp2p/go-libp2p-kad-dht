@@ -18,6 +18,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -110,7 +111,7 @@ type SweepingReprovider struct {
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
 
-	mhStore *MHStore
+	mhStore *datastore.MHStore
 
 	provideChan            chan provideReq
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
@@ -144,7 +145,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	}
 	if cfg.mhStore == nil {
 		// Setup MHStore if missing
-		mhStore, err := NewMHStore(ctx, ds.NewMapDatastore())
+		mhStore, err := datastore.NewMHStore(ctx, ds.NewMapDatastore())
 		if err != nil {
 			return nil, err
 		}

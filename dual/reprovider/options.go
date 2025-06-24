@@ -1,4 +1,4 @@
-package dual
+package reprovider
 
 import (
 	"context"
@@ -7,7 +7,9 @@ import (
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
+	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
 )
 
 const (
@@ -16,7 +18,7 @@ const (
 )
 
 type reproviderConfig struct {
-	mhStore *reprovider.MHStore
+	mhStore *datastore.MHStore
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
@@ -53,12 +55,12 @@ func (c *reproviderConfig) validate() error {
 
 var DefaultReproviderConfig = func(cfg *reproviderConfig) error {
 	var err error
-	cfg.mhStore, err = reprovider.NewMHStore(context.Background(), ds.NewMapDatastore())
+	cfg.mhStore, err = datastore.NewMHStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		return err
 	}
 
-	cfg.reprovideInterval = [2]time.Duration{reprovider.DefaultReprovideInterval, reprovider.DefaultReprovideInterval}
+	cfg.reprovideInterval = [2]time.Duration{amino.DefaultReprovideInterval, amino.DefaultReprovideInterval}
 	cfg.maxReprovideDelay = [2]time.Duration{reprovider.DefaultMaxReprovideDelay, reprovider.DefaultMaxReprovideDelay}
 
 	cfg.connectivityCheckOnlineInterval = [2]time.Duration{reprovider.DefaultConnectivityCheckOnlineInterval, reprovider.DefaultConnectivityCheckOnlineInterval}
@@ -72,7 +74,7 @@ var DefaultReproviderConfig = func(cfg *reproviderConfig) error {
 	return nil
 }
 
-func WithMHStore(mhStore *reprovider.MHStore) ReproviderOption {
+func WithMHStore(mhStore *datastore.MHStore) ReproviderOption {
 	return func(cfg *reproviderConfig) error {
 		if mhStore == nil {
 			return errors.New("reprovider config: mhStore cannot be nil")

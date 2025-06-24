@@ -1,4 +1,4 @@
-package dual
+package reprovider
 
 import (
 	"context"
@@ -9,7 +9,9 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
+	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	mh "github.com/multiformats/go-multihash"
 )
@@ -23,13 +25,13 @@ var (
 var rLogger = logging.Logger("dht/dual/reprovider")
 
 type SweepingReprovider struct {
-	dht     *DHT
+	dht     *dual.DHT
 	LAN     *reprovider.SweepingReprovider
 	WAN     *reprovider.SweepingReprovider
-	mhStore *reprovider.MHStore
+	mhStore *datastore.MHStore
 }
 
-func (d *DHT) NewSweepingReprovider(opts ...ReproviderOption) (*SweepingReprovider, error) {
+func NewSweepingReprovider(d *dual.DHT, opts ...ReproviderOption) (*SweepingReprovider, error) {
 	if d == nil || (d.LAN == nil && d.WAN == nil) {
 		return nil, errors.New("cannot create sweeping reprovider for nil dual DHT")
 	}
@@ -103,7 +105,7 @@ func (s *SweepingReprovider) runOnBoth(fn func(r *reprovider.SweepingReprovider)
 		errLan = nil
 	}
 
-	return combineErrors(errLan, errWan)
+	return dual.CombineErrors(errLan, errWan)
 }
 
 // Provide returns an error if the cid failed to be provided to either network.

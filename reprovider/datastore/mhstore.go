@@ -1,7 +1,8 @@
-package reprovider
+package datastore
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -10,11 +11,16 @@ import (
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	query "github.com/ipfs/go-datastore/query"
+	logging "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
+
+var logger = logging.Logger("dht/SweepingReprovider/MHStore")
 
 // MHStore stores multihashes grouped by their first prefixLen bits in a
 // datastore.
@@ -50,7 +56,7 @@ type KeyChanFunc func(context.Context) (<-chan cid.Cid, error) // TODO: update t
 const (
 	DefaultMHStorePrefixLen  = 10
 	DefaultMHStoreBasePrefix = "/reprovider/mhs"
-	DefaultGCInterval        = 2 * DefaultReprovideInterval
+	DefaultGCInterval        = 2 * amino.DefaultReprovideInterval
 	DefaultGCBatchSize       = 1 << 14
 )
 
@@ -419,4 +425,9 @@ func (s *MHStore) Delete(ctx context.Context, mhs ...mh.Multihash) error {
 		}
 	}
 	return nil
+}
+
+func mhToBit256(h mh.Multihash) bit256.Key {
+	hash := sha256.Sum256(h)
+	return bit256.NewKey(hash[:])
 }

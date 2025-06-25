@@ -150,7 +150,7 @@ func NewMHStore(ctx context.Context, d ds.Batching, opts ...MHStoreOption) (*MHS
 func (s *MHStore) Close() error {
 	s.cancel()
 	s.wg.Wait()
-	return s.ds.Close()
+	return nil
 }
 
 func (s *MHStore) runGC() {

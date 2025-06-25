@@ -167,27 +167,38 @@ func (s *MHStore) runGC() {
 				logger.Errorf("MHStore garbage collection failed: %v", err)
 				continue
 			}
-			err = s.Empty(s.ctx)
+			err = s.Reset(s.ctx, cidsChan)
 			if err != nil {
-				logger.Errorf("MHStore empty failed during garbage collection: %v", err)
-				continue
-			}
-			mhs := make([]mh.Multihash, s.gcBatchSize)
-			i := 0
-			for c := range cidsChan {
-				mhs[i] = c.Hash()
-				i++
-				if i == s.gcBatchSize {
-					_, err = s.Put(s.ctx, mhs...)
-					if err != nil {
-						logger.Errorf("MHStore put failed during garbage collection: %v", err)
-					}
-					i = 0
-					mhs = mhs[:0]
-				}
+				logger.Errorf("MHStore reset failed: %v", err)
 			}
 		}
 	}
+}
+
+func (s *MHStore) Reset(ctx context.Context, cidsChan <-chan cid.Cid) error {
+	err := s.Empty(ctx)
+	if err != nil {
+		return fmt.Errorf("MHStore empty failed during reset: %w", err)
+	}
+	mhs := make([]mh.Multihash, s.gcBatchSize)
+	i := 0
+	for c := range cidsChan {
+		mhs[i] = c.Hash()
+		i++
+		if i == s.gcBatchSize {
+			_, err = s.Put(ctx, mhs...)
+			if err != nil {
+				return fmt.Errorf("MHStore put failed during reset: %w", err)
+			}
+			i = 0
+			mhs = mhs[:0]
+		}
+	}
+	_, err = s.Put(ctx, mhs...)
+	if err != nil {
+		return fmt.Errorf("MHStore put failed during reset: %w", err)
+	}
+	return nil
 }
 
 func (s *MHStore) dsKey(prefix bitstr.Key) ds.Key {
@@ -340,24 +351,6 @@ func (s *MHStore) Empty(ctx context.Context) error {
 	defer s.lk.Unlock()
 
 	return s.emptyLocked(ctx)
-}
-
-// Reset deletes all entries under the given datastore prefix and stores the
-// provided hashes. Returns the deduplicated multihashes that have been
-// persisted.
-func (s *MHStore) Reset(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihash, error) {
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
-	err := s.emptyLocked(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(mhs) == 0 {
-		return nil, nil
-	}
-	return s.putLocked(ctx, mhs...)
 }
 
 // Delete removes the given multihashes from datastore.

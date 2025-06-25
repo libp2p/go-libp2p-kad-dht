@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	mh "github.com/multiformats/go-multihash"
 
@@ -101,21 +102,21 @@ func TestMHStoreReset(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	secondChan := make(chan cid.Cid, 2)
 	second := make([]mh.Multihash, 2)
-	for i := range second {
+	for i := range 2 {
 		h, err := mh.Sum([]byte{byte(i + 10)}, mh.SHA2_256, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
 		second[i] = h
+		secondChan <- cid.NewCidV1(cid.Raw, h)
 	}
+	close(secondChan)
 
-	added, err := store.Reset(context.Background(), second...)
+	err = store.Reset(context.Background(), secondChan)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(added) != len(second) {
-		t.Fatalf("expected %d hashes after reset, got %d", len(second), len(added))
 	}
 
 	// old hashes should not be present

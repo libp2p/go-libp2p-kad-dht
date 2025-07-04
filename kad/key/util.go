@@ -15,6 +15,9 @@ const BitPanicMsg = "bit index out of range"
 
 // Equal reports whether two keys have equal numeric values.
 func Equal[K kad.Key[K]](a, b K) bool {
+	if a.BitLen() != b.BitLen() {
+		return false
+	}
 	return a.Compare(b) == 0
 }
 

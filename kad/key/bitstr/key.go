@@ -57,14 +57,14 @@ func (k Key) CommonPrefixLength(o Key) int {
 		if len(o) == 0 && k.isZero() {
 			return len(k)
 		}
-		panic(lengthPanicMsg)
 	}
-	for i := 0; i < len(k); i++ {
+	minLen := min(len(k), len(o))
+	for i := range minLen {
 		if k[i] != o[i] {
 			return i
 		}
 	}
-	return len(k)
+	return minLen
 }
 
 func (k Key) Compare(o Key) int {
@@ -75,9 +75,8 @@ func (k Key) Compare(o Key) int {
 		if len(o) == 0 && k.isZero() {
 			return 0
 		}
-		panic(lengthPanicMsg)
 	}
-	for i := 0; i < len(k); i++ {
+	for i := range min(len(k), len(o)) {
 		if k[i] != o[i] {
 			if k[i] < o[i] {
 				return -1
@@ -85,7 +84,13 @@ func (k Key) Compare(o Key) int {
 			return 1
 		}
 	}
-	return 0
+	if len(k) == len(o) {
+		return 0
+	}
+	if len(k) > len(o) {
+		return 1
+	}
+	return -1
 }
 
 func (k Key) isZero() bool {

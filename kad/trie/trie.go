@@ -36,11 +36,6 @@ func (tr *Trie[K, D]) Branch(dir int) *Trie[K, D] {
 
 // Size returns the number of keys added to the trie.
 func (tr *Trie[K, D]) Size() int {
-	return tr.sizeAtDepth(0)
-}
-
-// Size returns the number of keys added to the trie at or beyond depth d.
-func (tr *Trie[K, D]) sizeAtDepth(d int) int {
 	if tr.IsLeaf() {
 		if !tr.HasKey() {
 			return 0
@@ -48,7 +43,7 @@ func (tr *Trie[K, D]) sizeAtDepth(d int) int {
 			return 1
 		}
 	} else {
-		return tr.branch[0].sizeAtDepth(d+1) + tr.branch[1].sizeAtDepth(d+1)
+		return tr.branch[0].Size() + tr.branch[1].Size()
 	}
 }
 

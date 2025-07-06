@@ -766,7 +766,7 @@ func (s *SweepingReprovider) reprovideForPrefix(prefix bitstr.Key, periodicRepro
 		for _, entry := range allEntries(r.cids, s.order) {
 			s.addLocalRecord(entry.Data)
 		}
-		cidsAllocations := s.cidsAllocationsToPeers(r)
+		cidsAllocations := allocateToKClosest(r.cids, r.peers, s.replicationFactor)
 		err := s.sendProviderRecords(cidsAllocations, addrInfo)
 		s.releaseRegionReprovide(r.prefix)
 		if periodicReprovide {
@@ -836,7 +836,7 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, cids []mh.Multi
 		for _, entry := range allEntries(r.cids, s.order) {
 			s.addLocalRecord(entry.Data)
 		}
-		cidsAllocations := s.cidsAllocationsToPeers(r)
+		cidsAllocations := allocateToKClosest(r.cids, r.peers, s.replicationFactor)
 		err := s.sendProviderRecords(cidsAllocations, addrInfo)
 		if err != nil {
 			logger.Warn(err, ": region ", r.prefix)
@@ -1157,24 +1157,6 @@ func (s *SweepingReprovider) sendProviderRecords(cidsAllocations map[peer.ID][]m
 	return nil
 }
 
-// cidsAllocationsToPeers assigns each cid of the provided region to the
-// replicationFactor closest peers from the region (XOR distance).
-func (s *SweepingReprovider) cidsAllocationsToPeers(r region) map[peer.ID][]mh.Multihash {
-	// TODO: this is a very greedy approach, can be greatly optimized
-	keysPerPeer := make(map[peer.ID][]mh.Multihash)
-	for _, cidEntry := range allEntries(r.cids, s.order) {
-		for _, peerEntry := range trie.Closest(r.peers, cidEntry.Key, s.replicationFactor) {
-			pid := peerEntry.Data
-			if _, ok := keysPerPeer[pid]; !ok {
-				keysPerPeer[pid] = []mh.Multihash{cidEntry.Data}
-			} else {
-				keysPerPeer[pid] = append(keysPerPeer[pid], cidEntry.Data)
-			}
-		}
-	}
-	return keysPerPeer
-}
-
 func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
 	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
@@ -1220,6 +1202,7 @@ func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprov
 	// more than s.maxReprovideDelay.
 	nextReprovideTime := min(s.reprovideTimeForPrefix(prefix), lastReprovide+s.reprovideInterval+s.maxReprovideDelay)
 	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
 	// If schedule contains keys starting with prefix, remove them to avoid
 	// overlap.
 	if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
@@ -1234,7 +1217,6 @@ func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprov
 		timeUntilReprovide := s.timeUntil(nextReprovideTime)
 		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 	}
-	s.scheduleLk.Unlock()
 }
 
 // currentTimeOffset returns the current time offset in the reprovide cycle.

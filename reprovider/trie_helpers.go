@@ -32,12 +32,17 @@ func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, s
 }
 
 func assignCidsToRegions(regions []region, cids []mh.Multihash) []region {
-	cidsTrie := trie.New[bit256.Key, mh.Multihash]()
-	for _, c := range cids {
-		cidsTrie.Add(mhToBit256(c), c)
+	for i := range regions {
+		regions[i].cids = trie.New[bit256.Key, mh.Multihash]()
 	}
-	for i, r := range regions {
-		regions[i].cids, _ = subtrieMatchingPrefix(cidsTrie, r.prefix)
+	for _, c := range cids {
+		k := mhToBit256(c)
+		for i, r := range regions {
+			if isPrefix(r.prefix, k) {
+				regions[i].cids.Add(k, c)
+				break
+			}
+		}
 	}
 	return regions
 }
@@ -138,7 +143,7 @@ func allEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], orde
 }
 
 func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []*trie.Entry[K0, D] {
-	if t.IsEmptyLeaf() {
+	if t == nil || t.IsEmptyLeaf() {
 		return nil
 	}
 	if t.IsNonEmptyLeaf() {
@@ -164,4 +169,130 @@ func subtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K
 		branch = branch.Branch(int(k.Bit(i)))
 	}
 	return branch, true
+}
+
+// mapInsert appends a slice of values to the map entry for the given key. If
+// the key doesn't exist, it creates a new slice pre-sized to the length of the
+// values being inserted to avoid multiple allocations.
+func mapInsert[K comparable, V any](m map[K][]V, k K, vs []V) {
+	if cur := m[k]; cur == nil {
+		// pre-size once
+		m[k] = append(make([]V, 0, len(vs)), vs...)
+	} else {
+		m[k] = append(cur, vs...)
+	}
+}
+
+// mapMerge merges all key-value pairs from the source map into the destination
+// map. Values from the source are appended to existing slices in the
+// destination.
+func mapMerge[K comparable, V any](dst, src map[K][]V) {
+	for k1, vs1 := range src {
+		mapInsert(dst, k1, vs1)
+	}
+}
+
+// allocateToKClosest distributes items from the items trie to the k closest
+// destinations in the dests trie based on XOR distance between their keys.
+//
+// The algorithm uses the trie structure to efficiently compute proximity
+// without explicit distance calculations. Items are allocated to destinations
+// by traversing both tries simultaneously and selecting the k destinations
+// with the smallest XOR distance to each item's key.
+//
+// Returns a map where each destination value is associated with all items
+// allocated to it. If k is 0 or either trie is empty, returns an empty map.
+func allocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][]V0 {
+	return allocateToKClosestAtDepth(items, dests, k, 0)
+}
+
+// allocateToKClosestAtDepth performs the recursive allocation algorithm at a specific
+// trie depth. At each depth, it processes both branches (0 and 1) of the trie,
+// determining which destinations are closest to the items based on matching bit
+// patterns at the current depth.
+//
+// The algorithm prioritizes destinations in the same branch as items (smaller XOR
+// distance) and recursively processes deeper levels when more granular distance
+// calculations are needed to select exactly k destinations.
+//
+// Parameters:
+//   - items: trie containing items to be allocated
+//   - dests: trie containing destination candidates
+//   - k: maximum number of destinations to allocate each item to
+//   - depth: current bit depth in the trie traversal
+//
+// Returns a map of destination values to their allocated items.
+func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth int) map[V1][]V0 {
+	m := make(map[V1][]V0)
+	if k == 0 {
+		return m
+	}
+	for i := range 2 {
+		// Assign all items from branch i
+
+		matchingItemsBranch := items.Branch(i)
+		matchingItems := allValues(matchingItemsBranch, bit256.ZeroKey())
+		if len(matchingItems) == 0 {
+			if items.IsNonEmptyLeaf() && int((*items.Key()).Bit(depth)) == i {
+				// items' current branch contains a single leaf
+				matchingItems = []V0{items.Data()}
+				matchingItemsBranch = items
+			} else {
+				// items' current branch is empty, skip it
+				continue
+			}
+		}
+
+		matchingDestsBranch := dests.Branch(i)
+		otherDestsBranch := dests.Branch(1 - i)
+		matchingDests := allValues(matchingDestsBranch, bit256.ZeroKey())
+		otherDests := allValues(otherDestsBranch, bit256.ZeroKey())
+		if dests.IsLeaf() {
+			// Single key (leaf) in dests
+			if dests.IsNonEmptyLeaf() {
+				if int((*dests.Key()).Bit(depth)) == i {
+					// Leaf matches current branch
+					matchingDests = []V1{dests.Data()}
+					matchingDestsBranch = dests
+				} else {
+					// Leaf matches other branch
+					otherDests = []V1{dests.Data()}
+					otherDestsBranch = dests
+				}
+			} else {
+				// Empty leaf, no dests to allocate items.
+				return m
+			}
+		}
+
+		if nMatchingDests := len(matchingDests); nMatchingDests <= k {
+			// Allocate matching items to the matching dests branch
+			for _, dest := range matchingDests {
+				mapInsert(m, dest, matchingItems)
+			}
+			if nMatchingDests == k || len(otherDests) == 0 {
+				// Items were assigned to all k dests, or other branch is empty.
+				continue
+			}
+
+			nMissingDests := k - nMatchingDests
+			if len(otherDests) <= nMissingDests {
+				// Other branch contains at most the missing number of dests to be
+				// allocated to. Allocate matching items to the other dests branch.
+				for _, dest := range otherDests {
+					mapInsert(m, dest, matchingItems)
+				}
+			} else {
+				// Other branch contains more than the missing number of dests, go one
+				// level deeper to assign matching items to the closest dests.
+				allocs := allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1)
+				mapMerge(m, allocs)
+			}
+		} else {
+			// Number of matching dests is larger than k, go one level deeper.
+			allocs := allocateToKClosestAtDepth(matchingItemsBranch, matchingDestsBranch, k, depth+1)
+			mapMerge(m, allocs)
+		}
+	}
+	return m
 }

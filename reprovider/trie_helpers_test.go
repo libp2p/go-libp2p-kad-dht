@@ -290,3 +290,151 @@ func TestExtractMinimalRegions(t *testing.T) {
 	require.Equal(t, 4, regions[1].peers.Size())
 	require.Equal(t, 6, regions[2].peers.Size())
 }
+
+func TestAllocateToKClosestSingle(t *testing.T) {
+	destKeys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+	dests := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range destKeys {
+		dests.Add(k, k)
+	}
+	itemKeys := []bitstr.Key{
+		"0000",
+	}
+	items := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range itemKeys {
+		items.Add(k, k)
+	}
+	allocs := allocateToKClosest(items, dests, 3)
+
+	// "0000" should be assigned to ["0000", "0001", "0011"]
+	expected := map[bitstr.Key][]bitstr.Key{
+		"0000": {"0000"},
+		"0001": {"0000"},
+		"0011": {"0000"},
+	}
+	require.Equal(t, expected, allocs)
+}
+
+func TestAllocateToKClosestBasic(t *testing.T) {
+	destKeys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+	dests := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range destKeys {
+		dests.Add(k, k)
+	}
+	itemKeys := []bitstr.Key{
+		"0000",
+		"0011",
+		"0111",
+		"1001",
+		"1011",
+		"1100",
+		"1101",
+	}
+	items := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range itemKeys {
+		items.Add(k, k)
+	}
+	allocs := allocateToKClosest(items, dests, 3)
+
+	expected := map[bitstr.Key][]bitstr.Key{
+		"0000": {"0000", "0011"},
+		"0001": {"0000", "0011"},
+		"0011": {"0000", "0011", "0111"},
+		"0100": {"0111"},
+		"0110": {"0111"},
+		"1010": {"1001", "1011", "1100", "1101"},
+		"1101": {"1001", "1011", "1100", "1101"},
+		"1110": {"1001", "1011", "1100", "1101"},
+	}
+	require.Equal(t, expected, allocs)
+}
+
+func genRandBit256() bit256.Key {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return bit256.NewKey(b[:])
+}
+
+func TestAllocateToKClosest(t *testing.T) {
+	nItems := 2 << 12
+	nDests := 2 << 10
+	replication := 12
+
+	items := trie.New[bit256.Key, bit256.Key]()
+	for range nItems {
+		i := genRandBit256()
+		items.Add(i, i)
+	}
+	dests := trie.New[bit256.Key, bit256.Key]()
+	for range nDests {
+		d := genRandBit256()
+		dests.Add(d, d)
+	}
+
+	allocs := allocateToKClosest(items, dests, replication)
+
+	for _, itemEntry := range allEntries(items, bit256.ZeroKey()) {
+		i := itemEntry.Key
+		closest := trie.Closest(dests, i, replication)
+		for _, closestEntry := range closest {
+			d := closestEntry.Key
+			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
+		}
+	}
+}
+
+// func genRandBit256CommonPrefix() bit256.Key {
+// 	var b [31]byte
+// 	if _, err := rand.Read(b[:]); err != nil {
+// 		panic(err)
+// 	}
+// 	return bit256.NewKey(append([]byte{0}, b[:]...))
+// }
+//
+// func TestAllocateToKClosestUnbalanced(t *testing.T) {
+// 	nItems := 2 << 12
+// 	nDests := 2 << 10
+// 	replication := 12
+//
+// 	items := trie.New[bit256.Key, bit256.Key]()
+// 	for range nItems {
+// 		i := genRandBit256CommonPrefix()
+// 		items.Add(i, i)
+// 	}
+// 	dests := trie.New[bit256.Key, bit256.Key]()
+// 	for range nDests {
+// 		d := genRandBit256CommonPrefix()
+// 		dests.Add(d, d)
+// 	}
+//
+// 	allocs := allocateToKClosest(items, dests, replication)
+//
+// 	for _, itemEntry := range allEntries(items, bit256.ZeroKey()) {
+// 		i := itemEntry.Key
+// 		closest := trie.Closest(dests, i, replication)
+// 		for _, closestEntry := range closest {
+// 			d := closestEntry.Key
+// 			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
+// 		}
+// 	}
+// }

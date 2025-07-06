@@ -312,11 +312,6 @@ func TestCidsAllocationsToPeers(t *testing.T) {
 	nPeers := 128
 	replicationFactor := 10
 
-	reprovider := SweepingReprovider{
-		replicationFactor: replicationFactor,
-		order:             bit256.ZeroKey(),
-	}
-
 	cids := cidsToMhs(genCids(nCids))
 	cidsTrie := trie.New[bit256.Key, mh.Multihash]()
 	for _, c := range cids {
@@ -328,12 +323,8 @@ func TestCidsAllocationsToPeers(t *testing.T) {
 		peers[i] = genRandPeerID(t)
 		peersTrie.Add(peerIDToBit256(peers[i]), peers[i])
 	}
-	r := region{
-		prefix: bitstr.Key(""),
-		peers:  peersTrie,
-		cids:   cidsTrie,
-	}
-	cidsAllocations := reprovider.cidsAllocationsToPeers(r)
+	cidsAllocations := allocateToKClosest(cidsTrie, peersTrie, replicationFactor)
+
 	for _, c := range cids {
 		k := sha256.Sum256(c)
 		closestPeers := kb.SortClosestPeers(peers, k[:])[:replicationFactor]

@@ -10,34 +10,34 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
-	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
-	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	mh "github.com/multiformats/go-multihash"
 )
 
 var (
-	_ reprovider.Provider    = &SweepingReprovider{}
-	_ reprovider.ProvideMany = &SweepingReprovider{}
-	_ reprovider.Reprovider  = &SweepingReprovider{}
+	_ provider.BoxoProvider = &SweepingProvider{}
+	_ provider.ProvideMany  = &SweepingProvider{}
+	_ provider.Provider     = &SweepingProvider{}
 )
 
-var rLogger = logging.Logger("dht/dual/reprovider")
+var rLogger = logging.Logger("dht/dual/provider")
 
-type SweepingReprovider struct {
+type SweepingProvider struct {
 	dht     *dual.DHT
-	LAN     *reprovider.SweepingReprovider
-	WAN     *reprovider.SweepingReprovider
+	LAN     *provider.SweepingProvider
+	WAN     *provider.SweepingProvider
 	mhStore *datastore.MHStore
 }
 
-func NewSweepingReprovider(d *dual.DHT, opts ...ReproviderOption) (*SweepingReprovider, error) {
+func NewSweepingProvider(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 	if d == nil || (d.LAN == nil && d.WAN == nil) {
-		return nil, errors.New("cannot create sweeping reprovider for nil dual DHT")
+		return nil, errors.New("cannot create sweeping provider for nil dual DHT")
 	}
 
-	var cfg reproviderConfig
-	err := cfg.apply(append([]ReproviderOption{DefaultReproviderConfig}, opts...)...)
+	var cfg config
+	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -46,45 +46,45 @@ func NewSweepingReprovider(d *dual.DHT, opts ...ReproviderOption) (*SweepingRepr
 		return nil, err
 	}
 
-	sweepingReproviders := make([]*reprovider.SweepingReprovider, 2)
+	sweepingProviders := make([]*provider.SweepingProvider, 2)
 	for i, dht := range []*dht.IpfsDHT{d.LAN, d.WAN} {
 		if dht == nil {
 			continue
 		}
-		dhtOpts := []reprovider.Option{
-			reprovider.WithPeerID(dht.PeerID()),
-			reprovider.WithReplicationFactor(dht.BucketSize()),
-			reprovider.WithSelfAddrs(dht.FilteredAddrs),
-			reprovider.WithRouter(dht),
-			reprovider.WithMessageSender(dht.MessageSender()),
-			reprovider.WithAddLocalRecord(func(h mh.Multihash) error {
+		dhtOpts := []provider.Option{
+			provider.WithPeerID(dht.PeerID()),
+			provider.WithReplicationFactor(dht.BucketSize()),
+			provider.WithSelfAddrs(dht.FilteredAddrs),
+			provider.WithRouter(dht),
+			provider.WithMessageSender(dht.MessageSender()),
+			provider.WithAddLocalRecord(func(h mh.Multihash) error {
 				return dht.Provide(dht.Context(), cid.NewCidV1(cid.Raw, h), false)
 			}),
-			reprovider.WithMHStore(cfg.mhStore),
-			reprovider.WithReprovideInterval(cfg.reprovideInterval[i]),
-			reprovider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
-			reprovider.WithConnectivityCheckOnlineInterval(cfg.connectivityCheckOnlineInterval[i]),
-			reprovider.WithConnectivityCheckOfflineInterval(cfg.connectivityCheckOfflineInterval[i]),
-			reprovider.WithMaxWorkers(cfg.maxWorkers[i]),
-			reprovider.WithDedicatedPeriodicWorkers(cfg.dedicatedPeriodicWorkers[i]),
-			reprovider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
-			reprovider.WithMaxProvideConnsPerWorker(cfg.maxProvideConnsPerWorker[i]),
+			provider.WithMHStore(cfg.mhStore),
+			provider.WithReprovideInterval(cfg.reprovideInterval[i]),
+			provider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
+			provider.WithConnectivityCheckOnlineInterval(cfg.connectivityCheckOnlineInterval[i]),
+			provider.WithConnectivityCheckOfflineInterval(cfg.connectivityCheckOfflineInterval[i]),
+			provider.WithMaxWorkers(cfg.maxWorkers[i]),
+			provider.WithDedicatedPeriodicWorkers(cfg.dedicatedPeriodicWorkers[i]),
+			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
+			provider.WithMaxProvideConnsPerWorker(cfg.maxProvideConnsPerWorker[i]),
 		}
-		sweepingReproviders[i], err = reprovider.NewReprovider(dht.Context(), dhtOpts...)
+		sweepingProviders[i], err = provider.NewProvider(dht.Context(), dhtOpts...)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return &SweepingReprovider{
+	return &SweepingProvider{
 		dht:     d,
-		LAN:     sweepingReproviders[0],
-		WAN:     sweepingReproviders[1],
+		LAN:     sweepingProviders[0],
+		WAN:     sweepingProviders[1],
 		mhStore: cfg.mhStore,
 	}, nil
 }
 
-func (s *SweepingReprovider) runOnBoth(fn func(r *reprovider.SweepingReprovider) error) error {
+func (s *SweepingProvider) runOnBoth(fn func(r *provider.SweepingProvider) error) error {
 	var errLan, errWan error
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -111,8 +111,8 @@ func (s *SweepingReprovider) runOnBoth(fn func(r *reprovider.SweepingReprovider)
 // Provide returns an error if the cid failed to be provided to either network.
 // However, it will keep reproviding the cid to both networks regardless of
 // whether the first provide succeeded.
-func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, announce bool) error {
-	return s.runOnBoth(func(r *reprovider.SweepingReprovider) error {
+func (s *SweepingProvider) Provide(ctx context.Context, c cid.Cid, announce bool) error {
+	return s.runOnBoth(func(r *provider.SweepingProvider) error {
 		return r.Provide(ctx, c, announce)
 	})
 }
@@ -121,8 +121,8 @@ func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, announce bo
 // if none of the cids could be provided in either DHT, however it will keep
 // reproviding these cids to both networks regardless of the initial provide
 // success.
-func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
-	return s.runOnBoth(func(r *reprovider.SweepingReprovider) error {
+func (s *SweepingProvider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
+	return s.runOnBoth(func(r *provider.SweepingProvider) error {
 		return r.ProvideMany(ctx, keys)
 	})
 }
@@ -131,7 +131,7 @@ func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihas
 // currently being reprovided. The keys will be periodically reprovided until
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
-func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
 	ctx := context.Background()
 	cids, err := s.mhStore.Put(ctx, keys...)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
 // StopProviding stops reproviding the given keys to both DHT swarms. The node
 // stops being referred as a provider when the provider records in both DHT
 // swarms expire.
-func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	err := s.mhStore.Delete(context.Background(), keys...)
 	if err != nil {
 		rLogger.Errorf("failed to stop providing keys: %s", err)
@@ -153,8 +153,8 @@ func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
 
 // InstantProvide only sends provider records for the given keys out to both
 // DHT swarms. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingReprovider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
-	return s.runOnBoth(func(r *reprovider.SweepingReprovider) error {
+func (s *SweepingProvider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
+	return s.runOnBoth(func(r *provider.SweepingProvider) error {
 		return r.InstantProvide(ctx, keys...)
 	})
 }
@@ -162,7 +162,7 @@ func (s *SweepingReprovider) InstantProvide(ctx context.Context, keys ...mh.Mult
 // ForceProvide is similar to StartProviding, but it sends provider records out
 // to the DHTs even if the keys were already provided in the past. Blocks until
 // provide is complete or an error occurs.
-func (s *SweepingReprovider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
+func (s *SweepingProvider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
 	_, err := s.mhStore.Put(ctx, keys...)
 	if err != nil {
 		return fmt.Errorf("failed to store multihashes: %w", err)

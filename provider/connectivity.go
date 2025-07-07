@@ -1,4 +1,4 @@
-package reprovider
+package provider
 
 import (
 	"context"

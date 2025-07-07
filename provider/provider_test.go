@@ -1,4 +1,4 @@
-package reprovider
+package provider
 
 import (
 	"bytes"
@@ -31,7 +31,7 @@ const (
 )
 
 func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
-	s := SweepingReprovider{
+	s := SweepingProvider{
 		reprovideInterval: 16 * time.Second,
 		order:             bit256.ZeroKey(),
 	}
@@ -45,7 +45,7 @@ func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
 }
 
 func TestReprovideTimeForPrefixWithCustomOrder(t *testing.T) {
-	s := SweepingReprovider{
+	s := SweepingProvider{
 		reprovideInterval: 16 * time.Second,
 		order:             bit256.NewKey(bytes.Repeat([]byte{0xFF}, 32)), // 111...1
 	}
@@ -148,7 +148,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		},
 	}
 	mockClock := clock.NewMock()
-	r := SweepingReprovider{
+	r := SweepingProvider{
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
@@ -195,7 +195,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		},
 	}
 	mockClock := clock.NewMock()
-	r := SweepingReprovider{
+	r := SweepingProvider{
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
@@ -278,7 +278,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		},
 	}
 
-	r := SweepingReprovider{
+	r := SweepingProvider{
 		router:            router,
 		replicationFactor: replicationFactor,
 		connectivity: connectivityChecker{
@@ -345,7 +345,7 @@ func TestProvideCidsToPeer(t *testing.T) {
 			return errors.New("error")
 		},
 	}
-	reprovider := SweepingReprovider{
+	reprovider := SweepingProvider{
 		msgSender: msgSender,
 	}
 
@@ -392,7 +392,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 			return nil
 		}),
 	}
-	reprovider, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
 
 	_ = reprovider
@@ -428,7 +428,7 @@ func TestProviderOffline(t *testing.T) {
 	mockClock := clock.NewMock()
 	checkInterval := time.Minute
 	catchupPendingChan := make(chan struct{}, 1)
-	reprovider := SweepingReprovider{
+	reprovider := SweepingProvider{
 		connectivity: connectivityChecker{
 			ctx:                  ctx,
 			clock:                mockClock,
@@ -529,7 +529,7 @@ func TestProvideSingle(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
 
 	// Blocks until cid is provided
@@ -630,7 +630,7 @@ func TestProvideMany(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
 	mockClock.Add(reprovideInterval - 1)
 
@@ -771,7 +771,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
-	reprovider, err := NewReprovider(ctx, opts...)
+	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
 	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)

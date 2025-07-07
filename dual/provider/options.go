@@ -8,8 +8,8 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
-	"github.com/libp2p/go-libp2p-kad-dht/reprovider"
-	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 )
 
 const (
@@ -17,7 +17,7 @@ const (
 	wanID
 )
 
-type reproviderConfig struct {
+type config struct {
 	mhStore *datastore.MHStore
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
@@ -32,28 +32,28 @@ type reproviderConfig struct {
 	maxProvideConnsPerWorker [2]int
 }
 
-type ReproviderOption func(opt *reproviderConfig) error
+type Option func(opt *config) error
 
-func (cfg *reproviderConfig) apply(opts ...ReproviderOption) error {
+func (cfg *config) apply(opts ...Option) error {
 	for i, o := range opts {
 		if err := o(cfg); err != nil {
-			return fmt.Errorf("reprovider dual dht option %d failed: %w", i, err)
+			return fmt.Errorf("provider dual dht option %d failed: %w", i, err)
 		}
 	}
 	return nil
 }
 
-func (c *reproviderConfig) validate() error {
+func (c *config) validate() error {
 	if c.dedicatedPeriodicWorkers[lanID]+c.dedicatedBurstWorkers[lanID] > c.maxWorkers[lanID] {
-		return errors.New("reprovider config: total dedicated workers exceed max workers")
+		return errors.New("provider config: total dedicated workers exceed max workers")
 	}
 	if c.dedicatedPeriodicWorkers[wanID]+c.dedicatedBurstWorkers[wanID] > c.maxWorkers[wanID] {
-		return errors.New("reprovider config: total dedicated workers exceed max workers")
+		return errors.New("provider config: total dedicated workers exceed max workers")
 	}
 	return nil
 }
 
-var DefaultReproviderConfig = func(cfg *reproviderConfig) error {
+var DefaultConfig = func(cfg *config) error {
 	var err error
 	cfg.mhStore, err = datastore.NewMHStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
@@ -61,10 +61,10 @@ var DefaultReproviderConfig = func(cfg *reproviderConfig) error {
 	}
 
 	cfg.reprovideInterval = [2]time.Duration{amino.DefaultReprovideInterval, amino.DefaultReprovideInterval}
-	cfg.maxReprovideDelay = [2]time.Duration{reprovider.DefaultMaxReprovideDelay, reprovider.DefaultMaxReprovideDelay}
+	cfg.maxReprovideDelay = [2]time.Duration{provider.DefaultMaxReprovideDelay, provider.DefaultMaxReprovideDelay}
 
-	cfg.connectivityCheckOnlineInterval = [2]time.Duration{reprovider.DefaultConnectivityCheckOnlineInterval, reprovider.DefaultConnectivityCheckOnlineInterval}
-	cfg.connectivityCheckOfflineInterval = [2]time.Duration{reprovider.DefaultConnectivityCheckOfflineInterval, reprovider.DefaultConnectivityCheckOfflineInterval}
+	cfg.connectivityCheckOnlineInterval = [2]time.Duration{provider.DefaultConnectivityCheckOnlineInterval, provider.DefaultConnectivityCheckOnlineInterval}
+	cfg.connectivityCheckOfflineInterval = [2]time.Duration{provider.DefaultConnectivityCheckOfflineInterval, provider.DefaultConnectivityCheckOfflineInterval}
 
 	cfg.maxWorkers = [2]int{4, 4}
 	cfg.dedicatedPeriodicWorkers = [2]int{2, 2}
@@ -74,18 +74,18 @@ var DefaultReproviderConfig = func(cfg *reproviderConfig) error {
 	return nil
 }
 
-func WithMHStore(mhStore *datastore.MHStore) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMHStore(mhStore *datastore.MHStore) Option {
+	return func(cfg *config) error {
 		if mhStore == nil {
-			return errors.New("reprovider config: mhStore cannot be nil")
+			return errors.New("provider config: mhStore cannot be nil")
 		}
 		cfg.mhStore = mhStore
 		return nil
 	}
 }
 
-func WithReprovideInterval(reprovideInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithReprovideInterval(reprovideInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if reprovideInterval <= 0 {
 			return fmt.Errorf("invalid reprovide interval %s", reprovideInterval)
 		}
@@ -96,8 +96,8 @@ func WithReprovideInterval(reprovideInterval time.Duration) ReproviderOption {
 	}
 }
 
-func WithReprovideIntervalLAN(reprovideInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithReprovideIntervalLAN(reprovideInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if reprovideInterval <= 0 {
 			return fmt.Errorf("invalid LAN reprovide interval %s", reprovideInterval)
 		}
@@ -106,8 +106,8 @@ func WithReprovideIntervalLAN(reprovideInterval time.Duration) ReproviderOption 
 	}
 }
 
-func WithReprovideIntervalWAN(reprovideInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithReprovideIntervalWAN(reprovideInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if reprovideInterval <= 0 {
 			return fmt.Errorf("invalid WAN reprovide interval %s", reprovideInterval)
 		}
@@ -116,8 +116,8 @@ func WithReprovideIntervalWAN(reprovideInterval time.Duration) ReproviderOption 
 	}
 }
 
-func WithMaxReprovideDelay(maxReprovideDelay time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxReprovideDelay(maxReprovideDelay time.Duration) Option {
+	return func(cfg *config) error {
 		if maxReprovideDelay <= 0 {
 			return fmt.Errorf("invalid max reprovide delay %s", maxReprovideDelay)
 		}
@@ -128,8 +128,8 @@ func WithMaxReprovideDelay(maxReprovideDelay time.Duration) ReproviderOption {
 	}
 }
 
-func WithMaxReprovideDelayLAN(maxReprovideDelay time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxReprovideDelayLAN(maxReprovideDelay time.Duration) Option {
+	return func(cfg *config) error {
 		if maxReprovideDelay <= 0 {
 			return fmt.Errorf("invalid LAN max reprovide delay %s", maxReprovideDelay)
 		}
@@ -138,8 +138,8 @@ func WithMaxReprovideDelayLAN(maxReprovideDelay time.Duration) ReproviderOption 
 	}
 }
 
-func WithMaxReprovideDelayWAN(maxReprovideDelay time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxReprovideDelayWAN(maxReprovideDelay time.Duration) Option {
+	return func(cfg *config) error {
 		if maxReprovideDelay <= 0 {
 			return fmt.Errorf("invalid WAN max reprovide delay %s", maxReprovideDelay)
 		}
@@ -148,8 +148,8 @@ func WithMaxReprovideDelayWAN(maxReprovideDelay time.Duration) ReproviderOption 
 	}
 }
 
-func WithConnectivityCheckOnlineInterval(onlineInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithConnectivityCheckOnlineInterval(onlineInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if onlineInterval <= 0 {
 			return fmt.Errorf("invalid connectivity check online interval %s", onlineInterval)
 		}
@@ -160,8 +160,8 @@ func WithConnectivityCheckOnlineInterval(onlineInterval time.Duration) Reprovide
 	}
 }
 
-func WithConnectivityCheckOnlineIntervalLAN(onlineInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithConnectivityCheckOnlineIntervalLAN(onlineInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if onlineInterval <= 0 {
 			return fmt.Errorf("invalid LAN connectivity check online interval %s", onlineInterval)
 		}
@@ -170,8 +170,8 @@ func WithConnectivityCheckOnlineIntervalLAN(onlineInterval time.Duration) Reprov
 	}
 }
 
-func WithConnectivityCheckOnlineIntervalWAN(onlineInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithConnectivityCheckOnlineIntervalWAN(onlineInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if onlineInterval <= 0 {
 			return fmt.Errorf("invalid WAN connectivity check online interval %s", onlineInterval)
 		}
@@ -180,8 +180,8 @@ func WithConnectivityCheckOnlineIntervalWAN(onlineInterval time.Duration) Reprov
 	}
 }
 
-func WithConnectivityCheckOfflineInterval(offlineInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithConnectivityCheckOfflineInterval(offlineInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if offlineInterval <= 0 {
 			return fmt.Errorf("invalid connectivity check offline interval %s", offlineInterval)
 		}
@@ -192,8 +192,8 @@ func WithConnectivityCheckOfflineInterval(offlineInterval time.Duration) Reprovi
 	}
 }
 
-func WithConnectivityCheckOfflineIntervalLAN(offlineInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithConnectivityCheckOfflineIntervalLAN(offlineInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if offlineInterval <= 0 {
 			return fmt.Errorf("invalid LAN connectivity check offline interval %s", offlineInterval)
 		}
@@ -202,8 +202,8 @@ func WithConnectivityCheckOfflineIntervalLAN(offlineInterval time.Duration) Repr
 	}
 }
 
-func WithConnectivityCheckOfflineIntervalWAN(offlineInterval time.Duration) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithConnectivityCheckOfflineIntervalWAN(offlineInterval time.Duration) Option {
+	return func(cfg *config) error {
 		if offlineInterval <= 0 {
 			return fmt.Errorf("invalid WAN connectivity check offline interval %s", offlineInterval)
 		}
@@ -212,8 +212,8 @@ func WithConnectivityCheckOfflineIntervalWAN(offlineInterval time.Duration) Repr
 	}
 }
 
-func WithMaxWorkers(maxWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxWorkers(maxWorkers int) Option {
+	return func(cfg *config) error {
 		if maxWorkers <= 0 {
 			return fmt.Errorf("invalid max workers %d", maxWorkers)
 		}
@@ -224,8 +224,8 @@ func WithMaxWorkers(maxWorkers int) ReproviderOption {
 	}
 }
 
-func WithMaxWorkersLAN(maxWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxWorkersLAN(maxWorkers int) Option {
+	return func(cfg *config) error {
 		if maxWorkers <= 0 {
 			return fmt.Errorf("invalid LAN max workers %d", maxWorkers)
 		}
@@ -234,8 +234,8 @@ func WithMaxWorkersLAN(maxWorkers int) ReproviderOption {
 	}
 }
 
-func WithMaxWorkersWAN(maxWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxWorkersWAN(maxWorkers int) Option {
+	return func(cfg *config) error {
 		if maxWorkers <= 0 {
 			return fmt.Errorf("invalid WAN max workers %d", maxWorkers)
 		}
@@ -244,8 +244,8 @@ func WithMaxWorkersWAN(maxWorkers int) ReproviderOption {
 	}
 }
 
-func WithDedicatedPeriodicWorkers(dedicatedPeriodicWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithDedicatedPeriodicWorkers(dedicatedPeriodicWorkers int) Option {
+	return func(cfg *config) error {
 		if dedicatedPeriodicWorkers < 0 {
 			return fmt.Errorf("invalid dedicated periodic workers %d", dedicatedPeriodicWorkers)
 		}
@@ -256,8 +256,8 @@ func WithDedicatedPeriodicWorkers(dedicatedPeriodicWorkers int) ReproviderOption
 	}
 }
 
-func WithDedicatedPeriodicWorkersLAN(dedicatedPeriodicWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithDedicatedPeriodicWorkersLAN(dedicatedPeriodicWorkers int) Option {
+	return func(cfg *config) error {
 		if dedicatedPeriodicWorkers < 0 {
 			return fmt.Errorf("invalid LAN dedicated periodic workers %d", dedicatedPeriodicWorkers)
 		}
@@ -266,8 +266,8 @@ func WithDedicatedPeriodicWorkersLAN(dedicatedPeriodicWorkers int) ReproviderOpt
 	}
 }
 
-func WithDedicatedPeriodicWorkersWAN(dedicatedPeriodicWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithDedicatedPeriodicWorkersWAN(dedicatedPeriodicWorkers int) Option {
+	return func(cfg *config) error {
 		if dedicatedPeriodicWorkers < 0 {
 			return fmt.Errorf("invalid WAN dedicated periodic workers %d", dedicatedPeriodicWorkers)
 		}
@@ -276,8 +276,8 @@ func WithDedicatedPeriodicWorkersWAN(dedicatedPeriodicWorkers int) ReproviderOpt
 	}
 }
 
-func WithDedicatedBurstWorkers(dedicatedBurstWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithDedicatedBurstWorkers(dedicatedBurstWorkers int) Option {
+	return func(cfg *config) error {
 		if dedicatedBurstWorkers < 0 {
 			return fmt.Errorf("invalid dedicated burst workers %d", dedicatedBurstWorkers)
 		}
@@ -288,8 +288,8 @@ func WithDedicatedBurstWorkers(dedicatedBurstWorkers int) ReproviderOption {
 	}
 }
 
-func WithDedicatedBurstWorkersLAN(dedicatedBurstWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithDedicatedBurstWorkersLAN(dedicatedBurstWorkers int) Option {
+	return func(cfg *config) error {
 		if dedicatedBurstWorkers < 0 {
 			return fmt.Errorf("invalid LAN dedicated burst workers %d", dedicatedBurstWorkers)
 		}
@@ -298,8 +298,8 @@ func WithDedicatedBurstWorkersLAN(dedicatedBurstWorkers int) ReproviderOption {
 	}
 }
 
-func WithDedicatedBurstWorkersWAN(dedicatedBurstWorkers int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithDedicatedBurstWorkersWAN(dedicatedBurstWorkers int) Option {
+	return func(cfg *config) error {
 		if dedicatedBurstWorkers < 0 {
 			return fmt.Errorf("invalid WAN dedicated burst workers %d", dedicatedBurstWorkers)
 		}
@@ -308,8 +308,8 @@ func WithDedicatedBurstWorkersWAN(dedicatedBurstWorkers int) ReproviderOption {
 	}
 }
 
-func WithMaxProvideConnsPerWorker(maxProvideConnsPerWorker int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxProvideConnsPerWorker(maxProvideConnsPerWorker int) Option {
+	return func(cfg *config) error {
 		if maxProvideConnsPerWorker <= 0 {
 			return fmt.Errorf("invalid max provide conns per worker %d", maxProvideConnsPerWorker)
 		}
@@ -320,8 +320,8 @@ func WithMaxProvideConnsPerWorker(maxProvideConnsPerWorker int) ReproviderOption
 	}
 }
 
-func WithMaxProvideConnsPerWorkerLAN(maxProvideConnsPerWorker int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxProvideConnsPerWorkerLAN(maxProvideConnsPerWorker int) Option {
+	return func(cfg *config) error {
 		if maxProvideConnsPerWorker <= 0 {
 			return fmt.Errorf("invalid LAN max provide conns per worker %d", maxProvideConnsPerWorker)
 		}
@@ -330,8 +330,8 @@ func WithMaxProvideConnsPerWorkerLAN(maxProvideConnsPerWorker int) ReproviderOpt
 	}
 }
 
-func WithMaxProvideConnsPerWorkerWAN(maxProvideConnsPerWorker int) ReproviderOption {
-	return func(cfg *reproviderConfig) error {
+func WithMaxProvideConnsPerWorkerWAN(maxProvideConnsPerWorker int) Option {
+	return func(cfg *config) error {
 		if maxProvideConnsPerWorker <= 0 {
 			return fmt.Errorf("invalid WAN max provide conns per worker %d", maxProvideConnsPerWorker)
 		}

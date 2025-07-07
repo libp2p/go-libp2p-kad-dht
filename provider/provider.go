@@ -1,4 +1,4 @@
-package reprovider
+package provider
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -33,17 +33,21 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// Provider announces blocks to the network
-type Provider interface {
+// BoxoProvider announces blocks to the network. This interface is defined in
+// boxo, and SweepingProvider probably doesn't need to implement it.
+//
+// TODO: remove if not needed
+type BoxoProvider interface {
 	// Provide takes a cid and makes an attempt to announce it to the network
 	Provide(context.Context, cid.Cid, bool) error
 }
 
+// TODO: remove if not needed
 type ProvideMany interface {
 	ProvideMany(ctx context.Context, keys []mh.Multihash) error
 }
 
-type Reprovider interface {
+type Provider interface {
 	StartProviding(...mh.Multihash)
 	StopProviding(...mh.Multihash)
 	InstantProvide(context.Context, ...mh.Multihash) error
@@ -51,20 +55,20 @@ type Reprovider interface {
 }
 
 var (
-	_ Provider    = &SweepingReprovider{}
-	_ ProvideMany = &SweepingReprovider{}
-	_ Reprovider  = &SweepingReprovider{}
+	_ BoxoProvider = &SweepingProvider{}
+	_ ProvideMany  = &SweepingProvider{}
+	_ Provider     = &SweepingProvider{}
 )
 
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
 }
 
-var logger = logging.Logger("dht/SweepingReprovider")
+var logger = logging.Logger("dht/SweepingProvider")
 
 var (
-	ErrNodeOffline                        = errors.New("reprovider: node is offline")
-	ErrNoKeyProvided                      = errors.New("reprovider: failed to provide any key")
+	ErrNodeOffline                        = errors.New("provider: node is offline")
+	ErrNoKeyProvided                      = errors.New("provider: failed to provide any key")
 	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 )
 
@@ -88,7 +92,7 @@ type provideReq struct {
 	forceProvide  bool
 }
 
-type SweepingReprovider struct {
+type SweepingProvider struct {
 	ctx    context.Context
 	peerid peer.ID
 	router KadClosestPeersRouter
@@ -137,7 +141,7 @@ type SweepingReprovider struct {
 	provideCounter metric.Int64Counter
 }
 
-func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, error) {
+func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error) {
 	var cfg config
 	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
@@ -154,7 +158,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/reprovider")
+	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(
 		"total_provide_count",
 		metric.WithDescription("Number of successful provides since node is running"),
@@ -162,7 +166,7 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 	if err != nil {
 		return nil, err
 	}
-	reprovider := &SweepingReprovider{
+	prov := &SweepingProvider{
 		ctx:    ctx,
 		router: cfg.router,
 		peerid: cfg.peerid,
@@ -214,19 +218,19 @@ func NewReprovider(ctx context.Context, opts ...Option) (*SweepingReprovider, er
 		provideCounter: providerCounter,
 	}
 	// Don't need to start schedule timer yet
-	reprovider.scheduleTimer.Stop()
+	prov.scheduleTimer.Stop()
 
 	// Connectivity checker starts in online state
-	reprovider.connectivity.online.Store(true)
-	reprovider.connectivity.backOnlineNotify = reprovider.catchupPendingNotify
+	prov.connectivity.online.Store(true)
+	prov.connectivity.backOnlineNotify = prov.catchupPendingNotify
 
-	go reprovider.run()
+	go prov.run()
 
-	return reprovider, nil
+	return prov, nil
 }
 
-func (s *SweepingReprovider) run() {
-	logger.Debug("Starting SweepingReprovider")
+func (s *SweepingProvider) run() {
+	logger.Debug("Starting SweepingProvider")
 	go s.measureInitialPrefixLen()
 	defer s.scheduleTimer.Stop()
 	defer s.workerPool.Close()
@@ -265,7 +269,7 @@ const initialGetClosestPeers = 4
 // of the prefix length to be used in the network.
 //
 // This function blocks until GetClosestPeers succeeds.
-func (s *SweepingReprovider) measureInitialPrefixLen() {
+func (s *SweepingProvider) measureInitialPrefixLen() {
 	cplSum := atomic.Int32{}
 	cplSamples := atomic.Int32{}
 	wg := sync.WaitGroup{}
@@ -309,7 +313,7 @@ func (s *SweepingReprovider) measureInitialPrefixLen() {
 	s.avgPrefixLenReady <- struct{}{}
 }
 
-func (s *SweepingReprovider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
+func (s *SweepingProvider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	reprovideTime := s.reprovideTimeForPrefix(prefix)
 	s.schedule.Add(prefix, reprovideTime)
 
@@ -333,13 +337,13 @@ func (s *SweepingReprovider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	}
 }
 
-func (s *SweepingReprovider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
+func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
 	s.prefixCursor = prefix
 	s.scheduleTimer.Reset(timeUntilReprovide)
 	s.scheduleTimerStartedAt = s.clock.Now()
 }
 
-func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
+func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.keys) == 0 {
 		if provideRequest.done != nil {
 			provideRequest.done <- nil
@@ -406,7 +410,7 @@ func (s *SweepingReprovider) handleProvide(provideRequest provideReq) {
 // prefixForKeyNoLock returns the prefix corresponding to the region in which
 // the given key belongs. The prefix corresponding to the region depends on the
 // peers in the DHT swarms.
-func (s *SweepingReprovider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
+func (s *SweepingProvider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
 	if scheduled, prefix := trieHasPrefixOfKey(s.schedule, k); scheduled {
 		return prefix
 	}
@@ -416,7 +420,7 @@ func (s *SweepingReprovider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
 
 // groupKeysAndAddToSchedule groups keys by common prefix used in the schedule.
 // If the common prefix isn't included in the schedule, add it.
-func (s *SweepingReprovider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bitstr.Key][]mh.Multihash {
+func (s *SweepingProvider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bitstr.Key][]mh.Multihash {
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
 	avgPrefixLen := 0
 
@@ -477,7 +481,7 @@ func (s *SweepingReprovider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[
 
 // groupKeysBySchedulePrefix groups keys by their common prefix that is
 // currently used in the schedule.
-func (s *SweepingReprovider) groupKeysByPrefix(keys []mh.Multihash) map[bitstr.Key][]mh.Multihash {
+func (s *SweepingProvider) groupKeysByPrefix(keys []mh.Multihash) map[bitstr.Key][]mh.Multihash {
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
 	seen := make(map[bit256.Key]struct{})
 	s.scheduleLk.Lock()
@@ -499,7 +503,7 @@ func (s *SweepingReprovider) groupKeysByPrefix(keys []mh.Multihash) map[bitstr.K
 	return prefixes
 }
 
-func (s *SweepingReprovider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash, retryOnFailure bool) error {
+func (s *SweepingProvider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash, retryOnFailure bool) error {
 	if len(prefixes) == 1 {
 		for prefix, keys := range prefixes {
 			// Provide a single key (NOT ProvideMany)
@@ -585,7 +589,7 @@ workerLoop:
 	return nil
 }
 
-func (s *SweepingReprovider) handleReprovide() {
+func (s *SweepingProvider) handleReprovide() {
 	online := s.connectivity.isOnline()
 	s.scheduleLk.Lock()
 	currentPrefix := s.prefixCursor
@@ -692,7 +696,7 @@ func (s *SweepingReprovider) handleReprovide() {
 	}()
 }
 
-func (s *SweepingReprovider) reprovideForPrefix(prefix bitstr.Key, periodicReprovide bool) error {
+func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovide bool) error {
 	selfAddrs := s.getSelfAddrs()
 	if len(selfAddrs) == 0 {
 		// NOTE: kubo doesn't like no being able to provide eventough sometimes no
@@ -790,7 +794,7 @@ func (s *SweepingReprovider) reprovideForPrefix(prefix bitstr.Key, periodicRepro
 	return nil
 }
 
-func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash, retryOnFailure bool) error {
+func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash, retryOnFailure bool) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -857,7 +861,7 @@ func (s *SweepingReprovider) provideForPrefix(prefix bitstr.Key, keys []mh.Multi
 	return nil
 }
 
-func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) error {
+func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -911,7 +915,7 @@ func (s *SweepingReprovider) individualProvideForPrefix(ctx context.Context, pre
 // optimization. It should be used for providing a small number of keys
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of keys.
-func (s *SweepingReprovider) vanillaProvide(ctx context.Context, k mh.Multihash) (bitstr.Key, error) {
+func (s *SweepingProvider) vanillaProvide(ctx context.Context, k mh.Multihash) (bitstr.Key, error) {
 	// Add provider record to local provider store.
 	s.addLocalRecord(k)
 	// Get peers to which the record will be allocated.
@@ -933,7 +937,7 @@ func (s *SweepingReprovider) vanillaProvide(ctx context.Context, k mh.Multihash)
 // prefix. In the case there aren't enough peers matching the provided prefix,
 // it will find and return the closest peers to the prefix, even if they don't
 // exactly match it.
-func (s *SweepingReprovider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
+func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
 	allClosestPeers := make(map[peer.ID]struct{}, 2*s.replicationFactor)
 
 	maxPrefixSearches := 64
@@ -1031,14 +1035,14 @@ explorationLoop:
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with
 // the provided key. Note that the returned peer IDs aren't random, they are
 // taken from a static list of preimages.
-func (s *SweepingReprovider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
+func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	p, _ := kb.GenRandPeerIDWithCPL(keyToBytes(k), kb.PeerIDPreimageMaxCpl)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
 // regionsFromPeers returns the keyspace regions from given peers ordered
 // according to s.order and the Common Prefix shared by all peers.
-func (s *SweepingReprovider) regionsFromPeers(peers []peer.ID) ([]region, bitstr.Key) {
+func (s *SweepingProvider) regionsFromPeers(peers []peer.ID) ([]region, bitstr.Key) {
 	if len(peers) == 0 {
 		return []region{}, ""
 	}
@@ -1055,7 +1059,7 @@ func (s *SweepingReprovider) regionsFromPeers(peers []peer.ID) ([]region, bitstr
 	return regions, commonPrefix
 }
 
-func (s *SweepingReprovider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
+func (s *SweepingProvider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 	s.scheduleLk.Lock()
 	// Pop prefixes scheduled in the future being covered by the explored peers.
 	if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
@@ -1081,7 +1085,7 @@ func (s *SweepingReprovider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 
 // claimRegionReprovide checks if the region is already being reprovided by
 // another thread. If not it marks the region as being currently reprovided.
-func (s *SweepingReprovider) claimRegionReprovide(regions []region) []region {
+func (s *SweepingProvider) claimRegionReprovide(regions []region) []region {
 	out := regions[:0]
 	s.ongoingReprovidesLk.Lock()
 	defer s.ongoingReprovidesLk.Unlock()
@@ -1098,7 +1102,7 @@ func (s *SweepingReprovider) claimRegionReprovide(regions []region) []region {
 }
 
 // releaseRegionReprovide marks the region as no longer being reprovided.
-func (s *SweepingReprovider) releaseRegionReprovide(prefix bitstr.Key) {
+func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 	s.ongoingReprovidesLk.Lock()
 	defer s.ongoingReprovidesLk.Unlock()
 	s.ongoingReprovides.Remove(prefix)
@@ -1119,7 +1123,7 @@ type provideJob struct {
 // peers. In this case, the region reprovide is considered failed and the
 // caller is responsible for trying again. This allows detecting if we are
 // offline.
-func (s *SweepingReprovider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo) error {
+func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo) error {
 	nPeers := len(keysAllocations)
 	if nPeers == 0 {
 		return nil
@@ -1173,7 +1177,7 @@ const maxConsecutiveProvideFailuresAllowed = 2
 
 // provideKeysToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given keys.
-func (s *SweepingReprovider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
+func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
 	errCount := 0
 	for _, mh := range keys {
 		pmes.Key = mh
@@ -1197,7 +1201,7 @@ func (s *SweepingReprovider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, p
 // (not if initial provide or late reprovide).
 //
 // If the given prefix is already on the schedule, this function is a no op.
-func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration) {
+func (s *SweepingProvider) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration) {
 	// Schedule next reprovide given that the prefix was just reprovided on
 	// schedule. In the case the next reprovide time should be delayed due to a
 	// growth in the number of network peers matching the prefix, don't delay
@@ -1222,24 +1226,24 @@ func (s *SweepingReprovider) scheduleNextReprovide(prefix bitstr.Key, lastReprov
 }
 
 // currentTimeOffset returns the current time offset in the reprovide cycle.
-func (s *SweepingReprovider) currentTimeOffset() time.Duration {
+func (s *SweepingProvider) currentTimeOffset() time.Duration {
 	return s.timeOffset(s.clock.Now())
 }
 
 // timeOffset returns the time offset in the reprovide cycle for the given
 // time.
-func (s *SweepingReprovider) timeOffset(t time.Time) time.Duration {
+func (s *SweepingProvider) timeOffset(t time.Time) time.Duration {
 	return t.Sub(s.cycleStart) % s.reprovideInterval
 }
 
 // timeUntil returns the time left (duration) until the given time offset.
-func (s *SweepingReprovider) timeUntil(d time.Duration) time.Duration {
+func (s *SweepingProvider) timeUntil(d time.Duration) time.Duration {
 	return s.timeBetween(s.currentTimeOffset(), d)
 }
 
 // timeBetween returns the duration between the two provided offsets, assuming
 // it is no more than s.reprovideInterval.
-func (s *SweepingReprovider) timeBetween(from, to time.Duration) time.Duration {
+func (s *SweepingProvider) timeBetween(from, to time.Duration) time.Duration {
 	return (to-from+s.reprovideInterval-1)%s.reprovideInterval + 1
 }
 
@@ -1262,7 +1266,7 @@ const maxPrefixSize = 24
 // This method ensures a deterministic and evenly distributed reprovide
 // schedule, where the temporal position within the cycle is based on the
 // binary representation of the key's prefix.
-func (s *SweepingReprovider) reprovideTimeForPrefix(prefix bitstr.Key) time.Duration {
+func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Duration {
 	if len(prefix) == 0 {
 		// Empty prefix: all reprovides occur at the beginning of the cycle.
 		return 0
@@ -1288,7 +1292,7 @@ func (s *SweepingReprovider) reprovideTimeForPrefix(prefix bitstr.Key) time.Dura
 //
 // nextPrefixToReprovide returns the next prefix to reprovide, based on the
 // current time offset.
-// func (s *SweepingReprovider) nextPrefixToReprovideNoLock() bitstr.Key {
+// func (s *SweepingProvider) nextPrefixToReprovideNoLock() bitstr.Key {
 // 	now := s.currentTimeOffset()
 // 	maxVal := time.Duration(1 << maxPrefixSize)
 //
@@ -1297,14 +1301,14 @@ func (s *SweepingReprovider) reprovideTimeForPrefix(prefix bitstr.Key) time.Dura
 // 	return nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
 // }
 
-func (s *SweepingReprovider) catchupPendingNotify() {
+func (s *SweepingProvider) catchupPendingNotify() {
 	select {
 	case s.catchupPendingChan <- struct{}{}:
 	default:
 	}
 }
 
-func (s *SweepingReprovider) catchupPendingWork() {
+func (s *SweepingProvider) catchupPendingWork() {
 	if s.catchupInProgress.Load() {
 		// Another catchup is already in process, skip and we'll try again later.
 		return
@@ -1353,7 +1357,7 @@ func (s *SweepingReprovider) catchupPendingWork() {
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
 // prefixes.
-func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
+func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	s.avgPrefixLenLk.Lock()
 	defer s.avgPrefixLenLk.Unlock()
 
@@ -1386,7 +1390,7 @@ func (s *SweepingReprovider) getAvgPrefixLenNoLock() int {
 // Provide returns an error if the cid failed to be provided to the network.
 // However, it will keep reproviding the cid regardless of whether the first
 // provide succeeded.
-func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
+func (s *SweepingProvider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
 	if !broadcast {
 		s.addLocalRecord(c.Hash())
 	}
@@ -1406,7 +1410,7 @@ func (s *SweepingReprovider) Provide(ctx context.Context, c cid.Cid, broadcast b
 // ProvideMany provides multiple keys to the network. It will return an error
 // if none of the keys could be provided, however it will keep reproviding
 // these keys regardless of the initial provide success.
-func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
+func (s *SweepingProvider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
 	doneChan := make(chan error, 1)
 	req := provideReq{
 		ctx:           ctx,
@@ -1424,7 +1428,7 @@ func (s *SweepingReprovider) ProvideMany(ctx context.Context, keys []mh.Multihas
 // already provided in the past. The keys will be periodically reprovided until
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
-func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
 	s.provideChan <- provideReq{
 		ctx:           context.Background(),
 		keys:          keys,
@@ -1437,7 +1441,7 @@ func (s *SweepingReprovider) StartProviding(keys ...mh.Multihash) {
 // StopProviding stops reproviding the given keys to the DHT swarm. The node
 // stops being referred as a provider when the provider records in the DHT
 // swarm expire.
-func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	err := s.mhStore.Delete(s.ctx, keys...)
 	if err != nil {
 		logger.Errorf("failed to stop providing keys: %s", err)
@@ -1446,7 +1450,7 @@ func (s *SweepingReprovider) StopProviding(keys ...mh.Multihash) {
 
 // InstantProvide only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingReprovider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
+func (s *SweepingProvider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
 	doneChan := make(chan error, 1)
 	req := provideReq{
 		ctx:           ctx,
@@ -1462,7 +1466,7 @@ func (s *SweepingReprovider) InstantProvide(ctx context.Context, keys ...mh.Mult
 
 // ForceProvide is similar to StartProviding, but it sends provider records out
 // to the DHT even if the keys were already provided in the past.
-func (s *SweepingReprovider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
+func (s *SweepingProvider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
 	doneChan := make(chan error, 1)
 	req := provideReq{
 		ctx:           ctx,

@@ -1,4 +1,4 @@
-package reprovider
+package provider
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"github.com/filecoin-project/go-clock"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/reprovider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"

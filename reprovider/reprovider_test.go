@@ -152,7 +152,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
-		pendingCidsChan:   make(chan []mh.Multihash, 1),
+		pendingKeysChan:   make(chan []mh.Multihash, 1),
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:     mockClock.Timer(time.Hour),
@@ -174,7 +174,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
 	require.Error(t, err)
-	require.Equal(t, []mh.Multihash{k}, <-r.pendingCidsChan)
+	require.Equal(t, []mh.Multihash{k}, <-r.pendingKeysChan)
 
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, true, true)
 	require.Error(t, err)
@@ -199,7 +199,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
-		pendingCidsChan:   make(chan []mh.Multihash, len(ks)),
+		pendingKeysChan:   make(chan []mh.Multihash, len(ks)),
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:     mockClock.Timer(time.Hour),
@@ -217,7 +217,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.Error(t, err)
-	pendingCids := append(<-r.pendingCidsChan, <-r.pendingCidsChan...)
+	pendingCids := append(<-r.pendingKeysChan, <-r.pendingKeysChan...)
 	require.Len(t, pendingCids, len(ks))
 	require.Contains(t, pendingCids, ks[0])
 	require.Contains(t, pendingCids, ks[1])
@@ -241,15 +241,15 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
-	require.Len(t, r.pendingCidsChan, 1)
-	pendingCids = <-r.pendingCidsChan
+	require.Len(t, r.pendingKeysChan, 1)
+	pendingCids = <-r.pendingKeysChan
 	require.Len(t, pendingCids, 1)
 	require.Contains(t, ks, pendingCids[0])
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.NoError(t, err)
 	require.Len(t, r.failedRegionsChan, 0)
-	require.Len(t, r.pendingCidsChan, 0)
+	require.Len(t, r.pendingKeysChan, 0)
 }
 
 func genRandPeerID(t *testing.T) peer.ID {
@@ -356,7 +356,7 @@ func TestProvideCidsToPeer(t *testing.T) {
 	pmes := &pb.Message{}
 
 	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
-	err = reprovider.provideCidsToPeer(pid, mhs, pmes)
+	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
 	require.Error(t, err)
 	require.Equal(t, maxConsecutiveProvideFailuresAllowed+1, msgCount)
 
@@ -369,7 +369,7 @@ func TestProvideCidsToPeer(t *testing.T) {
 		}
 		return nil
 	}
-	err = reprovider.provideCidsToPeer(pid, mhs, pmes)
+	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
 	require.NoError(t, err)
 	require.Equal(t, nCids, msgCount)
 }

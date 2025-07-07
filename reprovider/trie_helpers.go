@@ -13,7 +13,7 @@ import (
 type region struct {
 	prefix bitstr.Key
 	peers  *trie.Trie[bit256.Key, peer.ID]
-	cids   *trie.Trie[bit256.Key, mh.Multihash]
+	keys   *trie.Trie[bit256.Key, mh.Multihash]
 }
 
 // returns the list of all non-overlapping subtries of `t` having more than
@@ -31,15 +31,15 @@ func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, s
 	return []region{{prefix: path, peers: t}}
 }
 
-func assignCidsToRegions(regions []region, cids []mh.Multihash) []region {
+func assignKeysToRegions(regions []region, keys []mh.Multihash) []region {
 	for i := range regions {
-		regions[i].cids = trie.New[bit256.Key, mh.Multihash]()
+		regions[i].keys = trie.New[bit256.Key, mh.Multihash]()
 	}
-	for _, c := range cids {
-		k := mhToBit256(c)
+	for _, k := range keys {
+		h := mhToBit256(k)
 		for i, r := range regions {
-			if isPrefix(r.prefix, k) {
-				regions[i].cids.Add(k, c)
+			if isPrefix(r.prefix, h) {
+				regions[i].keys.Add(h, k)
 				break
 			}
 		}

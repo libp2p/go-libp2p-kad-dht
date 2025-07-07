@@ -114,7 +114,7 @@ func TestMHStoreReset(t *testing.T) {
 	}
 	close(secondChan)
 
-	err = store.Reset(context.Background(), secondChan)
+	err = store.ResetCids(context.Background(), secondChan)
 	if err != nil {
 		t.Fatal(err)
 	}

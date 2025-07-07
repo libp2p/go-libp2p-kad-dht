@@ -162,12 +162,12 @@ func (s *MHStore) runGC() {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			cidsChan, err := s.gcFunc(s.ctx)
+			keysChan, err := s.gcFunc(s.ctx)
 			if err != nil {
 				logger.Errorf("MHStore garbage collection failed: %v", err)
 				continue
 			}
-			err = s.Reset(s.ctx, cidsChan)
+			err = s.ResetCids(s.ctx, keysChan)
 			if err != nil {
 				logger.Errorf("MHStore reset failed: %v", err)
 			}
@@ -175,14 +175,14 @@ func (s *MHStore) runGC() {
 	}
 }
 
-func (s *MHStore) Reset(ctx context.Context, cidsChan <-chan cid.Cid) error {
+func (s *MHStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
 	err := s.Empty(ctx)
 	if err != nil {
 		return fmt.Errorf("MHStore empty failed during reset: %w", err)
 	}
 	mhs := make([]mh.Multihash, s.gcBatchSize)
 	i := 0
-	for c := range cidsChan {
+	for c := range keysChan {
 		mhs[i] = c.Hash()
 		i++
 		if i == s.gcBatchSize {

@@ -119,22 +119,22 @@ func shortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, [
 	return requested[:coveredCpl], peers[:lastCoveredPeerIndex]
 }
 
-type prefixAndCids struct {
+type prefixAndKeys struct {
 	prefix bitstr.Key
-	cids   []mh.Multihash
+	keys   []mh.Multihash
 }
 
-// sortPrefixesBySize sorts the prefixes by the number of CIDs they contain,
+// sortPrefixesBySize sorts the prefixes by the number of keys they contain,
 // largest first.
-func sortPrefixesBySize(prefixes map[bitstr.Key][]mh.Multihash) []prefixAndCids {
-	out := make([]prefixAndCids, 0, len(prefixes))
-	for prefix, cids := range prefixes {
-		if cids != nil {
-			out = append(out, prefixAndCids{prefix: prefix, cids: cids})
+func sortPrefixesBySize(prefixes map[bitstr.Key][]mh.Multihash) []prefixAndKeys {
+	out := make([]prefixAndKeys, 0, len(prefixes))
+	for prefix, keys := range prefixes {
+		if keys != nil {
+			out = append(out, prefixAndKeys{prefix: prefix, keys: keys})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return len(out[i].cids) > len(out[j].cids)
+		return len(out[i].keys) > len(out[j].keys)
 	})
 	return out
 }

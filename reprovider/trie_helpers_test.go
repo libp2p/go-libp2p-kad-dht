@@ -402,39 +402,3 @@ func TestAllocateToKClosest(t *testing.T) {
 		}
 	}
 }
-
-// func genRandBit256CommonPrefix() bit256.Key {
-// 	var b [31]byte
-// 	if _, err := rand.Read(b[:]); err != nil {
-// 		panic(err)
-// 	}
-// 	return bit256.NewKey(append([]byte{0}, b[:]...))
-// }
-//
-// func TestAllocateToKClosestUnbalanced(t *testing.T) {
-// 	nItems := 2 << 12
-// 	nDests := 2 << 10
-// 	replication := 12
-//
-// 	items := trie.New[bit256.Key, bit256.Key]()
-// 	for range nItems {
-// 		i := genRandBit256CommonPrefix()
-// 		items.Add(i, i)
-// 	}
-// 	dests := trie.New[bit256.Key, bit256.Key]()
-// 	for range nDests {
-// 		d := genRandBit256CommonPrefix()
-// 		dests.Add(d, d)
-// 	}
-//
-// 	allocs := allocateToKClosest(items, dests, replication)
-//
-// 	for _, itemEntry := range allEntries(items, bit256.ZeroKey()) {
-// 		i := itemEntry.Key
-// 		closest := trie.Closest(dests, i, replication)
-// 		for _, closestEntry := range closest {
-// 			d := closestEntry.Key
-// 			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
-// 		}
-// 	}
-// }

@@ -47,6 +47,9 @@ type ProvideMany interface {
 	ProvideMany(ctx context.Context, keys []mh.Multihash) error
 }
 
+// Provider is an interface that defines the methods for DHT providing.
+//
+// Note that this interface is subject to change.
 type Provider interface {
 	StartProviding(...mh.Multihash)
 	StopProviding(...mh.Multihash)

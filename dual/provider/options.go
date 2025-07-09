@@ -1,4 +1,4 @@
-package reprovider
+package provider
 
 import (
 	"context"
@@ -37,7 +37,7 @@ type Option func(opt *config) error
 func (cfg *config) apply(opts ...Option) error {
 	for i, o := range opts {
 		if err := o(cfg); err != nil {
-			return fmt.Errorf("provider dual dht option %d failed: %w", i, err)
+			return fmt.Errorf("dual dht provider option %d failed: %w", i, err)
 		}
 	}
 	return nil

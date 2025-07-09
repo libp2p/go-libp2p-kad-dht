@@ -13,7 +13,6 @@ import (
 
 	"github.com/filecoin-project/go-clock"
 	pool "github.com/guillaumemichel/reservedpool"
-	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 
@@ -33,35 +32,34 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// BoxoProvider announces blocks to the network. This interface is defined in
-// boxo, and SweepingProvider probably doesn't need to implement it.
-//
-// TODO: remove if not needed
-type BoxoProvider interface {
-	// Provide takes a cid and makes an attempt to announce it to the network
-	Provide(context.Context, cid.Cid, bool) error
-}
-
-// TODO: remove if not needed
-type ProvideMany interface {
-	ProvideMany(ctx context.Context, keys []mh.Multihash) error
-}
-
-// Provider is an interface that defines the methods for DHT providing.
+// Provider is an interface that defines the methods for DHT provides and
+// reprovides.
 //
 // Note that this interface is subject to change.
 type Provider interface {
+	// ProvideOnce sends provider records for the specified keys to the DHT swarm
+	// only once. It does not automatically reprovide those keys afterward.
+	ProvideOnce(context.Context, ...mh.Multihash) error
+
+	// StartProviding provides the given keys to the DHT swarm unless they were
+	// already provided in the past. The keys will be periodically reprovided until
+	// StopProviding is called for the same keys or user defined garbage collection
+	// deletes the keys.
 	StartProviding(...mh.Multihash)
+
+	// ForceStartProviding is similar to StartProviding, but it sends provider
+	// records out to the DHT regardless of whether the keys were already provided
+	// in the past. It keeps reproviding the keys until StopProviding is called
+	// for these keys.
+	ForceStartProviding(context.Context, ...mh.Multihash) error
+
+	// StopProviding stops reproviding the given keys to the DHT swarm. The node
+	// stops being referred as a provider when the provider records in the DHT
+	// swarm expire.
 	StopProviding(...mh.Multihash)
-	InstantProvide(context.Context, ...mh.Multihash) error
-	ForceProvide(context.Context, ...mh.Multihash) error
 }
 
-var (
-	_ BoxoProvider = &SweepingProvider{}
-	_ ProvideMany  = &SweepingProvider{}
-	_ Provider     = &SweepingProvider{}
-)
+var _ Provider = &SweepingProvider{}
 
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
@@ -71,6 +69,7 @@ var logger = logging.Logger("dht/SweepingProvider")
 
 var (
 	ErrNodeOffline                        = errors.New("provider: node is offline")
+	ErrNoSelfAddress                      = errors.New("provider: no self addresses available for providing keys")
 	ErrNoKeyProvided                      = errors.New("provider: failed to provide any key")
 	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 )
@@ -704,7 +703,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	if len(selfAddrs) == 0 {
 		// NOTE: kubo doesn't like no being able to provide eventough sometimes no
 		// valid addresses are provided. This makes the kubo tests fail.
-		return errors.New("no self addresses available for providing keys")
+		return ErrNoSelfAddress
 	}
 	keys, err := s.keyStore.Get(s.ctx, prefix)
 	if err != nil {
@@ -805,7 +804,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	if len(selfAddrs) == 0 {
 		// NOTE: kubo doesn't like no being able to provide eventough sometimes no
 		// valid addresses are provided. This makes the kubo tests fail.
-		return errors.New("no self addresses available for providing keys")
+		return ErrNoSelfAddress
 	}
 	if len(keys) <= 2 {
 		// Region has 1 or 2 keys, it is more optimized to provide them naively.
@@ -1390,40 +1389,19 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	return s.cachedAvgPrefixLen
 }
 
-// Provide returns an error if the cid failed to be provided to the network.
-// However, it will keep reproviding the cid regardless of whether the first
-// provide succeeded.
-func (s *SweepingProvider) Provide(ctx context.Context, c cid.Cid, broadcast bool) error {
-	if !broadcast {
-		s.addLocalRecord(c.Hash())
-	}
-	doneChan := make(chan error, 1)
-	req := provideReq{
-		ctx:           ctx,
-		keys:          []mh.Multihash{c.Hash()},
-		done:          doneChan,
-		reprovideKeys: true,
-		forceProvide:  false,
-	}
-	s.provideChan <- req
-	// Wait for initial provide to complete before returning.
-	return <-doneChan
-}
-
-// ProvideMany provides multiple keys to the network. It will return an error
-// if none of the keys could be provided, however it will keep reproviding
-// these keys regardless of the initial provide success.
-func (s *SweepingProvider) ProvideMany(ctx context.Context, keys []mh.Multihash) error {
+// ProvideOnce only sends provider records for the given keys out to the DHT
+// swarm. It does NOT take the responsibility to reprovide these keys.
+func (s *SweepingProvider) ProvideOnce(ctx context.Context, keys ...mh.Multihash) error {
 	doneChan := make(chan error, 1)
 	req := provideReq{
 		ctx:           ctx,
 		keys:          keys,
 		done:          doneChan,
-		reprovideKeys: true,
-		forceProvide:  false,
+		reprovideKeys: false,
+		forceProvide:  true,
 	}
 	s.provideChan <- req
-	// Wait for all keys to be provided before returning.
+	// Wait for provide to complete before returning potential error.
 	return <-doneChan
 }
 
@@ -1441,35 +1419,9 @@ func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
 	}
 }
 
-// StopProviding stops reproviding the given keys to the DHT swarm. The node
-// stops being referred as a provider when the provider records in the DHT
-// swarm expire.
-func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
-	err := s.keyStore.Delete(s.ctx, keys...)
-	if err != nil {
-		logger.Errorf("failed to stop providing keys: %s", err)
-	}
-}
-
-// InstantProvide only sends provider records for the given keys out to the DHT
-// swarm. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingProvider) InstantProvide(ctx context.Context, keys ...mh.Multihash) error {
-	doneChan := make(chan error, 1)
-	req := provideReq{
-		ctx:           ctx,
-		keys:          keys,
-		done:          doneChan,
-		reprovideKeys: false,
-		forceProvide:  true,
-	}
-	s.provideChan <- req
-	// Wait for provide to complete before returning potential error.
-	return <-doneChan
-}
-
-// ForceProvide is similar to StartProviding, but it sends provider records out
-// to the DHT even if the keys were already provided in the past.
-func (s *SweepingProvider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
+// ForceStartProviding is similar to StartProviding, but it sends provider
+// records out to the DHT even if the keys were already provided in the past.
+func (s *SweepingProvider) ForceStartProviding(ctx context.Context, keys ...mh.Multihash) error {
 	doneChan := make(chan error, 1)
 	req := provideReq{
 		ctx:           ctx,
@@ -1481,4 +1433,14 @@ func (s *SweepingProvider) ForceProvide(ctx context.Context, keys ...mh.Multihas
 	s.provideChan <- req
 	// Wait for initial provide to complete before returning.
 	return <-doneChan
+}
+
+// StopProviding stops reproviding the given keys to the DHT swarm. The node
+// stops being referred as a provider when the provider records in the DHT
+// swarm expire.
+func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
+	err := s.keyStore.Delete(s.ctx, keys...)
+	if err != nil {
+		logger.Errorf("failed to stop providing keys: %s", err)
+	}
 }

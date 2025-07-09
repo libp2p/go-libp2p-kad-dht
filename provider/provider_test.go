@@ -389,7 +389,9 @@ func TestProvideNoBootstrap(t *testing.T) {
 		WithRouter(router),
 		WithMessageSender(msgSender),
 		WithSelfAddrs(func() []ma.Multiaddr {
-			return nil
+			addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+			require.NoError(t, err)
+			return []ma.Multiaddr{addr}
 		}),
 	}
 	reprovider, err := NewProvider(ctx, opts...)
@@ -400,12 +402,12 @@ func TestProvideNoBootstrap(t *testing.T) {
 
 	// Set the reprovider as offline
 	reprovider.connectivity.online.Store(false)
-	err = reprovider.Provide(ctx, c, true)
+	err = reprovider.ProvideOnce(ctx, c.Hash())
 	require.ErrorIs(t, ErrNodeOffline, err)
 
 	// Set the reprovider as online, but don't bootstrap it
 	reprovider.connectivity.online.Store(true)
-	err = reprovider.Provide(ctx, c, true)
+	err = reprovider.ProvideOnce(ctx, c.Hash())
 	require.NoError(t, err)
 }
 
@@ -533,7 +535,7 @@ func TestProvideSingle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Blocks until cid is provided
-	err = reprovider.Provide(ctx, c, true)
+	err = reprovider.ForceStartProviding(ctx, c.Hash())
 	require.NoError(t, err)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
@@ -550,9 +552,9 @@ func TestProvideSingle(t *testing.T) {
 	require.Equal(t, reprovider.reprovideTimeForPrefix(prefix), reprovideTime)
 	reprovider.scheduleLk.Unlock()
 
-	// Try to provide the same cid again. Returns no error, but it is a noop.
-	err = reprovider.Provide(ctx, c, true)
-	require.NoError(t, err)
+	// Try to provide the same cid again -> noop
+	reprovider.StartProviding(c.Hash())
+	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide happens as scheduled.
@@ -634,7 +636,7 @@ func TestProvideMany(t *testing.T) {
 	require.NoError(t, err)
 	mockClock.Add(reprovideInterval - 1)
 
-	err = reprovider.ProvideMany(ctx, mhs)
+	err = reprovider.ForceStartProviding(ctx, mhs...)
 	require.NoError(t, err)
 	time.Sleep(20 * time.Millisecond) // wait for ProvideMany to finish
 
@@ -789,7 +791,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	}
 	reprovider.connectivity.online.Store(true)
 
-	err = reprovider.ProvideMany(ctx, mhs)
+	err = reprovider.ForceStartProviding(ctx, mhs...)
 	require.Error(t, err)
 
 	nodeOffline := func() bool {

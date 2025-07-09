@@ -92,6 +92,10 @@ func WithDatastorePrefix(base string) MHStoreOption {
 	}
 }
 
+// WithGCFunc sets the function periodically used to garbage collect keys that
+// shouldn't be provided anymore. During the garbage collection process, the
+// store is entirely purged, and is repopulated from the keys supplied by the
+// KeyChanFunc.
 func WithGCFunc(gcFunc KeyChanFunc) MHStoreOption {
 	return func(cfg *mhStoreCfg) error {
 		cfg.gcFunc = gcFunc
@@ -99,6 +103,9 @@ func WithGCFunc(gcFunc KeyChanFunc) MHStoreOption {
 	}
 }
 
+// WithGCInterval defines the interval at which the MHStore is garbage
+// collected. During the garbage collection process, the store is entirely
+// purged, and is repopulated from the keys supplied by the gcFunc.
 func WithGCInterval(interval time.Duration) MHStoreOption {
 	return func(cfg *mhStoreCfg) error {
 		if interval <= 0 {
@@ -109,6 +116,10 @@ func WithGCInterval(interval time.Duration) MHStoreOption {
 	}
 }
 
+// WithGCBatchSize defines the number of keys per batch when repopulating the
+// MHStore using the gcFunc. The gcFunc returns a chan cid.Cid, and the
+// repopulation process reads batches of gcBatchSize keys before writing them
+// to the MHStore.
 func WithGCBatchSize(size int) MHStoreOption {
 	return func(cfg *mhStoreCfg) error {
 		if size <= 0 {
@@ -153,6 +164,11 @@ func (s *MHStore) Close() error {
 	return nil
 }
 
+// runGC periodically runs garbage collection.
+//
+// Garbage collection consists in totally purging the MHStore, and repopulating
+// it with the keys supplied by the GC function. It basically resets the state
+// of the MHStore to match the state returned by the GC function.
 func (s *MHStore) runGC() {
 	s.wg.Add(1)
 	defer s.wg.Done()
@@ -175,6 +191,7 @@ func (s *MHStore) runGC() {
 	}
 }
 
+// ResetCids purges the MHStore and repopulates it with the provided cids.
 func (s *MHStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
 	err := s.Empty(ctx)
 	if err != nil {
@@ -420,6 +437,7 @@ func (s *MHStore) Delete(ctx context.Context, mhs ...mh.Multihash) error {
 	return nil
 }
 
+// mhToBit256 converts a multihash to a bit256.Key by hashing it with SHA-256.
 func mhToBit256(h mh.Multihash) bit256.Key {
 	hash := sha256.Sum256(h)
 	return bit256.NewKey(hash[:])

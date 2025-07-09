@@ -10,18 +10,20 @@ type Provider interface {
   // deletes the keys.
   StartProviding(...mh.Multihash)
 
+  // ForceStartProviding is similar to StartProviding, but it sends provider
+  // records out to the DHT regardless of whether the keys were already provided
+  // in the past. It keeps reproviding the keys until StopProviding is called
+  // for these keys.
+  ForceStartProviding(context.Context, ...mh.Multihash) error
+
   // StopProviding stops reproviding the given keys to the DHT swarm. The node
   // stops being referred as a provider when the provider records in the DHT
   // swarm expire.
   StopProviding(...mh.Multihash)
 
-  // InstantProvide only sends provider records for the given keys out to the DHT
-  // swarm. It does NOT take the responsibility to reprovide these keys.
-  InstantProvide(context.Context, ...mh.Multihash) error
-
-  // ForceProvide is similar to StartProviding, but it sends provider records out
-  // to the DHT even if the keys were already provided in the past.
-  ForceProvide(context.Context, ...mh.Multihash) error
+  // ProvideOnce sends provider records for the specified keys to the DHT swarm
+  // only once. It does not automatically reprovide those keys afterward.
+  ProvideOnce(context.Context, ...mh.Multihash) error
 }
 ```
 

@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 
+	ds "github.com/ipfs/go-datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
 )
 
@@ -35,8 +38,39 @@ type Provider interface {
 
 var _ Provider = &SweepingProvider{}
 
+// KadClosestPeersRouter defines the method for getting the closest peers to a
+// key in a DHT swarm.
+type KadClosestPeersRouter interface {
+	GetClosestPeers(context.Context, string) ([]peer.ID, error)
+}
+
 type SweepingProvider struct {
 	// TODO: implement me
+}
+
+// NewProvider creates a new SweepingProvider instance with the given options.
+func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error) {
+	var cfg config
+	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.keyStore == nil {
+		// Setup KeyStore if missing
+		keyStore, err := datastore.NewKeyStore(ctx, ds.NewMapDatastore())
+		if err != nil {
+			return nil, err
+		}
+		cfg.keyStore = keyStore
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	prov := &SweepingProvider{
+		// TODO: implement me
+	}
+
+	return prov, nil
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

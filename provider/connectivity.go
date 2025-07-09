@@ -9,6 +9,19 @@ import (
 	"github.com/filecoin-project/go-clock"
 )
 
+// connectivityChecker provides a thread-safe way to verify the connectivity of
+// a node, and triggers a wake-up callback when the node comes back online
+// after a period offline.
+//
+// Key behaviors:
+//   - Connectivity check: external function `checkFunc` supplied by caller.
+//   - Online handling: only run connectivity check upon call of triggerCheck()
+//     if at least `onlineCheckInterval` has passed since the last check.
+//   - Offline handling: while offline, triggerCheck() is ignored.
+//     – A background loop runs `checkFunc` every `offlineCheckInterval` until
+//     connectivity is restored.
+//     – Once back online, the node’s status is updated and `backOnlineNotify`
+//     is invoked exactly once.
 type connectivityChecker struct {
 	ctx context.Context
 
@@ -17,11 +30,11 @@ type connectivityChecker struct {
 
 	clock                clock.Clock
 	lastCheck            time.Time
-	onlineCheckInterval  time.Duration // maximum check frequency when online
+	onlineCheckInterval  time.Duration // minimum check interval when online
 	offlineCheckInterval time.Duration // periodic check frequency when offline
 
-	checkFunc        func() bool // function to check if node is online
-	backOnlineNotify func()
+	checkFunc        func() bool // function to check whether node is online
+	backOnlineNotify func()      // callback when node comes back online
 }
 
 func (c *connectivityChecker) isOnline() bool {

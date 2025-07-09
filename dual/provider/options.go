@@ -18,7 +18,7 @@ const (
 )
 
 type config struct {
-	mhStore *datastore.MHStore
+	keyStore *datastore.KeyStore
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
@@ -55,7 +55,7 @@ func (c *config) validate() error {
 
 var DefaultConfig = func(cfg *config) error {
 	var err error
-	cfg.mhStore, err = datastore.NewMHStore(context.Background(), ds.NewMapDatastore())
+	cfg.keyStore, err = datastore.NewKeyStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		return err
 	}
@@ -74,12 +74,12 @@ var DefaultConfig = func(cfg *config) error {
 	return nil
 }
 
-func WithMHStore(mhStore *datastore.MHStore) Option {
+func WithKeyStore(keyStore *datastore.KeyStore) Option {
 	return func(cfg *config) error {
-		if mhStore == nil {
-			return errors.New("provider config: mhStore cannot be nil")
+		if keyStore == nil {
+			return errors.New("provider config: keyStore cannot be nil")
 		}
-		cfg.mhStore = mhStore
+		cfg.keyStore = keyStore
 		return nil
 	}
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
-func TestMHStoreStoreAndGet(t *testing.T) {
-	store, err := NewMHStore(context.Background(), ds.NewMapDatastore())
+func TestKeyStoreStoreAndGet(t *testing.T) {
+	store, err := NewKeyStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestMHStoreStoreAndGet(t *testing.T) {
 	}
 
 	for _, h := range mhs {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultMHStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -61,7 +61,7 @@ func TestMHStoreStoreAndGet(t *testing.T) {
 		}
 	}
 
-	short := DefaultMHStorePrefixLen / 2
+	short := DefaultKeyStorePrefixLen / 2
 	p := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:short])
 	res, err := store.Get(context.Background(), p)
 	if err != nil {
@@ -84,8 +84,8 @@ func TestMHStoreStoreAndGet(t *testing.T) {
 	}
 }
 
-func TestMHStoreReset(t *testing.T) {
-	store, err := NewMHStore(context.Background(), ds.NewMapDatastore())
+func TestKeyStoreReset(t *testing.T) {
+	store, err := NewKeyStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestMHStoreReset(t *testing.T) {
 
 	// old hashes should not be present
 	for _, h := range first {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultMHStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -135,7 +135,7 @@ func TestMHStoreReset(t *testing.T) {
 
 	// new hashes should be retrievable
 	for _, h := range second {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultMHStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -153,8 +153,8 @@ func TestMHStoreReset(t *testing.T) {
 	}
 }
 
-func TestMHStoreDelete(t *testing.T) {
-	store, err := NewMHStore(context.Background(), ds.NewMapDatastore())
+func TestKeyStoreDelete(t *testing.T) {
+	store, err := NewKeyStore(context.Background(), ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestMHStoreDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	delPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:DefaultMHStorePrefixLen])
+	delPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:DefaultKeyStorePrefixLen])
 	if err := store.Delete(context.Background(), mhs[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestMHStoreDelete(t *testing.T) {
 	}
 
 	// other hashes should still be retrievable
-	otherPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[1]))[:DefaultMHStorePrefixLen])
+	otherPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[1]))[:DefaultKeyStorePrefixLen])
 	res, err = store.Get(context.Background(), otherPrefix)
 	if err != nil {
 		t.Fatal(err)

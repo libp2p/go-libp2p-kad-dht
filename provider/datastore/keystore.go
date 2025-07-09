@@ -20,11 +20,22 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
-var logger = logging.Logger("dht/SweepingReprovider/MHStore")
+var logger = logging.Logger("dht/SweepingReprovider/KeyStore")
 
-// MHStore stores multihashes grouped by their first prefixLen bits in a
-// datastore.
-type MHStore struct {
+type KeyChanFunc = func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
+
+// KeyStore maintains a collection of multihash keys, grouping them in a
+// datastore by their first `prefixLen` bits.
+//
+// Optionally, you can supply a garbage-collection callback that returns the
+// complete set of keys that should remain in the store. On a configurable
+// interval, the KeyStore will:
+//  1. Wipe its entire contents.
+//  2. Re-populate itself using only the keys provided by the callback.
+//
+// This automatic refresh keeps the KeyStore in sync with your source of truth
+// even if it’s difficult to know exactly when to call Remove() manually.
+type KeyStore struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -39,7 +50,7 @@ type MHStore struct {
 	gcBatchSize int
 }
 
-type mhStoreCfg struct {
+type keyStoreCfg struct {
 	base      string
 	prefixLen int
 
@@ -48,30 +59,28 @@ type mhStoreCfg struct {
 	gcBatchSize int
 }
 
-// MHStoreOption configures MHStore behaviour.
-type MHStoreOption func(*mhStoreCfg) error
-
-type KeyChanFunc = func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
+// KeyStoreOption configures KeyStore behaviour.
+type KeyStoreOption func(*keyStoreCfg) error
 
 const (
-	DefaultMHStorePrefixLen  = 10
-	DefaultMHStoreBasePrefix = "/reprovider/mhs"
-	DefaultGCInterval        = 2 * amino.DefaultReprovideInterval
-	DefaultGCBatchSize       = 1 << 14
+	DefaultKeyStorePrefixLen   = 10
+	DefaultKeyStoreBasePrefix  = "/reprovider/mhs"
+	DefaultKeyStoreGCInterval  = 2 * amino.DefaultReprovideInterval
+	DefaultKeyStoreGCBatchSize = 1 << 14
 )
 
-var MHStoreDefaultCfg = func(cfg *mhStoreCfg) error {
-	cfg.prefixLen = DefaultMHStorePrefixLen
-	cfg.base = DefaultMHStoreBasePrefix
-	cfg.gcInterval = DefaultGCInterval
-	cfg.gcBatchSize = DefaultGCBatchSize
+var KeyStoreDefaultCfg = func(cfg *keyStoreCfg) error {
+	cfg.prefixLen = DefaultKeyStorePrefixLen
+	cfg.base = DefaultKeyStoreBasePrefix
+	cfg.gcInterval = DefaultKeyStoreGCInterval
+	cfg.gcBatchSize = DefaultKeyStoreGCBatchSize
 	return nil
 }
 
 // WithPrefixLen sets the bit-length used to group multihashes when persisting
 // them. The value must be positive and at most 256 bits.
-func WithPrefixLen(n int) MHStoreOption {
-	return func(cfg *mhStoreCfg) error {
+func WithPrefixLen(n int) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
 		if n <= 0 || n > 256 {
 			return fmt.Errorf("invalid prefix length %d", n)
 		}
@@ -82,8 +91,8 @@ func WithPrefixLen(n int) MHStoreOption {
 
 // WithDatastorePrefix sets the datastore prefix under which multihashes are
 // stored.
-func WithDatastorePrefix(base string) MHStoreOption {
-	return func(cfg *mhStoreCfg) error {
+func WithDatastorePrefix(base string) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
 		if base == "" {
 			return fmt.Errorf("datastore prefix cannot be empty")
 		}
@@ -96,18 +105,18 @@ func WithDatastorePrefix(base string) MHStoreOption {
 // shouldn't be provided anymore. During the garbage collection process, the
 // store is entirely purged, and is repopulated from the keys supplied by the
 // KeyChanFunc.
-func WithGCFunc(gcFunc KeyChanFunc) MHStoreOption {
-	return func(cfg *mhStoreCfg) error {
+func WithGCFunc(gcFunc KeyChanFunc) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
 		cfg.gcFunc = gcFunc
 		return nil
 	}
 }
 
-// WithGCInterval defines the interval at which the MHStore is garbage
+// WithGCInterval defines the interval at which the KeyStore is garbage
 // collected. During the garbage collection process, the store is entirely
 // purged, and is repopulated from the keys supplied by the gcFunc.
-func WithGCInterval(interval time.Duration) MHStoreOption {
-	return func(cfg *mhStoreCfg) error {
+func WithGCInterval(interval time.Duration) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
 		if interval <= 0 {
 			return fmt.Errorf("invalid garbage collection interval %s", interval)
 		}
@@ -117,11 +126,11 @@ func WithGCInterval(interval time.Duration) MHStoreOption {
 }
 
 // WithGCBatchSize defines the number of keys per batch when repopulating the
-// MHStore using the gcFunc. The gcFunc returns a chan cid.Cid, and the
+// KeyStore using the gcFunc. The gcFunc returns a chan cid.Cid, and the
 // repopulation process reads batches of gcBatchSize keys before writing them
-// to the MHStore.
-func WithGCBatchSize(size int) MHStoreOption {
-	return func(cfg *mhStoreCfg) error {
+// to the KeyStore.
+func WithGCBatchSize(size int) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
 		if size <= 0 {
 			return fmt.Errorf("invalid garbage collection batch size %d", size)
 		}
@@ -130,18 +139,18 @@ func WithGCBatchSize(size int) MHStoreOption {
 	}
 }
 
-// NewMHStore creates a new MHStore backed by the provided datastore.
-func NewMHStore(ctx context.Context, d ds.Batching, opts ...MHStoreOption) (*MHStore, error) {
-	var cfg mhStoreCfg
-	opts = append([]MHStoreOption{MHStoreDefaultCfg}, opts...)
+// NewKeyStore creates a new KeyStore backed by the provided datastore.
+func NewKeyStore(ctx context.Context, d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
+	var cfg keyStoreCfg
+	opts = append([]KeyStoreOption{KeyStoreDefaultCfg}, opts...)
 	for i, o := range opts {
 		if err := o(&cfg); err != nil {
-			return nil, fmt.Errorf("MHStore option %d failed: %w", i, err)
+			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
 		}
 	}
-	mhStoreCtx, cancel := context.WithCancel(ctx)
-	mhStore := MHStore{
-		ctx:    mhStoreCtx,
+	keyStoreCtx, cancel := context.WithCancel(ctx)
+	keyStore := KeyStore{
+		ctx:    keyStoreCtx,
 		cancel: cancel,
 
 		ds:        d,
@@ -153,12 +162,12 @@ func NewMHStore(ctx context.Context, d ds.Batching, opts ...MHStoreOption) (*MHS
 		gcBatchSize: cfg.gcBatchSize,
 	}
 	if cfg.gcFunc != nil && cfg.gcInterval > 0 {
-		go mhStore.runGC()
+		go keyStore.runGC()
 	}
-	return &mhStore, nil
+	return &keyStore, nil
 }
 
-func (s *MHStore) Close() error {
+func (s *KeyStore) Close() error {
 	s.cancel()
 	s.wg.Wait()
 	return nil
@@ -166,10 +175,11 @@ func (s *MHStore) Close() error {
 
 // runGC periodically runs garbage collection.
 //
-// Garbage collection consists in totally purging the MHStore, and repopulating
-// it with the keys supplied by the GC function. It basically resets the state
-// of the MHStore to match the state returned by the GC function.
-func (s *MHStore) runGC() {
+// Garbage collection consists in totally purging the KeyStore, and
+// repopulating it with the keys supplied by the GC function. It basically
+// resets the state of the KeyStore to match the state returned by the GC
+// function.
+func (s *KeyStore) runGC() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 	ticker := time.NewTicker(s.gcInterval)
@@ -180,59 +190,58 @@ func (s *MHStore) runGC() {
 		case <-ticker.C:
 			keysChan, err := s.gcFunc(s.ctx)
 			if err != nil {
-				logger.Errorf("MHStore garbage collection failed: %v", err)
+				logger.Errorf("garbage collection failed: %v", err)
 				continue
 			}
 			err = s.ResetCids(s.ctx, keysChan)
 			if err != nil {
-				logger.Errorf("MHStore reset failed: %v", err)
+				logger.Errorf("reset failed: %v", err)
 			}
 		}
 	}
 }
 
-// ResetCids purges the MHStore and repopulates it with the provided cids.
-func (s *MHStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
+// ResetCids purges the KeyStore and repopulates it with the provided cids.
+func (s *KeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
 	err := s.Empty(ctx)
 	if err != nil {
-		return fmt.Errorf("MHStore empty failed during reset: %w", err)
+		return fmt.Errorf("KeyStore empty failed during reset: %w", err)
 	}
-	mhs := make([]mh.Multihash, s.gcBatchSize)
+	keys := make([]mh.Multihash, s.gcBatchSize)
 	i := 0
 	for c := range keysChan {
-		mhs[i] = c.Hash()
+		keys[i] = c.Hash()
 		i++
 		if i == s.gcBatchSize {
-			_, err = s.Put(ctx, mhs...)
+			_, err = s.Put(ctx, keys...)
 			if err != nil {
-				return fmt.Errorf("MHStore put failed during reset: %w", err)
+				return fmt.Errorf("KeyStore put failed during reset: %w", err)
 			}
 			i = 0
-			mhs = mhs[:0]
+			keys = keys[:0]
 		}
 	}
-	_, err = s.Put(ctx, mhs...)
+	_, err = s.Put(ctx, keys...)
 	if err != nil {
-		return fmt.Errorf("MHStore put failed during reset: %w", err)
+		return fmt.Errorf("KeyStore put failed during reset: %w", err)
 	}
 	return nil
 }
 
-func (s *MHStore) dsKey(prefix bitstr.Key) ds.Key {
+func (s *KeyStore) dsKey(prefix bitstr.Key) ds.Key {
 	return s.base.ChildString(string(prefix))
 }
 
-// putLocked stores the provided multihashes while assuming s.lk is already
-// held.
-func (s *MHStore) putLocked(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihash, error) {
+// putLocked stores the provided keys while assuming s.lk is already held.
+func (s *KeyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
 	groups := make(map[bitstr.Key][]mh.Multihash)
-	newMhs := make([]mh.Multihash, 0, len(mhs))
-	for _, h := range mhs {
+	for _, h := range keys {
 		k := mhToBit256(h)
 		bs := bitstr.Key(key.BitString(k)[:s.prefixLen])
 		groups[bs] = append(groups[bs], h)
 	}
 
+	newKeys := make([]mh.Multihash, 0, len(keys))
 	for prefix, hs := range groups {
 		dsKey := s.dsKey(prefix)
 		var stored []mh.Multihash
@@ -250,11 +259,12 @@ func (s *MHStore) putLocked(ctx context.Context, mhs ...mh.Multihash) ([]mh.Mult
 		for _, h := range stored {
 			set[string(h)] = struct{}{}
 		}
+
 		for _, h := range hs {
 			if _, ok := set[string(h)]; !ok {
 				stored = append(stored, h)
 				set[string(h)] = struct{}{}
-				newMhs = append(newMhs, h)
+				newKeys = append(newKeys, h)
 			}
 		}
 
@@ -266,25 +276,25 @@ func (s *MHStore) putLocked(ctx context.Context, mhs ...mh.Multihash) ([]mh.Mult
 			return nil, err
 		}
 	}
-	return newMhs, nil
+	return newKeys, nil
 }
 
-// Put stores the provided multihashes in the underlying datastore, grouping them
-// by the first prefixLen bits. It returns only the multihashes that were not
-// previously persisted in the datastore (i.e., newly added multihashes).
-func (s *MHStore) Put(ctx context.Context, mhs ...mh.Multihash) ([]mh.Multihash, error) {
-	if len(mhs) == 0 {
+// Put stores the provided keys in the underlying datastore, grouping them by
+// the first prefixLen bits. It returns only the keys that were not previously
+// persisted in the datastore (i.e., newly added keys).
+func (s *KeyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
+	if len(keys) == 0 {
 		return nil, nil
 	}
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
-	return s.putLocked(ctx, mhs...)
+	return s.putLocked(ctx, keys...)
 }
 
-// Get returns all multihashes whose bit256 representation matches the provided
+// Get returns all keys whose bit256 representation matches the provided
 // prefix.
-func (s *MHStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
+func (s *KeyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -344,7 +354,7 @@ func (s *MHStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, e
 
 // emptyLocked deletes all entries under the datastore prefix, assuming s.lk is
 // already held.
-func (s *MHStore) emptyLocked(ctx context.Context) error {
+func (s *KeyStore) emptyLocked(ctx context.Context) error {
 	res, err := s.ds.Query(ctx, query.Query{Prefix: s.base.String()})
 	if err != nil {
 		return err
@@ -363,16 +373,16 @@ func (s *MHStore) emptyLocked(ctx context.Context) error {
 }
 
 // Empty deletes all entries under the datastore prefix.
-func (s *MHStore) Empty(ctx context.Context) error {
+func (s *KeyStore) Empty(ctx context.Context) error {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
 	return s.emptyLocked(ctx)
 }
 
-// Delete removes the given multihashes from datastore.
-func (s *MHStore) Delete(ctx context.Context, mhs ...mh.Multihash) error {
-	if len(mhs) == 0 {
+// Delete removes the given keys from datastore.
+func (s *KeyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
+	if len(keys) == 0 {
 		return nil
 	}
 	if ctx == nil {
@@ -382,7 +392,7 @@ func (s *MHStore) Delete(ctx context.Context, mhs ...mh.Multihash) error {
 	defer s.lk.Unlock()
 
 	groups := make(map[bitstr.Key][]mh.Multihash)
-	for _, h := range mhs {
+	for _, h := range keys {
 		bs := bitstr.Key(key.BitString(mhToBit256(h)))
 		p := bitstr.Key(bs[:s.prefixLen])
 		groups[p] = append(groups[p], h)

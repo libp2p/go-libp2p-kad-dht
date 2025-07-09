@@ -25,10 +25,10 @@ var (
 var rLogger = logging.Logger("dht/dual/provider")
 
 type SweepingProvider struct {
-	dht     *dual.DHT
-	LAN     *provider.SweepingProvider
-	WAN     *provider.SweepingProvider
-	mhStore *datastore.MHStore
+	dht      *dual.DHT
+	LAN      *provider.SweepingProvider
+	WAN      *provider.SweepingProvider
+	keyStore *datastore.KeyStore
 }
 
 func NewSweepingProvider(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
@@ -60,7 +60,7 @@ func NewSweepingProvider(d *dual.DHT, opts ...Option) (*SweepingProvider, error)
 			provider.WithAddLocalRecord(func(h mh.Multihash) error {
 				return dht.Provide(dht.Context(), cid.NewCidV1(cid.Raw, h), false)
 			}),
-			provider.WithMHStore(cfg.mhStore),
+			provider.WithKeyStore(cfg.keyStore),
 			provider.WithReprovideInterval(cfg.reprovideInterval[i]),
 			provider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
 			provider.WithConnectivityCheckOnlineInterval(cfg.connectivityCheckOnlineInterval[i]),
@@ -77,10 +77,10 @@ func NewSweepingProvider(d *dual.DHT, opts ...Option) (*SweepingProvider, error)
 	}
 
 	return &SweepingProvider{
-		dht:     d,
-		LAN:     sweepingProviders[0],
-		WAN:     sweepingProviders[1],
-		mhStore: cfg.mhStore,
+		dht:      d,
+		LAN:      sweepingProviders[0],
+		WAN:      sweepingProviders[1],
+		keyStore: cfg.keyStore,
 	}, nil
 }
 
@@ -133,7 +133,7 @@ func (s *SweepingProvider) ProvideMany(ctx context.Context, keys []mh.Multihash)
 // deletes the keys.
 func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
 	ctx := context.Background()
-	cids, err := s.mhStore.Put(ctx, keys...)
+	cids, err := s.keyStore.Put(ctx, keys...)
 	if err != nil {
 		rLogger.Errorf("failed to store multihashes: %v", err)
 		return
@@ -145,7 +145,7 @@ func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
 // stops being referred as a provider when the provider records in both DHT
 // swarms expire.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
-	err := s.mhStore.Delete(context.Background(), keys...)
+	err := s.keyStore.Delete(context.Background(), keys...)
 	if err != nil {
 		rLogger.Errorf("failed to stop providing keys: %s", err)
 	}
@@ -163,7 +163,7 @@ func (s *SweepingProvider) InstantProvide(ctx context.Context, keys ...mh.Multih
 // to the DHTs even if the keys were already provided in the past. Blocks until
 // provide is complete or an error occurs.
 func (s *SweepingProvider) ForceProvide(ctx context.Context, keys ...mh.Multihash) error {
-	_, err := s.mhStore.Put(ctx, keys...)
+	_, err := s.keyStore.Put(ctx, keys...)
 	if err != nil {
 		return fmt.Errorf("failed to store multihashes: %w", err)
 	}

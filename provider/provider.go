@@ -118,7 +118,7 @@ type SweepingProvider struct {
 	lastAvgPrefixLen     time.Time
 	avgPrefixLenValidity time.Duration
 
-	mhStore *datastore.MHStore
+	keyStore *datastore.KeyStore
 
 	provideChan            chan provideReq
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
@@ -150,13 +150,13 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.mhStore == nil {
-		// Setup MHStore if missing
-		mhStore, err := datastore.NewMHStore(ctx, ds.NewMapDatastore())
+	if cfg.keyStore == nil {
+		// Setup KeyStore if missing
+		keyStore, err := datastore.NewKeyStore(ctx, ds.NewMapDatastore())
 		if err != nil {
 			return nil, err
 		}
-		cfg.mhStore = mhStore
+		cfg.keyStore = keyStore
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		getSelfAddrs:   cfg.selfAddrs,
 		addLocalRecord: cfg.addLocalRecord,
 
-		mhStore: cfg.mhStore,
+		keyStore: cfg.keyStore,
 
 		provideChan:   make(chan provideReq),
 		schedule:      trie.New[bitstr.Key, time.Duration](),
@@ -360,7 +360,7 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 	if provideRequest.reprovideKeys {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
-		keys, err = s.mhStore.Put(s.ctx, provideRequest.keys...)
+		keys, err = s.keyStore.Put(s.ctx, provideRequest.keys...)
 		if err != nil {
 			if provideRequest.done != nil {
 				provideRequest.done <- err
@@ -706,7 +706,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		// valid addresses are provided. This makes the kubo tests fail.
 		return errors.New("no self addresses available for providing keys")
 	}
-	keys, err := s.mhStore.Get(s.ctx, prefix)
+	keys, err := s.keyStore.Get(s.ctx, prefix)
 	if err != nil {
 		s.failedRegionsChan <- prefix
 		if periodicReprovide {
@@ -742,7 +742,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	regions, coveredPrefix := s.regionsFromPeers(peers)
 	if len(coveredPrefix) < len(prefix) {
 		// We need to load more keys
-		keys, err = s.mhStore.Get(s.ctx, coveredPrefix)
+		keys, err = s.keyStore.Get(s.ctx, coveredPrefix)
 		if err != nil {
 			s.failedRegionsChan <- prefix
 			if periodicReprovide {
@@ -1445,7 +1445,7 @@ func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
 // stops being referred as a provider when the provider records in the DHT
 // swarm expire.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
-	err := s.mhStore.Delete(s.ctx, keys...)
+	err := s.keyStore.Delete(s.ctx, keys...)
 	if err != nil {
 		logger.Errorf("failed to stop providing keys: %s", err)
 	}

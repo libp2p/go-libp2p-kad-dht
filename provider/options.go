@@ -30,7 +30,7 @@ type config struct {
 	peerid peer.ID
 	router KadClosestPeersRouter
 
-	mhStore *datastore.MHStore
+	keyStore *datastore.KeyStore
 
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
@@ -213,12 +213,12 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 	}
 }
 
-func WithMHStore(mhStore *datastore.MHStore) Option {
+func WithKeyStore(keyStore *datastore.KeyStore) Option {
 	return func(cfg *config) error {
-		if mhStore == nil {
+		if keyStore == nil {
 			return errors.New("reprovider config: multihash store cannot be nil")
 		}
-		cfg.mhStore = mhStore
+		cfg.keyStore = keyStore
 		return nil
 	}
 }

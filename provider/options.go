@@ -15,8 +15,19 @@ import (
 )
 
 const (
-	DefaultMaxReprovideDelay                = 1 * time.Hour
-	DefaultConnectivityCheckOnlineInterval  = 1 * time.Minute
+	// DefaultMaxReprovideDelay is the default maximum delay allowed when
+	// reproviding a region. The interval between 2 reprovides of the same region
+	// is at most ReprovideInterval+MaxReprovideDelay. This variable is necessary
+	// since regions can grow and shrink depending on the network churn.
+	DefaultMaxReprovideDelay = 1 * time.Hour
+
+	// DefaultConnectivityCheckOnlineInterval is the default minimum interval for
+	// checking whether the node is still online. Such a check is performed when
+	// a network operation fails, and the ConnectivityCheckOnlineInterval limits
+	// how often such a check is performed.
+	DefaultConnectivityCheckOnlineInterval = 1 * time.Minute
+	// DefaultConnectivityCheckOfflineInterval is the default interval for
+	// checking if the offline node has come online again.
 	DefaultConnectivityCheckOfflineInterval = 5 * time.Minute
 )
 
@@ -93,6 +104,9 @@ var DefaultConfig = func(cfg *config) error {
 	return nil
 }
 
+// WithReplicationFactor sets the replication factor for provider records. It
+// means that during provide and reprovide operations, each provider records is
+// allocated to the ReplicationFactor closest peers in the DHT swarm.
 func WithReplicationFactor(n int) Option {
 	return func(cfg *config) error {
 		cfg.replicationFactor = n
@@ -100,6 +114,7 @@ func WithReplicationFactor(n int) Option {
 	}
 }
 
+// WithReprovideInterval sets the interval at which regions are reprovided.
 func WithReprovideInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.reprovideInterval = d
@@ -107,6 +122,12 @@ func WithReprovideInterval(d time.Duration) Option {
 	}
 }
 
+// WithMaxReprovideDelay sets the maximum delay allowed when reproviding a
+// region. The interval between 2 reprovides of the same region is at most
+// ReprovideInterval+MaxReprovideDelay.
+//
+// This parameter is necessary since regions can grow and shrink depending on
+// the network churn.
 func WithMaxReprovideDelay(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.maxReprovideDelay = d
@@ -114,6 +135,10 @@ func WithMaxReprovideDelay(d time.Duration) Option {
 	}
 }
 
+// WithConnectivityCheckOnlineInterval sets the minimal interval for checking
+// whether the node is still online. Such a check is performed when a network
+// operation fails, and the ConnectivityCheckOnlineInterval limits how often
+// such a check is performed.
 func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.connectivityCheckOnlineInterval = d
@@ -121,6 +146,8 @@ func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	}
 }
 
+// WithConnectivityCheckOfflineInterval sets the interval for periodically
+// checking whether the offline node has come online again.
 func WithConnectivityCheckOfflineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.connectivityCheckOfflineInterval = d
@@ -128,6 +155,7 @@ func WithConnectivityCheckOfflineInterval(d time.Duration) Option {
 	}
 }
 
+// WithPeerID sets the peer ID of the node running the provider.
 func WithPeerID(p peer.ID) Option {
 	return func(cfg *config) error {
 		cfg.peerid = p
@@ -135,6 +163,7 @@ func WithPeerID(p peer.ID) Option {
 	}
 }
 
+// WithRouter sets the router used to find closest peers in the DHT.
 func WithRouter(r KadClosestPeersRouter) Option {
 	return func(cfg *config) error {
 		cfg.router = r
@@ -142,6 +171,8 @@ func WithRouter(r KadClosestPeersRouter) Option {
 	}
 }
 
+// WithMessageSender sets the message sender used to send messages out to the
+// DHT swarm.
 func WithMessageSender(m pb.MessageSender) Option {
 	return func(cfg *config) error {
 		cfg.msgSender = m
@@ -149,6 +180,8 @@ func WithMessageSender(m pb.MessageSender) Option {
 	}
 }
 
+// WithSelfAddrs sets the function that returns the self addresses of the node.
+// These addresses are written in the provider records advertised by the node.
 func WithSelfAddrs(f func() []ma.Multiaddr) Option {
 	return func(cfg *config) error {
 		cfg.selfAddrs = f
@@ -156,6 +189,8 @@ func WithSelfAddrs(f func() []ma.Multiaddr) Option {
 	}
 }
 
+// WithAddLocalRecord sets the function that adds a provider record to the
+// local provider record store.
 func WithAddLocalRecord(f func(mh.Multihash) error) Option {
 	return func(cfg *config) error {
 		if f == nil {
@@ -166,6 +201,8 @@ func WithAddLocalRecord(f func(mh.Multihash) error) Option {
 	}
 }
 
+// WithClock sets the clock used by the provider. This is useful for testing
+// purposes, allowing to control time in tests.
 func WithClock(c clock.Clock) Option {
 	return func(cfg *config) error {
 		cfg.clock = c
@@ -173,6 +210,16 @@ func WithClock(c clock.Clock) Option {
 	}
 }
 
+// WithMaxWorkers sets the maximum number of workers that can be used for
+// provide and reprovide jobs. The job of a worker is to explore a region of
+// the keyspace and (re)provide the keys matching the region to the closest
+// peers.
+//
+// You can configure a number of workers dedicated to periodic jobs, and a
+// number of workers dedicated to burst jobs. MaxWorkers should be greater or
+// equal to DedicatedPeriodicWorkers+DedicatedBurstWorkers. The additional
+// workers that aren't dedicated to specific jobs can be used for either job
+// type where needed.
 func WithMaxWorkers(n int) Option {
 	return func(cfg *config) error {
 		if n < 0 {
@@ -183,6 +230,8 @@ func WithMaxWorkers(n int) Option {
 	}
 }
 
+// WithDedicatedPeriodicWorkers sets the number of workers dedicated to
+// periodic region reprovides.
 func WithDedicatedPeriodicWorkers(n int) Option {
 	return func(cfg *config) error {
 		if n < 0 {
@@ -193,6 +242,10 @@ func WithDedicatedPeriodicWorkers(n int) Option {
 	}
 }
 
+// WithDedicatedBurstWorkers sets the number of workers dedicated to burst
+// operations. Burst operations consist in work that isn't scheduled
+// beforehands, such as initial provides and catching up with reproviding after
+// the node went offline for a while.
 func WithDedicatedBurstWorkers(n int) Option {
 	return func(cfg *config) error {
 		if n < 0 {
@@ -203,6 +256,9 @@ func WithDedicatedBurstWorkers(n int) Option {
 	}
 }
 
+// WithMaxProvideConnsPerWorker sets the maximum number of connections to
+// distinct peers that can be opened by a single worker during a provide
+// operation.
 func WithMaxProvideConnsPerWorker(n int) Option {
 	return func(cfg *config) error {
 		if n <= 0 {
@@ -213,6 +269,8 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 	}
 }
 
+// WithKeyStore defines the KeyStore used to keep track of the keys that need
+// to be reprovided.
 func WithKeyStore(keyStore *datastore.KeyStore) Option {
 	return func(cfg *config) error {
 		if keyStore == nil {

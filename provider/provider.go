@@ -183,7 +183,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 			clock:                cfg.clock,
 			onlineCheckInterval:  cfg.connectivityCheckOnlineInterval,
 			offlineCheckInterval: cfg.connectivityCheckOfflineInterval,
-			checkFunc: func() bool {
+			checkFunc: func(ctx context.Context) bool {
 				peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 				return err == nil && len(peers) > 0
 			},

@@ -436,7 +436,7 @@ func TestProviderOffline(t *testing.T) {
 			clock:                mockClock,
 			onlineCheckInterval:  checkInterval,
 			offlineCheckInterval: checkInterval,
-			checkFunc: func() bool {
+			checkFunc: func(context.Context) bool {
 				checkFuncCalled.Store(true)
 				return online.Load()
 			},
@@ -783,7 +783,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		clock:                mockClock,
 		onlineCheckInterval:  connectivityCheckInterval,
 		offlineCheckInterval: connectivityCheckInterval,
-		checkFunc: func() bool {
+		checkFunc: func(ctx context.Context) bool {
 			peers, err := router.GetClosestPeers(ctx, string(pid))
 			return err == nil && len(peers) > 0
 		},

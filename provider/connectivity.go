@@ -33,8 +33,8 @@ type connectivityChecker struct {
 	onlineCheckInterval  time.Duration // minimum check interval when online
 	offlineCheckInterval time.Duration // periodic check frequency when offline
 
-	checkFunc        func() bool // function to check whether node is online
-	backOnlineNotify func()      // callback when node comes back online
+	checkFunc        func(context.Context) bool // function to check whether node is online
+	backOnlineNotify func()                     // callback when node comes back online
 }
 
 func (c *connectivityChecker) isOnline() bool {
@@ -42,6 +42,10 @@ func (c *connectivityChecker) isOnline() bool {
 }
 
 func (c *connectivityChecker) triggerCheck() {
+	if c.ctx.Err() != nil {
+		// Noop
+		return
+	}
 	go func() {
 		if !c.mutex.TryLock() {
 			return // already checking
@@ -52,7 +56,7 @@ func (c *connectivityChecker) triggerCheck() {
 			return // last check was too recent
 		}
 
-		if c.checkFunc() {
+		if c.checkFunc(c.ctx) {
 			c.lastCheck = c.clock.Now()
 			return
 		}
@@ -67,11 +71,13 @@ func (c *connectivityChecker) triggerCheck() {
 			case <-c.ctx.Done():
 				return
 			case <-ticker.C:
-				if c.checkFunc() {
-					// Node is back online.
-					c.online.Store(true)
-					c.lastCheck = c.clock.Now()
-					c.backOnlineNotify()
+				if c.checkFunc(c.ctx) {
+					if c.ctx.Err() == nil {
+						// Node is back online.
+						c.online.Store(true)
+						c.lastCheck = c.clock.Now()
+						c.backOnlineNotify()
+					}
 					return
 				}
 			}

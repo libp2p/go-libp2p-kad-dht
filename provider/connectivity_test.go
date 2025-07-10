@@ -35,7 +35,7 @@ func TestTriggerCheck_SkipsWhenRecent(t *testing.T) {
 		clock:                mockClk,
 		onlineCheckInterval:  time.Minute,
 		offlineCheckInterval: time.Minute,
-		checkFunc:            func() bool { atomic.AddInt32(&called, 1); return true },
+		checkFunc:            func(context.Context) bool { atomic.AddInt32(&called, 1); return true },
 		backOnlineNotify:     func() {},
 	}
 	c.online.Store(true)
@@ -66,7 +66,7 @@ func TestTriggerCheck_OnlineFastPath(t *testing.T) {
 		clock:                mockClk,
 		onlineCheckInterval:  time.Minute,
 		offlineCheckInterval: time.Minute,
-		checkFunc:            func() bool { atomic.AddInt32(&calls, 1); return true },
+		checkFunc:            func(context.Context) bool { atomic.AddInt32(&calls, 1); return true },
 		backOnlineNotify:     func() { atomic.AddInt32(&notified, 1) },
 	}
 	c.online.Store(true)
@@ -103,7 +103,7 @@ func TestTriggerCheck_OfflineRecovery(t *testing.T) {
 		clock:                mockClk,
 		onlineCheckInterval:  time.Minute,
 		offlineCheckInterval: time.Minute,
-		checkFunc:            func() bool { return online.Load() },
+		checkFunc:            func(context.Context) bool { return online.Load() },
 		backOnlineNotify: func() {
 			atomic.AddInt32(&notified, 1)
 			close(done)

@@ -18,6 +18,7 @@ import (
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -100,7 +101,7 @@ type SweepingProvider struct {
 	router KadClosestPeersRouter
 	order  bit256.Key
 
-	connectivity connectivityChecker
+	connectivity *connectivity.ConnectivityChecker
 
 	workerPool               *pool.Pool[workerType]
 	maxProvideConnsPerWorker int
@@ -178,16 +179,16 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		reprovideInterval: cfg.reprovideInterval,
 		maxReprovideDelay: cfg.maxReprovideDelay,
 
-		connectivity: connectivityChecker{
-			ctx:                  ctx,
-			clock:                cfg.clock,
-			onlineCheckInterval:  cfg.connectivityCheckOnlineInterval,
-			offlineCheckInterval: cfg.connectivityCheckOfflineInterval,
-			checkFunc: func(ctx context.Context) bool {
-				peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
-				return err == nil && len(peers) > 0
-			},
-		},
+		// connectivity: connectivityChecker{
+		// 	ctx:                  ctx,
+		// 	clock:                cfg.clock,
+		// 	onlineCheckInterval:  cfg.connectivityCheckOnlineInterval,
+		// 	offlineCheckInterval: cfg.connectivityCheckOfflineInterval,
+		// 	checkFunc: func(ctx context.Context) bool {
+		// 		peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
+		// 		return err == nil && len(peers) > 0
+		// 	},
+		// },
 		workerPool: pool.New(cfg.maxWorkers, map[workerType]int{
 			periodicWorker: cfg.dedicatedPeriodicWorkers,
 			burstWorker:    cfg.dedicatedBurstWorkers,
@@ -222,9 +223,20 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 	// Don't need to start schedule timer yet
 	prov.scheduleTimer.Stop()
 
-	// Connectivity checker starts in online state
-	prov.connectivity.online.Store(true)
-	prov.connectivity.backOnlineNotify = prov.catchupPendingNotify
+	prov.connectivity, err = connectivity.New(
+		ctx,
+		func(ctx context.Context) bool {
+			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
+			return err == nil && len(peers) > 0
+		},
+		prov.catchupPendingNotify,
+		connectivity.WithClock(cfg.clock),
+		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
+		connectivity.WithOfflineCheckInterval(cfg.connectivityCheckOfflineInterval),
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	go prov.run()
 
@@ -253,10 +265,10 @@ func (s *SweepingProvider) run() {
 			if !slices.Contains(s.lateRegionsQueue, prefix) {
 				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 			}
-			s.connectivity.triggerCheck()
+			s.connectivity.TriggerCheck()
 		case keys := <-s.pendingKeysChan:
 			s.pendingKeys = append(s.pendingKeys, keys...)
-			s.connectivity.triggerCheck()
+			s.connectivity.TriggerCheck()
 		case <-retryTicker.C:
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
@@ -389,7 +401,7 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 		prefixes = s.groupKeysByPrefix(keys)
 	}
 
-	if !s.connectivity.isOnline() {
+	if !s.connectivity.IsOnline() {
 		logger.Warn("Node is offline, cannot provide requested keys.")
 		if provideRequest.reprovideKeys {
 			s.pendingKeys = append(s.pendingKeys, keys...)
@@ -562,7 +574,7 @@ workerLoop:
 			// Try to acquire a worker for the next prefix.
 			go acquireWorkerAsync()
 		case <-onlineTicker.C:
-			if !s.connectivity.isOnline() {
+			if !s.connectivity.IsOnline() {
 				cancelWorkers.Store(true)
 				break workerLoop
 			}
@@ -592,7 +604,7 @@ workerLoop:
 }
 
 func (s *SweepingProvider) handleReprovide() {
-	online := s.connectivity.isOnline()
+	online := s.connectivity.IsOnline()
 	s.scheduleLk.Lock()
 	currentPrefix := s.prefixCursor
 	// Get next prefix to reprovide, and set timer for it.
@@ -641,7 +653,7 @@ func (s *SweepingProvider) handleReprovide() {
 			// failed regions.
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilNextReprovide)
 			s.scheduleLk.Unlock()
-			s.connectivity.triggerCheck()
+			s.connectivity.TriggerCheck()
 			return
 		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
@@ -658,7 +670,7 @@ func (s *SweepingProvider) handleReprovide() {
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
 			}
-			s.connectivity.triggerCheck()
+			s.connectivity.TriggerCheck()
 			if count == scheduleSize {
 				// No reprovides are scheduled in the future, return here.
 				s.scheduleLk.Unlock()
@@ -954,7 +966,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	// Go down the trie to fully cover prefix.
 explorationLoop:
 	for i < maxPrefixSearches {
-		if !s.connectivity.isOnline() {
+		if !s.connectivity.IsOnline() {
 			err = ErrNodeOffline
 			earlyExit = true
 			break explorationLoop

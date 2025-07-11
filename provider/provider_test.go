@@ -14,6 +14,7 @@ import (
 	"github.com/filecoin-project/go-clock"
 	"github.com/ipfs/go-cid"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -261,6 +262,7 @@ func genRandPeerID(t *testing.T) peer.ID {
 }
 
 func TestClosestPeersToPrefixRandom(t *testing.T) {
+	ctx := context.Background()
 	replicationFactor := 10
 	nPeers := 128
 	peers := make([]peer.ID, nPeers)
@@ -278,14 +280,13 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		},
 	}
 
+	connChecker, err := connectivity.New(ctx, func(ctx context.Context) bool { return true }, func() {})
+	require.NoError(t, err)
 	r := SweepingProvider{
 		router:            router,
 		replicationFactor: replicationFactor,
-		connectivity: connectivityChecker{
-			online: atomic.Bool{},
-		},
+		connectivity:      connChecker,
 	}
-	r.connectivity.online.Store(true)
 
 	for _, prefix := range []bitstr.Key{"", "0", "1", "00", "01", "10", "11", "000", "001", "010", "011", "100", "101", "110", "111"} {
 		closestPeers, err := r.closestPeersToPrefix(prefix)
@@ -384,6 +385,20 @@ func TestProvideNoBootstrap(t *testing.T) {
 		},
 	}
 	msgSender := &mockMsgSender{}
+	clk := clock.NewMock()
+	online := atomic.Bool{}
+
+	checkInterval := time.Minute
+	connChecker, err := connectivity.New(
+		ctx,
+		func(ctx context.Context) bool { return online.Load() },
+		func() {},
+		connectivity.WithClock(clk),
+		connectivity.WithOnlineCheckInterval(checkInterval),
+		connectivity.WithOfflineCheckInterval(checkInterval),
+	)
+	require.NoError(t, err)
+
 	opts := []Option{
 		WithPeerID(pid),
 		WithRouter(router),
@@ -395,18 +410,22 @@ func TestProvideNoBootstrap(t *testing.T) {
 		}),
 	}
 	reprovider, err := NewProvider(ctx, opts...)
+	reprovider.connectivity = connChecker
 	require.NoError(t, err)
 
-	_ = reprovider
 	c := genCids(1)[0]
 
 	// Set the reprovider as offline
-	reprovider.connectivity.online.Store(false)
+	online.Store(false)
+	reprovider.connectivity.TriggerCheck()
+	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	err = reprovider.ProvideOnce(ctx, c.Hash())
 	require.ErrorIs(t, ErrNodeOffline, err)
 
 	// Set the reprovider as online, but don't bootstrap it
-	reprovider.connectivity.online.Store(true)
+	online.Store(true)
+	clk.Add(checkInterval)           // trigger connectivity check
+	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	err = reprovider.ProvideOnce(ctx, c.Hash())
 	require.NoError(t, err)
 }
@@ -420,74 +439,6 @@ func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args
 		time.Sleep(step)
 	}
 	t.Fatal(args...)
-}
-
-func TestProviderOffline(t *testing.T) {
-	ctx := context.Background()
-	online := atomic.Bool{}
-	online.Store(false)
-	checkFuncCalled := atomic.Bool{}
-	mockClock := clock.NewMock()
-	checkInterval := time.Minute
-	catchupPendingChan := make(chan struct{}, 1)
-	reprovider := SweepingProvider{
-		connectivity: connectivityChecker{
-			ctx:                  ctx,
-			clock:                mockClock,
-			onlineCheckInterval:  checkInterval,
-			offlineCheckInterval: checkInterval,
-			checkFunc: func(context.Context) bool {
-				checkFuncCalled.Store(true)
-				return online.Load()
-			},
-			backOnlineNotify: func() {
-				catchupPendingChan <- struct{}{}
-			},
-		},
-	}
-
-	checked := func() bool {
-		return checkFuncCalled.Load()
-	}
-	nodeOnline := func() bool {
-		return reprovider.connectivity.online.Load()
-	}
-	nodeOffline := func() bool {
-		return !reprovider.connectivity.online.Load()
-	}
-	// offline -> offline
-	reprovider.connectivity.triggerCheck()
-	waitUntil(t, checked, 10*time.Millisecond)
-	waitUntil(t, nodeOffline, 10*time.Millisecond)
-	require.Len(t, reprovider.catchupPendingChan, 0)
-
-	// Wait before modifying online status
-	checkFuncCalled.Store(false)
-	online.Store(true)
-
-	// offline -> online
-	mockClock.Add(checkInterval)
-	waitUntil(t, checked, 10*time.Millisecond)
-	waitUntil(t, nodeOnline, 10*time.Millisecond)
-	require.Len(t, catchupPendingChan, 1)
-	<-catchupPendingChan
-
-	mockClock.Add(checkInterval)
-	checkFuncCalled.Store(false)
-	// online -> online
-	reprovider.connectivity.triggerCheck()
-	waitUntil(t, checked, 10*time.Millisecond)
-	waitUntil(t, nodeOnline, 10*time.Millisecond)
-	require.Len(t, reprovider.catchupPendingChan, 0)
-
-	checkFuncCalled.Store(false)
-	mockClock.Add(checkInterval)
-	online.Store(false)
-
-	// online -> offline
-	reprovider.connectivity.triggerCheck()
-	waitUntil(t, checked, 10*time.Millisecond)
-	waitUntil(t, nodeOffline, 10*time.Millisecond)
 }
 
 func TestProvideSingle(t *testing.T) {
@@ -778,31 +729,31 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)
 
-	reprovider.connectivity = connectivityChecker{
-		ctx:                  ctx,
-		clock:                mockClock,
-		onlineCheckInterval:  connectivityCheckInterval,
-		offlineCheckInterval: connectivityCheckInterval,
-		checkFunc: func(ctx context.Context) bool {
+	reprovider.connectivity, err = connectivity.New(
+		ctx,
+		func(ctx context.Context) bool {
 			peers, err := router.GetClosestPeers(ctx, string(pid))
 			return err == nil && len(peers) > 0
 		},
-		backOnlineNotify: reprovider.catchupPendingNotify,
-	}
-	reprovider.connectivity.online.Store(true)
+		reprovider.catchupPendingNotify,
+		connectivity.WithClock(mockClock),
+		connectivity.WithOnlineCheckInterval(connectivityCheckInterval),
+		connectivity.WithOfflineCheckInterval(connectivityCheckInterval),
+	)
+	require.NoError(t, err)
 
 	err = reprovider.ForceStartProviding(ctx, mhs...)
 	require.Error(t, err)
 
 	nodeOffline := func() bool {
-		return !reprovider.connectivity.isOnline()
+		return !reprovider.connectivity.IsOnline()
 	}
 	waitUntil(t, nodeOffline, 10*time.Millisecond, "waiting for node to be offline")
 	mockClock.Add(connectivityCheckInterval)
 
 	routerOffline.Store(false)
 	mockClock.Add(connectivityCheckInterval)
-	waitUntil(t, reprovider.connectivity.isOnline, 10*time.Millisecond, "waiting for node to come back online")
+	waitUntil(t, reprovider.connectivity.IsOnline, 10*time.Millisecond, "waiting for node to come back online")
 
 	providedAllCids := func() bool {
 		msgSenderLk.Lock()

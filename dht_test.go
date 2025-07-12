@@ -1738,25 +1738,32 @@ func TestFindClosestPeers(t *testing.T) {
 	nDHTs := 30
 	dhts := setupDHTS(t, ctx, nDHTs)
 	defer func() {
-		for i := 0; i < nDHTs; i++ {
+		for i := range nDHTs {
 			dhts[i].Close()
 			defer dhts[i].host.Close()
 		}
 	}()
 
 	t.Logf("connecting %d dhts in a ring", nDHTs)
-	for i := 0; i < nDHTs; i++ {
+	for i := range nDHTs {
 		connect(t, ctx, dhts[i], dhts[(i+1)%len(dhts)])
 	}
 
 	querier := dhts[1]
-	peers, err := querier.GetClosestPeers(ctx, "foo")
+	queryStr := "foo"
+	peers, err := querier.GetClosestPeers(ctx, queryStr)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if len(peers) < querier.beta {
 		t.Fatalf("got wrong number of peers (got %d, expected at least %d)", len(peers), querier.beta)
+	}
+
+	queryKey := kb.ConvertKey(queryStr)
+	sortedPeers := kb.SortClosestPeers(peers, queryKey)
+	for i := range len(sortedPeers) {
+		require.Equal(t, sortedPeers[i], peers[i])
 	}
 }
 

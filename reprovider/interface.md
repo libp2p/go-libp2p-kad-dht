@@ -1,6 +1,6 @@
 # Provider Interface
 
-## Suggested `SweepingReprovider` interface
+## Suggested `DHTProvider` interface
 
 ```go
 // DHTProvider is an interface for providing keys to a DHT swarm. It holds a

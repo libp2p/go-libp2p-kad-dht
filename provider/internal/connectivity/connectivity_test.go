@@ -30,7 +30,6 @@ func TestTriggerCheck_SkipsWhenRecent(t *testing.T) {
 
 	var called int32
 	c, err := New(
-		ctx,
 		func(ctx context.Context) bool { atomic.AddInt32(&called, 1); return true },
 		func() {},
 		WithClock(clock.NewMock()),
@@ -40,12 +39,13 @@ func TestTriggerCheck_SkipsWhenRecent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create ConnectivityChecker: %v", err)
 	}
+	defer c.Close()
 
 	c.online.Store(true)
 
-	c.TriggerCheck() // should perform the check
+	c.TriggerCheck(ctx) // should perform the check
 	time.Sleep(5 * time.Millisecond)
-	c.TriggerCheck() // should return early
+	c.TriggerCheck(ctx) // should return early
 
 	// Give the goroutine a chance to run.
 	time.Sleep(5 * time.Millisecond)
@@ -64,18 +64,20 @@ func TestTriggerCheck_OnlineFastPath(t *testing.T) {
 	defer cancel()
 
 	var calls, notified int32
-	c := &ConnectivityChecker{
-		ctx:                  ctx,
-		clock:                mockClk,
-		onlineCheckInterval:  time.Minute,
-		offlineCheckInterval: time.Minute,
-		checkFunc:            func(context.Context) bool { atomic.AddInt32(&calls, 1); return true },
-		backOnlineNotify:     func() { atomic.AddInt32(&notified, 1) },
+	c, err := New(
+		func(context.Context) bool { atomic.AddInt32(&calls, 1); return true },
+		func() { atomic.AddInt32(&notified, 1) },
+		WithClock(mockClk),
+		WithOnlineCheckInterval(time.Minute),
+		WithOfflineCheckInterval(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("failed to create ConnectivityChecker: %v", err)
 	}
-	c.online.Store(true)
+	defer c.Close()                                   // ensure cleanup
 	c.lastCheck = mockClk.Now().Add(-2 * time.Minute) // new check can be triggered
 
-	c.TriggerCheck()
+	c.TriggerCheck(ctx)
 	eventually(t, func() bool { return atomic.LoadInt32(&calls) == 1 })
 
 	if !c.IsOnline() {
@@ -101,20 +103,19 @@ func TestTriggerCheck_OfflineRecovery(t *testing.T) {
 	done := make(chan struct{})
 
 	online.Store(false) // start offline
-	c := &ConnectivityChecker{
-		ctx:                  ctx,
-		clock:                mockClk,
-		onlineCheckInterval:  time.Minute,
-		offlineCheckInterval: time.Minute,
-		checkFunc:            func(context.Context) bool { return online.Load() },
-		backOnlineNotify: func() {
-			atomic.AddInt32(&notified, 1)
-			close(done)
-		},
+	c, err := New(
+		func(context.Context) bool { return online.Load() },
+		func() { atomic.AddInt32(&notified, 1); close(done) },
+		WithClock(mockClk),
+		WithOnlineCheckInterval(time.Minute),
+		WithOfflineCheckInterval(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("failed to create ConnectivityChecker: %v", err)
 	}
-	c.online.Store(true)                              // previously online
-	c.lastCheck = mockClk.Now().Add(-2 * time.Minute) // check can be triggered
-	c.TriggerCheck()                                  // launches goroutine
+	defer c.Close()                                   // ensure cleanup
+	c.lastCheck = mockClk.Now().Add(-2 * time.Minute) // new check can be triggered
+	c.TriggerCheck(ctx)                               // launches goroutine
 
 	// First offline tick (still disconnected).
 	time.Sleep(1 * time.Millisecond)
@@ -157,7 +158,6 @@ func TestOnlineOffline(t *testing.T) {
 	checkInterval := time.Minute
 	notified := make(chan struct{}, 1)
 	c, err := New(
-		ctx,
 		func(context.Context) bool {
 			checkFuncCalled.Store(true)
 			return online.Load()
@@ -183,7 +183,7 @@ func TestOnlineOffline(t *testing.T) {
 
 	// online -> online
 	online.Store(true) // node starts online
-	c.TriggerCheck()
+	c.TriggerCheck(ctx)
 	eventually(t, checked)
 	eventually(t, nodeOnline)
 	if len(notified) != 0 {
@@ -195,7 +195,7 @@ func TestOnlineOffline(t *testing.T) {
 	mockClock.Add(checkInterval)
 	online.Store(false) // simulate going offline
 
-	c.TriggerCheck()
+	c.TriggerCheck(ctx)
 	eventually(t, checked)
 	eventually(t, nodeOffline)
 	if len(notified) != 0 {

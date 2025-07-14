@@ -51,8 +51,8 @@ type KeyStore struct {
 }
 
 type keyStoreCfg struct {
-	base      string
-	prefixLen int
+	base       string
+	prefixBits int
 
 	gcFunc      KeyChanFunc
 	gcInterval  time.Duration
@@ -63,28 +63,28 @@ type keyStoreCfg struct {
 type KeyStoreOption func(*keyStoreCfg) error
 
 const (
-	DefaultKeyStorePrefixLen   = 10
+	DefaultKeyStorePrefixBits  = 10
 	DefaultKeyStoreBasePrefix  = "/reprovider/mhs"
 	DefaultKeyStoreGCInterval  = 2 * amino.DefaultReprovideInterval
 	DefaultKeyStoreGCBatchSize = 1 << 14
 )
 
 var KeyStoreDefaultCfg = func(cfg *keyStoreCfg) error {
-	cfg.prefixLen = DefaultKeyStorePrefixLen
+	cfg.prefixBits = DefaultKeyStorePrefixBits
 	cfg.base = DefaultKeyStoreBasePrefix
 	cfg.gcInterval = DefaultKeyStoreGCInterval
 	cfg.gcBatchSize = DefaultKeyStoreGCBatchSize
 	return nil
 }
 
-// WithPrefixLen sets the bit-length used to group multihashes when persisting
+// WithPrefixBits sets the bit-length used to group multihashes when persisting
 // them. The value must be positive and at most 256 bits.
-func WithPrefixLen(n int) KeyStoreOption {
+func WithPrefixBits(n int) KeyStoreOption {
 	return func(cfg *keyStoreCfg) error {
 		if n <= 0 || n > 256 {
 			return fmt.Errorf("invalid prefix length %d", n)
 		}
-		cfg.prefixLen = n
+		cfg.prefixBits = n
 		return nil
 	}
 }
@@ -155,7 +155,7 @@ func NewKeyStore(ctx context.Context, d ds.Batching, opts ...KeyStoreOption) (*K
 
 		ds:        d,
 		base:      ds.NewKey(cfg.base),
-		prefixLen: cfg.prefixLen,
+		prefixLen: cfg.prefixBits,
 
 		gcFunc:      cfg.gcFunc,
 		gcInterval:  cfg.gcInterval,

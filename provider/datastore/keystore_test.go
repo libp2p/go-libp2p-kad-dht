@@ -44,7 +44,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 	}
 
 	for _, h := range mhs {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixBits])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -61,7 +61,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 		}
 	}
 
-	short := DefaultKeyStorePrefixLen / 2
+	short := DefaultKeyStorePrefixBits / 2
 	p := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:short])
 	res, err := store.Get(context.Background(), p)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestKeyStoreReset(t *testing.T) {
 
 	// old hashes should not be present
 	for _, h := range first {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixBits])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -135,7 +135,7 @@ func TestKeyStoreReset(t *testing.T) {
 
 	// new hashes should be retrievable
 	for _, h := range second {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixBits])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -171,7 +171,7 @@ func TestKeyStoreDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	delPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:DefaultKeyStorePrefixLen])
+	delPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:DefaultKeyStorePrefixBits])
 	if err := store.Delete(context.Background(), mhs[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestKeyStoreDelete(t *testing.T) {
 	}
 
 	// other hashes should still be retrievable
-	otherPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[1]))[:DefaultKeyStorePrefixLen])
+	otherPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[1]))[:DefaultKeyStorePrefixBits])
 	res, err = store.Get(context.Background(), otherPrefix)
 	if err != nil {
 		t.Fatal(err)

@@ -262,7 +262,6 @@ func genRandPeerID(t *testing.T) peer.ID {
 }
 
 func TestClosestPeersToPrefixRandom(t *testing.T) {
-	ctx := context.Background()
 	replicationFactor := 10
 	nPeers := 128
 	peers := make([]peer.ID, nPeers)
@@ -280,8 +279,9 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		},
 	}
 
-	connChecker, err := connectivity.New(ctx, func(ctx context.Context) bool { return true }, func() {})
+	connChecker, err := connectivity.New(func(ctx context.Context) bool { return true }, func() {})
 	require.NoError(t, err)
+	defer connChecker.Close()
 	r := SweepingProvider{
 		router:            router,
 		replicationFactor: replicationFactor,
@@ -390,7 +390,6 @@ func TestProvideNoBootstrap(t *testing.T) {
 
 	checkInterval := time.Minute
 	connChecker, err := connectivity.New(
-		ctx,
 		func(ctx context.Context) bool { return online.Load() },
 		func() {},
 		connectivity.WithClock(clk),
@@ -398,6 +397,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 		connectivity.WithOfflineCheckInterval(checkInterval),
 	)
 	require.NoError(t, err)
+	defer connChecker.Close()
 
 	opts := []Option{
 		WithPeerID(pid),
@@ -417,7 +417,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 
 	// Set the reprovider as offline
 	online.Store(false)
-	reprovider.connectivity.TriggerCheck()
+	reprovider.connectivity.TriggerCheck(ctx)
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	err = reprovider.ProvideOnce(ctx, c.Hash())
 	require.ErrorIs(t, ErrNodeOffline, err)
@@ -730,7 +730,6 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	routerOffline.Store(true)
 
 	reprovider.connectivity, err = connectivity.New(
-		ctx,
 		func(ctx context.Context) bool {
 			peers, err := router.GetClosestPeers(ctx, string(pid))
 			return err == nil && len(peers) > 0
@@ -741,6 +740,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		connectivity.WithOfflineCheckInterval(connectivityCheckInterval),
 	)
 	require.NoError(t, err)
+	defer reprovider.connectivity.Close()
 
 	err = reprovider.ForceStartProviding(ctx, mhs...)
 	require.Error(t, err)

@@ -179,16 +179,6 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		reprovideInterval: cfg.reprovideInterval,
 		maxReprovideDelay: cfg.maxReprovideDelay,
 
-		// connectivity: connectivityChecker{
-		// 	ctx:                  ctx,
-		// 	clock:                cfg.clock,
-		// 	onlineCheckInterval:  cfg.connectivityCheckOnlineInterval,
-		// 	offlineCheckInterval: cfg.connectivityCheckOfflineInterval,
-		// 	checkFunc: func(ctx context.Context) bool {
-		// 		peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
-		// 		return err == nil && len(peers) > 0
-		// 	},
-		// },
 		workerPool: pool.New(cfg.maxWorkers, map[workerType]int{
 			periodicWorker: cfg.dedicatedPeriodicWorkers,
 			burstWorker:    cfg.dedicatedBurstWorkers,
@@ -224,7 +214,6 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 	prov.scheduleTimer.Stop()
 
 	prov.connectivity, err = connectivity.New(
-		ctx,
 		func(ctx context.Context) bool {
 			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 			return err == nil && len(peers) > 0
@@ -248,6 +237,7 @@ func (s *SweepingProvider) run() {
 	go s.measureInitialPrefixLen()
 	defer s.scheduleTimer.Stop()
 	defer s.workerPool.Close()
+	defer s.connectivity.Close()
 
 	retryTicker := time.NewTicker(time.Minute)
 	defer retryTicker.Stop()
@@ -265,10 +255,10 @@ func (s *SweepingProvider) run() {
 			if !slices.Contains(s.lateRegionsQueue, prefix) {
 				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 			}
-			s.connectivity.TriggerCheck()
+			s.connectivity.TriggerCheck(s.ctx)
 		case keys := <-s.pendingKeysChan:
 			s.pendingKeys = append(s.pendingKeys, keys...)
-			s.connectivity.TriggerCheck()
+			s.connectivity.TriggerCheck(s.ctx)
 		case <-retryTicker.C:
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
@@ -653,7 +643,7 @@ func (s *SweepingProvider) handleReprovide() {
 			// failed regions.
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilNextReprovide)
 			s.scheduleLk.Unlock()
-			s.connectivity.TriggerCheck()
+			s.connectivity.TriggerCheck(s.ctx)
 			return
 		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
@@ -670,7 +660,7 @@ func (s *SweepingProvider) handleReprovide() {
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
 			}
-			s.connectivity.TriggerCheck()
+			s.connectivity.TriggerCheck(s.ctx)
 			if count == scheduleSize {
 				// No reprovides are scheduled in the future, return here.
 				s.scheduleLk.Unlock()

@@ -23,7 +23,8 @@ import (
 //     – Once back online, the node’s status is updated and `backOnlineNotify`
 //     is invoked exactly once.
 type ConnectivityChecker struct {
-	ctx context.Context
+	done      chan struct{}
+	closeOnce sync.Once
 
 	online atomic.Bool
 	mutex  sync.Mutex
@@ -38,14 +39,14 @@ type ConnectivityChecker struct {
 }
 
 // New creates a new ConnectivityChecker instance.
-func New(ctx context.Context, checkFunc func(context.Context) bool, backOnlineNotify func(), opts ...Option) (*ConnectivityChecker, error) {
+func New(checkFunc func(context.Context) bool, backOnlineNotify func(), opts ...Option) (*ConnectivityChecker, error) {
 	var cfg config
 	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
 		return nil, err
 	}
 	c := &ConnectivityChecker{
-		ctx:                  ctx,
+		done:                 make(chan struct{}),
 		clock:                cfg.clock,
 		onlineCheckInterval:  cfg.onlineCheckInterval,
 		offlineCheckInterval: cfg.offlineCheckInterval,
@@ -55,6 +56,20 @@ func New(ctx context.Context, checkFunc func(context.Context) bool, backOnlineNo
 	c.online.Store(true) // Start with the node considered online
 
 	return c, nil
+}
+
+// Close stops any running connectivity checks and prevents future ones.
+func (c *ConnectivityChecker) Close() {
+	c.closeOnce.Do(func() { close(c.done) })
+}
+
+func (c *ConnectivityChecker) closed() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // IsOnline returns true if the node is currently online, false otherwise.
@@ -69,23 +84,25 @@ func (c *ConnectivityChecker) IsOnline() bool {
 // * If after running the check the node is still online, update the last check timestamp.
 // * If the node is found offline, enter the loop:
 //   - Perform connectivity check every `offlineCheckInterval`.
+//   - Exit if context is cancelled, or ConnectivityChecker is closed.
 //   - When node is found back online, run the `backOnlineNotify` callback.
-func (c *ConnectivityChecker) TriggerCheck() {
-	if c.ctx.Err() != nil {
+func (c *ConnectivityChecker) TriggerCheck(ctx context.Context) {
+	if c.closed() {
 		// Noop
 		return
 	}
+	if !c.mutex.TryLock() {
+		return // already checking
+	}
+	if c.online.Load() && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
+		c.mutex.Unlock()
+		return // last check was too recent
+	}
+
 	go func() {
-		if !c.mutex.TryLock() {
-			return // already checking
-		}
 		defer c.mutex.Unlock()
 
-		if c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
-			return // last check was too recent
-		}
-
-		if c.checkFunc(c.ctx) {
+		if c.checkFunc(ctx) {
 			c.lastCheck = c.clock.Now()
 			return
 		}
@@ -97,11 +114,13 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-c.ctx.Done():
+			case <-ctx.Done():
+				return
+			case <-c.done:
 				return
 			case <-ticker.C:
-				if c.checkFunc(c.ctx) {
-					if c.ctx.Err() == nil {
+				if c.checkFunc(ctx) {
+					if !c.closed() {
 						// Node is back online.
 						c.online.Store(true)
 						c.lastCheck = c.clock.Now()

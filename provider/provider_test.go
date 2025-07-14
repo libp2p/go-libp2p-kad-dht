@@ -379,25 +379,21 @@ func TestProvideNoBootstrap(t *testing.T) {
 	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
+
+	online := atomic.Bool{}
+	online.Store(true) // start online
 	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-			return []peer.ID{pid}, nil
+			if online.Load() {
+				return []peer.ID{pid}, nil
+			}
+			return nil, errors.New("offline")
 		},
 	}
 	msgSender := &mockMsgSender{}
 	clk := clock.NewMock()
-	online := atomic.Bool{}
 
 	checkInterval := time.Minute
-	connChecker, err := connectivity.New(
-		func(ctx context.Context) bool { return online.Load() },
-		func() {},
-		connectivity.WithClock(clk),
-		connectivity.WithOnlineCheckInterval(checkInterval),
-		connectivity.WithOfflineCheckInterval(checkInterval),
-	)
-	require.NoError(t, err)
-	defer connChecker.Close()
 
 	opts := []Option{
 		WithPeerID(pid),
@@ -408,10 +404,13 @@ func TestProvideNoBootstrap(t *testing.T) {
 			require.NoError(t, err)
 			return []ma.Multiaddr{addr}
 		}),
+		WithClock(clk),
+		WithConnectivityCheckOnlineInterval(checkInterval),
+		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
 	reprovider, err := NewProvider(ctx, opts...)
-	reprovider.connectivity = connChecker
 	require.NoError(t, err)
+	reprovider.cachedAvgPrefixLen = 4
 
 	c := genCids(1)[0]
 
@@ -728,19 +727,6 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)
-
-	reprovider.connectivity, err = connectivity.New(
-		func(ctx context.Context) bool {
-			peers, err := router.GetClosestPeers(ctx, string(pid))
-			return err == nil && len(peers) > 0
-		},
-		reprovider.catchupPendingNotify,
-		connectivity.WithClock(mockClock),
-		connectivity.WithOnlineCheckInterval(connectivityCheckInterval),
-		connectivity.WithOfflineCheckInterval(connectivityCheckInterval),
-	)
-	require.NoError(t, err)
-	defer reprovider.connectivity.Close()
 
 	err = reprovider.ForceStartProviding(ctx, mhs...)
 	require.Error(t, err)

@@ -1361,6 +1361,9 @@ func (s *SweepingProvider) catchupPendingWork() {
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
 // prefixes.
+//
+// Hangs until the first measurement is done if the average prefix length is
+// missing.
 func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	s.avgPrefixLenLk.Lock()
 	defer s.avgPrefixLenLk.Unlock()

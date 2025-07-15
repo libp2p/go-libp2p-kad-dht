@@ -19,6 +19,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -173,7 +174,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		ctx:    ctx,
 		router: cfg.router,
 		peerid: cfg.peerid,
-		order:  peerIDToBit256(cfg.peerid),
+		order:  helpers.PeerIDToBit256(cfg.peerid),
 
 		replicationFactor: cfg.replicationFactor,
 		reprovideInterval: cfg.reprovideInterval,
@@ -290,9 +291,9 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 						return // Ignore result if only 2 other peers in DHT.
 					}
 					cpl := keyLen
-					firstPeerKey := peerIDToBit256(peers[0])
+					firstPeerKey := helpers.PeerIDToBit256(peers[0])
 					for _, p := range peers[1:] {
-						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, peerIDToBit256(p)))
+						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, helpers.PeerIDToBit256(p)))
 					}
 					cplSum.Add(int32(cpl))
 					cplSamples.Add(1)
@@ -326,7 +327,7 @@ func (s *SweepingProvider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	if s.prefixCursor == "" {
 		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
 	} else {
-		followingKey := nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
+		followingKey := helpers.NextNonEmptyLeaf(s.schedule, prefix, s.order).Key
 		if s.prefixCursor == followingKey {
 			found, scheduledAlarm := trie.Find(s.schedule, s.prefixCursor)
 			if !found {
@@ -415,7 +416,7 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 // the given key belongs. The prefix corresponding to the region depends on the
 // peers in the DHT swarms.
 func (s *SweepingProvider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
-	if scheduled, prefix := trieHasPrefixOfKey(s.schedule, k); scheduled {
+	if scheduled, prefix := helpers.TrieHasPrefixOfKey(s.schedule, k); scheduled {
 		return prefix
 	}
 	avgPrefixLen := s.getAvgPrefixLenNoLock()
@@ -432,20 +433,20 @@ func (s *SweepingProvider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bi
 	defer s.scheduleLk.Unlock()
 	for _, h := range keys {
 		prefixConsolidation := false
-		k := mhToBit256(h)
+		k := helpers.MhToBit256(h)
 		// Add key to s.keys if not there already, and add fresh keys to newKeys.
 		// Deduplication is handled here.
 		// If prefix of c not scheduled yet, add it to the schedule.
-		scheduled, prefix := trieHasPrefixOfKey(s.schedule, k)
+		scheduled, prefix := helpers.TrieHasPrefixOfKey(s.schedule, k)
 		if !scheduled {
 			if avgPrefixLen == 0 {
 				avgPrefixLen = s.getAvgPrefixLenNoLock()
 			}
 			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
-			if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
+			if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
 				// If generated prefix is a prefix of existing scheduled keyspace
 				// zones, consolidate these zones around the shorter prefix.
-				for _, entry := range allEntries(subtrie, s.order) {
+				for _, entry := range helpers.AllEntries(subtrie, s.order) {
 					s.schedule.Remove(entry.Key)
 				}
 				prefixConsolidation = true
@@ -462,7 +463,7 @@ func (s *SweepingProvider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bi
 			// prefix is a shorted prefix of a prefix already in the schedule.
 			// Consolidate everything into prefix.
 			for p, keys := range prefixes {
-				if isBitstrPrefix(p, prefix) {
+				if helpers.IsBitstrPrefix(p, prefix) {
 					seen := make(map[string]struct{})
 					for _, key := range prefixes[prefix] {
 						seen[string(key)] = struct{}{}
@@ -491,7 +492,7 @@ func (s *SweepingProvider) groupKeysByPrefix(keys []mh.Multihash) map[bitstr.Key
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
 	for _, k := range keys {
-		h := mhToBit256(k)
+		h := helpers.MhToBit256(k)
 		// Don't add duplicates
 		if _, ok := seen[h]; ok {
 			continue
@@ -517,7 +518,7 @@ func (s *SweepingProvider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash
 		}
 	}
 
-	sortedPrefixes := sortPrefixesBySize(prefixes)
+	sortedPrefixes := helpers.SortPrefixesBySize(prefixes)
 
 	// Atomic flag: 0 = no keys successfully provided yet, 1 = at least one
 	// success
@@ -546,11 +547,11 @@ workerLoop:
 		select {
 		case <-workerAcquiredChan:
 			wg.Add(1)
-			go func(p prefixAndKeys, i int) {
+			go func(p helpers.PrefixAndKeys, i int) {
 				defer wg.Done()
 				defer s.workerPool.Release(burstWorker)
 
-				if err := s.provideForPrefix(p.prefix, p.keys, retryOnFailure); err != nil {
+				if err := s.provideForPrefix(p.Prefix, p.Keys, retryOnFailure); err != nil {
 					logger.Error(err)
 				} else {
 					// Track if we were able to provide at least one key.
@@ -579,7 +580,7 @@ workerLoop:
 		// Add keys that haven't been provided yet to the pending queue.
 		keys := make([]mh.Multihash, 0)
 		for _, prefix := range sortedPrefixes[i:] {
-			keys = append(keys, prefix.keys...)
+			keys = append(keys, prefix.Keys...)
 		}
 		s.pendingKeysChan <- keys
 	} else {
@@ -598,7 +599,7 @@ func (s *SweepingProvider) handleReprovide() {
 	s.scheduleLk.Lock()
 	currentPrefix := s.prefixCursor
 	// Get next prefix to reprovide, and set timer for it.
-	next := nextNonEmptyLeaf(s.schedule, currentPrefix, s.order)
+	next := helpers.NextNonEmptyLeaf(s.schedule, currentPrefix, s.order)
 
 	if next == nil {
 		// Schedule is empty, don't reprovide anything.
@@ -623,7 +624,7 @@ func (s *SweepingProvider) handleReprovide() {
 			// failedRegionsChan. This only happens if the main thread gets blocked
 			// for more than reprovideInterval.
 			nextKeyFound := false
-			scheduleEntries := allEntries(s.schedule, s.order)
+			scheduleEntries := helpers.AllEntries(s.schedule, s.order)
 			for _, entry := range scheduleEntries {
 				if !nextKeyFound && entry.Data > currentTimeOffset {
 					next = entry
@@ -656,7 +657,7 @@ func (s *SweepingProvider) handleReprovide() {
 				if !slices.Contains(s.lateRegionsQueue, prefix) {
 					s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 				}
-				next = nextNonEmptyLeaf(s.schedule, next.Key, s.order)
+				next = helpers.NextNonEmptyLeaf(s.schedule, next.Key, s.order)
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
 			}
@@ -752,7 +753,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 			return fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 		}
 	}
-	regions = assignKeysToRegions(regions, keys)
+	regions = helpers.AssignKeysToRegions(regions, keys)
 	logger.Debugf("requested prefix: %s (len %d), prefix covered: %s (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
 
 	// When reproviding a region, remove all scheduled regions starting with
@@ -766,25 +767,25 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	errCount := 0
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: selfAddrs}
 	for _, r := range regions {
-		nKeys := r.keys.Size()
+		nKeys := r.Keys.Size()
 		if nKeys == 0 {
-			s.releaseRegionReprovide(r.prefix)
+			s.releaseRegionReprovide(r.Prefix)
 			continue
 		}
 		// Add keys to local provider store
-		for _, entry := range allEntries(r.keys, s.order) {
+		for _, entry := range helpers.AllEntries(r.Keys, s.order) {
 			s.addLocalRecord(entry.Data)
 		}
-		keysAllocations := allocateToKClosest(r.keys, r.peers, s.replicationFactor)
+		keysAllocations := helpers.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
 		err := s.sendProviderRecords(keysAllocations, addrInfo)
-		s.releaseRegionReprovide(r.prefix)
+		s.releaseRegionReprovide(r.Prefix)
 		if periodicReprovide {
-			s.scheduleNextReprovide(r.prefix, s.currentTimeOffset())
+			s.scheduleNextReprovide(r.Prefix, s.currentTimeOffset())
 		}
 		if err != nil {
-			logger.Warn(err, ": region ", r.prefix)
+			logger.Warn(err, ": region ", r.Prefix)
 			errCount++
-			s.failedRegionsChan <- r.prefix
+			s.failedRegionsChan <- r.Prefix
 			continue
 		}
 		s.provideCounter.Add(s.ctx, int64(nKeys))
@@ -833,26 +834,26 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	regions, _ := s.regionsFromPeers(peers)
 	// TODO: it would be great to take all keys matching coveredPrefix from
 	// pendingKeys pool.
-	regions = assignKeysToRegions(regions, keys)
+	regions = helpers.AssignKeysToRegions(regions, keys)
 
 	errCount := 0
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: selfAddrs}
 	for _, r := range regions {
-		nKeys := r.keys.Size()
+		nKeys := r.Keys.Size()
 		if nKeys == 0 {
 			continue
 		}
 		// Add keys to local provider store
-		for _, entry := range allEntries(r.keys, s.order) {
+		for _, entry := range helpers.AllEntries(r.Keys, s.order) {
 			s.addLocalRecord(entry.Data)
 		}
-		keysAllocations := allocateToKClosest(r.keys, r.peers, s.replicationFactor)
+		keysAllocations := helpers.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
 		err := s.sendProviderRecords(keysAllocations, addrInfo)
 		if err != nil {
-			logger.Warn(err, ": region ", r.prefix)
+			logger.Warn(err, ": region ", r.Prefix)
 			errCount++
 			if retryOnFailure {
-				s.pendingKeysChan <- allValues(r.keys, s.order)
+				s.pendingKeysChan <- helpers.AllValues(r.Keys, s.order)
 			}
 			continue
 		}
@@ -927,7 +928,7 @@ func (s *SweepingProvider) vanillaProvide(ctx context.Context, k mh.Multihash) (
 	if err != nil {
 		return "", err
 	}
-	coveredPrefix, _ := shortestCoveredPrefix(bitstr.Key(key.BitString(mhToBit256(k))), peers)
+	coveredPrefix, _ := helpers.ShortestCoveredPrefix(bitstr.Key(key.BitString(helpers.MhToBit256(k))), peers)
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
 	keysAllocations := make(map[peer.ID][]mh.Multihash)
 	for _, p := range peers {
@@ -962,11 +963,11 @@ explorationLoop:
 			break explorationLoop
 		}
 		i++
-		fullKey := firstFullKeyWithPrefix(nextPrefix, s.order)
+		fullKey := helpers.FirstFullKeyWithPrefix(nextPrefix, s.order)
 		closestPeers, err = s.closestPeersToKey(fullKey)
 		peerStrs := ""
 		for _, p := range closestPeers {
-			peerStrs += key.BitString(peerIDToBit256(p))[:8] + ", "
+			peerStrs += key.BitString(helpers.PeerIDToBit256(p))[:8] + ", "
 		}
 		if err != nil {
 			// We only get an err if something really bad happened, e.g no peers in
@@ -979,7 +980,7 @@ explorationLoop:
 			earlyExit = true
 			break explorationLoop
 		}
-		coveredPrefix, coveredPeers := shortestCoveredPrefix(fullKey, closestPeers)
+		coveredPrefix, coveredPeers := helpers.ShortestCoveredPrefix(fullKey, closestPeers)
 		for _, p := range coveredPeers {
 			allClosestPeers[p] = struct{}{}
 		}
@@ -1022,7 +1023,7 @@ explorationLoop:
 		// Push coveredPrefix to stack
 		coveredPrefixesStack = append(coveredPrefixesStack, coveredPrefix)
 		// Flip last bit of last covered prefix
-		nextPrefix = flipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
+		nextPrefix = helpers.FlipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
 	}
 
 	peers := make([]peer.ID, 0, len(allClosestPeers))
@@ -1040,39 +1041,39 @@ explorationLoop:
 // the provided key. Note that the returned peer IDs aren't random, they are
 // taken from a static list of preimages.
 func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
-	p, _ := kb.GenRandPeerIDWithCPL(keyToBytes(k), kb.PeerIDPreimageMaxCpl)
+	p, _ := kb.GenRandPeerIDWithCPL(helpers.KeyToBytes(k), kb.PeerIDPreimageMaxCpl)
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
 // regionsFromPeers returns the keyspace regions from given peers ordered
 // according to s.order and the Common Prefix shared by all peers.
-func (s *SweepingProvider) regionsFromPeers(peers []peer.ID) ([]region, bitstr.Key) {
+func (s *SweepingProvider) regionsFromPeers(peers []peer.ID) ([]helpers.Region, bitstr.Key) {
 	if len(peers) == 0 {
-		return []region{}, ""
+		return []helpers.Region{}, ""
 	}
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 	minCpl := keyLen
-	firstPeerKey := peerIDToBit256(peers[0])
+	firstPeerKey := helpers.PeerIDToBit256(peers[0])
 	for _, p := range peers {
-		k := peerIDToBit256(p)
+		k := helpers.PeerIDToBit256(p)
 		peersTrie.Add(k, p)
 		minCpl = min(minCpl, firstPeerKey.CommonPrefixLength(k))
 	}
 	commonPrefix := bitstr.Key(key.BitString(firstPeerKey)[:minCpl])
-	regions := extractMinimalRegions(peersTrie, commonPrefix, s.replicationFactor, s.order)
+	regions := helpers.ExtractMinimalRegions(peersTrie, commonPrefix, s.replicationFactor, s.order)
 	return regions, commonPrefix
 }
 
 func (s *SweepingProvider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 	s.scheduleLk.Lock()
 	// Pop prefixes scheduled in the future being covered by the explored peers.
-	if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
+	if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
 		logger.Warnf("previous next scheduled prefix is %s", s.prefixCursor)
-		for _, entry := range allEntries(subtrie, s.order) {
+		for _, entry := range helpers.AllEntries(subtrie, s.order) {
 			if s.schedule.Remove(entry.Key) {
 				logger.Warnf("removed %s from schedule because of %s", entry.Key, prefix)
 				if s.prefixCursor == entry.Key {
-					next := nextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
+					next := helpers.NextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
 					if next == nil {
 						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
 					} else {
@@ -1089,17 +1090,17 @@ func (s *SweepingProvider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 
 // claimRegionReprovide checks if the region is already being reprovided by
 // another thread. If not it marks the region as being currently reprovided.
-func (s *SweepingProvider) claimRegionReprovide(regions []region) []region {
+func (s *SweepingProvider) claimRegionReprovide(regions []helpers.Region) []helpers.Region {
 	out := regions[:0]
 	s.ongoingReprovidesLk.Lock()
 	defer s.ongoingReprovidesLk.Unlock()
 	for _, r := range regions {
-		if r.peers.IsEmptyLeaf() {
+		if r.Peers.IsEmptyLeaf() {
 			continue
 		}
-		if ok, _ := trieHasPrefixOfKey(s.ongoingReprovides, r.prefix); !ok {
+		if ok, _ := helpers.TrieHasPrefixOfKey(s.ongoingReprovides, r.Prefix); !ok {
 			out = append(out, r)
-			s.ongoingReprovides.Add(r.prefix, struct{}{})
+			s.ongoingReprovides.Add(r.Prefix, struct{}{})
 		}
 	}
 	return out
@@ -1215,11 +1216,11 @@ func (s *SweepingProvider) scheduleNextReprovide(prefix bitstr.Key, lastReprovid
 	defer s.scheduleLk.Unlock()
 	// If schedule contains keys starting with prefix, remove them to avoid
 	// overlap.
-	if subtrie, ok := subtrieMatchingPrefix(s.schedule, prefix); ok {
-		for _, entry := range allEntries(subtrie, s.order) {
+	if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
+		for _, entry := range helpers.AllEntries(subtrie, s.order) {
 			s.schedule.Remove(entry.Key)
 		}
-	} else if ok, _ := trieHasPrefixOfKey(s.schedule, prefix); ok {
+	} else if ok, _ := helpers.TrieHasPrefixOfKey(s.schedule, prefix); ok {
 		return
 	}
 	s.schedule.Add(prefix, nextReprovideTime)
@@ -1335,7 +1336,7 @@ func (s *SweepingProvider) catchupPendingWork() {
 	}
 	keysInNoRegions := []mh.Multihash{}
 	for _, c := range pendingKeys {
-		if ok, _ := trieHasPrefixOfKey(lateRegionsTrie, mhToBit256(c)); !ok {
+		if ok, _ := helpers.TrieHasPrefixOfKey(lateRegionsTrie, helpers.MhToBit256(c)); !ok {
 			keysInNoRegions = append(keysInNoRegions, c)
 		}
 	}
@@ -1385,7 +1386,7 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	scheduleSize := s.schedule.Size()
 	if scheduleSize > 0 {
 		// Take average prefix length of all scheduled prefixes.
-		for _, entry := range allEntries(s.schedule, s.order) {
+		for _, entry := range helpers.AllEntries(s.schedule, s.order) {
 			prefixLenSum += len(entry.Key)
 		}
 		s.cachedAvgPrefixLen = prefixLenSum / scheduleSize

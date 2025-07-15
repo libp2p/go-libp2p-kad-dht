@@ -1,4 +1,4 @@
-package provider
+package helpers
 
 import (
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -10,36 +10,36 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
-type region struct {
-	prefix bitstr.Key
-	peers  *trie.Trie[bit256.Key, peer.ID]
-	keys   *trie.Trie[bit256.Key, mh.Multihash]
+type Region struct {
+	Prefix bitstr.Key
+	Peers  *trie.Trie[bit256.Key, peer.ID]
+	Keys   *trie.Trie[bit256.Key, mh.Multihash]
 }
 
 // returns the list of all non-overlapping subtries of `t` having more than
 // `size` elements, sorted according to `order`. every element is included in
 // exactly one region.
-func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []region {
+func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
 	if t.IsEmptyLeaf() {
 		return nil
 	}
 	if t.Branch(0).Size() > size && t.Branch(1).Size() > size {
 		b := int(order.Bit(len(path)))
-		return append(extractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
-			extractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
+		return append(ExtractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
+			ExtractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
 	}
-	return []region{{prefix: path, peers: t}}
+	return []Region{{Prefix: path, Peers: t}}
 }
 
-func assignKeysToRegions(regions []region, keys []mh.Multihash) []region {
+func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
 	for i := range regions {
-		regions[i].keys = trie.New[bit256.Key, mh.Multihash]()
+		regions[i].Keys = trie.New[bit256.Key, mh.Multihash]()
 	}
 	for _, k := range keys {
-		h := mhToBit256(k)
+		h := MhToBit256(k)
 		for i, r := range regions {
-			if isPrefix(r.prefix, h) {
-				regions[i].keys.Add(h, k)
+			if isPrefix(r.Prefix, h) {
+				regions[i].Keys.Add(h, k)
 				break
 			}
 		}
@@ -47,9 +47,9 @@ func assignKeysToRegions(regions []region, keys []mh.Multihash) []region {
 	return regions
 }
 
-// trieHasPrefixOfKey checks if the trie contains a leave whose key is a prefix
+// TrieHasPrefixOfKey checks if the trie contains a leave whose key is a prefix
 // (or a match) of the provided k
-func trieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (bool, K0) {
+func TrieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (bool, K0) {
 	return trieHasPrefixOfKeyAtDepth(t, k, 0)
 }
 
@@ -65,9 +65,9 @@ func trieHasPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Tr
 	return trieHasPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
 }
 
-// nextNonEmptyLeaf returns the leaf right after the provided key `k` in the
+// NextNonEmptyLeaf returns the leaf right after the provided key `k` in the
 // trie according to the provided `order`.
-func nextNonEmptyLeaf[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K0, order K1) *trie.Entry[K0, D] {
+func NextNonEmptyLeaf[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K0, order K1) *trie.Entry[K0, D] {
 	return nextNonEmptyLeafAtDepth(t, k, order, 0, false)
 }
 
@@ -127,8 +127,8 @@ func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie
 	return nil
 }
 
-func allValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
-	entries := allEntries(t, order)
+func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
+	entries := AllEntries(t, order)
 	out := make([]D, len(entries))
 	for i, entry := range entries {
 		out[i] = entry.Data
@@ -136,9 +136,9 @@ func allValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 	return out
 }
 
-// allKeys returns a slice containing all keys in the trie `t` sorted according
-// to the provided `order`.
-func allEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
+// AllEntries returns all entries in the trie `t` at depth 0, sorted according
+// to the distance of the keys to `order`.
+func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
 	return allEntriesAtDepth(t, order, 0)
 }
 
@@ -154,7 +154,7 @@ func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D
 		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
 }
 
-func subtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
+func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
 	if t.IsEmptyLeaf() {
 		return t, false
 	}
@@ -192,7 +192,7 @@ func mapMerge[K comparable, V any](dst, src map[K][]V) {
 	}
 }
 
-// allocateToKClosest distributes items from the items trie to the k closest
+// AllocateToKClosest distributes items from the items trie to the k closest
 // destinations in the dests trie based on XOR distance between their keys.
 //
 // The algorithm uses the trie structure to efficiently compute proximity
@@ -202,7 +202,7 @@ func mapMerge[K comparable, V any](dst, src map[K][]V) {
 //
 // Returns a map where each destination value is associated with all items
 // allocated to it. If k is 0 or either trie is empty, returns an empty map.
-func allocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][]V0 {
+func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][]V0 {
 	return allocateToKClosestAtDepth(items, dests, k, 0)
 }
 
@@ -231,7 +231,7 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		// Assign all items from branch i
 
 		matchingItemsBranch := items.Branch(i)
-		matchingItems := allValues(matchingItemsBranch, bit256.ZeroKey())
+		matchingItems := AllValues(matchingItemsBranch, bit256.ZeroKey())
 		if len(matchingItems) == 0 {
 			if items.IsNonEmptyLeaf() && int((*items.Key()).Bit(depth)) == i {
 				// items' current branch contains a single leaf
@@ -245,8 +245,8 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 
 		matchingDestsBranch := dests.Branch(i)
 		otherDestsBranch := dests.Branch(1 - i)
-		matchingDests := allValues(matchingDestsBranch, bit256.ZeroKey())
-		otherDests := allValues(otherDestsBranch, bit256.ZeroKey())
+		matchingDests := AllValues(matchingDestsBranch, bit256.ZeroKey())
+		otherDests := AllValues(otherDestsBranch, bit256.ZeroKey())
 		if dests.IsLeaf() {
 			// Single key (leaf) in dests
 			if dests.IsNonEmptyLeaf() {

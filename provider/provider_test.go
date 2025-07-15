@@ -15,6 +15,7 @@ import (
 	"github.com/ipfs/go-cid"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -60,11 +61,11 @@ func TestReprovideTimeForPrefixWithCustomOrder(t *testing.T) {
 }
 
 func TestKeyToBytes(t *testing.T) {
-	require.Equal(t, []byte{0b00000000}, keyToBytes(bitstr.Key("0")))
-	require.Equal(t, []byte{0b00000000}, keyToBytes(bitstr.Key("00000000")))
-	require.Equal(t, []byte{0b00000000, 0b00000000}, keyToBytes(bitstr.Key("000000000")))
-	require.Equal(t, []byte{0b00110000}, keyToBytes(bitstr.Key("0011")))
-	require.Equal(t, []byte{0b11111110}, keyToBytes(bitstr.Key("1111111")))
+	require.Equal(t, []byte{0b00000000}, helpers.KeyToBytes(bitstr.Key("0")))
+	require.Equal(t, []byte{0b00000000}, helpers.KeyToBytes(bitstr.Key("00000000")))
+	require.Equal(t, []byte{0b00000000, 0b00000000}, helpers.KeyToBytes(bitstr.Key("000000000")))
+	require.Equal(t, []byte{0b00110000}, helpers.KeyToBytes(bitstr.Key("0011")))
+	require.Equal(t, []byte{0b11111110}, helpers.KeyToBytes(bitstr.Key("1111111")))
 }
 
 func genCids(n int) []cid.Cid {
@@ -87,7 +88,7 @@ func genBalancedCids(exponent int) []cid.Cid {
 		if err != nil {
 			panic(err)
 		}
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:exponent])
+		prefix := bitstr.Key(key.BitString(helpers.MhToBit256(h))[:exponent])
 		if _, ok := cids[prefix]; !ok {
 			cids[prefix] = cid.NewCidV1(cid.Raw, h)
 		}
@@ -269,7 +270,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 	for i := range peers {
 		p := genRandPeerID(t)
 		peers[i] = p
-		peersTrie.Add(peerIDToBit256(p), p)
+		peersTrie.Add(helpers.PeerIDToBit256(p), p)
 	}
 
 	router := &mockRouter{
@@ -296,7 +297,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		// Reduce prefix if necessary as closestPeersToPrefix always returns at
 		// least replicationFactor peers if possible.
 		for {
-			subtrie, ok := subtrieMatchingPrefix(peersTrie, currPrefix)
+			subtrie, ok := helpers.SubtrieMatchingPrefix(peersTrie, currPrefix)
 			require.True(t, ok)
 			subtrieSize = subtrie.Size()
 			if subtrieSize > replicationFactor {
@@ -316,15 +317,15 @@ func TestCidsAllocationsToPeers(t *testing.T) {
 	cids := cidsToMhs(genCids(nCids))
 	cidsTrie := trie.New[bit256.Key, mh.Multihash]()
 	for _, c := range cids {
-		cidsTrie.Add(mhToBit256(c), c)
+		cidsTrie.Add(helpers.MhToBit256(c), c)
 	}
 	peers := make([]peer.ID, nPeers)
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 	for i := range peers {
 		peers[i] = genRandPeerID(t)
-		peersTrie.Add(peerIDToBit256(peers[i]), peers[i])
+		peersTrie.Add(helpers.PeerIDToBit256(peers[i]), peers[i])
 	}
-	cidsAllocations := allocateToKClosest(cidsTrie, peersTrie, replicationFactor)
+	cidsAllocations := helpers.AllocateToKClosest(cidsTrie, peersTrie, replicationFactor)
 
 	for _, c := range cids {
 		k := sha256.Sum256(c)
@@ -454,7 +455,7 @@ func TestProvideSingle(t *testing.T) {
 	peers := make([]peer.ID, replicationFactor)
 	peers[0], err = peer.Decode("12BooooPEER1")
 	require.NoError(t, err)
-	kbKey := keyToBytes(peerIDToBit256(peers[0]))
+	kbKey := helpers.KeyToBytes(helpers.PeerIDToBit256(peers[0]))
 	for i := range peers[1:] {
 		peers[i+1], err = kb.GenRandPeerIDWithCPL(kbKey, uint(prefixLen))
 		require.NoError(t, err)
@@ -490,13 +491,13 @@ func TestProvideSingle(t *testing.T) {
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
-	prefix := bitstr.Key(key.BitString(mhToBit256(c.Hash()))[:prefixLen])
+	prefix := bitstr.Key(key.BitString(helpers.MhToBit256(c.Hash()))[:prefixLen])
 	reprovider.scheduleLk.Lock()
 	require.Equal(t, 1, reprovider.schedule.Size())
 	found, reprovideTime := trie.Find(reprovider.schedule, prefix)
 	if !found {
 		t.Log(prefix)
-		t.Log(allEntries(reprovider.schedule, reprovider.order)[0].Key)
+		t.Log(helpers.AllEntries(reprovider.schedule, reprovider.order)[0].Key)
 		t.Fatal("prefix not inserted in schedule")
 	}
 	require.Equal(t, reprovider.reprovideTimeForPrefix(prefix), reprovideTime)
@@ -618,7 +619,7 @@ func TestProvideMany(t *testing.T) {
 	for k, holders := range addProviderRpcs {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.
-		require.Len(t, holders, replicationFactor, key.BitString(mhToBit256([]byte(k))))
+		require.Len(t, holders, replicationFactor, key.BitString(helpers.MhToBit256([]byte(k))))
 		// Verify provider records are assigned to the closest peers
 		closestPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))[:replicationFactor]
 		for _, p := range closestPeers {

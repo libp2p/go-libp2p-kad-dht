@@ -1,4 +1,4 @@
-package provider
+package helpers
 
 import (
 	"crypto/rand"
@@ -31,7 +31,7 @@ func TestNextNonEmptyLeafFullTrie(t *testing.T) {
 	order := binaryKeys[0]
 	t.Run("OrderZero", func(t *testing.T) {
 		for i, k := range binaryKeys {
-			nextKey := nextNonEmptyLeaf(tr, k, order).Key
+			nextKey := NextNonEmptyLeaf(tr, k, order).Key
 			require.Equal(t, binaryKeys[(i+1)%nKeys], nextKey)
 		}
 	})
@@ -40,7 +40,7 @@ func TestNextNonEmptyLeafFullTrie(t *testing.T) {
 		initialKey := binaryKeys[0]
 		k := initialKey
 		for range binaryKeys {
-			k = nextNonEmptyLeaf(tr, k, order).Key
+			k = NextNonEmptyLeaf(tr, k, order).Key
 		}
 		require.Equal(t, initialKey, k)
 	})
@@ -48,7 +48,7 @@ func TestNextNonEmptyLeafFullTrie(t *testing.T) {
 	order = binaryKeys[nKeys-1]
 	t.Run("CustomOrder", func(t *testing.T) {
 		for i, k := range binaryKeys {
-			nextKey := nextNonEmptyLeaf(tr, k, order).Key
+			nextKey := NextNonEmptyLeaf(tr, k, order).Key
 			require.Equal(t, binaryKeys[(i-1+nKeys)%nKeys], nextKey)
 		}
 	})
@@ -72,7 +72,7 @@ func TestNextNonEmptyLeafSparseTrie(t *testing.T) {
 	order := bitstr.Key(fmt.Sprintf("%0*b", bitlen, 0))
 	t.Run("OrderZero", func(t *testing.T) {
 		for i, k := range binaryKeys {
-			nextKey := nextNonEmptyLeaf(tr, k, order).Key
+			nextKey := NextNonEmptyLeaf(tr, k, order).Key
 			require.Equal(t, binaryKeys[(i+1)%nKeys], nextKey)
 		}
 	})
@@ -81,7 +81,7 @@ func TestNextNonEmptyLeafSparseTrie(t *testing.T) {
 		for i := range 1 << bitlen {
 			binary := fmt.Sprintf("%0*b", bitlen, i)
 			k := bitstr.Key(binary)
-			nextKey := nextNonEmptyLeaf(tr, k, order).Key
+			nextKey := NextNonEmptyLeaf(tr, k, order).Key
 			require.Equal(t, binaryKeys[((i+1)%(1<<bitlen))/(1<<sparsity)], nextKey, k)
 		}
 	})
@@ -89,7 +89,7 @@ func TestNextNonEmptyLeafSparseTrie(t *testing.T) {
 	order = binaryKeys[nKeys-1]
 	t.Run("CustomOrder", func(t *testing.T) {
 		for i, k := range binaryKeys {
-			nextKey := nextNonEmptyLeaf(tr, k, order).Key
+			nextKey := NextNonEmptyLeaf(tr, k, order).Key
 			require.Equal(t, binaryKeys[(i-1+nKeys)%nKeys], nextKey)
 		}
 	})
@@ -117,7 +117,7 @@ func TestNextNonEmptyLeafRandom(t *testing.T) {
 
 		currentKey := bit256.ZeroKey()
 		for j, k := range keys {
-			currentKey = nextNonEmptyLeaf(tr, currentKey, order).Key
+			currentKey = NextNonEmptyLeaf(tr, currentKey, order).Key
 			require.Equal(t, k, currentKey, "failed at index %d\nExp: %s\nGot: %s", j, key.BitString(k), key.BitString(currentKey))
 		}
 	}
@@ -130,7 +130,7 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 	// Zero key in the trie
 	for _, k0 := range keys {
 		for _, k1 := range keys {
-			require.Nil(t, nextNonEmptyLeaf(tr, k0, k1))
+			require.Nil(t, NextNonEmptyLeaf(tr, k0, k1))
 		}
 	}
 
@@ -140,7 +140,7 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 		require.Equal(t, 1, tr.Size())
 		for _, k1 := range keys {
 			for _, k2 := range keys {
-				require.Equal(t, k0, nextNonEmptyLeaf(tr, k1, k2).Key)
+				require.Equal(t, k0, NextNonEmptyLeaf(tr, k1, k2).Key)
 			}
 		}
 		tr.Remove(k0)
@@ -168,7 +168,7 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 						break
 					}
 				}
-				require.Equal(t, expectedKey, nextNonEmptyLeaf(tr, keys[i], keys[0]).Key, "leaf after %s should be %s", keys[i], expectedKey)
+				require.Equal(t, expectedKey, NextNonEmptyLeaf(tr, keys[i], keys[0]).Key, "leaf after %s should be %s", keys[i], expectedKey)
 			}
 
 			tr.Remove(k0)
@@ -198,7 +198,7 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 					}
 				}
 			}
-			require.Equal(t, expectedKey, nextNonEmptyLeaf(tr, keys[j], keys[0]).Key, "leaf after %s should be %s", keys[j], expectedKey)
+			require.Equal(t, expectedKey, NextNonEmptyLeaf(tr, keys[j], keys[0]).Key, "leaf after %s should be %s", keys[j], expectedKey)
 		}
 
 		for j := range keys {
@@ -215,7 +215,7 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 	}
 	require.Equal(t, 4, tr.Size())
 	for i := range keys {
-		require.Equal(t, keys[(i+1)%len(keys)], nextNonEmptyLeaf(tr, keys[i], keys[0]).Key)
+		require.Equal(t, keys[(i+1)%len(keys)], NextNonEmptyLeaf(tr, keys[i], keys[0]).Key)
 	}
 	for _, k := range keys {
 		tr.Remove(k)
@@ -228,8 +228,8 @@ func TestExtractMinimalRegions(t *testing.T) {
 	order := bit256.NewKey(selfID[:])
 
 	genPeerWithPrefix := func(prefix bitstr.Key) peer.ID {
-		k := firstFullKeyWithPrefix(prefix, order)
-		bs := keyToBytes(k)
+		k := FirstFullKeyWithPrefix(prefix, order)
+		bs := KeyToBytes(k)
 		pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
 		require.NoError(t, err)
 		return pid
@@ -273,22 +273,22 @@ func TestExtractMinimalRegions(t *testing.T) {
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 
 	// Test behavior when trie is empty
-	regions := extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	regions := ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Nil(t, regions)
 	for i := range pids {
 		pid := genPeerWithPrefix(prefixes[i])
 		pids[i] = pid
-		peersTrie.Add(peerIDToBit256(pid), pid)
+		peersTrie.Add(PeerIDToBit256(pid), pid)
 	}
 
-	regions = extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	regions = ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Len(t, regions, 3)
-	require.Equal(t, bitstr.Key("00"), regions[0].prefix)
-	require.Equal(t, bitstr.Key("01"), regions[1].prefix)
-	require.Equal(t, bitstr.Key("1"), regions[2].prefix)
-	require.Equal(t, 4, regions[0].peers.Size())
-	require.Equal(t, 4, regions[1].peers.Size())
-	require.Equal(t, 6, regions[2].peers.Size())
+	require.Equal(t, bitstr.Key("00"), regions[0].Prefix)
+	require.Equal(t, bitstr.Key("01"), regions[1].Prefix)
+	require.Equal(t, bitstr.Key("1"), regions[2].Prefix)
+	require.Equal(t, 4, regions[0].Peers.Size())
+	require.Equal(t, 4, regions[1].Peers.Size())
+	require.Equal(t, 6, regions[2].Peers.Size())
 }
 
 func TestAllocateToKClosestSingle(t *testing.T) {
@@ -313,7 +313,7 @@ func TestAllocateToKClosestSingle(t *testing.T) {
 	for _, k := range itemKeys {
 		items.Add(k, k)
 	}
-	allocs := allocateToKClosest(items, dests, 3)
+	allocs := AllocateToKClosest(items, dests, 3)
 
 	// "0000" should be assigned to ["0000", "0001", "0011"]
 	expected := map[bitstr.Key][]bitstr.Key{
@@ -352,7 +352,7 @@ func TestAllocateToKClosestBasic(t *testing.T) {
 	for _, k := range itemKeys {
 		items.Add(k, k)
 	}
-	allocs := allocateToKClosest(items, dests, 3)
+	allocs := AllocateToKClosest(items, dests, 3)
 
 	expected := map[bitstr.Key][]bitstr.Key{
 		"0000": {"0000", "0011"},
@@ -391,9 +391,9 @@ func TestAllocateToKClosest(t *testing.T) {
 		dests.Add(d, d)
 	}
 
-	allocs := allocateToKClosest(items, dests, replication)
+	allocs := AllocateToKClosest(items, dests, replication)
 
-	for _, itemEntry := range allEntries(items, bit256.ZeroKey()) {
+	for _, itemEntry := range AllEntries(items, bit256.ZeroKey()) {
 		i := itemEntry.Key
 		closest := trie.Closest(dests, i, replication)
 		for _, closestEntry := range closest {

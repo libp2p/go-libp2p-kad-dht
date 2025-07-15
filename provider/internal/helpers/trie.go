@@ -10,15 +10,21 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
+// Region represents a subtrie of the complete DHT keyspace.
+//
+//   - Prefix is the identifier of the subtrie.
+//   - Peers contains all the network peers matching this region.
+//   - Keys contains all the keys provided by the local node matching this
+//     region.
 type Region struct {
 	Prefix bitstr.Key
 	Peers  *trie.Trie[bit256.Key, peer.ID]
 	Keys   *trie.Trie[bit256.Key, mh.Multihash]
 }
 
-// returns the list of all non-overlapping subtries of `t` having more than
-// `size` elements, sorted according to `order`. every element is included in
-// exactly one region.
+// ExtractMinimalRegions returns the list of all non-overlapping subtries of
+// `t` having strictly more than `size` elements, sorted according to `order`.
+// Every element is included in exactly one region.
 func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
 	if t.IsEmptyLeaf() {
 		return nil
@@ -31,6 +37,8 @@ func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, s
 	return []Region{{Prefix: path, Peers: t}}
 }
 
+// AssignKeysToRegions assigns the provided keys to the regions based on their
+// kademlia identifier key.
 func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
 	for i := range regions {
 		regions[i].Keys = trie.New[bit256.Key, mh.Multihash]()
@@ -47,26 +55,29 @@ func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
 	return regions
 }
 
-// TrieHasPrefixOfKey checks if the trie contains a leave whose key is a prefix
-// (or a match) of the provided k
-func TrieHasPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (bool, K0) {
-	return trieHasPrefixOfKeyAtDepth(t, k, 0)
+// FindPrefixPrefixOfKey checks whether the trie contains a leave whose key is a
+// prefix or exact match of `k`.
+//
+// If there is a match, the function returns the matching key and true.
+// Otherwise it returns the zero key and false.
+func FindPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (K0, bool) {
+	return findPrefixOfKeyAtDepth(t, k, 0)
 }
 
-func trieHasPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) (bool, K0) {
+func findPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) (K0, bool) {
 	if t.IsLeaf() {
 		if !t.HasKey() {
 			var zero K0
-			return false, zero
+			return zero, false
 		}
-		return key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen(), *t.Key()
+		return *t.Key(), key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen()
 	}
 	b := int(k.Bit(depth))
-	return trieHasPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
+	return findPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
 }
 
-// NextNonEmptyLeaf returns the leaf right after the provided key `k` in the
-// trie according to the provided `order`.
+// NextNonEmptyLeaf returns the leaf following the provided key `k` in the trie
+// according to the provided `order`.
 func NextNonEmptyLeaf[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K0, order K1) *trie.Entry[K0, D] {
 	return nextNonEmptyLeafAtDepth(t, k, order, 0, false)
 }
@@ -127,6 +138,8 @@ func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie
 	return nil
 }
 
+// AllValues returns all values stored in the trie `t` sorted by their keys in
+// the supplied `order`.
 func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
 	entries := AllEntries(t, order)
 	out := make([]D, len(entries))
@@ -136,8 +149,8 @@ func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 	return out
 }
 
-// AllEntries returns all entries in the trie `t` at depth 0, sorted according
-// to the distance of the keys to `order`.
+// AllEntries returns all entries (key + value) stored in the trie `t` sorted
+// by their keys in the supplied `order`.
 func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
 	return allEntriesAtDepth(t, order, 0)
 }
@@ -154,6 +167,8 @@ func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D
 		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
 }
 
+// SubtrieMatchingPrefix returns the potential subtrie of `t` that matches the
+// prefix `k`, and true if there was a match and false otherwise.
 func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
 	if t.IsEmptyLeaf() {
 		return t, false
@@ -168,7 +183,7 @@ func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K
 		}
 		branch = branch.Branch(int(k.Bit(i)))
 	}
-	return branch, true
+	return branch, !branch.IsEmptyLeaf()
 }
 
 // mapInsert appends a slice of values to the map entry for the given key. If

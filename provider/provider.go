@@ -416,7 +416,7 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 // the given key belongs. The prefix corresponding to the region depends on the
 // peers in the DHT swarms.
 func (s *SweepingProvider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
-	if scheduled, prefix := helpers.TrieHasPrefixOfKey(s.schedule, k); scheduled {
+	if prefix, ok := helpers.FindPrefixOfKey(s.schedule, k); ok {
 		return prefix
 	}
 	avgPrefixLen := s.getAvgPrefixLenNoLock()
@@ -437,7 +437,7 @@ func (s *SweepingProvider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bi
 		// Add key to s.keys if not there already, and add fresh keys to newKeys.
 		// Deduplication is handled here.
 		// If prefix of c not scheduled yet, add it to the schedule.
-		scheduled, prefix := helpers.TrieHasPrefixOfKey(s.schedule, k)
+		prefix, scheduled := helpers.FindPrefixOfKey(s.schedule, k)
 		if !scheduled {
 			if avgPrefixLen == 0 {
 				avgPrefixLen = s.getAvgPrefixLenNoLock()
@@ -1098,7 +1098,7 @@ func (s *SweepingProvider) claimRegionReprovide(regions []helpers.Region) []help
 		if r.Peers.IsEmptyLeaf() {
 			continue
 		}
-		if ok, _ := helpers.TrieHasPrefixOfKey(s.ongoingReprovides, r.Prefix); !ok {
+		if _, ok := helpers.FindPrefixOfKey(s.ongoingReprovides, r.Prefix); !ok {
 			out = append(out, r)
 			s.ongoingReprovides.Add(r.Prefix, struct{}{})
 		}
@@ -1220,7 +1220,7 @@ func (s *SweepingProvider) scheduleNextReprovide(prefix bitstr.Key, lastReprovid
 		for _, entry := range helpers.AllEntries(subtrie, s.order) {
 			s.schedule.Remove(entry.Key)
 		}
-	} else if ok, _ := helpers.TrieHasPrefixOfKey(s.schedule, prefix); ok {
+	} else if _, ok := helpers.FindPrefixOfKey(s.schedule, prefix); ok {
 		return
 	}
 	s.schedule.Add(prefix, nextReprovideTime)
@@ -1336,7 +1336,7 @@ func (s *SweepingProvider) catchupPendingWork() {
 	}
 	keysInNoRegions := []mh.Multihash{}
 	for _, c := range pendingKeys {
-		if ok, _ := helpers.TrieHasPrefixOfKey(lateRegionsTrie, helpers.MhToBit256(c)); !ok {
+		if _, ok := helpers.FindPrefixOfKey(lateRegionsTrie, helpers.MhToBit256(c)); !ok {
 			keysInNoRegions = append(keysInNoRegions, c)
 		}
 	}

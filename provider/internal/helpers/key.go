@@ -7,24 +7,31 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
+
 	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
+// KeyLen is the length of a 256-bit kademlia identifier in bits.
 const KeyLen = bit256.KeyLen * 8 // 256
 
+// MhToBit256 converts a multihash to a its 256-bit kademlia identifier by
+// hashing it with SHA-256.
 func MhToBit256(h mh.Multihash) bit256.Key {
 	hash := sha256.Sum256(h)
 	return bit256.NewKey(hash[:])
 }
 
+// PeerIDToBit256 converts a peer.ID to a its 256-bit kademlia identifier by
+// hashing it with SHA-256.
 func PeerIDToBit256(id peer.ID) bit256.Key {
 	hash := sha256.Sum256([]byte(id))
 	return bit256.NewKey(hash[:])
 }
 
+// FlipLastBit flips the last bit of the given key.
 func FlipLastBit(k bitstr.Key) bitstr.Key {
 	if len(k) == 0 {
 		return k

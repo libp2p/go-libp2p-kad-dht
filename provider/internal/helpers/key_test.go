@@ -2,16 +2,44 @@ package helpers
 
 import (
 	"crypto/rand"
+	"strconv"
 	"testing"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	mh "github.com/multiformats/go-multihash"
+
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+
 	"github.com/stretchr/testify/require"
 )
+
+func TestFlipLastBit(t *testing.T) {
+	require.Equal(t, FlipLastBit(""), bitstr.Key(""))
+	require.Equal(t, FlipLastBit("0"), bitstr.Key("1"))
+	require.Equal(t, FlipLastBit("1"), bitstr.Key("0"))
+	require.Equal(t, FlipLastBit("00"), bitstr.Key("01"))
+	require.Equal(t, FlipLastBit("00000000"), bitstr.Key("00000001"))
+}
+
+func TestIsPrefix(t *testing.T) {
+	require.True(t, isPrefix(bitstr.Key(""), bitstr.Key("")))
+	require.True(t, isPrefix(bitstr.Key(""), bitstr.Key("1")))
+	require.True(t, isPrefix(bitstr.Key("0"), bitstr.Key("0")))
+	require.True(t, isPrefix(bitstr.Key("0"), bitstr.Key("01")))
+	require.True(t, isPrefix(bitstr.Key("1"), bitstr.Key("11")))
+	require.True(t, isPrefix(bitstr.Key("0"), bitstr.Key("00000000")))
+	require.True(t, isPrefix(bitstr.Key("0101010"), bitstr.Key("01010100")))
+	require.True(t, isPrefix(bitstr.Key("0101010"), bitstr.Key("01010101")))
+
+	require.False(t, isPrefix(bitstr.Key("1"), bitstr.Key("")))
+	require.False(t, isPrefix(bitstr.Key("1"), bitstr.Key("0")))
+	require.False(t, isPrefix(bitstr.Key("0"), bitstr.Key("1")))
+	require.False(t, isPrefix(bitstr.Key("00"), bitstr.Key("0")))
+}
 
 func genRandPeerID(t *testing.T) peer.ID {
 	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -115,4 +143,42 @@ func TestIsBitstrPrefix(t *testing.T) {
 	require.False(t, IsBitstrPrefix(bitstr.Key("01"), fullKey))
 	require.False(t, IsBitstrPrefix(bitstr.Key("001"), fullKey))
 	require.False(t, IsBitstrPrefix(bitstr.Key("0000"), fullKey))
+}
+
+func genMultihashes(n int) []mh.Multihash {
+	mhs := make([]mh.Multihash, n)
+	for i := range mhs {
+		h, err := mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
+		if err != nil {
+			panic(err)
+		}
+		mhs[i], err = mh.Encode(h, mh.SHA2_256)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return mhs
+}
+
+func TestSortPrefixesBySize(t *testing.T) {
+	prefixLen := 6
+	allocations := make(map[bitstr.Key][]mh.Multihash, 1<<prefixLen)
+	for _, h := range genMultihashes(1 << 10) {
+		k := MhToBit256(h)
+		prefix := bitstr.Key(key.BitString(k)[:prefixLen])
+		keys, ok := allocations[prefix]
+		if !ok {
+			allocations[prefix] = []mh.Multihash{h}
+		} else {
+			allocations[prefix] = append(keys, h)
+		}
+	}
+
+	sorted := SortPrefixesBySize(allocations)
+
+	for i := range len(sorted) - 1 {
+		if len(sorted[i].Keys) < len(sorted[i+1].Keys) {
+			t.Fatal("PrefixAndKeys not sorted by number of keys")
+		}
+	}
 }

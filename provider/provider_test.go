@@ -411,6 +411,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 	}
 	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
+	defer reprovider.Close()
 	reprovider.cachedAvgPrefixLen = 4
 
 	c := genCids(1)[0]
@@ -484,6 +485,7 @@ func TestProvideSingle(t *testing.T) {
 	}
 	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
+	defer reprovider.Close()
 
 	// Blocks until cid is provided
 	err = reprovider.ForceStartProviding(ctx, c.Hash())
@@ -585,6 +587,7 @@ func TestProvideMany(t *testing.T) {
 	}
 	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
+	defer reprovider.Close()
 	mockClock.Add(reprovideInterval - 1)
 
 	err = reprovider.ForceStartProviding(ctx, mhs...)
@@ -726,6 +729,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	}
 	reprovider, err := NewProvider(ctx, opts...)
 	require.NoError(t, err)
+	defer reprovider.Close()
 	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)
 

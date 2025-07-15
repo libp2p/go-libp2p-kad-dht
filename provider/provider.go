@@ -97,7 +97,9 @@ type provideReq struct {
 }
 
 type SweepingProvider struct {
-	ctx    context.Context
+	done      chan struct{}
+	closeOnce sync.Once
+
 	peerid peer.ID
 	router KadClosestPeersRouter
 	order  bit256.Key
@@ -171,7 +173,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		return nil, err
 	}
 	prov := &SweepingProvider{
-		ctx:    ctx,
+		done:   make(chan struct{}),
 		router: cfg.router,
 		peerid: cfg.peerid,
 		order:  helpers.PeerIDToBit256(cfg.peerid),
@@ -245,7 +247,7 @@ func (s *SweepingProvider) run() {
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-s.done:
 			// TODO: gracefully shutdown
 			return
 		case provideRequest := <-s.provideChan:
@@ -256,16 +258,21 @@ func (s *SweepingProvider) run() {
 			if !slices.Contains(s.lateRegionsQueue, prefix) {
 				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 			}
-			s.connectivity.TriggerCheck(s.ctx)
+			s.connectivity.TriggerCheck(context.Background())
 		case keys := <-s.pendingKeysChan:
 			s.pendingKeys = append(s.pendingKeys, keys...)
-			s.connectivity.TriggerCheck(s.ctx)
+			s.connectivity.TriggerCheck(context.Background())
 		case <-retryTicker.C:
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
 			s.catchupPendingWork()
 		}
 	}
+}
+
+// Close stops the provider and releases all resources.
+func (s *SweepingProvider) Close() {
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
 const initialGetClosestPeers = 4
@@ -285,7 +292,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 			bytes := [32]byte{}
 			rand.Read(bytes[:])
 			for {
-				peers, err := s.router.GetClosestPeers(s.ctx, string(bytes[:]))
+				peers, err := s.router.GetClosestPeers(context.Background(), string(bytes[:]))
 				if err == nil && len(peers) > 0 {
 					if len(peers) <= 2 {
 						return // Ignore result if only 2 other peers in DHT.
@@ -362,7 +369,7 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 	if provideRequest.reprovideKeys {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
-		keys, err = s.keyStore.Put(s.ctx, provideRequest.keys...)
+		keys, err = s.keyStore.Put(context.Background(), provideRequest.keys...)
 		if err != nil {
 			if provideRequest.done != nil {
 				provideRequest.done <- err
@@ -569,7 +576,7 @@ workerLoop:
 				cancelWorkers.Store(true)
 				break workerLoop
 			}
-		case <-s.ctx.Done():
+		case <-s.done:
 			// TODO: save pending keys to disk to exit gracefully
 			cancelWorkers.Store(true)
 			break workerLoop
@@ -644,7 +651,7 @@ func (s *SweepingProvider) handleReprovide() {
 			// failed regions.
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilNextReprovide)
 			s.scheduleLk.Unlock()
-			s.connectivity.TriggerCheck(s.ctx)
+			s.connectivity.TriggerCheck(context.Background())
 			return
 		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
@@ -661,7 +668,7 @@ func (s *SweepingProvider) handleReprovide() {
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
 			}
-			s.connectivity.TriggerCheck(s.ctx)
+			s.connectivity.TriggerCheck(context.Background())
 			if count == scheduleSize {
 				// No reprovides are scheduled in the future, return here.
 				s.scheduleLk.Unlock()
@@ -708,7 +715,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		// valid addresses are provided. This makes the kubo tests fail.
 		return ErrNoSelfAddress
 	}
-	keys, err := s.keyStore.Get(s.ctx, prefix)
+	keys, err := s.keyStore.Get(context.Background(), prefix)
 	if err != nil {
 		s.failedRegionsChan <- prefix
 		if periodicReprovide {
@@ -719,7 +726,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		logger.Errorf("No keys to reprovide for prefix %s", prefix)
 		return nil
 	} else if len(keys) <= 2 {
-		return s.individualProvideForPrefix(s.ctx, prefix, keys, true, periodicReprovide)
+		return s.individualProvideForPrefix(context.Background(), prefix, keys, true, periodicReprovide)
 	}
 
 	logger.Debugf("Starting to explore prefix %s for reproviding %d matching keys", prefix, len(keys))
@@ -744,7 +751,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	regions, coveredPrefix := s.regionsFromPeers(peers)
 	if len(coveredPrefix) < len(prefix) {
 		// We need to load more keys
-		keys, err = s.keyStore.Get(s.ctx, coveredPrefix)
+		keys, err = s.keyStore.Get(context.Background(), coveredPrefix)
 		if err != nil {
 			s.failedRegionsChan <- prefix
 			if periodicReprovide {
@@ -788,7 +795,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 			s.failedRegionsChan <- r.Prefix
 			continue
 		}
-		s.provideCounter.Add(s.ctx, int64(nKeys))
+		s.provideCounter.Add(context.Background(), int64(nKeys))
 
 		// TODO: persist to datastore that region identified by prefix was reprovided `now`, only during periodic reprovides?
 	}
@@ -811,7 +818,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	}
 	if len(keys) <= 2 {
 		// Region has 1 or 2 keys, it is more optimized to provide them naively.
-		return s.individualProvideForPrefix(s.ctx, prefix, keys, false, false)
+		return s.individualProvideForPrefix(context.Background(), prefix, keys, false, false)
 	}
 	logger.Debugf("Starting to explore prefix %s for %d matching keys", prefix, len(keys))
 	peers, err := s.closestPeersToPrefix(prefix)
@@ -857,7 +864,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 			}
 			continue
 		}
-		s.provideCounter.Add(s.ctx, int64(nKeys))
+		s.provideCounter.Add(context.Background(), int64(nKeys))
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	if errCount == len(regions) {
@@ -1042,7 +1049,7 @@ explorationLoop:
 // taken from a static list of preimages.
 func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	p, _ := kb.GenRandPeerIDWithCPL(helpers.KeyToBytes(k), kb.PeerIDPreimageMaxCpl)
-	return s.router.GetClosestPeers(s.ctx, string(p))
+	return s.router.GetClosestPeers(context.Background(), string(p))
 }
 
 // regionsFromPeers returns the keyspace regions from given peers ordered
@@ -1186,7 +1193,7 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pme
 	errCount := 0
 	for _, mh := range keys {
 		pmes.Key = mh
-		err := s.msgSender.SendMessage(s.ctx, p, pmes)
+		err := s.msgSender.SendMessage(context.Background(), p, pmes)
 		if err != nil {
 			errCount++
 
@@ -1445,7 +1452,7 @@ func (s *SweepingProvider) ForceStartProviding(ctx context.Context, keys ...mh.M
 // stops being referred as a provider when the provider records in the DHT
 // swarm expire.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
-	err := s.keyStore.Delete(s.ctx, keys...)
+	err := s.keyStore.Delete(context.Background(), keys...)
 	if err != nil {
 		logger.Errorf("failed to stop providing keys: %s", err)
 	}

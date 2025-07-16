@@ -351,6 +351,10 @@ func TestSubtrieMatchingPrefix(t *testing.T) {
 		"1110",
 	}
 	tr := trie.New[bitstr.Key, struct{}]()
+
+	_, ok := SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
+	require.False(t, ok)
+
 	for _, k := range keys {
 		tr.Add(k, struct{}{})
 	}
@@ -375,12 +379,85 @@ func TestSubtrieMatchingPrefix(t *testing.T) {
 	require.Equal(t, tr.Branch(0).Branch(0).Branch(0), subtrie)
 	require.Equal(t, 2, subtrie.Size())
 
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0).Branch(0).Branch(0).Branch(0), subtrie)
+	require.Equal(t, 1, subtrie.Size())
+	require.True(t, subtrie.IsNonEmptyLeaf())
+
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("111"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(1).Branch(1).Branch(1), subtrie)
+	require.Equal(t, 1, subtrie.Size())
+	require.True(t, subtrie.IsNonEmptyLeaf())
+
 	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("100"))
 	require.False(t, ok)
 	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1001"))
 	require.False(t, ok)
 	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("00000"))
 	require.False(t, ok)
+}
+
+func TestPruneSubtrie(t *testing.T) {
+	tr := trie.New[bitstr.Key, struct{}]()
+
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+
+	resetTrie := func() {
+		*tr = trie.Trie[bitstr.Key, struct{}]{}
+		for _, k := range keys {
+			tr.Add(k, struct{}{})
+		}
+		require.Equal(t, len(keys), tr.Size())
+	}
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key(""))
+	require.Equal(t, 0, tr.Size())
+	require.True(t, tr.IsEmptyLeaf())
+	require.Nil(t, tr.Key())
+	require.Nil(t, tr.Branch(0))
+	require.Nil(t, tr.Branch(1))
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("0"))
+	require.Equal(t, 3, tr.Size())
+	require.True(t, tr.Branch(0).IsEmptyLeaf())
+	require.False(t, tr.Branch(1).IsLeaf())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("00"))
+	require.Equal(t, 5, tr.Size())
+	require.True(t, tr.Branch(0).Branch(0).IsEmptyLeaf())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("0000"))
+	require.Equal(t, 7, tr.Size())
+
+	keys = []bitstr.Key{
+		"0000",
+		"0001",
+		"1000",
+	}
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("11"))
+	require.Equal(t, 3, tr.Size())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("000"))
+	require.Equal(t, 1, tr.Size())
+	require.True(t, tr.Branch(0).IsEmptyLeaf())
 }
 
 func TestAllocateToKClosestSingle(t *testing.T) {

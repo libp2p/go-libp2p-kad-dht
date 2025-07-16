@@ -179,11 +179,38 @@ func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K
 			return t, false
 		}
 		if branch.IsNonEmptyLeaf() {
-			return t, key.CommonPrefixLength(*branch.Key(), k) == k.BitLen()
+			return branch, key.CommonPrefixLength(*branch.Key(), k) == k.BitLen()
 		}
 		branch = branch.Branch(int(k.Bit(i)))
 	}
 	return branch, !branch.IsEmptyLeaf()
+}
+
+func PruneSubtrie[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) {
+	pruneSubtrieAtDepth(t, k, 0)
+}
+
+func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) bool {
+	if t.IsLeaf() {
+		if t.HasKey() && isPrefix(k, *t.Key()) {
+			*t = trie.Trie[K0, D]{}
+			return true
+		}
+		return false
+	}
+
+	// Not a leaf, continue pruning branches.
+	if depth == k.BitLen() {
+		*t = trie.Trie[K0, D]{}
+		return true
+	}
+
+	pruned := pruneSubtrieAtDepth(t.Branch(int(k.Bit(depth))), k, depth+1)
+	if pruned && t.Branch(1-int(k.Bit(depth))).IsEmptyLeaf() {
+		*t = trie.Trie[K0, D]{}
+		return true
+	}
+	return false
 }
 
 // mapInsert appends a slice of values to the map entry for the given key. If

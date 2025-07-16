@@ -10,36 +10,32 @@
 type DHTProvider interface {
   // StartProviding ensures keys are periodically advertised to the DHT swarm.
   //
-  // If the keys aren't currently being reprovided, they are immediately
-  // provided to the DHT swarm, and scheduled to be reprovided periodically. If
-  // `force` is set to true, all keys are immediately provided to the DHT
-  // swarm, regardless of whether they were already being provided in the past.
-  // `keys` keep being reprovided until `StopProviding` is called.
+  // If the `keys` aren't currently being reprovided, they are added to the
+  // queue to be provided to the DHT swarm as soon as possible, and scheduled
+  // to be reprovided periodically. If `force` is set to true, all keys are
+  // provided to the DHT swarm, regardless of whether they were already being
+  // reprovided in the past. `keys` keep being reprovided until `StopProviding`
+  // is called.
   //
-  // This call blocks until the initial provide completes (or fails), at
-  // which point it returns any error related to the initial provide.
-  //
-  // Cancelling the context cancels only the immediate provide, but not the
-  // reproviding of keys which is still done at some point the future. Call
-  // `StopProviding` to stop reproviding the specified keys.
-  StartProviding(ctx context.Context, force bool, keys ...mh.Multihash) error
-
-  // StartProvidingAsync is similar to `StartProviding`, but it does not block
-  // until the initial provide operation completes or fails. The supplied keys
-  // will eventually be provided and reprovided to the DHT swarm until
-  // `StopProviding` is called.
-  StartProvidingAsync(force bool, keys ...mh.Multihash)
+  // This operation is asynchronous, it returns as soon as the `keys` are added
+  // to the provide queue, and provides happens asynchronously.
+  StartProviding(force bool, keys ...mh.Multihash)
 
   // StopProviding stops reproviding the given keys to the DHT swarm. The node
   // stops being referred as a provider when the provider records in the DHT
   // swarm expire.
-  StopProviding(...mh.Multihash)
+  //
+  // Remove the `keys` from the schedule and return immediately. Valid records
+  // can remain in the DHT swarm up to the provider record TTL after calling
+  // `StopProviding`.
+  StopProviding(keys ...mh.Multihash)
 
   // ProvideOnce sends provider records for the specified keys to the DHT swarm
   // only once. It does not automatically reprovide those keys afterward.
   //
-  // Canceling the context cancels the immediate provide of the keys.
-  ProvideOnce(context.Context, ...mh.Multihash) error
+  // Add the supplied multihashes to the provide queue, and return immediately.
+  // The provide operation happens asynchronously.
+  ProvideOnce(keys ...mh.Multihash)
 }
 ```
 

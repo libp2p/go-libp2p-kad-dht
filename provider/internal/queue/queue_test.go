@@ -217,6 +217,41 @@ func TestDequeueMatching(t *testing.T) {
 	require.Empty(t, mhs)
 }
 
+func TestRemove(t *testing.T) {
+	nMultihashesPerPrefix := 1 << 2
+	q := New()
+	prefixes := []bitstr.Key{
+		"0010",
+		"100",
+		"010",
+	}
+	mhMap := make(map[bitstr.Key][]mh.Multihash)
+	for _, prefix := range prefixes {
+		mhs := genMultihashesMatchingPrefix(prefix, nMultihashesPerPrefix)
+		q.Enqueue(prefix, mhs...)
+		mhMap[prefix] = mhs
+	}
+	require.Equal(t, len(prefixes), q.prefixes.Size())
+	require.Equal(t, len(prefixes), q.queue.Len())
+	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, q.Size())
+
+	q.Remove(mhMap[bitstr.Key("0010")][:2]...)
+	require.Equal(t, len(prefixes)*nMultihashesPerPrefix-2, q.Size())
+	require.Equal(t, q.queue.At(0), bitstr.Key("0010"))
+
+	q.Remove(mhMap[bitstr.Key("100")]...)
+	require.Equal(t, len(prefixes)*nMultihashesPerPrefix-6, q.Size())
+	require.Equal(t, q.queue.At(1), bitstr.Key("010"))
+
+	q.Remove(mhMap[bitstr.Key("0010")][2])
+	require.Equal(t, len(prefixes)*nMultihashesPerPrefix-7, q.Size())
+	require.Equal(t, q.queue.At(0), bitstr.Key("0010"))
+
+	q.Remove(append([]mh.Multihash{mhMap[bitstr.Key("0010")][3]}, mhMap[bitstr.Key("010")][1:3]...)...)
+	require.Equal(t, 2, q.Size())
+	require.Equal(t, q.queue.At(0), bitstr.Key("010"))
+}
+
 func TestClearQueue(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 	q := New()

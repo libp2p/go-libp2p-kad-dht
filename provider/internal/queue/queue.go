@@ -160,6 +160,34 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 	return keys
 }
 
+func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+
+	matchingPrefixes := make(map[bitstr.Key]struct{})
+
+	// Remove keys from the keys trie.
+	for _, h := range keys {
+		k := helpers.MhToBit256(h)
+		q.keys.Remove(k)
+		if prefix, ok := helpers.FindPrefixOfKey(q.prefixes, k); ok {
+			matchingPrefixes[prefix] = struct{}{}
+		}
+	}
+
+	// For matching prefixes, if no more keys are matching, remove them from
+	// queue.
+	prefixesToRemove := make([]bitstr.Key, 0)
+	for prefix := range matchingPrefixes {
+		if _, ok := helpers.SubtrieMatchingPrefix(q.keys, prefix); !ok {
+			prefixesToRemove = append(prefixesToRemove, prefix)
+		}
+	}
+	if len(prefixesToRemove) > 0 {
+		q.removePrefixesFromQueue(prefixesToRemove)
+	}
+}
+
 // Empty returns true if the queue is empty.
 func (q *ProvideQueue) Empty() bool {
 	q.lk.Lock()

@@ -3,8 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -12,11 +10,10 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/libp2p/go-libp2p-kad-dht/provider"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
-	kb "github.com/libp2p/go-libp2p-kbucket"
 	mh "github.com/multiformats/go-multihash"
 )
 
-var _ provider.Provider = &SweepingProvider{}
+var _ provider.DHTProvider = &SweepingProvider{}
 
 var rLogger = logging.Logger("dht/dual/provider")
 
@@ -80,50 +77,29 @@ func NewSweepingProvider(d *dual.DHT, opts ...Option) (*SweepingProvider, error)
 	}, nil
 }
 
-func (s *SweepingProvider) runOnBoth(fn func(r *provider.SweepingProvider) error) error {
-	var errLan, errWan error
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		errLan = fn(s.LAN)
-	}()
-	go func() {
-		defer wg.Done()
-		errWan = fn(s.WAN)
-	}()
-
-	wg.Wait()
-
-	// ignore empty LAN-table errors
-	if errLan == kb.ErrLookupFailure {
-		errLan = nil
-	}
-
-	return dual.CombineErrors(errLan, errWan)
-}
-
 // ProvideOnce only sends provider records for the given keys out to both
 // DHT swarms. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingProvider) ProvideOnce(ctx context.Context, keys ...mh.Multihash) error {
-	return s.runOnBoth(func(r *provider.SweepingProvider) error {
-		return r.ProvideOnce(ctx, keys...)
-	})
+func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
+	go s.LAN.ProvideOnce(keys...)
+	go s.WAN.ProvideOnce(keys...)
 }
 
 // StartProviding provides the given keys to both DHT swarms unless they are
 // currently being reprovided. The keys will be periodically reprovided until
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
-func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 	ctx := context.Background()
-	cids, err := s.keyStore.Put(ctx, keys...)
+	newKeys, err := s.keyStore.Put(ctx, keys...)
 	if err != nil {
 		rLogger.Errorf("failed to store multihashes: %v", err)
 		return
 	}
-	go s.ProvideOnce(ctx, cids...)
+	if !force {
+		keys = newKeys
+	}
+	// TODO: add to schedule
+	go s.ProvideOnce(keys...)
 }
 
 // StopProviding stops reproviding the given keys to both DHT swarms. The node
@@ -134,15 +110,5 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	if err != nil {
 		rLogger.Errorf("failed to stop providing keys: %s", err)
 	}
-}
-
-// ForceStartProviding is similar to StartProviding, but it sends provider records out
-// to the DHTs even if the keys were already provided in the past. Blocks until
-// provide is complete or an error occurs.
-func (s *SweepingProvider) ForceStartProviding(ctx context.Context, keys ...mh.Multihash) error {
-	_, err := s.keyStore.Put(ctx, keys...)
-	if err != nil {
-		return fmt.Errorf("failed to store multihashes: %w", err)
-	}
-	return s.ProvideOnce(ctx, keys...)
+	// TODO: delete from provider queue
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -34,34 +35,42 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// Provider is an interface that defines the methods for DHT provides and
-// reprovides.
-//
-// Note that this interface is subject to change.
-type Provider interface {
-	// ProvideOnce sends provider records for the specified keys to the DHT swarm
-	// only once. It does not automatically reprovide those keys afterward.
-	ProvideOnce(context.Context, ...mh.Multihash) error
-
-	// StartProviding provides the given keys to the DHT swarm unless they were
-	// already provided in the past. The keys will be periodically reprovided until
-	// StopProviding is called for the same keys or user defined garbage collection
-	// deletes the keys.
-	StartProviding(...mh.Multihash)
-
-	// ForceStartProviding is similar to StartProviding, but it sends provider
-	// records out to the DHT regardless of whether the keys were already provided
-	// in the past. It keeps reproviding the keys until StopProviding is called
-	// for these keys.
-	ForceStartProviding(context.Context, ...mh.Multihash) error
+// DHTProvider is an interface for providing keys to a DHT swarm. It holds a
+// state of keys to be advertised, and is responsible for periodically
+// publishing provider records for these keys to the DHT swarm before the
+// records expire.
+type DHTProvider interface {
+	// StartProviding ensures keys are periodically advertised to the DHT swarm.
+	//
+	// If the `keys` aren't currently being reprovided, they are added to the
+	// queue to be provided to the DHT swarm as soon as possible, and scheduled
+	// to be reprovided periodically. If `force` is set to true, all keys are
+	// provided to the DHT swarm, regardless of whether they were already being
+	// reprovided in the past. `keys` keep being reprovided until `StopProviding`
+	// is called.
+	//
+	// This operation is asynchronous, it returns as soon as the `keys` are added
+	// to the provide queue, and provides happens asynchronously.
+	StartProviding(force bool, keys ...mh.Multihash)
 
 	// StopProviding stops reproviding the given keys to the DHT swarm. The node
 	// stops being referred as a provider when the provider records in the DHT
 	// swarm expire.
-	StopProviding(...mh.Multihash)
+	//
+	// Remove the `keys` from the schedule and return immediately. Valid records
+	// can remain in the DHT swarm up to the provider record TTL after calling
+	// `StopProviding`.
+	StopProviding(keys ...mh.Multihash)
+
+	// ProvideOnce sends provider records for the specified keys to the DHT swarm
+	// only once. It does not automatically reprovide those keys afterward.
+	//
+	// Add the supplied multihashes to the provide queue, and return immediately.
+	// The provide operation happens asynchronously.
+	ProvideOnce(keys ...mh.Multihash)
 }
 
-var _ Provider = &SweepingProvider{}
+var _ DHTProvider = &SweepingProvider{}
 
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
@@ -89,11 +98,9 @@ const (
 )
 
 type provideReq struct {
-	ctx           context.Context
-	keys          []mh.Multihash
-	done          chan<- error
-	reprovideKeys bool
-	forceProvide  bool
+	keys      []mh.Multihash
+	reprovide bool
+	force     bool
 }
 
 type SweepingProvider struct {
@@ -128,6 +135,9 @@ type SweepingProvider struct {
 	scheduleLk             sync.Mutex
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
+
+	provideQueue *queue.ProvideQueue
+	// provideRunning sync.Mutex
 
 	failedRegionsChan  chan bitstr.Key
 	lateRegionsQueue   []bitstr.Key
@@ -208,6 +218,8 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		failedRegionsChan:  make(chan bitstr.Key, 1),
 		pendingKeysChan:    make(chan []mh.Multihash),
 		catchupPendingChan: make(chan struct{}, 1),
+
+		provideQueue: queue.New(),
 
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 
@@ -357,35 +369,27 @@ func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUn
 
 func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 	if len(provideRequest.keys) == 0 {
-		if provideRequest.done != nil {
-			provideRequest.done <- nil
-		}
 		return
 	}
 
 	var err error
 	var keys []mh.Multihash
 	var prefixes map[bitstr.Key][]mh.Multihash
-	if provideRequest.reprovideKeys {
+	if provideRequest.reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
 		keys, err = s.keyStore.Put(context.Background(), provideRequest.keys...)
 		if err != nil {
-			if provideRequest.done != nil {
-				provideRequest.done <- err
-			}
+			logger.Errorf("couldn't add keys to keystore: %s", err)
 			return
 		} else if len(keys) == 0 {
 			// All keys are already tracked and have been provided.
-			if provideRequest.done != nil {
-				provideRequest.done <- nil
-			}
 			return
 		}
 		prefixes = s.groupKeysAndAddToSchedule(keys)
 	}
 
-	if !provideRequest.reprovideKeys || provideRequest.forceProvide {
+	if !provideRequest.reprovide || provideRequest.force {
 		// Don't filter out keys that are already being reprovided.
 		keys = make([]mh.Multihash, 0, len(provideRequest.keys))
 		seen := make(map[string]struct{})
@@ -401,20 +405,17 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 
 	if !s.connectivity.IsOnline() {
 		logger.Warn("Node is offline, cannot provide requested keys.")
-		if provideRequest.reprovideKeys {
+		if provideRequest.reprovide {
 			s.pendingKeys = append(s.pendingKeys, keys...)
-		}
-		if provideRequest.done != nil {
-			provideRequest.done <- ErrNodeOffline
 		}
 		return
 	}
 
 	logger.Debugf("Providing %d new keys with %d different prefixes", len(keys), len(prefixes))
 	go func() {
-		err := s.networkProvide(prefixes, provideRequest.reprovideKeys)
-		if provideRequest.done != nil {
-			provideRequest.done <- err
+		err := s.networkProvide(prefixes, provideRequest.reprovide)
+		if err != nil {
+			logger.Error(err)
 		}
 	}()
 }
@@ -1404,48 +1405,24 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 
 // ProvideOnce only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingProvider) ProvideOnce(ctx context.Context, keys ...mh.Multihash) error {
-	doneChan := make(chan error, 1)
-	req := provideReq{
-		ctx:           ctx,
-		keys:          keys,
-		done:          doneChan,
-		reprovideKeys: false,
-		forceProvide:  true,
+func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
+	s.provideChan <- provideReq{
+		keys:      keys,
+		reprovide: false,
+		force:     true,
 	}
-	s.provideChan <- req
-	// Wait for provide to complete before returning potential error.
-	return <-doneChan
 }
 
 // StartProviding provides the given keys to the DHT swarm unless they were
 // already provided in the past. The keys will be periodically reprovided until
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
-func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 	s.provideChan <- provideReq{
-		ctx:           context.Background(),
-		keys:          keys,
-		done:          nil,
-		reprovideKeys: true,
-		forceProvide:  false,
+		keys:      keys,
+		reprovide: true,
+		force:     force,
 	}
-}
-
-// ForceStartProviding is similar to StartProviding, but it sends provider
-// records out to the DHT even if the keys were already provided in the past.
-func (s *SweepingProvider) ForceStartProviding(ctx context.Context, keys ...mh.Multihash) error {
-	doneChan := make(chan error, 1)
-	req := provideReq{
-		ctx:           ctx,
-		keys:          keys,
-		done:          doneChan,
-		reprovideKeys: true,
-		forceProvide:  true,
-	}
-	s.provideChan <- req
-	// Wait for initial provide to complete before returning.
-	return <-doneChan
 }
 
 // StopProviding stops reproviding the given keys to the DHT swarm. The node
@@ -1456,4 +1433,5 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	if err != nil {
 		logger.Errorf("failed to stop providing keys: %s", err)
 	}
+	// TODO: delete keys from provide queue
 }

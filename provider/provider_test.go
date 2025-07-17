@@ -420,15 +420,14 @@ func TestProvideNoBootstrap(t *testing.T) {
 	online.Store(false)
 	reprovider.connectivity.TriggerCheck(ctx)
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	err = reprovider.ProvideOnce(ctx, c.Hash())
-	require.ErrorIs(t, ErrNodeOffline, err)
+	reprovider.ProvideOnce(c.Hash())
+	// TODO: require.ErrorIs(t, ErrNodeOffline, err)
 
 	// Set the reprovider as online, but don't bootstrap it
 	online.Store(true)
 	clk.Add(checkInterval)           // trigger connectivity check
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	err = reprovider.ProvideOnce(ctx, c.Hash())
-	require.NoError(t, err)
+	reprovider.ProvideOnce(c.Hash()) // TODO: no err
 }
 
 func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args ...any) {
@@ -488,8 +487,7 @@ func TestProvideSingle(t *testing.T) {
 	defer reprovider.Close()
 
 	// Blocks until cid is provided
-	err = reprovider.ForceStartProviding(ctx, c.Hash())
-	require.NoError(t, err)
+	reprovider.StartProviding(true, c.Hash()) // TODO: no error
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
@@ -506,7 +504,7 @@ func TestProvideSingle(t *testing.T) {
 	reprovider.scheduleLk.Unlock()
 
 	// Try to provide the same cid again -> noop
-	reprovider.StartProviding(c.Hash())
+	reprovider.StartProviding(false, c.Hash())
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
@@ -590,9 +588,8 @@ func TestProvideMany(t *testing.T) {
 	defer reprovider.Close()
 	mockClock.Add(reprovideInterval - 1)
 
-	err = reprovider.ForceStartProviding(ctx, mhs...)
-	require.NoError(t, err)
-	time.Sleep(20 * time.Millisecond) // wait for ProvideMany to finish
+	reprovider.StartProviding(true, mhs...) // TODO: verify no error
+	time.Sleep(20 * time.Millisecond)       // wait for ProvideMany to finish
 
 	// Each cid should have been provided at least once.
 	msgSenderLk.Lock()
@@ -733,8 +730,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)
 
-	err = reprovider.ForceStartProviding(ctx, mhs...)
-	require.Error(t, err)
+	reprovider.StartProviding(true, mhs...) // TODO: this errors, check that
 
 	nodeOffline := func() bool {
 		return !reprovider.connectivity.IsOnline()

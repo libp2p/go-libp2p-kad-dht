@@ -150,7 +150,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DHT, error) {
 
 // Close closes the DHT context.
 func (dht *DHT) Close() error {
-	return CombineErrors(dht.WAN.Close(), dht.LAN.Close())
+	return combineErrors(dht.WAN.Close(), dht.LAN.Close())
 }
 
 // WANActive returns true when the WAN DHT is active (has peers).
@@ -298,10 +298,10 @@ func (dht *DHT) FindPeer(ctx context.Context, pid peer.ID) (pi peer.AddrInfo, er
 	}
 
 	// Otherwise, return what we have _and_ return the error.
-	return ai, CombineErrors(wanErr, lanErr)
+	return ai, combineErrors(wanErr, lanErr)
 }
 
-func CombineErrors(erra, errb error) error {
+func combineErrors(erra, errb error) error {
 	// if the errors are the same, just return one.
 	if erra == errb {
 		return erra
@@ -325,7 +325,7 @@ func (dht *DHT) Bootstrap(ctx context.Context) (err error) {
 
 	erra := dht.WAN.Bootstrap(ctx)
 	errb := dht.LAN.Bootstrap(ctx)
-	return CombineErrors(erra, errb)
+	return combineErrors(erra, errb)
 }
 
 // PutValue adds value corresponding to given Key.
@@ -369,7 +369,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 	if lanErr == nil {
 		return lanVal, nil
 	}
-	return nil, CombineErrors(wanErr, lanErr)
+	return nil, combineErrors(wanErr, lanErr)
 }
 
 // SearchValue searches for better values from this value

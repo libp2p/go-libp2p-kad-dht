@@ -488,6 +488,7 @@ func TestProvideSingle(t *testing.T) {
 
 	// Blocks until cid is provided
 	reprovider.StartProviding(true, c.Hash()) // TODO: no error
+	time.Sleep(10 * time.Millisecond)         // wait for ProvideOnce to finish
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
@@ -589,7 +590,7 @@ func TestProvideMany(t *testing.T) {
 	mockClock.Add(reprovideInterval - 1)
 
 	reprovider.StartProviding(true, mhs...) // TODO: verify no error
-	time.Sleep(20 * time.Millisecond)       // wait for ProvideMany to finish
+	time.Sleep(50 * time.Millisecond)       // wait for ProvideMany to finish
 
 	// Each cid should have been provided at least once.
 	msgSenderLk.Lock()

@@ -372,35 +372,23 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 		return
 	}
 
-	var err error
-	var keys []mh.Multihash
-	var prefixes map[bitstr.Key][]mh.Multihash
+	keys := provideRequest.keys
 	if provideRequest.reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
-		keys, err = s.keyStore.Put(context.Background(), provideRequest.keys...)
+		newKeys, err := s.keyStore.Put(context.Background(), provideRequest.keys...)
 		if err != nil {
 			logger.Errorf("couldn't add keys to keystore: %s", err)
 			return
-		} else if len(keys) == 0 {
-			// All keys are already tracked and have been provided.
-			return
 		}
-		prefixes = s.groupKeysAndAddToSchedule(keys)
+		if !provideRequest.force {
+			keys = newKeys
+		}
 	}
 
-	if !provideRequest.reprovide || provideRequest.force {
-		// Don't filter out keys that are already being reprovided.
-		keys = make([]mh.Multihash, 0, len(provideRequest.keys))
-		seen := make(map[string]struct{})
-		for _, key := range provideRequest.keys {
-			keyStr := string(key)
-			if _, ok := seen[keyStr]; !ok {
-				seen[keyStr] = struct{}{}
-				keys = append(keys, key)
-			}
-		}
-		prefixes = s.groupKeysByPrefix(keys)
+	prefixes := s.groupAndScheduleKeysByPrefix(keys, provideRequest.reprovide)
+	if len(prefixes) == 0 {
+		return
 	}
 
 	if !s.connectivity.IsOnline() {
@@ -420,46 +408,40 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 	}()
 }
 
-// prefixForKeyNoLock returns the prefix corresponding to the region in which
-// the given key belongs. The prefix corresponding to the region depends on the
-// peers in the DHT swarms.
-func (s *SweepingProvider) prefixForKeyNoLock(k bit256.Key) bitstr.Key {
-	if prefix, ok := helpers.FindPrefixOfKey(s.schedule, k); ok {
-		return prefix
-	}
-	avgPrefixLen := s.getAvgPrefixLenNoLock()
-	return bitstr.Key(key.BitString(k)[:avgPrefixLen])
-}
-
-// groupKeysAndAddToSchedule groups keys by common prefix used in the schedule.
-// If the common prefix isn't included in the schedule, add it.
-func (s *SweepingProvider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bitstr.Key][]mh.Multihash {
+func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
+	avgPrefixLen := -1
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	avgPrefixLen := 0
+	seen := make(map[bit256.Key]struct{})
 
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
 	for _, h := range keys {
-		prefixConsolidation := false
 		k := helpers.MhToBit256(h)
-		// Add key to s.keys if not there already, and add fresh keys to newKeys.
-		// Deduplication is handled here.
-		// If prefix of c not scheduled yet, add it to the schedule.
+		// Don't add duplicates
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+
+		prefixConsolidation := false
 		prefix, scheduled := helpers.FindPrefixOfKey(s.schedule, k)
 		if !scheduled {
-			if avgPrefixLen == 0 {
+			if avgPrefixLen == -1 {
 				avgPrefixLen = s.getAvgPrefixLenNoLock()
 			}
 			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
-			if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
-				// If generated prefix is a prefix of existing scheduled keyspace
-				// zones, consolidate these zones around the shorter prefix.
-				for _, entry := range helpers.AllEntries(subtrie, s.order) {
-					s.schedule.Remove(entry.Key)
+
+			if schedule {
+				if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
+					// If generated prefix is a prefix of existing scheduled keyspace
+					// zones, consolidate these zones around the shorter prefix.
+					for _, entry := range helpers.AllEntries(subtrie, s.order) {
+						s.schedule.Remove(entry.Key)
+					}
+					prefixConsolidation = true
 				}
-				prefixConsolidation = true
+				s.addPrefixToScheduleNoLock(prefix)
 			}
-			s.addPrefixToScheduleNoLock(prefix)
 		}
 
 		if _, ok := prefixes[prefix]; !ok {
@@ -487,30 +469,6 @@ func (s *SweepingProvider) groupKeysAndAddToSchedule(keys []mh.Multihash) map[bi
 					delete(prefixes, p)
 				}
 			}
-		}
-	}
-	return prefixes
-}
-
-// groupKeysBySchedulePrefix groups keys by their common prefix that is
-// currently used in the schedule.
-func (s *SweepingProvider) groupKeysByPrefix(keys []mh.Multihash) map[bitstr.Key][]mh.Multihash {
-	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	seen := make(map[bit256.Key]struct{})
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
-	for _, k := range keys {
-		h := helpers.MhToBit256(k)
-		// Don't add duplicates
-		if _, ok := seen[h]; ok {
-			continue
-		}
-		seen[h] = struct{}{}
-		prefix := s.prefixForKeyNoLock(h)
-		if _, ok := prefixes[prefix]; !ok {
-			prefixes[prefix] = []mh.Multihash{k}
-		} else {
-			prefixes[prefix] = append(prefixes[prefix], k)
 		}
 	}
 	return prefixes
@@ -1364,7 +1322,7 @@ func (s *SweepingProvider) catchupPendingWork() {
 
 		// 3. Provide the remaining keys that haven't been provided yet as part of
 		//    a late region.
-		s.networkProvide(s.groupKeysByPrefix(keysInNoRegions), true)
+		s.networkProvide(s.groupAndScheduleKeysByPrefix(keysInNoRegions, false), true)
 	}()
 }
 
@@ -1433,5 +1391,5 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	if err != nil {
 		logger.Errorf("failed to stop providing keys: %s", err)
 	}
-	// TODO: delete keys from provide queue
+	s.provideQueue.Remove(keys...)
 }

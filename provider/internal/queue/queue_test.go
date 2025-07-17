@@ -132,6 +132,10 @@ func TestDequeue(t *testing.T) {
 		require.False(t, q.prefixes.Remove(prefix))
 		require.Equal(t, q.Size(), (len(prefixes)-i-1)*nMultihashesPerPrefix)
 	}
+
+	prefix, mhs := q.Dequeue()
+	require.Equal(t, bitstr.Key(""), prefix)
+	require.Empty(t, mhs)
 }
 
 func TestDequeueMatching(t *testing.T) {
@@ -155,6 +159,7 @@ func TestDequeueMatching(t *testing.T) {
 	require.Equal(t, q.queue.Len(), len(prefixes))
 	require.Equal(t, q.Size(), len(prefixes)*nMultihashesPerPrefix)
 
+	// Prefix not in queue.
 	mhs := q.DequeueMatching(bitstr.Key("101"))
 	require.Empty(t, mhs)
 
@@ -178,6 +183,11 @@ func TestDequeueMatching(t *testing.T) {
 	require.Equal(t, 1, q.queue.Index(func(k bitstr.Key) bool { return k == bitstr.Key("11") }))
 	require.Equal(t, 2, q.queue.Index(func(k bitstr.Key) bool { return k == bitstr.Key("000") }))
 
+	// Prefix not in queue.
+	mhs = q.DequeueMatching(bitstr.Key("011"))
+	require.Empty(t, mhs)
+
+	// Partial prefix
 	mhs0 := q.DequeueMatching(bitstr.Key("110"))
 	if len(mhs0) > 0 {
 		require.Equal(t, 3, q.queue.Len())
@@ -192,6 +202,19 @@ func TestDequeueMatching(t *testing.T) {
 	require.Equal(t, 0, q.queue.Index(func(k bitstr.Key) bool { return k == bitstr.Key("100") }))
 	require.Equal(t, 1, q.queue.Index(func(k bitstr.Key) bool { return k == bitstr.Key("000") }))
 	require.ElementsMatch(t, append(mhs0, mhs1...), mhMap[bitstr.Key("11")])
+
+	prefix, mhs := q.Dequeue()
+	require.Equal(t, bitstr.Key("100"), prefix)
+	require.ElementsMatch(t, mhMap[bitstr.Key("100")], mhs)
+
+	mhs = q.DequeueMatching(bitstr.Key("000"))
+	require.ElementsMatch(t, mhMap[bitstr.Key("000")], mhs)
+
+	require.Equal(t, 0, q.queue.Len())
+	require.True(t, q.Empty())
+
+	mhs = q.DequeueMatching(bitstr.Key("000"))
+	require.Empty(t, mhs)
 }
 
 func TestClearQueue(t *testing.T) {

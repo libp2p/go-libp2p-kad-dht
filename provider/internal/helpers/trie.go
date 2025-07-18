@@ -85,6 +85,14 @@ func NextNonEmptyLeaf[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D]
 	return nextNonEmptyLeafAtDepth(t, k, order, 0, false)
 }
 
+// nextNonEmptyLeafAtDepth is a recursive function that finds the non empty
+// leaf right after the supplied key `k`.
+//
+// We first need to go down the trie until we find the supplied `k` (if it
+// exists). Once we have found the key, or its closest neighbor (if it doesn't
+// exist) we hit the bottom of the trie. Then we go back up in the trie until
+// we are able to go deeper again following `order` until we fall on a
+// non-empty leaf. This is the leaf we are looking for.
 func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K0, order K1, depth int, hitBottom bool) *trie.Entry[K0, D] {
 	if hitBottom {
 		if t.IsNonEmptyLeaf() {

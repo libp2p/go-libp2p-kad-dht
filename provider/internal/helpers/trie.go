@@ -1,9 +1,12 @@
 package helpers
 
 import (
+	"github.com/libp2p/go-libp2p/core/peer"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
+	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
@@ -301,4 +304,49 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		}
 	}
 	return m
+}
+
+// Region represents a subtrie of the complete DHT keyspace.
+//
+//   - Prefix is the identifier of the subtrie.
+//   - Peers contains all the network peers matching this region.
+//   - Keys contains all the keys provided by the local node matching this
+//     region.
+type Region struct {
+	Prefix bitstr.Key
+	Peers  *trie.Trie[bit256.Key, peer.ID]
+	Keys   *trie.Trie[bit256.Key, mh.Multihash]
+}
+
+// ExtractMinimalRegions returns the list of all non-overlapping subtries of
+// `t` having strictly more than `size` elements, sorted according to `order`.
+// Every element is included in exactly one region.
+func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
+	if t.IsEmptyLeaf() {
+		return nil
+	}
+	if t.Branch(0).Size() > size && t.Branch(1).Size() > size {
+		b := int(order.Bit(len(path)))
+		return append(ExtractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
+			ExtractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
+	}
+	return []Region{{Prefix: path, Peers: t}}
+}
+
+// AssignKeysToRegions assigns the provided keys to the regions based on their
+// kademlia identifier key.
+func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
+	for i := range regions {
+		regions[i].Keys = trie.New[bit256.Key, mh.Multihash]()
+	}
+	for _, k := range keys {
+		h := MhToBit256(k)
+		for i, r := range regions {
+			if IsPrefix(r.Prefix, h) {
+				regions[i].Keys.Add(h, k)
+				break
+			}
+		}
+	}
+	return regions
 }

@@ -53,3 +53,28 @@ func TestAllEntries(t *testing.T) {
 		require.Equal(t, entries[i].Data, elements[len(elements)-1-i].fruit)
 	}
 }
+
+func TestFindPrefixOfKey(t *testing.T) {
+	tr := trie.New[bitstr.Key, struct{}]()
+
+	keys := []bitstr.Key{
+		"00",
+		"10",
+	}
+	for _, k := range keys {
+		tr.Add(k, struct{}{})
+	}
+
+	match, ok := FindPrefixOfKey(tr, bitstr.Key("00"))
+	require.True(t, ok)
+	require.Equal(t, bitstr.Key("00"), match)
+
+	match, ok = FindPrefixOfKey(tr, bitstr.Key("10000000"))
+	require.True(t, ok)
+	require.Equal(t, bitstr.Key("10"), match)
+
+	_, ok = FindPrefixOfKey(tr, bitstr.Key("01"))
+	require.False(t, ok)
+	_, ok = FindPrefixOfKey(tr, bitstr.Key("11000000"))
+	require.False(t, ok)
+}

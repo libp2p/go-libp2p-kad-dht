@@ -100,32 +100,35 @@ func KeyToBytes[K kad.Key[K]](k K) []byte {
 	return b
 }
 
-// ShortestCoveredPrefix takes as input the `requested` key and the list of
+// ShortestCoveredPrefix takes as input the `target` key and the list of
 // closest peers to this key. It returns a prefix of `requested` that is
-// covered by these peers.
+// covered by these peers, along with the peers matching this prefix.
 //
-// If every peer shares the same CPL to `requested`, then no deeper zone is
+// We say that a set of peers fully "covers" a prefix of the global keyspace,
+// if all the peers matching this prefix are included in the set.
+//
+// If every peer shares the same CPL to `target`, then no deeper zone is
 // covered, we learn that the adjacent sibling branch is empty. In this case we
 // return the prefix one bit deeper (`minCPL+1`) and an empty peer list.
-func ShortestCoveredPrefix(requested bitstr.Key, peers []peer.ID) (bitstr.Key, []peer.ID) {
+func ShortestCoveredPrefix(target bitstr.Key, peers []peer.ID) (bitstr.Key, []peer.ID) {
 	if len(peers) == 0 {
-		return requested, peers
+		return target, peers
 	}
 	// Sort the peers by their distance to the requested key.
-	peers = kb.SortClosestPeers(peers, KeyToBytes(requested))
+	peers = kb.SortClosestPeers(peers, KeyToBytes(target))
 
-	minCpl := requested.BitLen() // key bitlen
+	minCpl := target.BitLen() // key bitlen
 	coveredCpl := 0
 	lastCoveredPeerIndex := 0
 	for i, p := range peers {
-		cpl := key.CommonPrefixLength(requested, PeerIDToBit256(p))
+		cpl := key.CommonPrefixLength(target, PeerIDToBit256(p))
 		if cpl < minCpl {
 			coveredCpl = cpl + 1
 			lastCoveredPeerIndex = i
 			minCpl = cpl
 		}
 	}
-	return requested[:coveredCpl], peers[:lastCoveredPeerIndex]
+	return target[:coveredCpl], peers[:lastCoveredPeerIndex]
 }
 
 // PrefixAndKeys is a struct that holds a prefix and the multihashes whose

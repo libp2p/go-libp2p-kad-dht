@@ -16,27 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAssignKeysToRegions(t *testing.T) {
-	regions := []Region{
-		{Prefix: "0", Peers: nil, Keys: nil},
-		{Prefix: "1", Peers: nil, Keys: nil},
-	}
-
-	nKeys := 1 << 8
-	mhs := make([]mh.Multihash, nKeys)
-	for i, h := range genMultihashes(nKeys) {
-		mhs[i] = h
-	}
-
-	regions = AssignKeysToRegions(regions, mhs)
-	for _, r := range regions {
-		for _, h := range AllValues(r.Keys, bit256.ZeroKey()) {
-			k := MhToBit256(h)
-			require.True(t, IsPrefix(r.Prefix, k))
-		}
-	}
-}
-
 func TestFindPrefixOfKey(t *testing.T) {
 	tr := trie.New[bitstr.Key, struct{}]()
 
@@ -59,6 +38,67 @@ func TestFindPrefixOfKey(t *testing.T) {
 	_, ok = FindPrefixOfKey(tr, bitstr.Key("01"))
 	require.False(t, ok)
 	_, ok = FindPrefixOfKey(tr, bitstr.Key("11000000"))
+	require.False(t, ok)
+}
+
+func TestSubtrieMatchingPrefix(t *testing.T) {
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0010",
+		"0100",
+		"0111",
+		"1010",
+		"1011",
+		"1101",
+		"1110",
+	}
+	tr := trie.New[bitstr.Key, struct{}]()
+
+	_, ok := SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
+	require.False(t, ok)
+
+	for _, k := range keys {
+		tr.Add(k, struct{}{})
+	}
+
+	subtrie, ok := SubtrieMatchingPrefix(tr, bitstr.Key(""))
+	require.True(t, ok)
+	require.Equal(t, tr, subtrie)
+	require.Equal(t, 9, subtrie.Size())
+
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0), subtrie)
+	require.Equal(t, 5, subtrie.Size())
+
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(1), subtrie)
+	require.Equal(t, 4, subtrie.Size())
+
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("000"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0).Branch(0).Branch(0), subtrie)
+	require.Equal(t, 2, subtrie.Size())
+
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0).Branch(0).Branch(0).Branch(0), subtrie)
+	require.Equal(t, 1, subtrie.Size())
+	require.True(t, subtrie.IsNonEmptyLeaf())
+
+	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("111"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(1).Branch(1).Branch(1), subtrie)
+	require.Equal(t, 1, subtrie.Size())
+	require.True(t, subtrie.IsNonEmptyLeaf())
+
+	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("100"))
+	require.False(t, ok)
+	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1001"))
+	require.False(t, ok)
+	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("00000"))
 	require.False(t, ok)
 }
 
@@ -269,136 +309,6 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 	}
 }
 
-func TestExtractMinimalRegions(t *testing.T) {
-	replicationFactor := 3
-	selfID := [32]byte{}
-	order := bit256.NewKey(selfID[:])
-
-	genPeerWithPrefix := func(prefix bitstr.Key) peer.ID {
-		k := FirstFullKeyWithPrefix(prefix, order)
-		bs := KeyToBytes(k)
-		pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
-		require.NoError(t, err)
-		return pid
-	}
-
-	prefixes := []bitstr.Key{
-		"00000",
-		"00001",
-		"00101",
-		"00110",
-		"01000",
-		"01001",
-		"01011",
-		"01100",
-		"10100",
-		"11000",
-		"11001",
-		"11010",
-		"11110",
-		"11111",
-	}
-
-	// Binary trie of peers
-	//                                     ____________I___________
-	//                                    /                        \
-	//                 __________________/__                      __\_______
-	//                /                     \                    /          \
-	//         ______/_                     _\_                 /           _\_______
-	//        /        \                   /   \               /           /         \
-	//       /         _\_             ___/_    \             /       ____/_          \
-	//      /         /   \           /     \    \           /       /      \          \
-	//     / \       /     \        / \      \    \         /       / \      \        / \
-	// 00000 00001 00101 00110  01000 01001 01011 01100  10100  11000 11001 11010 11110 11111
-	//
-	// Groups are expected to be:
-	// * [00000, 00001, 00101, 00110]
-	// * [01000, 01001, 01011, 01100]
-	// * [10100, 11000, 11001, 11010, 11110, 11111]
-
-	pids := make([]peer.ID, len(prefixes))
-	peersTrie := trie.New[bit256.Key, peer.ID]()
-
-	// Test behavior when trie is empty
-	regions := ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
-	require.Nil(t, regions)
-	for i := range pids {
-		pid := genPeerWithPrefix(prefixes[i])
-		pids[i] = pid
-		peersTrie.Add(PeerIDToBit256(pid), pid)
-	}
-
-	regions = ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
-	require.Len(t, regions, 3)
-	require.Equal(t, bitstr.Key("00"), regions[0].Prefix)
-	require.Equal(t, bitstr.Key("01"), regions[1].Prefix)
-	require.Equal(t, bitstr.Key("1"), regions[2].Prefix)
-	require.Equal(t, 4, regions[0].Peers.Size())
-	require.Equal(t, 4, regions[1].Peers.Size())
-	require.Equal(t, 6, regions[2].Peers.Size())
-}
-
-func TestSubtrieMatchingPrefix(t *testing.T) {
-	keys := []bitstr.Key{
-		"0000",
-		"0001",
-		"0010",
-		"0100",
-		"0111",
-		"1010",
-		"1011",
-		"1101",
-		"1110",
-	}
-	tr := trie.New[bitstr.Key, struct{}]()
-
-	_, ok := SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
-	require.False(t, ok)
-
-	for _, k := range keys {
-		tr.Add(k, struct{}{})
-	}
-
-	subtrie, ok := SubtrieMatchingPrefix(tr, bitstr.Key(""))
-	require.True(t, ok)
-	require.Equal(t, tr, subtrie)
-	require.Equal(t, 9, subtrie.Size())
-
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0"))
-	require.True(t, ok)
-	require.Equal(t, tr.Branch(0), subtrie)
-	require.Equal(t, 5, subtrie.Size())
-
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1"))
-	require.True(t, ok)
-	require.Equal(t, tr.Branch(1), subtrie)
-	require.Equal(t, 4, subtrie.Size())
-
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("000"))
-	require.True(t, ok)
-	require.Equal(t, tr.Branch(0).Branch(0).Branch(0), subtrie)
-	require.Equal(t, 2, subtrie.Size())
-
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
-	require.True(t, ok)
-	require.Equal(t, tr.Branch(0).Branch(0).Branch(0).Branch(0), subtrie)
-	require.Equal(t, 1, subtrie.Size())
-	require.True(t, subtrie.IsNonEmptyLeaf())
-
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("111"))
-	require.True(t, ok)
-	require.Equal(t, tr.Branch(1).Branch(1).Branch(1), subtrie)
-	require.Equal(t, 1, subtrie.Size())
-	require.True(t, subtrie.IsNonEmptyLeaf())
-
-	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("100"))
-	require.False(t, ok)
-	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1001"))
-	require.False(t, ok)
-	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("00000"))
-	require.False(t, ok)
-}
-
 func TestPruneSubtrie(t *testing.T) {
 	tr := trie.New[bitstr.Key, struct{}]()
 
@@ -595,6 +505,96 @@ func TestAllocateToKClosest(t *testing.T) {
 		for _, closestEntry := range closest {
 			d := closestEntry.Key
 			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
+		}
+	}
+}
+
+func TestExtractMinimalRegions(t *testing.T) {
+	replicationFactor := 3
+	selfID := [32]byte{}
+	order := bit256.NewKey(selfID[:])
+
+	genPeerWithPrefix := func(prefix bitstr.Key) peer.ID {
+		k := FirstFullKeyWithPrefix(prefix, order)
+		bs := KeyToBytes(k)
+		pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
+		require.NoError(t, err)
+		return pid
+	}
+
+	prefixes := []bitstr.Key{
+		"00000",
+		"00001",
+		"00101",
+		"00110",
+		"01000",
+		"01001",
+		"01011",
+		"01100",
+		"10100",
+		"11000",
+		"11001",
+		"11010",
+		"11110",
+		"11111",
+	}
+
+	// Binary trie of peers
+	//                                     ____________I___________
+	//                                    /                        \
+	//                 __________________/__                      __\_______
+	//                /                     \                    /          \
+	//         ______/_                     _\_                 /           _\_______
+	//        /        \                   /   \               /           /         \
+	//       /         _\_             ___/_    \             /       ____/_          \
+	//      /         /   \           /     \    \           /       /      \          \
+	//     / \       /     \        / \      \    \         /       / \      \        / \
+	// 00000 00001 00101 00110  01000 01001 01011 01100  10100  11000 11001 11010 11110 11111
+	//
+	// Groups are expected to be:
+	// * [00000, 00001, 00101, 00110]
+	// * [01000, 01001, 01011, 01100]
+	// * [10100, 11000, 11001, 11010, 11110, 11111]
+
+	pids := make([]peer.ID, len(prefixes))
+	peersTrie := trie.New[bit256.Key, peer.ID]()
+
+	// Test behavior when trie is empty
+	regions := ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	require.Nil(t, regions)
+	for i := range pids {
+		pid := genPeerWithPrefix(prefixes[i])
+		pids[i] = pid
+		peersTrie.Add(PeerIDToBit256(pid), pid)
+	}
+
+	regions = ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	require.Len(t, regions, 3)
+	require.Equal(t, bitstr.Key("00"), regions[0].Prefix)
+	require.Equal(t, bitstr.Key("01"), regions[1].Prefix)
+	require.Equal(t, bitstr.Key("1"), regions[2].Prefix)
+	require.Equal(t, 4, regions[0].Peers.Size())
+	require.Equal(t, 4, regions[1].Peers.Size())
+	require.Equal(t, 6, regions[2].Peers.Size())
+}
+
+func TestAssignKeysToRegions(t *testing.T) {
+	regions := []Region{
+		{Prefix: "0", Peers: nil, Keys: nil},
+		{Prefix: "1", Peers: nil, Keys: nil},
+	}
+
+	nKeys := 1 << 8
+	mhs := make([]mh.Multihash, nKeys)
+	for i, h := range genMultihashes(nKeys) {
+		mhs[i] = h
+	}
+
+	regions = AssignKeysToRegions(regions, mhs)
+	for _, r := range regions {
+		for _, h := range AllValues(r.Keys, bit256.ZeroKey()) {
+			k := MhToBit256(h)
+			require.True(t, IsPrefix(r.Prefix, k))
 		}
 	}
 }

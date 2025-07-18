@@ -10,49 +10,33 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
-// Region represents a subtrie of the complete DHT keyspace.
-//
-//   - Prefix is the identifier of the subtrie.
-//   - Peers contains all the network peers matching this region.
-//   - Keys contains all the keys provided by the local node matching this
-//     region.
-type Region struct {
-	Prefix bitstr.Key
-	Peers  *trie.Trie[bit256.Key, peer.ID]
-	Keys   *trie.Trie[bit256.Key, mh.Multihash]
+// AllEntries returns all entries (key + value) stored in the trie `t` sorted
+// by their keys in the supplied `order`.
+func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
+	return allEntriesAtDepth(t, order, 0)
 }
 
-// ExtractMinimalRegions returns the list of all non-overlapping subtries of
-// `t` having strictly more than `size` elements, sorted according to `order`.
-// Every element is included in exactly one region.
-func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
-	if t.IsEmptyLeaf() {
+func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []*trie.Entry[K0, D] {
+	if t == nil || t.IsEmptyLeaf() {
 		return nil
 	}
-	if t.Branch(0).Size() > size && t.Branch(1).Size() > size {
-		b := int(order.Bit(len(path)))
-		return append(ExtractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
-			ExtractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
+	if t.IsNonEmptyLeaf() {
+		return []*trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
 	}
-	return []Region{{Prefix: path, Peers: t}}
+	b := int(order.Bit(depth))
+	return append(allEntriesAtDepth(t.Branch(b), order, depth+1),
+		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
 }
 
-// AssignKeysToRegions assigns the provided keys to the regions based on their
-// kademlia identifier key.
-func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
-	for i := range regions {
-		regions[i].Keys = trie.New[bit256.Key, mh.Multihash]()
+// AllValues returns all values stored in the trie `t` sorted by their keys in
+// the supplied `order`.
+func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
+	entries := AllEntries(t, order)
+	out := make([]D, len(entries))
+	for i, entry := range entries {
+		out[i] = entry.Data
 	}
-	for _, k := range keys {
-		h := MhToBit256(k)
-		for i, r := range regions {
-			if IsPrefix(r.Prefix, h) {
-				regions[i].Keys.Add(h, k)
-				break
-			}
-		}
-	}
-	return regions
+	return out
 }
 
 // FindPrefixPrefixOfKey checks whether the trie contains a leave whose key is a
@@ -74,6 +58,25 @@ func findPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[
 	}
 	b := int(k.Bit(depth))
 	return findPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
+}
+
+// SubtrieMatchingPrefix returns the potential subtrie of `t` that matches the
+// prefix `k`, and true if there was a match and false otherwise.
+func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
+	if t.IsEmptyLeaf() {
+		return t, false
+	}
+	branch := t
+	for i := range k.BitLen() {
+		if branch.IsEmptyLeaf() {
+			return t, false
+		}
+		if branch.IsNonEmptyLeaf() {
+			return branch, key.CommonPrefixLength(*branch.Key(), k) == k.BitLen()
+		}
+		branch = branch.Branch(int(k.Bit(i)))
+	}
+	return branch, !branch.IsEmptyLeaf()
 }
 
 // NextNonEmptyLeaf returns the leaf following the provided key `k` in the trie
@@ -138,54 +141,10 @@ func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie
 	return nil
 }
 
-// AllValues returns all values stored in the trie `t` sorted by their keys in
-// the supplied `order`.
-func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
-	entries := AllEntries(t, order)
-	out := make([]D, len(entries))
-	for i, entry := range entries {
-		out[i] = entry.Data
-	}
-	return out
-}
-
-// AllEntries returns all entries (key + value) stored in the trie `t` sorted
-// by their keys in the supplied `order`.
-func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
-	return allEntriesAtDepth(t, order, 0)
-}
-
-func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []*trie.Entry[K0, D] {
-	if t == nil || t.IsEmptyLeaf() {
-		return nil
-	}
-	if t.IsNonEmptyLeaf() {
-		return []*trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
-	}
-	b := int(order.Bit(depth))
-	return append(allEntriesAtDepth(t.Branch(b), order, depth+1),
-		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
-}
-
-// SubtrieMatchingPrefix returns the potential subtrie of `t` that matches the
-// prefix `k`, and true if there was a match and false otherwise.
-func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
-	if t.IsEmptyLeaf() {
-		return t, false
-	}
-	branch := t
-	for i := range k.BitLen() {
-		if branch.IsEmptyLeaf() {
-			return t, false
-		}
-		if branch.IsNonEmptyLeaf() {
-			return branch, key.CommonPrefixLength(*branch.Key(), k) == k.BitLen()
-		}
-		branch = branch.Branch(int(k.Bit(i)))
-	}
-	return branch, !branch.IsEmptyLeaf()
-}
-
+// PruneSubtrie removes the subtrie at the given key `k` from the trie `t` if
+// it exists.
+//
+// All keys starting with the prefix `k` are purged from the trie.
 func PruneSubtrie[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) {
 	pruneSubtrieAtDepth(t, k, 0)
 }
@@ -337,4 +296,49 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		}
 	}
 	return m
+}
+
+// Region represents a subtrie of the complete DHT keyspace.
+//
+//   - Prefix is the identifier of the subtrie.
+//   - Peers contains all the network peers matching this region.
+//   - Keys contains all the keys provided by the local node matching this
+//     region.
+type Region struct {
+	Prefix bitstr.Key
+	Peers  *trie.Trie[bit256.Key, peer.ID]
+	Keys   *trie.Trie[bit256.Key, mh.Multihash]
+}
+
+// ExtractMinimalRegions returns the list of all non-overlapping subtries of
+// `t` having strictly more than `size` elements, sorted according to `order`.
+// Every element is included in exactly one region.
+func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
+	if t.IsEmptyLeaf() {
+		return nil
+	}
+	if t.Branch(0).Size() > size && t.Branch(1).Size() > size {
+		b := int(order.Bit(len(path)))
+		return append(ExtractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
+			ExtractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
+	}
+	return []Region{{Prefix: path, Peers: t}}
+}
+
+// AssignKeysToRegions assigns the provided keys to the regions based on their
+// kademlia identifier key.
+func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
+	for i := range regions {
+		regions[i].Keys = trie.New[bit256.Key, mh.Multihash]()
+	}
+	for _, k := range keys {
+		h := MhToBit256(k)
+		for i, r := range regions {
+			if IsPrefix(r.Prefix, h) {
+				regions[i].Keys.Add(h, k)
+				break
+			}
+		}
+	}
+	return regions
 }

@@ -3,6 +3,7 @@ package helpers
 import (
 	"crypto/rand"
 	"strconv"
+	"strings"
 	"testing"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -25,6 +26,18 @@ func TestFlipLastBit(t *testing.T) {
 	require.Equal(t, FlipLastBit("00000000"), bitstr.Key("00000001"))
 }
 
+func TestFirstFullKeyWithPrefix(t *testing.T) {
+	zeroKey := bitstr.Key(strings.Repeat("0", KeyLen))
+	oneKey := bitstr.Key(strings.Repeat("1", KeyLen))
+
+	require.Equal(t, zeroKey, FirstFullKeyWithPrefix(bitstr.Key(""), zeroKey))
+	require.Equal(t, zeroKey, FirstFullKeyWithPrefix(bitstr.Key("0"), zeroKey))
+	require.Equal(t, bitstr.Key("000"+strings.Repeat("1", KeyLen-3)), FirstFullKeyWithPrefix(bitstr.Key("000"), oneKey))
+	require.Equal(t, zeroKey, FirstFullKeyWithPrefix(zeroKey, zeroKey))
+	require.Equal(t, oneKey, FirstFullKeyWithPrefix(oneKey, zeroKey))
+	require.Equal(t, zeroKey, FirstFullKeyWithPrefix(zeroKey+"1", zeroKey))
+}
+
 func TestIsPrefix(t *testing.T) {
 	require.True(t, IsPrefix(bitstr.Key(""), bitstr.Key("")))
 	require.True(t, IsPrefix(bitstr.Key(""), bitstr.Key("1")))
@@ -39,6 +52,54 @@ func TestIsPrefix(t *testing.T) {
 	require.False(t, IsPrefix(bitstr.Key("1"), bitstr.Key("0")))
 	require.False(t, IsPrefix(bitstr.Key("0"), bitstr.Key("1")))
 	require.False(t, IsPrefix(bitstr.Key("00"), bitstr.Key("0")))
+}
+
+func TestKeyToBytes(t *testing.T) {
+	nKeys := 1 << 8
+	buf := make([]byte, 32)
+	for range nKeys {
+		if _, err := rand.Read(buf); err != nil {
+			t.Fatal(err)
+		}
+		b256 := bit256.NewKey(buf)
+		bstr := bitstr.Key(key.BitString(b256))
+		require.Equal(t, buf, KeyToBytes(b256))
+		require.Equal(t, buf, KeyToBytes(bstr))
+	}
+}
+
+func TestKeyToBytesPadding(t *testing.T) {
+	k := bitstr.Key("")
+	bs := KeyToBytes(k)
+	require.Equal(t, []byte{}, bs)
+
+	k = bitstr.Key("1")
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b10000000}, bs)
+
+	k = bitstr.Key("0")
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b00000000}, bs)
+
+	k = bitstr.Key("111111") // 6 ones
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b11111100}, bs)
+
+	k = bitstr.Key("00000000") // 8 zeros
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b00000000}, bs)
+
+	k = bitstr.Key("11111111") // 8 ones
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b11111111}, bs)
+
+	k = bitstr.Key("000000000") // 9 zeros
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b00000000, 0b00000000}, bs)
+
+	k = bitstr.Key("111111111") // 9 ones
+	bs = KeyToBytes(k)
+	require.Equal(t, []byte{0b11111111, 0b10000000}, bs)
 }
 
 func genRandPeerID(t *testing.T) peer.ID {
@@ -131,6 +192,12 @@ func TestShortestCoveredPrefix(t *testing.T) {
 		require.Len(t, coveredPeers, len(peers)-largestCplCount)
 		require.Equal(t, targetBitstr[:minCpl+1], prefix)
 	}
+
+	// Test without supplying peers
+	bstrTarget := bitstr.Key("110101111")
+	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget, nil)
+	require.Equal(t, bstrTarget, prefix)
+	require.Empty(t, coveredPeers)
 }
 
 func TestIsBitstrPrefix(t *testing.T) {

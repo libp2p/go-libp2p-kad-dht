@@ -136,14 +136,11 @@ type SweepingProvider struct {
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
 
-	provideQueue *queue.ProvideQueue
-	// provideRunning sync.Mutex
+	provideQueue   *queue.ProvideQueue
+	provideRunning sync.Mutex
 
 	failedRegionsChan  chan bitstr.Key
 	lateRegionsQueue   []bitstr.Key
-	pendingKeys        []mh.Multihash
-	pendingKeysChan    chan []mh.Multihash
-	catchupInProgress  atomic.Bool
 	catchupPendingChan chan struct{}
 
 	prefixCursor        bitstr.Key
@@ -216,7 +213,6 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		scheduleTimer: cfg.clock.Timer(time.Hour),
 
 		failedRegionsChan:  make(chan bitstr.Key, 1),
-		pendingKeysChan:    make(chan []mh.Multihash),
 		catchupPendingChan: make(chan struct{}, 1),
 
 		provideQueue: queue.New(),
@@ -271,9 +267,6 @@ func (s *SweepingProvider) run() {
 				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 			}
 			s.connectivity.TriggerCheck(context.Background())
-		case keys := <-s.pendingKeysChan:
-			s.pendingKeys = append(s.pendingKeys, keys...)
-			s.connectivity.TriggerCheck(context.Background())
 		case <-retryTicker.C:
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
@@ -285,6 +278,15 @@ func (s *SweepingProvider) run() {
 // Close stops the provider and releases all resources.
 func (s *SweepingProvider) Close() {
 	s.closeOnce.Do(func() { close(s.done) })
+}
+
+func (s *SweepingProvider) closed() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
 }
 
 const initialGetClosestPeers = 4
@@ -391,21 +393,14 @@ func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
 		return
 	}
 
-	if !s.connectivity.IsOnline() {
-		logger.Warn("Node is offline, cannot provide requested keys.")
-		if provideRequest.reprovide {
-			s.pendingKeys = append(s.pendingKeys, keys...)
-		}
-		return
+	// Sort prefixes by number of keys.
+	sortedPrefixesAndKeys := helpers.SortPrefixesBySize(prefixes)
+	// Add keys to the provide queue.
+	for _, prefixAndKeys := range sortedPrefixesAndKeys {
+		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
 	}
 
-	logger.Debugf("Providing %d new keys with %d different prefixes", len(keys), len(prefixes))
-	go func() {
-		err := s.networkProvide(prefixes, provideRequest.reprovide)
-		if err != nil {
-			logger.Error(err)
-		}
-	}()
+	go s.provideLoop()
 }
 
 func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
@@ -474,91 +469,125 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 	return prefixes
 }
 
-func (s *SweepingProvider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash, retryOnFailure bool) error {
-	if len(prefixes) == 1 {
-		for prefix, keys := range prefixes {
-			// Provide a single key (NOT ProvideMany)
-			if len(keys) == 1 {
-				return s.provideForPrefix(prefix, keys, retryOnFailure)
-			}
+func (s *SweepingProvider) provideLoop() {
+	if !s.provideRunning.TryLock() {
+		// Ensure that only one goroutine is running the provide loop at a time.
+		return
+	}
+	defer s.provideRunning.Unlock()
+
+	for !s.provideQueue.IsEmpty() {
+		if s.closed() {
+			// Exit loop if provider is closed.
+			return
 		}
-	}
-
-	sortedPrefixes := helpers.SortPrefixesBySize(prefixes)
-
-	// Atomic flag: 0 = no keys successfully provided yet, 1 = at least one
-	// success
-	var anySuccess uint32
-	wg := sync.WaitGroup{}
-
-	onlineTicker := s.clock.Ticker(5 * time.Second)
-	defer onlineTicker.Stop()
-
-	cancelWorkers := atomic.Bool{}
-	workerAcquiredChan := make(chan struct{}, 1)
-	acquireWorkerAsync := func() {
-		if err := s.workerPool.Acquire(burstWorker); err == nil {
-			if cancelWorkers.Load() {
-				s.workerPool.Release(burstWorker)
-			} else {
-				workerAcquiredChan <- struct{}{}
-			}
+		if !s.connectivity.IsOnline() {
+			// Don't try to provide if not is offline.
+			return
 		}
-	}
-
-	i := 0
-	go acquireWorkerAsync()
-workerLoop:
-	for {
-		select {
-		case <-workerAcquiredChan:
-			wg.Add(1)
-			go func(p helpers.PrefixAndKeys, i int) {
-				defer wg.Done()
-				defer s.workerPool.Release(burstWorker)
-
-				if err := s.provideForPrefix(p.Prefix, p.Keys, retryOnFailure); err != nil {
-					logger.Error(err)
-				} else {
-					// Track if we were able to provide at least one key.
-					atomic.StoreUint32(&anySuccess, 1)
-				}
-			}(sortedPrefixes[i], i)
-			i++
-			if i == len(sortedPrefixes) {
-				break workerLoop
-			}
-			// Try to acquire a worker for the next prefix.
-			go acquireWorkerAsync()
-		case <-onlineTicker.C:
-			if !s.connectivity.IsOnline() {
-				cancelWorkers.Store(true)
-				break workerLoop
-			}
-		case <-s.done:
-			// TODO: save pending keys to disk to exit gracefully
-			cancelWorkers.Store(true)
-			break workerLoop
+		// Block until we can acquire a worker from the pool.
+		err := s.workerPool.Acquire(burstWorker)
+		if err != nil {
+			// Provider was closed while waiting for a worker.
+			return
 		}
-	}
+		go func() {
+			defer s.workerPool.Release(burstWorker)
 
-	if i != len(sortedPrefixes) {
-		// Add keys that haven't been provided yet to the pending queue.
-		keys := make([]mh.Multihash, 0)
-		for _, prefix := range sortedPrefixes[i:] {
-			keys = append(keys, prefix.Keys...)
-		}
-		s.pendingKeysChan <- keys
-	} else {
-		// Wait for workers to finish before reporting completion.
-		wg.Wait()
+			prefix, keys := s.provideQueue.Dequeue()
+			err := s.provideForPrefix(prefix, keys)
+			if err != nil {
+				logger.Error(err)
+			}
+		}()
 	}
-
-	if atomic.LoadUint32(&anySuccess) == 0 {
-		return ErrNoKeyProvided
-	}
-	return nil
 }
+
+// func (s *SweepingProvider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash, retryOnFailure bool) error {
+// 	if len(prefixes) == 1 {
+// 		for prefix, keys := range prefixes {
+// 			// Provide a single key (NOT ProvideMany)
+// 			if len(keys) == 1 {
+// 				return s.provideForPrefix(prefix, keys, retryOnFailure)
+// 			}
+// 		}
+// 	}
+//
+// 	sortedPrefixes := helpers.SortPrefixesBySize(prefixes)
+//
+// 	// Atomic flag: 0 = no keys successfully provided yet, 1 = at least one
+// 	// success
+// 	var anySuccess uint32
+// 	wg := sync.WaitGroup{}
+//
+// 	onlineTicker := s.clock.Ticker(5 * time.Second)
+// 	defer onlineTicker.Stop()
+//
+// 	cancelWorkers := atomic.Bool{}
+// 	workerAcquiredChan := make(chan struct{}, 1)
+// 	acquireWorkerAsync := func() {
+// 		if err := s.workerPool.Acquire(burstWorker); err == nil {
+// 			if cancelWorkers.Load() {
+// 				s.workerPool.Release(burstWorker)
+// 			} else {
+// 				workerAcquiredChan <- struct{}{}
+// 			}
+// 		}
+// 	}
+//
+// 	i := 0
+// 	go acquireWorkerAsync()
+// workerLoop:
+// 	for {
+// 		select {
+// 		case <-workerAcquiredChan:
+// 			wg.Add(1)
+// 			go func(p helpers.PrefixAndKeys, i int) {
+// 				defer wg.Done()
+// 				defer s.workerPool.Release(burstWorker)
+//
+// 				if err := s.provideForPrefix(p.Prefix, p.Keys, retryOnFailure); err != nil {
+// 					logger.Error(err)
+// 				} else {
+// 					// Track if we were able to provide at least one key.
+// 					atomic.StoreUint32(&anySuccess, 1)
+// 				}
+// 			}(sortedPrefixes[i], i)
+// 			i++
+// 			if i == len(sortedPrefixes) {
+// 				break workerLoop
+// 			}
+// 			// Try to acquire a worker for the next prefix.
+// 			go acquireWorkerAsync()
+// 		case <-onlineTicker.C:
+// 			if !s.connectivity.IsOnline() {
+// 				cancelWorkers.Store(true)
+// 				break workerLoop
+// 			}
+// 		case <-s.done:
+// 			// TODO: save pending keys to disk to exit gracefully
+// 			cancelWorkers.Store(true)
+// 			break workerLoop
+// 		}
+// 	}
+//
+// 	if i != len(sortedPrefixes) {
+// 		// Add keys that haven't been provided yet to the pending queue.
+// 		keys := make([]mh.Multihash, 0)
+// 		for _, prefix := range sortedPrefixes[i:] {
+// 			keys = append(keys, prefix.Keys...)
+// 		}
+// 		s.pendingKeysChan <- keys
+// 	} else {
+// 		// Wait for workers to finish before reporting completion.
+// 		wg.Wait()
+// 	}
+//
+// 	if atomic.LoadUint32(&anySuccess) == 0 {
+// 		return ErrNoKeyProvided
+// 	}
+// 	return nil
+// }
 
 func (s *SweepingProvider) handleReprovide() {
 	online := s.connectivity.IsOnline()
@@ -765,7 +794,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	return nil
 }
 
-func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash, retryOnFailure bool) error {
+func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -782,24 +811,25 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	logger.Debugf("Starting to explore prefix %s for %d matching keys", prefix, len(keys))
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
-		if retryOnFailure {
-			s.pendingKeysChan <- keys
-		}
+		s.connectivity.TriggerCheck(context.Background())
+		// Put keys back to the provide queue.
+		s.provideQueue.Enqueue(prefix, keys...)
 		if err == errTooManyIterationsDuringExploration {
-			logger.Errorf("prefix key exploration not complete: %s", prefix)
+			err = fmt.Errorf("%w for '%s'", err, prefix)
 		}
 		return err
 	}
 	if len(peers) == 0 {
-		if retryOnFailure {
-			s.pendingKeysChan <- keys
-		}
+		s.connectivity.TriggerCheck(context.Background())
+		// Put keys back to the provide queue.
+		s.provideQueue.Enqueue(prefix, keys...)
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
 
-	regions, _ := s.regionsFromPeers(peers)
-	// TODO: it would be great to take all keys matching coveredPrefix from
-	// pendingKeys pool.
+	regions, coveredPrefix := s.regionsFromPeers(peers)
+
+	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
+	keys = append(keys, extraKeys...)
 	regions = helpers.AssignKeysToRegions(regions, keys)
 
 	errCount := 0
@@ -810,17 +840,17 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 			continue
 		}
 		// Add keys to local provider store
-		for _, entry := range helpers.AllEntries(r.Keys, s.order) {
-			s.addLocalRecord(entry.Data)
+		for _, h := range helpers.AllValues(r.Keys, s.order) {
+			s.addLocalRecord(h)
 		}
 		keysAllocations := helpers.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
 		err := s.sendProviderRecords(keysAllocations, addrInfo)
 		if err != nil {
 			logger.Warn(err, ": region ", r.Prefix)
 			errCount++
-			if retryOnFailure {
-				s.pendingKeysChan <- helpers.AllValues(r.Keys, s.order)
-			}
+			s.connectivity.TriggerCheck(context.Background())
+			// Put keys back to the provide queue.
+			s.provideQueue.Enqueue(r.Prefix, helpers.AllValues(r.Keys, s.order)...)
 			continue
 		}
 		s.provideCounter.Add(context.Background(), int64(nKeys))
@@ -842,7 +872,8 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 	if len(keys) == 1 {
 		coveredPrefix, err := s.vanillaProvide(ctx, keys[0])
 		if err != nil && !reprovide {
-			s.pendingKeysChan <- keys
+			s.connectivity.TriggerCheck(context.Background())
+			s.provideQueue.Enqueue(prefix, keys...)
 		}
 		provideErr = err
 		if periodicReprovide {
@@ -860,7 +891,8 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 					success.Store(true)
 				} else if !reprovide {
 					// Individual provide failed
-					s.pendingKeysChan <- []mh.Multihash{key}
+					s.connectivity.TriggerCheck(context.Background())
+					s.provideQueue.Enqueue(prefix, key)
 				}
 			}()
 		}
@@ -1280,35 +1312,12 @@ func (s *SweepingProvider) catchupPendingNotify() {
 }
 
 func (s *SweepingProvider) catchupPendingWork() {
-	if s.catchupInProgress.Load() {
-		// Another catchup is already in process, skip and we'll try again later.
-		return
-	}
-	pendingKeys := s.pendingKeys
 	lateRegions := s.lateRegionsQueue
-	if len(pendingKeys) == 0 && len(lateRegions) == 0 {
-		// No pending work :)
-		return
-	}
-	// Empty pending lists
-	s.pendingKeys = s.pendingKeys[:0]
+	// Empty pending list
 	s.lateRegionsQueue = s.lateRegionsQueue[:0]
 
-	// 1. Iterate on keys, and remove those matching any prefix in the
-	//    lateRegions (they will be provided as part of the region)
-	lateRegionsTrie := trie.New[bitstr.Key, mh.Multihash]()
-	for _, r := range lateRegions {
-		lateRegionsTrie.Add(r, nil)
-	}
-	keysInNoRegions := []mh.Multihash{}
-	for _, c := range pendingKeys {
-		if _, ok := helpers.FindPrefixOfKey(lateRegionsTrie, helpers.MhToBit256(c)); !ok {
-			keysInNoRegions = append(keysInNoRegions, c)
-		}
-	}
-
 	go func() {
-		// 2. Iterate on lateRegions, and reprovide them
+		// Iterate on lateRegions, and reprovide them
 		for _, r := range lateRegions {
 			s.workerPool.Acquire(burstWorker)
 			go func() {
@@ -1320,9 +1329,8 @@ func (s *SweepingProvider) catchupPendingWork() {
 			}()
 		}
 
-		// 3. Provide the remaining keys that haven't been provided yet as part of
-		//    a late region.
-		s.networkProvide(s.groupAndScheduleKeysByPrefix(keysInNoRegions, false), true)
+		// Restart provide loop if it was stopped.
+		go s.provideLoop()
 	}()
 }
 

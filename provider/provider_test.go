@@ -16,6 +16,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -150,20 +151,32 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		},
 	}
 	mockClock := clock.NewMock()
+	connCheker, err := connectivity.New(func(ctx context.Context) bool { return true }, func() {})
+	require.NoError(t, err)
 	r := SweepingProvider{
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
-		pendingKeysChan:   make(chan []mh.Multihash, 1),
+		provideQueue:      queue.New(),
+		connectivity:      connCheker,
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:     mockClock.Timer(time.Hour),
 		getSelfAddrs:      func() []ma.Multiaddr { return nil },
 		addLocalRecord:    func(mh mh.Multihash) error { return nil },
 	}
+	// r, err := NewProvider(ctx,
+	// 	WithRouter(router),
+	// 	WithClock(mockClock),
+	// 	WithReprovideInterval(time.Hour),
+	// 	WithPeerID(genRandPeerID(t)),
+	// 	WithMessageSender(m pb.MessageSender)
+	// )
+	// require.NoError(t, err)
+	// defer r.Close()
 
 	// Providing no cids returns no error
-	err := r.individualProvideForPrefix(ctx, prefix, nil, false, false)
+	err = r.individualProvideForPrefix(ctx, prefix, nil, false, false)
 	require.NoError(t, err)
 
 	// Providing a single cid - success
@@ -176,7 +189,8 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
 	require.Error(t, err)
-	require.Equal(t, []mh.Multihash{k}, <-r.pendingKeysChan)
+	_, mhs := r.provideQueue.Dequeue()
+	require.Equal(t, []mh.Multihash{k}, mhs)
 
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, true, true)
 	require.Error(t, err)
@@ -190,18 +204,21 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	for i := range ks {
 		ks[i] = cids[i].Hash()
 	}
-	prefix := bitstr.Key("10111011")
+	prefix := bitstr.Key("")
 	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			return nil, nil
 		},
 	}
 	mockClock := clock.NewMock()
+	connCheker, err := connectivity.New(func(ctx context.Context) bool { return true }, func() {})
+	require.NoError(t, err)
 	r := SweepingProvider{
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
-		pendingKeysChan:   make(chan []mh.Multihash, len(ks)),
+		provideQueue:      queue.New(),
+		connectivity:      connCheker,
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:     mockClock.Timer(time.Hour),
@@ -210,7 +227,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	}
 
 	// Providing two cids - 2 successes
-	err := r.individualProvideForPrefix(ctx, prefix, ks, false, false)
+	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
 
 	// Providing two cids - 2 failures
@@ -219,10 +236,13 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.Error(t, err)
-	pendingCids := append(<-r.pendingKeysChan, <-r.pendingKeysChan...)
-	require.Len(t, pendingCids, len(ks))
-	require.Contains(t, pendingCids, ks[0])
-	require.Contains(t, pendingCids, ks[1])
+	require.Equal(t, len(ks), r.provideQueue.Size())
+	pendingCids := []mh.Multihash{}
+	for !r.provideQueue.IsEmpty() {
+		_, cids := r.provideQueue.Dequeue()
+		pendingCids = append(pendingCids, cids...)
+	}
+	require.ElementsMatch(t, pendingCids, ks)
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.Error(t, err)
@@ -243,15 +263,15 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
-	require.Len(t, r.pendingKeysChan, 1)
-	pendingCids = <-r.pendingKeysChan
+	require.Equal(t, 1, r.provideQueue.Size())
+	_, pendingCids = r.provideQueue.Dequeue()
 	require.Len(t, pendingCids, 1)
 	require.Contains(t, ks, pendingCids[0])
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.NoError(t, err)
 	require.Len(t, r.failedRegionsChan, 0)
-	require.Len(t, r.pendingKeysChan, 0)
+	require.True(t, r.provideQueue.IsEmpty())
 }
 
 func genRandPeerID(t *testing.T) peer.ID {

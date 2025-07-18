@@ -188,8 +188,8 @@ func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
 	}
 }
 
-// Empty returns true if the queue is empty.
-func (q *ProvideQueue) Empty() bool {
+// IsEmpty returns true if the queue is empty.
+func (q *ProvideQueue) IsEmpty() bool {
 	q.lk.Lock()
 	defer q.lk.Unlock()
 	return q.queue.Len() == 0

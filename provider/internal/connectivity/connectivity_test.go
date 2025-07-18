@@ -1,7 +1,6 @@
 package connectivity
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,12 +24,9 @@ func eventually(t *testing.T, fn func() bool) {
 //  1. If the last check was too recent, triggerCheck must return early and never
 //     call checkFunc.
 func TestTriggerCheck_SkipsWhenRecent(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	var called int32
 	c, err := New(
-		func(ctx context.Context) bool { atomic.AddInt32(&called, 1); return true },
+		func() bool { atomic.AddInt32(&called, 1); return true },
 		func() {},
 		WithClock(clock.NewMock()),
 		WithOnlineCheckInterval(time.Minute),
@@ -43,9 +39,9 @@ func TestTriggerCheck_SkipsWhenRecent(t *testing.T) {
 
 	c.online.Store(true)
 
-	c.TriggerCheck(ctx) // should perform the check
+	c.TriggerCheck() // should perform the check
 	time.Sleep(5 * time.Millisecond)
-	c.TriggerCheck(ctx) // should return early
+	c.TriggerCheck() // should return early
 
 	// Give the goroutine a chance to run.
 	time.Sleep(5 * time.Millisecond)
@@ -60,12 +56,10 @@ func TestTriggerCheck_SkipsWhenRecent(t *testing.T) {
 //     – NOT fire backOnlineNotify.
 func TestTriggerCheck_OnlineFastPath(t *testing.T) {
 	mockClk := clock.NewMock()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var calls, notified int32
 	c, err := New(
-		func(context.Context) bool { atomic.AddInt32(&calls, 1); return true },
+		func() bool { atomic.AddInt32(&calls, 1); return true },
 		func() { atomic.AddInt32(&notified, 1) },
 		WithClock(mockClk),
 		WithOnlineCheckInterval(time.Minute),
@@ -77,7 +71,7 @@ func TestTriggerCheck_OnlineFastPath(t *testing.T) {
 	defer c.Close()                                   // ensure cleanup
 	c.lastCheck = mockClk.Now().Add(-2 * time.Minute) // new check can be triggered
 
-	c.TriggerCheck(ctx)
+	c.TriggerCheck()
 	eventually(t, func() bool { return atomic.LoadInt32(&calls) == 1 })
 
 	if !c.IsOnline() {
@@ -95,16 +89,13 @@ func TestTriggerCheck_OnlineFastPath(t *testing.T) {
 //     – invoke backOnlineNotify exactly once and then stop.
 func TestTriggerCheck_OfflineRecovery(t *testing.T) {
 	mockClk := clock.NewMock()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	var online atomic.Bool // represents real connectivity
 	var notified int32
 	done := make(chan struct{})
 
 	online.Store(false) // start offline
 	c, err := New(
-		func(context.Context) bool { return online.Load() },
+		func() bool { return online.Load() },
 		func() { atomic.AddInt32(&notified, 1); close(done) },
 		WithClock(mockClk),
 		WithOnlineCheckInterval(time.Minute),
@@ -115,7 +106,7 @@ func TestTriggerCheck_OfflineRecovery(t *testing.T) {
 	}
 	defer c.Close()                                   // ensure cleanup
 	c.lastCheck = mockClk.Now().Add(-2 * time.Minute) // new check can be triggered
-	c.TriggerCheck(ctx)                               // launches goroutine
+	c.TriggerCheck()                                  // launches goroutine
 
 	// First offline tick (still disconnected).
 	time.Sleep(1 * time.Millisecond)
@@ -151,17 +142,13 @@ func TestTriggerCheck_OfflineRecovery(t *testing.T) {
 //  4. Check whether the ConnectivityChecker adapts when the node goes offline
 //     and online again
 func TestOnlineOffline(t *testing.T) {
-	ctx := context.Background()
 	online := atomic.Bool{}
 	checkFuncCalled := atomic.Bool{}
 	mockClock := clock.NewMock()
 	checkInterval := time.Minute
 	notified := make(chan struct{}, 1)
 	c, err := New(
-		func(context.Context) bool {
-			checkFuncCalled.Store(true)
-			return online.Load()
-		},
+		func() bool { checkFuncCalled.Store(true); return online.Load() },
 		func() { notified <- struct{}{} },
 		WithClock(mockClock),
 		WithOnlineCheckInterval(checkInterval),
@@ -183,7 +170,7 @@ func TestOnlineOffline(t *testing.T) {
 
 	// online -> online
 	online.Store(true) // node starts online
-	c.TriggerCheck(ctx)
+	c.TriggerCheck()
 	eventually(t, checked)
 	eventually(t, nodeOnline)
 	if len(notified) != 0 {
@@ -195,7 +182,7 @@ func TestOnlineOffline(t *testing.T) {
 	mockClock.Add(checkInterval)
 	online.Store(false) // simulate going offline
 
-	c.TriggerCheck(ctx)
+	c.TriggerCheck()
 	eventually(t, checked)
 	eventually(t, nodeOffline)
 	if len(notified) != 0 {

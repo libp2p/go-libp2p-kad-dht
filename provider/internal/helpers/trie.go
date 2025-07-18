@@ -39,7 +39,7 @@ func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 	return out
 }
 
-// FindPrefixPrefixOfKey checks whether the trie contains a leave whose key is a
+// FindPrefixOfKey checks whether the trie contains a leave whose key is a
 // prefix or exact match of `k`.
 //
 // If there is a match, the function returns the matching key and true.

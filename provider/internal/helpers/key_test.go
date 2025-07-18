@@ -26,19 +26,19 @@ func TestFlipLastBit(t *testing.T) {
 }
 
 func TestIsPrefix(t *testing.T) {
-	require.True(t, isPrefix(bitstr.Key(""), bitstr.Key("")))
-	require.True(t, isPrefix(bitstr.Key(""), bitstr.Key("1")))
-	require.True(t, isPrefix(bitstr.Key("0"), bitstr.Key("0")))
-	require.True(t, isPrefix(bitstr.Key("0"), bitstr.Key("01")))
-	require.True(t, isPrefix(bitstr.Key("1"), bitstr.Key("11")))
-	require.True(t, isPrefix(bitstr.Key("0"), bitstr.Key("00000000")))
-	require.True(t, isPrefix(bitstr.Key("0101010"), bitstr.Key("01010100")))
-	require.True(t, isPrefix(bitstr.Key("0101010"), bitstr.Key("01010101")))
+	require.True(t, IsPrefix(bitstr.Key(""), bitstr.Key("")))
+	require.True(t, IsPrefix(bitstr.Key(""), bitstr.Key("1")))
+	require.True(t, IsPrefix(bitstr.Key("0"), bitstr.Key("0")))
+	require.True(t, IsPrefix(bitstr.Key("0"), bitstr.Key("01")))
+	require.True(t, IsPrefix(bitstr.Key("1"), bitstr.Key("11")))
+	require.True(t, IsPrefix(bitstr.Key("0"), bitstr.Key("00000000")))
+	require.True(t, IsPrefix(bitstr.Key("0101010"), bitstr.Key("01010100")))
+	require.True(t, IsPrefix(bitstr.Key("0101010"), bitstr.Key("01010101")))
 
-	require.False(t, isPrefix(bitstr.Key("1"), bitstr.Key("")))
-	require.False(t, isPrefix(bitstr.Key("1"), bitstr.Key("0")))
-	require.False(t, isPrefix(bitstr.Key("0"), bitstr.Key("1")))
-	require.False(t, isPrefix(bitstr.Key("00"), bitstr.Key("0")))
+	require.False(t, IsPrefix(bitstr.Key("1"), bitstr.Key("")))
+	require.False(t, IsPrefix(bitstr.Key("1"), bitstr.Key("0")))
+	require.False(t, IsPrefix(bitstr.Key("0"), bitstr.Key("1")))
+	require.False(t, IsPrefix(bitstr.Key("00"), bitstr.Key("0")))
 }
 
 func genRandPeerID(t *testing.T) peer.ID {

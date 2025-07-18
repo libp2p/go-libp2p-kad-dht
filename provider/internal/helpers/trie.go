@@ -46,7 +46,7 @@ func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
 	for _, k := range keys {
 		h := MhToBit256(k)
 		for i, r := range regions {
-			if isPrefix(r.Prefix, h) {
+			if IsPrefix(r.Prefix, h) {
 				regions[i].Keys.Add(h, k)
 				break
 			}
@@ -192,7 +192,7 @@ func PruneSubtrie[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k 
 
 func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) bool {
 	if t.IsLeaf() {
-		if t.HasKey() && isPrefix(k, *t.Key()) {
+		if t.HasKey() && IsPrefix(k, *t.Key()) {
 			*t = trie.Trie[K0, D]{}
 			return true
 		}

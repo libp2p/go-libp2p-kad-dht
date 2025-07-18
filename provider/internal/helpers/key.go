@@ -55,8 +55,8 @@ func IsBitstrPrefix(k0 bitstr.Key, k1 bitstr.Key) bool {
 	return len(k0) <= len(k1) && k0 == k1[:len(k0)]
 }
 
-// isPrefix returns true if k0 is a prefix of k1
-func isPrefix[K0 kad.Key[K0], K1 kad.Key[K1]](k0 K0, k1 K1) bool {
+// IsPrefix returns true if k0 is a prefix of k1
+func IsPrefix[K0 kad.Key[K0], K1 kad.Key[K1]](k0 K0, k1 K1) bool {
 	if k0.BitLen() > k1.BitLen() {
 		return false
 	}

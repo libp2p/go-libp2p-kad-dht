@@ -32,7 +32,7 @@ func TestAssignKeysToRegions(t *testing.T) {
 	for _, r := range regions {
 		for _, h := range AllValues(r.Keys, bit256.ZeroKey()) {
 			k := MhToBit256(h)
-			require.True(t, isPrefix(r.Prefix, k))
+			require.True(t, IsPrefix(r.Prefix, k))
 		}
 	}
 }

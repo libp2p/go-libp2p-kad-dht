@@ -6,7 +6,6 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
 	mh "github.com/multiformats/go-multihash"
-	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 	"github.com/stretchr/testify/require"
@@ -24,7 +23,7 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 			panic(err)
 		}
 		k := helpers.MhToBit256(h)
-		if helpers.IsBitstrPrefix(prefix, bitstr.Key(key.BitString(k))) {
+		if helpers.IsPrefix(prefix, k) {
 			mhs = append(mhs, h)
 		}
 	}

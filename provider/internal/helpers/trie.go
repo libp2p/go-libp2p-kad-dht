@@ -144,3 +144,34 @@ func nextNonEmptyLeafAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie
 	// Next leaf not found, signal it to parent by returning an empty entry.
 	return nil
 }
+
+// PruneSubtrie removes the subtrie at the given key `k` from the trie `t` if
+// it exists.
+//
+// All keys starting with the prefix `k` are purged from the trie.
+func PruneSubtrie[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) {
+	pruneSubtrieAtDepth(t, k, 0)
+}
+
+func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) bool {
+	if t.IsLeaf() {
+		if t.HasKey() && IsPrefix(k, *t.Key()) {
+			*t = trie.Trie[K0, D]{}
+			return true
+		}
+		return false
+	}
+
+	// Not a leaf, continue pruning branches.
+	if depth == k.BitLen() {
+		*t = trie.Trie[K0, D]{}
+		return true
+	}
+
+	pruned := pruneSubtrieAtDepth(t.Branch(int(k.Bit(depth))), k, depth+1)
+	if pruned && t.Branch(1-int(k.Bit(depth))).IsEmptyLeaf() {
+		*t = trie.Trie[K0, D]{}
+		return true
+	}
+	return false
+}

@@ -351,3 +351,64 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 		tr.Remove(k)
 	}
 }
+
+func TestPruneSubtrie(t *testing.T) {
+	tr := trie.New[bitstr.Key, struct{}]()
+
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+
+	resetTrie := func() {
+		*tr = trie.Trie[bitstr.Key, struct{}]{}
+		for _, k := range keys {
+			tr.Add(k, struct{}{})
+		}
+		require.Equal(t, len(keys), tr.Size())
+	}
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key(""))
+	require.Equal(t, 0, tr.Size())
+	require.True(t, tr.IsEmptyLeaf())
+	require.Nil(t, tr.Key())
+	require.Nil(t, tr.Branch(0))
+	require.Nil(t, tr.Branch(1))
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("0"))
+	require.Equal(t, 3, tr.Size())
+	require.True(t, tr.Branch(0).IsEmptyLeaf())
+	require.False(t, tr.Branch(1).IsLeaf())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("00"))
+	require.Equal(t, 5, tr.Size())
+	require.True(t, tr.Branch(0).Branch(0).IsEmptyLeaf())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("0000"))
+	require.Equal(t, 7, tr.Size())
+
+	keys = []bitstr.Key{
+		"0000",
+		"0001",
+		"1000",
+	}
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("11"))
+	require.Equal(t, 3, tr.Size())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("000"))
+	require.Equal(t, 1, tr.Size())
+	require.True(t, tr.Branch(0).IsEmptyLeaf())
+}

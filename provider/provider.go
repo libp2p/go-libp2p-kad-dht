@@ -225,8 +225,8 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 	prov.scheduleTimer.Stop()
 
 	prov.connectivity, err = connectivity.New(
-		func(ctx context.Context) bool {
-			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
+		func() bool {
+			peers, err := cfg.router.GetClosestPeers(context.Background(), string(cfg.peerid))
 			return err == nil && len(peers) > 0
 		},
 		prov.catchupPendingNotify,
@@ -266,7 +266,7 @@ func (s *SweepingProvider) run() {
 			if !slices.Contains(s.lateRegionsQueue, prefix) {
 				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
 			}
-			s.connectivity.TriggerCheck(context.Background())
+			s.connectivity.TriggerCheck()
 		case <-retryTicker.C:
 			s.catchupPendingNotify()
 		case <-s.catchupPendingChan:
@@ -639,7 +639,7 @@ func (s *SweepingProvider) handleReprovide() {
 			// failed regions.
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilNextReprovide)
 			s.scheduleLk.Unlock()
-			s.connectivity.TriggerCheck(context.Background())
+			s.connectivity.TriggerCheck()
 			return
 		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
@@ -656,7 +656,7 @@ func (s *SweepingProvider) handleReprovide() {
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
 			}
-			s.connectivity.TriggerCheck(context.Background())
+			s.connectivity.TriggerCheck()
 			if count == scheduleSize {
 				// No reprovides are scheduled in the future, return here.
 				s.scheduleLk.Unlock()
@@ -811,7 +811,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	logger.Debugf("Starting to explore prefix %s for %d matching keys", prefix, len(keys))
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
-		s.connectivity.TriggerCheck(context.Background())
+		s.connectivity.TriggerCheck()
 		// Put keys back to the provide queue.
 		s.provideQueue.Enqueue(prefix, keys...)
 		if err == errTooManyIterationsDuringExploration {
@@ -820,7 +820,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 		return err
 	}
 	if len(peers) == 0 {
-		s.connectivity.TriggerCheck(context.Background())
+		s.connectivity.TriggerCheck()
 		// Put keys back to the provide queue.
 		s.provideQueue.Enqueue(prefix, keys...)
 		return errors.New("no peers found when exploring prefix " + string(prefix))
@@ -848,7 +848,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 		if err != nil {
 			logger.Warn(err, ": region ", r.Prefix)
 			errCount++
-			s.connectivity.TriggerCheck(context.Background())
+			s.connectivity.TriggerCheck()
 			// Put keys back to the provide queue.
 			s.provideQueue.Enqueue(r.Prefix, helpers.AllValues(r.Keys, s.order)...)
 			continue
@@ -872,7 +872,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 	if len(keys) == 1 {
 		coveredPrefix, err := s.vanillaProvide(ctx, keys[0])
 		if err != nil && !reprovide {
-			s.connectivity.TriggerCheck(context.Background())
+			s.connectivity.TriggerCheck()
 			s.provideQueue.Enqueue(prefix, keys...)
 		}
 		provideErr = err
@@ -891,7 +891,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 					success.Store(true)
 				} else if !reprovide {
 					// Individual provide failed
-					s.connectivity.TriggerCheck(context.Background())
+					s.connectivity.TriggerCheck()
 					s.provideQueue.Enqueue(prefix, key)
 				}
 			}()

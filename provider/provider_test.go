@@ -151,7 +151,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		},
 	}
 	mockClock := clock.NewMock()
-	connCheker, err := connectivity.New(func(ctx context.Context) bool { return true }, func() {})
+	connCheker, err := connectivity.New(func() bool { return true }, func() {})
 	require.NoError(t, err)
 	r := SweepingProvider{
 		router:            router,
@@ -211,7 +211,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		},
 	}
 	mockClock := clock.NewMock()
-	connCheker, err := connectivity.New(func(ctx context.Context) bool { return true }, func() {})
+	connCheker, err := connectivity.New(func() bool { return true }, func() {})
 	require.NoError(t, err)
 	r := SweepingProvider{
 		router:            router,
@@ -300,7 +300,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		},
 	}
 
-	connChecker, err := connectivity.New(func(ctx context.Context) bool { return true }, func() {})
+	connChecker, err := connectivity.New(func() bool { return true }, func() {})
 	require.NoError(t, err)
 	defer connChecker.Close()
 	r := SweepingProvider{
@@ -438,7 +438,7 @@ func TestProvideNoBootstrap(t *testing.T) {
 
 	// Set the reprovider as offline
 	online.Store(false)
-	reprovider.connectivity.TriggerCheck(ctx)
+	reprovider.connectivity.TriggerCheck()
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	reprovider.ProvideOnce(c.Hash())
 	// TODO: require.ErrorIs(t, ErrNodeOffline, err)

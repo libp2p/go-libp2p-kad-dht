@@ -60,9 +60,9 @@ func findPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[
 	return findPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
 }
 
-// SubtrieMatchingPrefix returns the potential subtrie of `t` that matches the
-// prefix `k`, and true if there was a match and false otherwise.
-func SubtrieMatchingPrefix[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
+// FindSubtrie returns the potential subtrie of `t` that matches the prefix
+// `k`, and true if there was a match and false otherwise.
+func FindSubtrie[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (*trie.Trie[K0, D], bool) {
 	if t.IsEmptyLeaf() {
 		return t, false
 	}

@@ -62,7 +62,7 @@ func (q *ProvideQueue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 	q.lk.Lock()
 	defer q.lk.Unlock()
 
-	if subtrie, ok := helpers.SubtrieMatchingPrefix(q.prefixes, prefix); ok {
+	if subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix); ok {
 		// Prefix is a prefix of (at least) an existing prefix in the queue.
 		entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
 		prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
@@ -105,7 +105,7 @@ func (q *ProvideQueue) Dequeue() (bitstr.Key, []mh.Multihash) {
 	q.prefixes.Remove(prefix)
 
 	// Get all keys that match the prefix.
-	subtrie, _ := helpers.SubtrieMatchingPrefix(q.keys, prefix)
+	subtrie, _ := helpers.FindSubtrie(q.keys, prefix)
 	keys := helpers.AllValues(subtrie, bit256.ZeroKey())
 
 	// Remove the keys from the keys trie.
@@ -125,7 +125,7 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 		return nil
 	}
 
-	subtrie, ok := helpers.SubtrieMatchingPrefix(q.keys, prefix)
+	subtrie, ok := helpers.FindSubtrie(q.keys, prefix)
 	if !ok {
 		// No keys matching the prefix.
 		return nil
@@ -136,7 +136,7 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 	helpers.PruneSubtrie(q.keys, prefix)
 
 	// Remove prefix from queue and prefixes trie.
-	if subtrie, ok := helpers.SubtrieMatchingPrefix(q.prefixes, prefix); ok {
+	if subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix); ok {
 		// There are superstrings of `prefix` in the queue.
 		entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
 		prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
@@ -149,7 +149,7 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 		// `prefix` is a superstring of some other shorter prefix in the queue.
 		// Leave it in the queue, unless the shorter prefix doesn't have any
 		// matching keys left.
-		if _, ok := helpers.SubtrieMatchingPrefix(q.keys, shorterPrefix); !ok {
+		if _, ok := helpers.FindSubtrie(q.keys, shorterPrefix); !ok {
 			q.prefixes.Remove(shorterPrefix)
 			index := q.queue.Index(func(element bitstr.Key) bool { return element == shorterPrefix })
 			if index >= 0 {
@@ -180,7 +180,7 @@ func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
 	// queue.
 	prefixesToRemove := make([]bitstr.Key, 0)
 	for prefix := range matchingPrefixes {
-		if _, ok := helpers.SubtrieMatchingPrefix(q.keys, prefix); !ok {
+		if _, ok := helpers.FindSubtrie(q.keys, prefix); !ok {
 			prefixesToRemove = append(prefixesToRemove, prefix)
 		}
 	}

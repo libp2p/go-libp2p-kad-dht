@@ -427,7 +427,7 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
 
 			if schedule {
-				if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
+				if subtrie, ok := helpers.FindSubtrie(s.schedule, prefix); ok {
 					// If generated prefix is a prefix of existing scheduled keyspace
 					// zones, consolidate these zones around the shorter prefix.
 					for _, entry := range helpers.AllEntries(subtrie, s.order) {
@@ -1065,7 +1065,7 @@ func (s *SweepingProvider) regionsFromPeers(peers []peer.ID) ([]helpers.Region, 
 func (s *SweepingProvider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 	s.scheduleLk.Lock()
 	// Pop prefixes scheduled in the future being covered by the explored peers.
-	if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
+	if subtrie, ok := helpers.FindSubtrie(s.schedule, prefix); ok {
 		logger.Warnf("previous next scheduled prefix is %s", s.prefixCursor)
 		for _, entry := range helpers.AllEntries(subtrie, s.order) {
 			if s.schedule.Remove(entry.Key) {
@@ -1214,7 +1214,7 @@ func (s *SweepingProvider) scheduleNextReprovide(prefix bitstr.Key, lastReprovid
 	defer s.scheduleLk.Unlock()
 	// If schedule contains keys starting with prefix, remove them to avoid
 	// overlap.
-	if subtrie, ok := helpers.SubtrieMatchingPrefix(s.schedule, prefix); ok {
+	if subtrie, ok := helpers.FindSubtrie(s.schedule, prefix); ok {
 		for _, entry := range helpers.AllEntries(subtrie, s.order) {
 			s.schedule.Remove(entry.Key)
 		}

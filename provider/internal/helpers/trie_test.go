@@ -86,7 +86,7 @@ func TestFindPrefixOfKey(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestSubtrieMatchingPrefix(t *testing.T) {
+func TestFindSubtrie(t *testing.T) {
 	keys := []bitstr.Key{
 		"0000",
 		"0001",
@@ -100,50 +100,50 @@ func TestSubtrieMatchingPrefix(t *testing.T) {
 	}
 	tr := trie.New[bitstr.Key, struct{}]()
 
-	_, ok := SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
+	_, ok := FindSubtrie(tr, bitstr.Key("0000"))
 	require.False(t, ok)
 
 	for _, k := range keys {
 		tr.Add(k, struct{}{})
 	}
 
-	subtrie, ok := SubtrieMatchingPrefix(tr, bitstr.Key(""))
+	subtrie, ok := FindSubtrie(tr, bitstr.Key(""))
 	require.True(t, ok)
 	require.Equal(t, tr, subtrie)
 	require.Equal(t, 9, subtrie.Size())
 
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0"))
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("0"))
 	require.True(t, ok)
 	require.Equal(t, tr.Branch(0), subtrie)
 	require.Equal(t, 5, subtrie.Size())
 
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1"))
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("1"))
 	require.True(t, ok)
 	require.Equal(t, tr.Branch(1), subtrie)
 	require.Equal(t, 4, subtrie.Size())
 
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("000"))
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("000"))
 	require.True(t, ok)
 	require.Equal(t, tr.Branch(0).Branch(0).Branch(0), subtrie)
 	require.Equal(t, 2, subtrie.Size())
 
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("0000"))
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("0000"))
 	require.True(t, ok)
 	require.Equal(t, tr.Branch(0).Branch(0).Branch(0).Branch(0), subtrie)
 	require.Equal(t, 1, subtrie.Size())
 	require.True(t, subtrie.IsNonEmptyLeaf())
 
-	subtrie, ok = SubtrieMatchingPrefix(tr, bitstr.Key("111"))
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("111"))
 	require.True(t, ok)
 	require.Equal(t, tr.Branch(1).Branch(1).Branch(1), subtrie)
 	require.Equal(t, 1, subtrie.Size())
 	require.True(t, subtrie.IsNonEmptyLeaf())
 
-	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("100"))
+	_, ok = FindSubtrie(tr, bitstr.Key("100"))
 	require.False(t, ok)
-	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("1001"))
+	_, ok = FindSubtrie(tr, bitstr.Key("1001"))
 	require.False(t, ok)
-	_, ok = SubtrieMatchingPrefix(tr, bitstr.Key("00000"))
+	_, ok = FindSubtrie(tr, bitstr.Key("00000"))
 	require.False(t, ok)
 }
 

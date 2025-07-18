@@ -317,7 +317,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		// Reduce prefix if necessary as closestPeersToPrefix always returns at
 		// least replicationFactor peers if possible.
 		for {
-			subtrie, ok := helpers.SubtrieMatchingPrefix(peersTrie, currPrefix)
+			subtrie, ok := helpers.FindSubtrie(peersTrie, currPrefix)
 			require.True(t, ok)
 			subtrieSize = subtrie.Size()
 			if subtrieSize > replicationFactor {

@@ -1,7 +1,6 @@
 package connectivity
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,12 +33,12 @@ type ConnectivityChecker struct {
 	onlineCheckInterval  time.Duration // minimum check interval when online
 	offlineCheckInterval time.Duration // periodic check frequency when offline
 
-	checkFunc        func(context.Context) bool // function to check whether node is online
-	backOnlineNotify func()                     // callback when node comes back online
+	checkFunc        func() bool // function to check whether node is online
+	backOnlineNotify func()      // callback when node comes back online
 }
 
 // New creates a new ConnectivityChecker instance.
-func New(checkFunc func(context.Context) bool, backOnlineNotify func(), opts ...Option) (*ConnectivityChecker, error) {
+func New(checkFunc func() bool, backOnlineNotify func(), opts ...Option) (*ConnectivityChecker, error) {
 	var cfg config
 	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
@@ -86,7 +85,7 @@ func (c *ConnectivityChecker) IsOnline() bool {
 //   - Perform connectivity check every `offlineCheckInterval`.
 //   - Exit if context is cancelled, or ConnectivityChecker is closed.
 //   - When node is found back online, run the `backOnlineNotify` callback.
-func (c *ConnectivityChecker) TriggerCheck(ctx context.Context) {
+func (c *ConnectivityChecker) TriggerCheck() {
 	if c.closed() {
 		// Noop
 		return
@@ -102,7 +101,7 @@ func (c *ConnectivityChecker) TriggerCheck(ctx context.Context) {
 	go func() {
 		defer c.mutex.Unlock()
 
-		if c.checkFunc(ctx) {
+		if c.checkFunc() {
 			c.lastCheck = c.clock.Now()
 			return
 		}
@@ -114,12 +113,10 @@ func (c *ConnectivityChecker) TriggerCheck(ctx context.Context) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
-				return
 			case <-c.done:
 				return
 			case <-ticker.C:
-				if c.checkFunc(ctx) {
+				if c.checkFunc() {
 					if !c.closed() {
 						// Node is back online.
 						c.online.Store(true)

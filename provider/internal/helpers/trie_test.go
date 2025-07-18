@@ -6,6 +6,10 @@ import (
 	"sort"
 	"testing"
 
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/peer"
+	mh "github.com/multiformats/go-multihash"
+
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
@@ -548,6 +552,96 @@ func TestAllocateToKClosest(t *testing.T) {
 		for _, closestEntry := range closest {
 			d := closestEntry.Key
 			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
+		}
+	}
+}
+
+func TestExtractMinimalRegions(t *testing.T) {
+	replicationFactor := 3
+	selfID := [32]byte{}
+	order := bit256.NewKey(selfID[:])
+
+	genPeerWithPrefix := func(prefix bitstr.Key) peer.ID {
+		k := FirstFullKeyWithPrefix(prefix, order)
+		bs := KeyToBytes(k)
+		pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
+		require.NoError(t, err)
+		return pid
+	}
+
+	prefixes := []bitstr.Key{
+		"00000",
+		"00001",
+		"00101",
+		"00110",
+		"01000",
+		"01001",
+		"01011",
+		"01100",
+		"10100",
+		"11000",
+		"11001",
+		"11010",
+		"11110",
+		"11111",
+	}
+
+	// Binary trie of peers
+	//                                     ____________I___________
+	//                                    /                        \
+	//                 __________________/__                      __\_______
+	//                /                     \                    /          \
+	//         ______/_                     _\_                 /           _\_______
+	//        /        \                   /   \               /           /         \
+	//       /         _\_             ___/_    \             /       ____/_          \
+	//      /         /   \           /     \    \           /       /      \          \
+	//     / \       /     \        / \      \    \         /       / \      \        / \
+	// 00000 00001 00101 00110  01000 01001 01011 01100  10100  11000 11001 11010 11110 11111
+	//
+	// Groups are expected to be:
+	// * [00000, 00001, 00101, 00110]
+	// * [01000, 01001, 01011, 01100]
+	// * [10100, 11000, 11001, 11010, 11110, 11111]
+
+	pids := make([]peer.ID, len(prefixes))
+	peersTrie := trie.New[bit256.Key, peer.ID]()
+
+	// Test behavior when trie is empty
+	regions := ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	require.Nil(t, regions)
+	for i := range pids {
+		pid := genPeerWithPrefix(prefixes[i])
+		pids[i] = pid
+		peersTrie.Add(PeerIDToBit256(pid), pid)
+	}
+
+	regions = ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	require.Len(t, regions, 3)
+	require.Equal(t, bitstr.Key("00"), regions[0].Prefix)
+	require.Equal(t, bitstr.Key("01"), regions[1].Prefix)
+	require.Equal(t, bitstr.Key("1"), regions[2].Prefix)
+	require.Equal(t, 4, regions[0].Peers.Size())
+	require.Equal(t, 4, regions[1].Peers.Size())
+	require.Equal(t, 6, regions[2].Peers.Size())
+}
+
+func TestAssignKeysToRegions(t *testing.T) {
+	regions := []Region{
+		{Prefix: "0", Peers: nil, Keys: nil},
+		{Prefix: "1", Peers: nil, Keys: nil},
+	}
+
+	nKeys := 1 << 8
+	mhs := make([]mh.Multihash, nKeys)
+	for i, h := range genMultihashes(nKeys) {
+		mhs[i] = h
+	}
+
+	regions = AssignKeysToRegions(regions, mhs)
+	for _, r := range regions {
+		for _, h := range AllValues(r.Keys, bit256.ZeroKey()) {
+			k := MhToBit256(h)
+			require.True(t, IsPrefix(r.Prefix, k))
 		}
 	}
 }

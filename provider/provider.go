@@ -82,11 +82,20 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	// TODO: implement me
 }
 
-// LastProvideAt returns the wall‑clock time at which `key` was most recently
-// advertised to the DHT by this node.
+// ProvideState encodes the current relationship between this node and `key`.
+type ProvideState uint8
+
+const (
+	StateUnknown  ProvideState = iota // we have no record of the key
+	StateQueued                       // key is queued to be provided
+	StateProvided                     // key was provided at least once
+)
+
+// ProvideStatus reports the provider’s view of a key.
 //
-// If the key has never been provided, the second return value is **false** and
-// the first is the zero `time.Time`.
-func (s *SweepingProvider) LastProvideAt(key mh.Multihash) (time.Time, bool) {
-	return time.Time{}, false
+// When `state == StateProvided`, `ts` is the wall‑clock time of the most recent
+// successful provide operation (UTC).
+// For `StateQueued` or `StateUnknown`, `ts` is the zero `time.Time`.
+func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, ts time.Time) {
+	return StateUnknown, time.Time{}
 }

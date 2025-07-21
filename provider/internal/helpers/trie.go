@@ -305,17 +305,38 @@ type Region struct {
 	Keys   *trie.Trie[bit256.Key, mh.Multihash]
 }
 
-// ExtractMinimalRegions returns the list of all non-overlapping subtries of
+// RegionsFromPeers returns the keyspace regions of size `regionSize` from the
+// given `peers` sorted according to `order` along with the Common Prefix
+// shared by all peers.
+func RegionsFromPeers(peers []peer.ID, regionSize int, order bit256.Key) ([]Region, bitstr.Key) {
+	if len(peers) == 0 {
+		return []Region{}, ""
+	}
+	peersTrie := trie.New[bit256.Key, peer.ID]()
+	minCpl := KeyLen
+	firstPeerKey := PeerIDToBit256(peers[0])
+	for _, p := range peers {
+		k := PeerIDToBit256(p)
+		peersTrie.Add(k, p)
+		minCpl = min(minCpl, firstPeerKey.CommonPrefixLength(k))
+	}
+	commonPrefix := bitstr.Key(key.BitString(firstPeerKey)[:minCpl])
+	regions := extractMinimalRegions(peersTrie, commonPrefix, regionSize, order)
+	return regions, commonPrefix
+}
+
+// extractMinimalRegions returns the list of all non-overlapping subtries of
 // `t` having strictly more than `size` elements, sorted according to `order`.
 // Every element is included in exactly one region.
-func ExtractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
+func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
 	if t.IsEmptyLeaf() {
 		return nil
 	}
-	if t.Branch(0).Size() > size && t.Branch(1).Size() > size {
+	branch0, branch1 := t.Branch(0), t.Branch(1)
+	if branch0 != nil && branch1 != nil && branch0.Size() > size && branch1.Size() > size {
 		b := int(order.Bit(len(path)))
-		return append(ExtractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
-			ExtractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
+		return append(extractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
+			extractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)
 	}
 	return []Region{{Prefix: path, Peers: t}}
 }

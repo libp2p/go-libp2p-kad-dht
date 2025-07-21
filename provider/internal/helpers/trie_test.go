@@ -554,6 +554,39 @@ func TestAllocateToKClosest(t *testing.T) {
 	}
 }
 
+func TestRegionsFromPeers(t *testing.T) {
+	// No peers
+	regions, commonPrefix := RegionsFromPeers(nil, 1, bit256.ZeroKey())
+	require.Empty(t, regions)
+	require.Equal(t, bitstr.Key(""), commonPrefix)
+
+	// Single peer
+	p0 := genRandPeerID(t)
+	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0}, 1, bit256.ZeroKey())
+	require.Len(t, regions, 1)
+	bstrPid0 := bitstr.Key(key.BitString(PeerIDToBit256(p0)))
+	require.Equal(t, bstrPid0, commonPrefix)
+
+	// Two peers
+	p1 := genRandPeerID(t)
+	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0, p1}, 1, bit256.ZeroKey())
+	require.Len(t, regions, 1)
+	cpl := key.CommonPrefixLength(bstrPid0, PeerIDToBit256(p1))
+	common := bstrPid0[:cpl]
+	require.Equal(t, common, commonPrefix)
+
+	// Three peers
+	p2 := genRandPeerID(t)
+	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0, p1, p2}, 1, bit256.ZeroKey())
+	require.Len(t, regions, 1)
+	cpl = key.CommonPrefixLength(common, PeerIDToBit256(p2))
+	common = common[:cpl]
+	require.Equal(t, common, commonPrefix)
+
+	// From 4 peers onwards, there is a probability of having more than 1
+	// regions. Refer to TestExtractMinimalRegions.
+}
+
 func TestExtractMinimalRegions(t *testing.T) {
 	replicationFactor := 3
 	selfID := [32]byte{}
@@ -605,7 +638,7 @@ func TestExtractMinimalRegions(t *testing.T) {
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 
 	// Test behavior when trie is empty
-	regions := ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	regions := extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Nil(t, regions)
 	for i := range pids {
 		pid := genPeerWithPrefix(prefixes[i])
@@ -613,7 +646,7 @@ func TestExtractMinimalRegions(t *testing.T) {
 		peersTrie.Add(PeerIDToBit256(pid), pid)
 	}
 
-	regions = ExtractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
+	regions = extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Len(t, regions, 3)
 	require.Equal(t, bitstr.Key("00"), regions[0].Prefix)
 	require.Equal(t, bitstr.Key("01"), regions[1].Prefix)

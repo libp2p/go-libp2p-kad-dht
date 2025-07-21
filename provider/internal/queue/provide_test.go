@@ -30,7 +30,7 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 	return mhs
 }
 
-func TestEnqueueSimple(t *testing.T) {
+func TestProvideEnqueueSimple(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 
 	q := NewProvideQueue()
@@ -63,7 +63,7 @@ func TestEnqueueSimple(t *testing.T) {
 	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, q.Size())
 }
 
-func TestEnqueueOverlapping(t *testing.T) {
+func TestProvideEnqueueOverlapping(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 
 	q := NewProvideQueue()
@@ -103,7 +103,7 @@ func TestEnqueueOverlapping(t *testing.T) {
 	require.Equal(t, 2*len(prefixes)*nMultihashesPerPrefix, q.Size())
 }
 
-func TestDequeue(t *testing.T) {
+func TestProvideDequeue(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 	q := NewProvideQueue()
 	prefixes := []bitstr.Key{
@@ -139,7 +139,7 @@ func TestDequeue(t *testing.T) {
 	require.Empty(t, mhs)
 }
 
-func TestDequeueMatching(t *testing.T) {
+func TestProvideDequeueMatching(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 	q := NewProvideQueue()
 	prefixes := []bitstr.Key{
@@ -219,7 +219,7 @@ func TestDequeueMatching(t *testing.T) {
 	require.Empty(t, mhs)
 }
 
-func TestRemove(t *testing.T) {
+func TestProvideRemove(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 2
 	q := NewProvideQueue()
 	prefixes := []bitstr.Key{
@@ -254,7 +254,7 @@ func TestRemove(t *testing.T) {
 	require.Equal(t, q.queue.queue.At(0), bitstr.Key("010"))
 }
 
-func TestClearQueue(t *testing.T) {
+func TestProvideClearQueue(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 	q := NewProvideQueue()
 	require.True(t, q.IsEmpty())

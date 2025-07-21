@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/gammazero/deque"
@@ -11,11 +10,21 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
+// prefixQueue is a non-thread safe queue storing non overlapping, unique
+// prefixes of kademlia keys, in the order they were enqueued.
 type prefixQueue struct {
 	queue    deque.Deque[bitstr.Key]          // used to preserve the queue order
 	prefixes *trie.Trie[bitstr.Key, struct{}] // used to track prefixes in the queue
 }
 
+// Push adds a prefix to the queue.
+//
+// If prefix is already in the queue, this is a no-op.
+//
+// If the queue contains superstrings of the supplied prefix, insert the
+// supplied prefix at the position of the first superstring in the queue, and
+// remove all superstrings from the queue. The prefixes are consolidated around
+// the shortest prefix.
 func (q *prefixQueue) Push(prefix bitstr.Key) {
 	if subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix); ok {
 		// Prefix is a prefix of (at least) an existing prefix in the queue.
@@ -38,6 +47,7 @@ func (q *prefixQueue) Push(prefix bitstr.Key) {
 	}
 }
 
+// Pop removes and returns the first prefix from the queue.
 func (q *prefixQueue) Pop() (bitstr.Key, bool) {
 	if q.queue.Len() == 0 {
 		return bitstr.Key(""), false
@@ -50,6 +60,7 @@ func (q *prefixQueue) Pop() (bitstr.Key, bool) {
 	return prefix, true
 }
 
+// Remove removes a prefix or all its superstrings from the queue, if any.
 func (q *prefixQueue) Remove(prefix bitstr.Key) bool {
 	subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix)
 	if !ok {
@@ -60,18 +71,11 @@ func (q *prefixQueue) Remove(prefix bitstr.Key) bool {
 	for i, entry := range entriesToRemove {
 		prefixesToRemove[i] = entry.Key
 	}
-	if len(prefixesToRemove) == 0 {
-		return false
-	}
 	q.removePrefixesFromQueue(prefixesToRemove)
 	return true
 }
 
-// IsEmpty returns true if the queue is empty.
-func (q *prefixQueue) IsEmpty() bool {
-	return q.queue.Len() == 0
-}
-
+// Returns the number of prefixes in the queue.
 func (q *prefixQueue) Size() int {
 	return q.queue.Len()
 }
@@ -90,11 +94,9 @@ func (q *prefixQueue) Clear() int {
 // removeSubtrieFromQueue removes all keys in the provided subtrie from q.queue
 // and q.prefixes. Returns the position of the first removed key in the queue.
 func (q *prefixQueue) removePrefixesFromQueue(prefixes []bitstr.Key) int {
-	fmt.Println("removing prefixes from queue", prefixes, len(prefixes))
 	indexes := make([]int, 0, len(prefixes))
 	for _, prefix := range prefixes {
 		// Remove elements from the queue that are superstrings of `prefix`.
-		fmt.Println("prefix", prefix)
 		q.prefixes.Remove(prefix)
 		// Find indexes of the superstrings in the queue.
 		index := q.queue.Index(func(element bitstr.Key) bool { return element == prefix })

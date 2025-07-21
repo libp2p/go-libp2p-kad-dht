@@ -26,7 +26,7 @@ import (
 // ProvideQueue allows dequeuing the first prefix of the queue, with all
 // matching keys or dequeuing all keys matching a requested prefix.
 type ProvideQueue struct {
-	lk sync.Mutex
+	mu sync.Mutex
 
 	queue prefixQueue
 	keys  *trie.Trie[bit256.Key, mh.Multihash] // used to store keys in the queue
@@ -55,8 +55,8 @@ func (q *ProvideQueue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 	if len(keys) == 0 {
 		return
 	}
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	// Enqueue the prefix in the queue if required.
 	q.queue.Push(prefix)
@@ -72,8 +72,8 @@ func (q *ProvideQueue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 // The prefix and keys are removed from the queue. If the queue is empty,
 // return false and the empty prefix.
 func (q *ProvideQueue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	prefix, ok := q.queue.Pop()
 	if !ok {
 		return prefix, nil, false
@@ -94,8 +94,8 @@ func (q *ProvideQueue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
 // The keys and prefix are removed from the queue. If the queue is empty, or
 // supplied prefix doesn't match any keys, an empty slice is returned.
 func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	subtrie, ok := helpers.FindSubtrie(q.keys, prefix)
 	if !ok {
@@ -129,8 +129,8 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 // If this operation removes the last keys for prefixes in the queue, remove
 // the prefixes from the queue.
 func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	matchingPrefixes := make(map[bitstr.Key]struct{})
 
@@ -159,15 +159,15 @@ func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
 
 // IsEmpty returns true if the queue is empty.
 func (q *ProvideQueue) IsEmpty() bool {
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	return q.queue.Size() == 0
 }
 
 // Size returns the number of regions containing at least one key in the queue.
 func (q *ProvideQueue) Size() int {
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	return q.sizeNoLock()
 }
 
@@ -180,8 +180,8 @@ func (q *ProvideQueue) sizeNoLock() int {
 // Clear removes all keys from the queue and returns the number of keys that
 // were removed.
 func (q *ProvideQueue) Clear() int {
-	q.lk.Lock()
-	defer q.lk.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	size := q.sizeNoLock()
 
 	q.queue.Clear()

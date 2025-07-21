@@ -14,6 +14,118 @@ import (
 	mh "github.com/multiformats/go-multihash"
 )
 
+type prefixQueue struct {
+	queue    deque.Deque[bitstr.Key]          // used to preserve the queue order
+	prefixes *trie.Trie[bitstr.Key, struct{}] // used to track prefixes in the queue
+}
+
+func newPrefixQueue() *prefixQueue {
+	return &prefixQueue{prefixes: trie.New[bitstr.Key, struct{}]()}
+}
+
+func (q *prefixQueue) Enqueue(prefix bitstr.Key) {
+	if subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix); ok {
+		// Prefix is a prefix of (at least) an existing prefix in the queue.
+		entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
+		prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
+		for i, entry := range entriesToRemove {
+			prefixesToRemove[i] = entry.Key
+		}
+		// Remove superstrings of `prefix` from the queue
+		firstRemovedIndex := q.removePrefixesFromQueue(prefixesToRemove)
+		// Insert `prefix` in the queue at the location of the first removed
+		// prefix (last in order of deletion).
+		q.queue.Insert(firstRemovedIndex, prefix)
+		// Add `prefix` to prefixes trie.
+		q.prefixes.Add(prefix, struct{}{})
+	} else if _, ok := helpers.FindPrefixOfKey(q.prefixes, prefix); !ok {
+		// No prefixes of `prefix` found in the queue.
+		q.queue.PushBack(prefix)
+		q.prefixes.Add(prefix, struct{}{})
+	}
+}
+
+func (q *prefixQueue) Dequeue() bitstr.Key {
+	if q.queue.Len() == 0 {
+		return bitstr.Key("")
+	}
+	// Dequeue the first prefix from the queue.
+	prefix := q.queue.PopFront()
+	// Remove the prefix from the prefixes trie.
+	q.prefixes.Remove(prefix)
+
+	return prefix
+}
+
+func (q *prefixQueue) Remove(prefix bitstr.Key) {
+	subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix)
+	if !ok {
+		return
+	}
+	entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
+	prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
+	for _, entry := range entriesToRemove {
+		prefixesToRemove = append(prefixesToRemove, entry.Key)
+	}
+	q.removePrefixesFromQueue(prefixesToRemove)
+}
+
+// IsEmpty returns true if the queue is empty.
+func (q *prefixQueue) IsEmpty() bool {
+	return q.queue.Len() == 0
+}
+
+func (q *prefixQueue) Size() int {
+	return q.queue.Len()
+}
+
+// Clear removes all keys from the queue and returns the number of keys that
+// were removed.
+func (q *prefixQueue) Clear() int {
+	size := q.Size()
+
+	q.queue.Clear()
+	*q.prefixes = trie.Trie[bitstr.Key, struct{}]{}
+
+	return size
+}
+
+func (q *prefixQueue) removePrefixesFromQueue(prefixes []bitstr.Key) int {
+	indexes := make([]int, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		// Remove elements from the queue that are superstrings of `prefix`.
+		q.prefixes.Remove(prefix)
+		// Find indexes of the superstrings in the queue.
+		index := q.queue.Index(func(element bitstr.Key) bool { return element == prefix })
+		if index >= 0 {
+			indexes = append(indexes, index)
+		}
+	}
+	// Sort indexes to remove in descending order so that we can remove them
+	// without affecting the indexes of the remaining elements.
+	slices.Sort(indexes)
+	slices.Reverse(indexes)
+	// Remove items in the queue that are prefixes of `prefix`
+	for _, index := range indexes {
+		q.queue.Remove(index)
+	}
+	return indexes[len(indexes)-1] // return the position of the first removed key
+}
+
+type Queue struct {
+	lk sync.Mutex
+
+	queue prefixQueue
+	keys  *trie.Trie[bit256.Key, mh.Multihash] // used to store keys in the queue
+}
+
+func NewQueue() *Queue {
+	return &Queue{
+		queue: prefixQueue{prefixes: trie.New[bitstr.Key, struct{}]()},
+		keys:  trie.New[bit256.Key, mh.Multihash](),
+	}
+}
+
 // ProvideQueue is a thread-safe queue storing multihashes about to be provided
 // to a Kademlia DHT, allowing smart batching.
 //

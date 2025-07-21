@@ -85,9 +85,6 @@ var (
 
 const keyLen = bit256.KeyLen * 8 // 256
 
-// TODO: support resuming reprovide service after a restart
-// persist prefixes waiting to be reprovided and last reprovided prefix (with time) on disk
-
 type workerType uint8
 
 const (
@@ -250,7 +247,6 @@ func (s *SweepingProvider) run() {
 	for {
 		select {
 		case <-s.done:
-			// TODO: gracefully shutdown
 			return
 		case provideRequest := <-s.provideChan:
 			s.handleProvide(provideRequest)
@@ -735,7 +731,6 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		}
 		s.provideCounter.Add(context.Background(), int64(nKeys))
 
-		// TODO: persist to datastore that region identified by prefix was reprovided `now`, only during periodic reprovides?
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	if errCount == len(regions) {
@@ -849,7 +844,6 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 		}
 	}
 	if reprovide {
-		// TODO: persist to datastore that region identified by prefix was reprovided `now`
 		if provideErr != nil {
 			s.failedReprovide(prefix)
 		}

@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"time"
+
 	mh "github.com/multiformats/go-multihash"
 )
 
@@ -78,4 +80,13 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 // `StopProviding`.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	// TODO: implement me
+}
+
+// LastProvideAt returns the wall‑clock time at which `key` was most recently
+// advertised to the DHT by this node.
+//
+// If the key has never been provided, the second return value is **false** and
+// the first is the zero `time.Time`.
+func (s *SweepingProvider) LastProvideAt(key mh.Multihash) (time.Time, bool) {
+	return time.Time{}, false
 }

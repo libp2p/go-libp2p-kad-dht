@@ -19,11 +19,7 @@ type prefixQueue struct {
 	prefixes *trie.Trie[bitstr.Key, struct{}] // used to track prefixes in the queue
 }
 
-func newPrefixQueue() *prefixQueue {
-	return &prefixQueue{prefixes: trie.New[bitstr.Key, struct{}]()}
-}
-
-func (q *prefixQueue) Enqueue(prefix bitstr.Key) {
+func (q *prefixQueue) Push(prefix bitstr.Key) {
 	if subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix); ok {
 		// Prefix is a prefix of (at least) an existing prefix in the queue.
 		entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
@@ -45,22 +41,22 @@ func (q *prefixQueue) Enqueue(prefix bitstr.Key) {
 	}
 }
 
-func (q *prefixQueue) Dequeue() bitstr.Key {
+func (q *prefixQueue) Pop() (bitstr.Key, bool) {
 	if q.queue.Len() == 0 {
-		return bitstr.Key("")
+		return bitstr.Key(""), false
 	}
 	// Dequeue the first prefix from the queue.
 	prefix := q.queue.PopFront()
 	// Remove the prefix from the prefixes trie.
 	q.prefixes.Remove(prefix)
 
-	return prefix
+	return prefix, true
 }
 
-func (q *prefixQueue) Remove(prefix bitstr.Key) {
+func (q *prefixQueue) Remove(prefix bitstr.Key) bool {
 	subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix)
 	if !ok {
-		return
+		return false
 	}
 	entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
 	prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
@@ -68,6 +64,7 @@ func (q *prefixQueue) Remove(prefix bitstr.Key) {
 		prefixesToRemove = append(prefixesToRemove, entry.Key)
 	}
 	q.removePrefixesFromQueue(prefixesToRemove)
+	return true
 }
 
 // IsEmpty returns true if the queue is empty.
@@ -124,6 +121,133 @@ func NewQueue() *Queue {
 		queue: prefixQueue{prefixes: trie.New[bitstr.Key, struct{}]()},
 		keys:  trie.New[bit256.Key, mh.Multihash](),
 	}
+}
+
+func (q *Queue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
+	if len(keys) == 0 {
+		return
+	}
+	q.lk.Lock()
+	defer q.lk.Unlock()
+
+	// Enqueue the prefix in the queue if required.
+	q.queue.Push(prefix)
+
+	// Add keys to the keys trie.
+	for _, h := range keys {
+		q.keys.Add(helpers.MhToBit256(h), h)
+	}
+}
+
+func (q *Queue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+	prefix, ok := q.queue.Pop()
+	if !ok {
+		return prefix, nil, false
+	}
+
+	// Get all keys that match the prefix.
+	subtrie, _ := helpers.FindSubtrie(q.keys, prefix)
+	keys := helpers.AllValues(subtrie, bit256.ZeroKey())
+
+	// Remove the keys from the keys trie.
+	helpers.PruneSubtrie(q.keys, prefix)
+
+	return prefix, keys, true
+}
+
+func (q *Queue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+
+	subtrie, ok := helpers.FindSubtrie(q.keys, prefix)
+	if !ok {
+		// No keys matching the prefix.
+		return nil
+	}
+	keys := helpers.AllValues(subtrie, bit256.ZeroKey())
+
+	// Remove the keys from the keys trie.
+	helpers.PruneSubtrie(q.keys, prefix)
+
+	// Remove prefix and its superstrings from queue if any.
+	removed := q.queue.Remove(prefix)
+	if !removed {
+		// prefix and superstrings not in queue.
+		if shorterPrefix, ok := helpers.FindPrefixOfKey(q.queue.prefixes, prefix); ok {
+			// prefix is a superstring of some other shorter prefix in the queue.
+			// Leave it in the queue, unless the shorter prefix doesn't have any
+			// matching keys left.
+			if _, ok := helpers.FindSubtrie(q.keys, shorterPrefix); !ok {
+				// No keys matching shorterPrefix, remove shorterPrefix from queue.
+				q.queue.Remove(shorterPrefix)
+			}
+		}
+	}
+	return keys
+}
+
+func (q *Queue) Remove(keys ...mh.Multihash) {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+
+	matchingPrefixes := make(map[bitstr.Key]struct{})
+
+	// Remove keys from the keys trie.
+	for _, h := range keys {
+		k := helpers.MhToBit256(h)
+		q.keys.Remove(k)
+		if prefix, ok := helpers.FindPrefixOfKey(q.queue.prefixes, k); ok {
+			// Get the trie leaf matching the key, if any.
+			matchingPrefixes[prefix] = struct{}{}
+		}
+	}
+
+	// For matching prefixes, if no more keys are matching, remove them from
+	// queue.
+	prefixesToRemove := make([]bitstr.Key, 0)
+	for prefix := range matchingPrefixes {
+		if _, ok := helpers.FindSubtrie(q.keys, prefix); !ok {
+			prefixesToRemove = append(prefixesToRemove, prefix)
+		}
+	}
+	if len(prefixesToRemove) > 0 {
+		q.queue.removePrefixesFromQueue(prefixesToRemove)
+	}
+}
+
+// IsEmpty returns true if the queue is empty.
+func (q *Queue) IsEmpty() bool {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+	return q.queue.Size() == 0
+}
+
+// Size returns the number of regions containing at least one key in the queue.
+func (q *Queue) Size() int {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+	return q.sizeNoLock()
+}
+
+// sizeNoLock returns the number of regions containing at least one key in the
+// queue. It assumes the mutex is held already.
+func (q *Queue) sizeNoLock() int {
+	return q.keys.Size()
+}
+
+// Clear removes all keys from the queue and returns the number of keys that
+// were removed.
+func (q *Queue) Clear() int {
+	q.lk.Lock()
+	defer q.lk.Unlock()
+	size := q.sizeNoLock()
+
+	q.queue.Clear()
+	*q.keys = trie.Trie[bit256.Key, mh.Multihash]{}
+
+	return size
 }
 
 // ProvideQueue is a thread-safe queue storing multihashes about to be provided

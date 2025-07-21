@@ -33,7 +33,7 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 func TestEnqueueSimple(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 
-	q := New()
+	q := NewQueue()
 
 	// Enqueue no multihash
 	q.Enqueue(bitstr.Key("1010"))
@@ -52,11 +52,11 @@ func TestEnqueueSimple(t *testing.T) {
 	}
 
 	// Verify prefixes are in the queue
-	require.Equal(t, len(prefixes), q.prefixes.Size())
-	require.Equal(t, len(prefixes), q.queue.Len())
+	require.Equal(t, len(prefixes), q.queue.prefixes.Size())
+	require.Equal(t, len(prefixes), q.queue.queue.Len())
 	for _, prefix := range prefixes {
-		require.GreaterOrEqual(t, q.queue.Index(func(k bitstr.Key) bool { return k == prefix }), 0)
-		ok, _ := trie.Find(q.prefixes, prefix)
+		require.GreaterOrEqual(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefix }), 0)
+		ok, _ := trie.Find(q.queue.prefixes, prefix)
 		require.True(t, ok)
 	}
 	// Verify the count of multihashes matches
@@ -66,7 +66,7 @@ func TestEnqueueSimple(t *testing.T) {
 func TestEnqueueOverlapping(t *testing.T) {
 	nMultihashesPerPrefix := 1 << 4
 
-	q := New()
+	q := NewQueue()
 
 	prefixes := []bitstr.Key{
 		"000",
@@ -77,10 +77,10 @@ func TestEnqueueOverlapping(t *testing.T) {
 		q.Enqueue(prefix, mhs...)
 	}
 
-	require.Equal(t, 1, q.prefixes.Size()) // Only shortest prefix should remain
-	require.Equal(t, 1, q.queue.Len())
-	require.GreaterOrEqual(t, q.queue.Index(func(k bitstr.Key) bool { return k == prefixes[0] }), 0) // "000" is in queue
-	require.Negative(t, q.queue.Index(func(k bitstr.Key) bool { return k == prefixes[1] }))          // "0000" is NOT in queue
+	require.Equal(t, 1, q.queue.prefixes.Size()) // Only shortest prefix should remain
+	require.Equal(t, 1, q.queue.queue.Len())
+	require.GreaterOrEqual(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[0] }), 0) // "000" is in queue
+	require.Negative(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[1] }))          // "0000" is NOT in queue
 
 	// Verify the count of multihashes matches
 	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, q.Size())
@@ -94,10 +94,10 @@ func TestEnqueueOverlapping(t *testing.T) {
 		q.Enqueue(prefix, mhs...)
 	}
 
-	require.Equal(t, 2, q.prefixes.Size()) // only "000" and "111" should remain
-	require.Equal(t, 2, q.queue.Len())
-	require.GreaterOrEqual(t, q.queue.Index(func(k bitstr.Key) bool { return k == prefixes[1] }), 0) // "111" is in queue
-	require.Negative(t, q.queue.Index(func(k bitstr.Key) bool { return k == prefixes[0] }))          // "1111" is NOT in queue
+	require.Equal(t, 2, q.queue.prefixes.Size()) // only "000" and "111" should remain
+	require.Equal(t, 2, q.queue.queue.Len())
+	require.GreaterOrEqual(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[1] }), 0) // "111" is in queue
+	require.Negative(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[0] }))          // "1111" is NOT in queue
 
 	// Verify the count of multihashes matches
 	require.Equal(t, 2*len(prefixes)*nMultihashesPerPrefix, q.Size())

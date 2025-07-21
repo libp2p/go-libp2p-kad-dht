@@ -215,7 +215,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		failedRegionsChan:  make(chan bitstr.Key, 1),
 		catchupPendingChan: make(chan struct{}, 1),
 
-		provideQueue: queue.New(),
+		provideQueue: queue.NewProvideQueue(),
 
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 
@@ -494,10 +494,12 @@ func (s *SweepingProvider) provideLoop() {
 		go func() {
 			defer s.workerPool.Release(burstWorker)
 
-			prefix, keys := s.provideQueue.Dequeue()
-			err := s.provideForPrefix(prefix, keys)
-			if err != nil {
-				logger.Error(err)
+			prefix, keys, ok := s.provideQueue.Dequeue()
+			if ok {
+				err := s.provideForPrefix(prefix, keys)
+				if err != nil {
+					logger.Error(err)
+				}
 			}
 		}()
 	}

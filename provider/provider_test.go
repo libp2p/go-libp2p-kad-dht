@@ -157,7 +157,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
-		provideQueue:      queue.New(),
+		provideQueue:      queue.NewProvideQueue(),
 		connectivity:      connCheker,
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
@@ -189,7 +189,8 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	}
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
 	require.Error(t, err)
-	_, mhs := r.provideQueue.Dequeue()
+	_, mhs, ok := r.provideQueue.Dequeue()
+	require.True(t, ok)
 	require.Equal(t, []mh.Multihash{k}, mhs)
 
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, true, true)
@@ -217,7 +218,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		router:            router,
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
-		provideQueue:      queue.New(),
+		provideQueue:      queue.NewProvideQueue(),
 		connectivity:      connCheker,
 		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
@@ -239,7 +240,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.Equal(t, len(ks), r.provideQueue.Size())
 	pendingCids := []mh.Multihash{}
 	for !r.provideQueue.IsEmpty() {
-		_, cids := r.provideQueue.Dequeue()
+		_, cids, ok := r.provideQueue.Dequeue()
+		require.True(t, ok)
 		pendingCids = append(pendingCids, cids...)
 	}
 	require.ElementsMatch(t, pendingCids, ks)
@@ -264,7 +266,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, r.provideQueue.Size())
-	_, pendingCids = r.provideQueue.Dequeue()
+	_, pendingCids, ok := r.provideQueue.Dequeue()
+	require.True(t, ok)
 	require.Len(t, pendingCids, 1)
 	require.Contains(t, ks, pendingCids[0])
 

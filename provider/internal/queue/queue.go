@@ -87,6 +87,8 @@ func (q *prefixQueue) Clear() int {
 	return size
 }
 
+// removeSubtrieFromQueue removes all keys in the provided subtrie from q.queue
+// and q.prefixes. Returns the position of the first removed key in the queue.
 func (q *prefixQueue) removePrefixesFromQueue(prefixes []bitstr.Key) int {
 	indexes := make([]int, 0, len(prefixes))
 	for _, prefix := range prefixes {
@@ -109,6 +111,19 @@ func (q *prefixQueue) removePrefixesFromQueue(prefixes []bitstr.Key) int {
 	return indexes[len(indexes)-1] // return the position of the first removed key
 }
 
+// ProvideQueue is a thread-safe queue storing multihashes about to be provided
+// to a Kademlia DHT, allowing smart batching.
+//
+// The queue groups keys by their kademlia identifier prefixes, so that keys
+// that should be allocated to the same DHT peers are dequeued together from
+// the queue, for efficient batch providing.
+//
+// The insertion order of prefixes is preserved, but not for keys. Inserting
+// keys matching a prefix that is already in the queue inserts the keys at the
+// position of the existing prefix.
+//
+// ProvideQueue allows dequeuing the first prefix of the queue, with all
+// matching keys or dequeuing all keys matching a requested prefix.
 type Queue struct {
 	lk sync.Mutex
 
@@ -123,6 +138,17 @@ func NewQueue() *Queue {
 	}
 }
 
+// Enqueue adds the supplied keys to the queue under the given prefix.
+//
+// If the prefix already sits in the queue, supplied keys join the queue at the
+// position of the existing prefix. If the queue contains prefixes that are
+// superstrings of the supplied prefix, all keys matching the supplied prefix
+// are consolidated at the position of the first matching superstring in the
+// queue.
+//
+// If supplied prefix doesn't exist yet in the queue, add it at the end.
+//
+// Supplied keys MUST match the supplied prefix.
 func (q *Queue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 	if len(keys) == 0 {
 		return
@@ -139,6 +165,10 @@ func (q *Queue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 	}
 }
 
+// Dequeue pops the first prefix of the queue along with all matching keys.
+//
+// The prefix and keys are removed from the queue. If the queue is empty,
+// return false and the empty prefix.
 func (q *Queue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
 	q.lk.Lock()
 	defer q.lk.Unlock()
@@ -157,6 +187,10 @@ func (q *Queue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
 	return prefix, keys, true
 }
 
+// DequeueMatching returns keys matching the given prefix from the queue.
+//
+// The keys and prefix are removed from the queue. If the queue is empty, or
+// supplied prefix doesn't match any keys, an empty slice is returned.
 func (q *Queue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 	q.lk.Lock()
 	defer q.lk.Unlock()
@@ -188,6 +222,10 @@ func (q *Queue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 	return keys
 }
 
+// Remove removes the supplied keys from the queue.
+//
+// If this operation removes the last keys for prefixes in the queue, remove
+// the prefixes from the queue.
 func (q *Queue) Remove(keys ...mh.Multihash) {
 	q.lk.Lock()
 	defer q.lk.Unlock()

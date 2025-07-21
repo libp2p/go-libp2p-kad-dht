@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -81,7 +80,6 @@ var logger = logging.Logger("dht/SweepingProvider")
 var (
 	ErrNodeOffline                        = errors.New("provider: node is offline")
 	ErrNoSelfAddress                      = errors.New("provider: no self addresses available for providing keys")
-	ErrNoKeyProvided                      = errors.New("provider: failed to provide any key")
 	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 )
 
@@ -136,12 +134,10 @@ type SweepingProvider struct {
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
 
-	provideQueue   *queue.ProvideQueue
-	provideRunning sync.Mutex
-
-	failedRegionsChan  chan bitstr.Key
-	lateRegionsQueue   []bitstr.Key
-	catchupPendingChan chan struct{}
+	provideQueue         *queue.ProvideQueue
+	provideRunning       sync.Mutex
+	reprovideQueue       *queue.ReprovideQueue
+	lateReprovideRunning sync.Mutex
 
 	prefixCursor        bitstr.Key
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
@@ -212,10 +208,8 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 		schedule:      trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer: cfg.clock.Timer(time.Hour),
 
-		failedRegionsChan:  make(chan bitstr.Key, 1),
-		catchupPendingChan: make(chan struct{}, 1),
-
-		provideQueue: queue.NewProvideQueue(),
+		provideQueue:   queue.NewProvideQueue(),
+		reprovideQueue: queue.NewReprovideQueue(),
 
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 
@@ -229,7 +223,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 			peers, err := cfg.router.GetClosestPeers(context.Background(), string(cfg.peerid))
 			return err == nil && len(peers) > 0
 		},
-		prov.catchupPendingNotify,
+		prov.catchupPendingWork,
 		connectivity.WithClock(cfg.clock),
 		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
 		connectivity.WithOfflineCheckInterval(cfg.connectivityCheckOfflineInterval),
@@ -262,15 +256,10 @@ func (s *SweepingProvider) run() {
 			s.handleProvide(provideRequest)
 		case <-s.scheduleTimer.C:
 			s.handleReprovide()
-		case prefix := <-s.failedRegionsChan:
-			if !slices.Contains(s.lateRegionsQueue, prefix) {
-				s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
-			}
-			s.connectivity.TriggerCheck()
 		case <-retryTicker.C:
-			s.catchupPendingNotify()
-		case <-s.catchupPendingChan:
-			s.catchupPendingWork()
+			if s.connectivity.IsOnline() {
+				s.catchupPendingWork()
+			}
 		}
 	}
 }
@@ -469,6 +458,20 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 	return prefixes
 }
 
+func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys ...mh.Multihash) {
+	// Put keys back to the provide queue.
+	s.provideQueue.Enqueue(prefix, keys...)
+
+	s.connectivity.TriggerCheck()
+}
+
+func (s *SweepingProvider) failedReprovide(prefix bitstr.Key) {
+	// Put prefix in the reprovide queue.
+	s.reprovideQueue.Enqueue(prefix)
+
+	s.connectivity.TriggerCheck()
+}
+
 func (s *SweepingProvider) provideLoop() {
 	if !s.provideRunning.TryLock() {
 		// Ensure that only one goroutine is running the provide loop at a time.
@@ -482,7 +485,7 @@ func (s *SweepingProvider) provideLoop() {
 			return
 		}
 		if !s.connectivity.IsOnline() {
-			// Don't try to provide if not is offline.
+			// Don't try to provide if node is offline.
 			return
 		}
 		// Block until we can acquire a worker from the pool.
@@ -505,91 +508,35 @@ func (s *SweepingProvider) provideLoop() {
 	}
 }
 
-// func (s *SweepingProvider) networkProvide(prefixes map[bitstr.Key][]mh.Multihash, retryOnFailure bool) error {
-// 	if len(prefixes) == 1 {
-// 		for prefix, keys := range prefixes {
-// 			// Provide a single key (NOT ProvideMany)
-// 			if len(keys) == 1 {
-// 				return s.provideForPrefix(prefix, keys, retryOnFailure)
-// 			}
-// 		}
-// 	}
-//
-// 	sortedPrefixes := helpers.SortPrefixesBySize(prefixes)
-//
-// 	// Atomic flag: 0 = no keys successfully provided yet, 1 = at least one
-// 	// success
-// 	var anySuccess uint32
-// 	wg := sync.WaitGroup{}
-//
-// 	onlineTicker := s.clock.Ticker(5 * time.Second)
-// 	defer onlineTicker.Stop()
-//
-// 	cancelWorkers := atomic.Bool{}
-// 	workerAcquiredChan := make(chan struct{}, 1)
-// 	acquireWorkerAsync := func() {
-// 		if err := s.workerPool.Acquire(burstWorker); err == nil {
-// 			if cancelWorkers.Load() {
-// 				s.workerPool.Release(burstWorker)
-// 			} else {
-// 				workerAcquiredChan <- struct{}{}
-// 			}
-// 		}
-// 	}
-//
-// 	i := 0
-// 	go acquireWorkerAsync()
-// workerLoop:
-// 	for {
-// 		select {
-// 		case <-workerAcquiredChan:
-// 			wg.Add(1)
-// 			go func(p helpers.PrefixAndKeys, i int) {
-// 				defer wg.Done()
-// 				defer s.workerPool.Release(burstWorker)
-//
-// 				if err := s.provideForPrefix(p.Prefix, p.Keys, retryOnFailure); err != nil {
-// 					logger.Error(err)
-// 				} else {
-// 					// Track if we were able to provide at least one key.
-// 					atomic.StoreUint32(&anySuccess, 1)
-// 				}
-// 			}(sortedPrefixes[i], i)
-// 			i++
-// 			if i == len(sortedPrefixes) {
-// 				break workerLoop
-// 			}
-// 			// Try to acquire a worker for the next prefix.
-// 			go acquireWorkerAsync()
-// 		case <-onlineTicker.C:
-// 			if !s.connectivity.IsOnline() {
-// 				cancelWorkers.Store(true)
-// 				break workerLoop
-// 			}
-// 		case <-s.done:
-// 			// TODO: save pending keys to disk to exit gracefully
-// 			cancelWorkers.Store(true)
-// 			break workerLoop
-// 		}
-// 	}
-//
-// 	if i != len(sortedPrefixes) {
-// 		// Add keys that haven't been provided yet to the pending queue.
-// 		keys := make([]mh.Multihash, 0)
-// 		for _, prefix := range sortedPrefixes[i:] {
-// 			keys = append(keys, prefix.Keys...)
-// 		}
-// 		s.pendingKeysChan <- keys
-// 	} else {
-// 		// Wait for workers to finish before reporting completion.
-// 		wg.Wait()
-// 	}
-//
-// 	if atomic.LoadUint32(&anySuccess) == 0 {
-// 		return ErrNoKeyProvided
-// 	}
-// 	return nil
-// }
+func (s *SweepingProvider) reprovideLateRegions() {
+	for !s.reprovideQueue.IsEmpty() {
+		if s.closed() {
+			// Exit loop if provider is closed.
+			return
+		}
+		if !s.connectivity.IsOnline() {
+			// Don't try to reprovide a region if node is offline.
+			return
+		}
+		// Block until we can acquire a worker from the pool.
+		err := s.workerPool.Acquire(burstWorker)
+		if err != nil {
+			// Provider was closed while waiting for a worker.
+			return
+		}
+		go func() {
+			defer s.workerPool.Release(burstWorker)
+
+			prefix, ok := s.reprovideQueue.Dequeue()
+			if ok {
+				err := s.reprovideForPrefix(prefix, false)
+				if err != nil {
+					logger.Error(err)
+				}
+			}
+		}()
+	}
+}
 
 func (s *SweepingProvider) handleReprovide() {
 	online := s.connectivity.IsOnline()
@@ -628,9 +575,7 @@ func (s *SweepingProvider) handleReprovide() {
 					nextKeyFound = true
 				}
 				prefix := entry.Key
-				if !slices.Contains(s.lateRegionsQueue, prefix) {
-					s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
-				}
+				s.reprovideQueue.Enqueue(prefix)
 			}
 			if !nextKeyFound {
 				next = scheduleEntries[0]
@@ -651,9 +596,7 @@ func (s *SweepingProvider) handleReprovide() {
 			scheduleSize := s.schedule.Size()
 			for timeSinceTimerUntilNext < timeSinceTimerRunning && count < scheduleSize {
 				prefix := next.Key
-				if !slices.Contains(s.lateRegionsQueue, prefix) {
-					s.lateRegionsQueue = append(s.lateRegionsQueue, prefix)
-				}
+				s.reprovideQueue.Enqueue(prefix)
 				next = helpers.NextNonEmptyLeaf(s.schedule, next.Key, s.order)
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
@@ -675,18 +618,13 @@ func (s *SweepingProvider) handleReprovide() {
 
 	// If we are offline, don't even try to reprovide region.
 	if !online {
-		s.failedRegionsChan <- currentPrefix
+		s.reprovideQueue.Enqueue(currentPrefix)
 		return
 	}
 
-	// Remove prefix that is about to be reprovided from the late regions queue
-	// if present.
-	for i, r := range s.lateRegionsQueue {
-		if r == currentPrefix {
-			s.lateRegionsQueue = slices.Delete(s.lateRegionsQueue, i, i+1)
-			break
-		}
-	}
+	// Remove prefix that is about to be reprovided from the reprovide queue if
+	// present.
+	s.reprovideQueue.Remove(currentPrefix)
 
 	go func() {
 		s.workerPool.Acquire(periodicWorker)
@@ -707,7 +645,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	}
 	keys, err := s.keyStore.Get(context.Background(), prefix)
 	if err != nil {
-		s.failedRegionsChan <- prefix
+		s.failedReprovide(prefix)
 		if periodicReprovide {
 			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
 		}
@@ -716,6 +654,8 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		logger.Errorf("No keys to reprovide for prefix %s", prefix)
 		return nil
 	} else if len(keys) <= 2 {
+		// Don't fully explore the region, execute simple DHT provides for these
+		// keys. It isn't worth it to fully explore a region for just a few keys.
 		return s.individualProvideForPrefix(context.Background(), prefix, keys, true, periodicReprovide)
 	}
 
@@ -725,14 +665,14 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		if err == errTooManyIterationsDuringExploration {
 			logger.Errorf("prefix key exploration not complete: %s", prefix)
 		}
-		s.failedRegionsChan <- prefix
+		s.failedReprovide(prefix)
 		if periodicReprovide {
 			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
 		}
 		return err
 	}
 	if len(peers) == 0 {
-		s.failedRegionsChan <- prefix
+		s.failedReprovide(prefix)
 		if periodicReprovide {
 			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
 		}
@@ -743,13 +683,20 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		// We need to load more keys
 		keys, err = s.keyStore.Get(context.Background(), coveredPrefix)
 		if err != nil {
-			s.failedRegionsChan <- prefix
+			s.failedReprovide(prefix)
 			if periodicReprovide {
 				s.scheduleNextReprovide(prefix, s.currentTimeOffset())
 			}
 			return fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 		}
 	}
+	// Remove all keys matching coveredPrefix from provide queue. No need to
+	// provide them anymore since they are about to be reprovided.
+	s.provideQueue.DequeueMatching(coveredPrefix)
+	// Remove covered prefix from the reprovide queue, so since we are about the
+	// reprovide the region.
+	s.reprovideQueue.Remove(coveredPrefix)
+	// Assign keys to keyspace regions.
 	regions = helpers.AssignKeysToRegions(regions, keys)
 	logger.Debugf("requested prefix: %s (len %d), prefix covered: %s (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
 
@@ -764,6 +711,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	errCount := 0
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: selfAddrs}
 	for _, r := range regions {
+		s.reprovideQueue.Remove(r.Prefix)
 		nKeys := r.Keys.Size()
 		if nKeys == 0 {
 			s.releaseRegionReprovide(r.Prefix)
@@ -782,7 +730,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		if err != nil {
 			logger.Warn(err, ": region ", r.Prefix)
 			errCount++
-			s.failedRegionsChan <- r.Prefix
+			s.failedReprovide(r.Prefix)
 			continue
 		}
 		s.provideCounter.Add(context.Background(), int64(nKeys))
@@ -807,24 +755,21 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 		return ErrNoSelfAddress
 	}
 	if len(keys) <= 2 {
-		// Region has 1 or 2 keys, it is more optimized to provide them naively.
+		// Don't fully explore the region, execute simple DHT provides for these
+		// keys. It isn't worth it to fully explore a region for just a few keys.
 		return s.individualProvideForPrefix(context.Background(), prefix, keys, false, false)
 	}
 	logger.Debugf("Starting to explore prefix %s for %d matching keys", prefix, len(keys))
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
-		s.connectivity.TriggerCheck()
-		// Put keys back to the provide queue.
-		s.provideQueue.Enqueue(prefix, keys...)
+		s.failedProvide(prefix, keys...)
 		if err == errTooManyIterationsDuringExploration {
 			err = fmt.Errorf("%w for '%s'", err, prefix)
 		}
 		return err
 	}
 	if len(peers) == 0 {
-		s.connectivity.TriggerCheck()
-		// Put keys back to the provide queue.
-		s.provideQueue.Enqueue(prefix, keys...)
+		s.failedProvide(prefix, keys...)
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
 
@@ -850,9 +795,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 		if err != nil {
 			logger.Warn(err, ": region ", r.Prefix)
 			errCount++
-			s.connectivity.TriggerCheck()
-			// Put keys back to the provide queue.
-			s.provideQueue.Enqueue(r.Prefix, helpers.AllValues(r.Keys, s.order)...)
+			s.failedProvide(r.Prefix, helpers.AllValues(r.Keys, s.order)...)
 			continue
 		}
 		s.provideCounter.Add(context.Background(), int64(nKeys))
@@ -874,8 +817,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 	if len(keys) == 1 {
 		coveredPrefix, err := s.vanillaProvide(ctx, keys[0])
 		if err != nil && !reprovide {
-			s.connectivity.TriggerCheck()
-			s.provideQueue.Enqueue(prefix, keys...)
+			s.failedProvide(prefix, keys...)
 		}
 		provideErr = err
 		if periodicReprovide {
@@ -893,8 +835,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 					success.Store(true)
 				} else if !reprovide {
 					// Individual provide failed
-					s.connectivity.TriggerCheck()
-					s.provideQueue.Enqueue(prefix, key)
+					s.failedProvide(prefix, key)
 				}
 			}()
 		}
@@ -910,7 +851,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 	if reprovide {
 		// TODO: persist to datastore that region identified by prefix was reprovided `now`
 		if provideErr != nil {
-			s.failedRegionsChan <- prefix
+			s.failedReprovide(prefix)
 		}
 	}
 	return provideErr
@@ -1064,6 +1005,8 @@ func (s *SweepingProvider) regionsFromPeers(peers []peer.ID) ([]helpers.Region, 
 	return regions, commonPrefix
 }
 
+// unscheduleSubsumedPrefixes removes all superstrings of `prefix` that are
+// scheduled in the future.
 func (s *SweepingProvider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
 	s.scheduleLk.Lock()
 	// Pop prefixes scheduled in the future being covered by the explored peers.
@@ -1169,6 +1112,9 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	return nil
 }
 
+// genProvideMessage generates a new provide message with the supplied
+// AddrInfo. The message contains no keys, as they will be set later before
+// sending the message.
 func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 	pmes := pb.NewMessage(pb.Message_ADD_PROVIDER, []byte{}, 0)
 	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
@@ -1293,47 +1239,22 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-// TODO: remove if not needed
-//
-// nextPrefixToReprovide returns the next prefix to reprovide, based on the
-// current time offset.
-// func (s *SweepingProvider) nextPrefixToReprovideNoLock() bitstr.Key {
-// 	now := s.currentTimeOffset()
-// 	maxVal := time.Duration(1 << maxPrefixSize)
-//
-// 	intPrefix := now * maxVal / s.reprovideInterval
-// 	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
-// 	return nextNonEmptyLeaf(s.schedule, prefix, s.order).Key
-// }
-
-func (s *SweepingProvider) catchupPendingNotify() {
-	select {
-	case s.catchupPendingChan <- struct{}{}:
-	default:
-	}
-}
-
 func (s *SweepingProvider) catchupPendingWork() {
-	lateRegions := s.lateRegionsQueue
-	// Empty pending list
-	s.lateRegionsQueue = s.lateRegionsQueue[:0]
+	if s.lateReprovideRunning.TryLock() {
+		go func() {
+			// Reprovide late regions if any.
+			s.reprovideLateRegions()
+			s.lateReprovideRunning.Unlock()
 
-	go func() {
-		// Iterate on lateRegions, and reprovide them
-		for _, r := range lateRegions {
-			s.workerPool.Acquire(burstWorker)
-			go func() {
-				defer s.workerPool.Release(burstWorker)
-				err := s.reprovideForPrefix(r, false)
-				if err != nil {
-					logger.Error(err)
-				}
-			}()
-		}
+			// Provides are handled after reprovides, because keys pending to be
+			// provided will be provided as part of a region reprovide if they belong
+			// to that region. Hence, the provideLoop will use less resources if run
+			// after the reprovides.
 
-		// Restart provide loop if it was stopped.
-		go s.provideLoop()
-	}()
+			// Restart provide loop if it was stopped.
+			s.provideLoop()
+		}()
+	}
 }
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled

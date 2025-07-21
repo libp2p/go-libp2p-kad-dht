@@ -158,22 +158,13 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
 		provideQueue:      queue.NewProvideQueue(),
+		reprovideQueue:    queue.NewReprovideQueue(),
 		connectivity:      connCheker,
-		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:     mockClock.Timer(time.Hour),
 		getSelfAddrs:      func() []ma.Multiaddr { return nil },
 		addLocalRecord:    func(mh mh.Multihash) error { return nil },
 	}
-	// r, err := NewProvider(ctx,
-	// 	WithRouter(router),
-	// 	WithClock(mockClock),
-	// 	WithReprovideInterval(time.Hour),
-	// 	WithPeerID(genRandPeerID(t)),
-	// 	WithMessageSender(m pb.MessageSender)
-	// )
-	// require.NoError(t, err)
-	// defer r.Close()
 
 	// Providing no cids returns no error
 	err = r.individualProvideForPrefix(ctx, prefix, nil, false, false)
@@ -195,7 +186,9 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 
 	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, true, true)
 	require.Error(t, err)
-	require.Equal(t, prefix, <-r.failedRegionsChan)
+	dequeued, ok := r.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefix, dequeued)
 }
 
 func TestIndividualProvideForPrefixMultiple(t *testing.T) {
@@ -219,8 +212,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		clock:             mockClock,
 		reprovideInterval: time.Hour,
 		provideQueue:      queue.NewProvideQueue(),
+		reprovideQueue:    queue.NewReprovideQueue(),
 		connectivity:      connCheker,
-		failedRegionsChan: make(chan bitstr.Key, 1),
 		schedule:          trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:     mockClock.Timer(time.Hour),
 		getSelfAddrs:      func() []ma.Multiaddr { return nil },
@@ -248,7 +241,9 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.Error(t, err)
-	require.Equal(t, prefix, <-r.failedRegionsChan)
+	dequeued, ok := r.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefix, dequeued)
 
 	// Providing two cids - 1 success, 1 failure
 	lk := sync.Mutex{}
@@ -266,14 +261,14 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, r.provideQueue.Size())
-	_, pendingCids, ok := r.provideQueue.Dequeue()
+	_, pendingCids, ok = r.provideQueue.Dequeue()
 	require.True(t, ok)
 	require.Len(t, pendingCids, 1)
 	require.Contains(t, ks, pendingCids[0])
 
 	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
 	require.NoError(t, err)
-	require.Len(t, r.failedRegionsChan, 0)
+	require.True(t, r.reprovideQueue.IsEmpty())
 	require.True(t, r.provideQueue.IsEmpty())
 }
 

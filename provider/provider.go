@@ -674,7 +674,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		}
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
-	regions, coveredPrefix := s.regionsFromPeers(peers)
+	regions, coveredPrefix := helpers.RegionsFromPeers(peers, s.replicationFactor, s.order)
 	if len(coveredPrefix) < len(prefix) {
 		// We need to load more keys
 		keys, err = s.keyStore.Get(context.Background(), coveredPrefix)
@@ -768,7 +768,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
 
-	regions, coveredPrefix := s.regionsFromPeers(peers)
+	regions, coveredPrefix := helpers.RegionsFromPeers(peers, s.replicationFactor, s.order)
 
 	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
 	keys = append(keys, extraKeys...)
@@ -978,25 +978,6 @@ explorationLoop:
 func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	p, _ := kb.GenRandPeerIDWithCPL(helpers.KeyToBytes(k), kb.PeerIDPreimageMaxCpl)
 	return s.router.GetClosestPeers(context.Background(), string(p))
-}
-
-// regionsFromPeers returns the keyspace regions from given peers ordered
-// according to s.order and the Common Prefix shared by all peers.
-func (s *SweepingProvider) regionsFromPeers(peers []peer.ID) ([]helpers.Region, bitstr.Key) {
-	if len(peers) == 0 {
-		return []helpers.Region{}, ""
-	}
-	peersTrie := trie.New[bit256.Key, peer.ID]()
-	minCpl := keyLen
-	firstPeerKey := helpers.PeerIDToBit256(peers[0])
-	for _, p := range peers {
-		k := helpers.PeerIDToBit256(p)
-		peersTrie.Add(k, p)
-		minCpl = min(minCpl, firstPeerKey.CommonPrefixLength(k))
-	}
-	commonPrefix := bitstr.Key(key.BitString(firstPeerKey)[:minCpl])
-	regions := helpers.ExtractMinimalRegions(peersTrie, commonPrefix, s.replicationFactor, s.order)
-	return regions, commonPrefix
 }
 
 // unscheduleSubsumedPrefixes removes all superstrings of `prefix` that are

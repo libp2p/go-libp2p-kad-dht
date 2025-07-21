@@ -1,69 +1,81 @@
 package provider
 
 import (
-	"context"
-
 	mh "github.com/multiformats/go-multihash"
 )
 
-// Provider is an interface that defines the methods for DHT provides and
-// reprovides.
-//
-// Note that this interface is subject to change.
-type Provider interface {
-	// ProvideOnce sends provider records for the specified keys to the DHT swarm
-	// only once. It does not automatically reprovide those keys afterward.
-	ProvideOnce(context.Context, ...mh.Multihash) error
-
-	// StartProviding provides the given keys to the DHT swarm unless they were
-	// already provided in the past. The keys will be periodically reprovided until
-	// StopProviding is called for the same keys or user defined garbage collection
-	// deletes the keys.
-	StartProviding(...mh.Multihash)
-
-	// ForceStartProviding is similar to StartProviding, but it sends provider
-	// records out to the DHT regardless of whether the keys were already provided
-	// in the past. It keeps reproviding the keys until StopProviding is called
-	// for these keys.
-	ForceStartProviding(context.Context, ...mh.Multihash) error
+// DHTProvider is an interface for providing keys to a DHT swarm. It holds a
+// state of keys to be advertised, and is responsible for periodically
+// publishing provider records for these keys to the DHT swarm before the
+// records expire.
+type DHTProvider interface {
+	// StartProviding ensures keys are periodically advertised to the DHT swarm.
+	//
+	// If the `keys` aren't currently being reprovided, they are added to the
+	// queue to be provided to the DHT swarm as soon as possible, and scheduled
+	// to be reprovided periodically. If `force` is set to true, all keys are
+	// provided to the DHT swarm, regardless of whether they were already being
+	// reprovided in the past. `keys` keep being reprovided until `StopProviding`
+	// is called.
+	//
+	// This operation is asynchronous, it returns as soon as the `keys` are added
+	// to the provide queue, and provides happens asynchronously.
+	StartProviding(force bool, keys ...mh.Multihash)
 
 	// StopProviding stops reproviding the given keys to the DHT swarm. The node
 	// stops being referred as a provider when the provider records in the DHT
 	// swarm expire.
-	StopProviding(...mh.Multihash)
+	//
+	// Remove the `keys` from the schedule and return immediately. Valid records
+	// can remain in the DHT swarm up to the provider record TTL after calling
+	// `StopProviding`.
+	StopProviding(keys ...mh.Multihash)
+
+	// ProvideOnce sends provider records for the specified keys to the DHT swarm
+	// only once. It does not automatically reprovide those keys afterward.
+	//
+	// Add the supplied multihashes to the provide queue, and return immediately.
+	// The provide operation happens asynchronously.
+	ProvideOnce(keys ...mh.Multihash)
 }
 
-var _ Provider = &SweepingProvider{}
+var _ DHTProvider = &SweepingProvider{}
 
 type SweepingProvider struct {
 	// TODO: implement me
 }
 
-// ProvideOnce only sends provider records for the given keys out to the DHT
-// swarm. It does NOT take the responsibility to reprovide these keys.
-func (s *SweepingProvider) ProvideOnce(ctx context.Context, keys ...mh.Multihash) error {
-	// TODO: implement me
-	return nil
-}
-
-// StartProviding provides the given keys to the DHT swarm unless they were
-// already provided in the past. The keys will be periodically reprovided until
-// StopProviding is called for the same keys or user defined garbage collection
-// deletes the keys.
-func (s *SweepingProvider) StartProviding(keys ...mh.Multihash) {
+// ProvideOnce sends provider records for the specified keys to the DHT swarm
+// only once. It does not automatically reprovide those keys afterward.
+//
+// Add the supplied multihashes to the provide queue, and return immediately.
+// The provide operation happens asynchronously.
+func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
 	// TODO: implement me
 }
 
-// ForceStartProviding is similar to StartProviding, but it sends provider
-// records out to the DHT even if the keys were already provided in the past.
-func (s *SweepingProvider) ForceStartProviding(ctx context.Context, keys ...mh.Multihash) error {
+// StartProviding ensures keys are periodically advertised to the DHT swarm.
+//
+// If the `keys` aren't currently being reprovided, they are added to the
+// queue to be provided to the DHT swarm as soon as possible, and scheduled
+// to be reprovided periodically. If `force` is set to true, all keys are
+// provided to the DHT swarm, regardless of whether they were already being
+// reprovided in the past. `keys` keep being reprovided until `StopProviding`
+// is called.
+//
+// This operation is asynchronous, it returns as soon as the `keys` are added
+// to the provide queue, and provides happens asynchronously.
+func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 	// TODO: implement me
-	return nil
 }
 
 // StopProviding stops reproviding the given keys to the DHT swarm. The node
 // stops being referred as a provider when the provider records in the DHT
 // swarm expire.
+//
+// Remove the `keys` from the schedule and return immediately. Valid records
+// can remain in the DHT swarm up to the provider record TTL after calling
+// `StopProviding`.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	// TODO: implement me
 }

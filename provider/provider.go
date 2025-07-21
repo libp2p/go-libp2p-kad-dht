@@ -1324,3 +1324,9 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	}
 	s.provideQueue.Remove(keys...)
 }
+
+// ClearProvideQueue clears the all the keys from the provide queue and returns
+// the number of keys that were cleared.
+func (s *SweepingProvider) ClearProvideQueue() int {
+	return s.provideQueue.Clear()
+}

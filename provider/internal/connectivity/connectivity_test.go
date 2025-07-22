@@ -189,8 +189,15 @@ func TestOnlineOffline(t *testing.T) {
 		t.Fatal("notified should be empty")
 	}
 
-	// offline -> offline
+	// TriggerCheck is noop while offline
 	checkFuncCalled.Store(false)
+	c.TriggerCheck()
+	time.Sleep(5 * time.Millisecond)
+	if checkFuncCalled.Load() {
+		t.Fatal("TriggerCheck should be no-op while offline")
+	}
+
+	// offline -> offline
 	mockClock.Add(checkInterval)
 	eventually(t, checked)
 	eventually(t, nodeOffline)
@@ -204,5 +211,74 @@ func TestOnlineOffline(t *testing.T) {
 	eventually(t, nodeOnline)
 	if len(notified) != 1 {
 		t.Fatal("notified should have one element")
+	}
+}
+
+// 5. Check ConnectivityChecker behaviour after closing it.
+func TestClose(t *testing.T) {
+	online := atomic.Bool{}
+	checkFuncCalled := atomic.Bool{}
+	mockClock := clock.NewMock()
+	checkInterval := time.Minute
+	notified := make(chan struct{}, 1)
+	c, err := New(
+		func() bool { checkFuncCalled.Store(true); return online.Load() },
+		func() { notified <- struct{}{} },
+		WithClock(mockClock),
+		WithOnlineCheckInterval(checkInterval),
+		WithOfflineCheckInterval(checkInterval),
+	)
+	if err != nil {
+		t.Fatalf("failed to create ConnectivityChecker: %v", err)
+	}
+
+	checked := func() bool {
+		return checkFuncCalled.Load()
+	}
+	nodeOffline := func() bool {
+		return !c.IsOnline()
+	}
+
+	// Node is offline
+	c.TriggerCheck()
+	eventually(t, checked)
+	eventually(t, nodeOffline)
+
+	// Close connectivity checker
+	checkFuncCalled.Store(false)
+	c.Close()
+	mockClock.Add(2 * checkInterval)
+	time.Sleep(5 * time.Millisecond)
+	if checkFuncCalled.Load() {
+		t.Fatal("checkFunc should not be called after Close")
+	}
+
+	// TriggerCheck is noop after Close
+	c.TriggerCheck()
+	mockClock.Add(2 * checkInterval)
+	time.Sleep(5 * time.Millisecond)
+	if checkFuncCalled.Load() {
+		t.Fatal("checkFunc should not be called after Close")
+	}
+}
+
+// 6. Try to build a ConnectivityChecker with invalid options
+func TestInvalidOptions(t *testing.T) {
+	// Negative OnlineCheckInterval
+	_, err := New(
+		func() bool { return true },
+		func() {},
+		WithOnlineCheckInterval(-time.Minute),
+	)
+	if err == nil {
+		t.Fatal("expected error for negative OnlineCheckInterval")
+	}
+	_, err = New(
+		func() bool { return true },
+		func() {},
+		WithOfflineCheckInterval(0*time.Second),
+	)
+	if err == nil {
+		t.Fatal("expected error for zero OfflineCheckInterval")
 	}
 }

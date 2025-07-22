@@ -78,12 +78,9 @@ type KadClosestPeersRouter interface {
 var logger = logging.Logger("dht/SweepingProvider")
 
 var (
-	ErrNodeOffline                        = errors.New("provider: node is offline")
-	ErrNoSelfAddress                      = errors.New("provider: no self addresses available for providing keys")
-	errTooManyIterationsDuringExploration = errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
+	ErrNodeOffline   = errors.New("provider: node is offline")
+	ErrNoSelfAddress = errors.New("provider: no self addresses available for providing keys")
 )
-
-const keyLen = bit256.KeyLen * 8 // 256
 
 type workerType uint8
 
@@ -91,12 +88,6 @@ const (
 	periodicWorker workerType = iota
 	burstWorker
 )
-
-type provideReq struct {
-	keys      []mh.Multihash
-	reprovide bool
-	force     bool
-}
 
 type SweepingProvider struct {
 	done      chan struct{}
@@ -125,16 +116,10 @@ type SweepingProvider struct {
 
 	keyStore *datastore.KeyStore
 
-	provideChan            chan provideReq
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
 	scheduleLk             sync.Mutex
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
-
-	provideQueue         *queue.ProvideQueue
-	provideRunning       sync.Mutex
-	reprovideQueue       *queue.ReprovideQueue
-	lateReprovideRunning sync.Mutex
 
 	prefixCursor        bitstr.Key
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
@@ -143,6 +128,11 @@ type SweepingProvider struct {
 	msgSender      pb.MessageSender
 	getSelfAddrs   func() []ma.Multiaddr
 	addLocalRecord func(mh.Multihash) error
+
+	provideQueue         *queue.ProvideQueue
+	provideRunning       sync.Mutex
+	reprovideQueue       *queue.ReprovideQueue
+	lateReprovideRunning sync.Mutex
 
 	provideCounter metric.Int64Counter
 }
@@ -201,7 +191,6 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 
 		keyStore: cfg.keyStore,
 
-		provideChan:   make(chan provideReq),
 		schedule:      trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer: cfg.clock.Timer(time.Hour),
 
@@ -248,14 +237,12 @@ func (s *SweepingProvider) run() {
 		select {
 		case <-s.done:
 			return
-		case provideRequest := <-s.provideChan:
-			s.handleProvide(provideRequest)
-		case <-s.scheduleTimer.C:
-			s.handleReprovide()
 		case <-retryTicker.C:
 			if s.connectivity.IsOnline() {
 				s.catchupPendingWork()
 			}
+		case <-s.scheduleTimer.C:
+			s.handleReprovide()
 		}
 	}
 }
@@ -296,7 +283,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 					if len(peers) <= 2 {
 						return // Ignore result if only 2 other peers in DHT.
 					}
-					cpl := keyLen
+					cpl := helpers.KeyLen
 					firstPeerKey := helpers.PeerIDToBit256(peers[0])
 					for _, p := range peers[1:] {
 						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, helpers.PeerIDToBit256(p)))
@@ -324,148 +311,22 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 	s.avgPrefixLenReady <- struct{}{}
 }
 
-func (s *SweepingProvider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
-	reprovideTime := s.reprovideTimeForPrefix(prefix)
-	s.schedule.Add(prefix, reprovideTime)
+func (s *SweepingProvider) catchupPendingWork() {
+	if s.lateReprovideRunning.TryLock() {
+		go func() {
+			// Reprovide late regions if any.
+			s.reprovideLateRegions()
+			s.lateReprovideRunning.Unlock()
 
-	currentTimeOffset := s.currentTimeOffset()
-	timeUntilReprovide := s.timeBetween(currentTimeOffset, reprovideTime)
-	if s.prefixCursor == "" {
-		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
-	} else {
-		followingKey := helpers.NextNonEmptyLeaf(s.schedule, prefix, s.order).Key
-		if s.prefixCursor == followingKey {
-			found, scheduledAlarm := trie.Find(s.schedule, s.prefixCursor)
-			if !found {
-				s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
-			} else {
-				timeUntilScheduledAlarm := s.timeBetween(currentTimeOffset, scheduledAlarm)
-				if timeUntilReprovide < timeUntilScheduledAlarm {
-					s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
-				}
-			}
-		}
+			// Provides are handled after reprovides, because keys pending to be
+			// provided will be provided as part of a region reprovide if they belong
+			// to that region. Hence, the provideLoop will use less resources if run
+			// after the reprovides.
+
+			// Restart provide loop if it was stopped.
+			s.provideLoop()
+		}()
 	}
-}
-
-func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
-	s.prefixCursor = prefix
-	s.scheduleTimer.Reset(timeUntilReprovide)
-	s.scheduleTimerStartedAt = s.clock.Now()
-}
-
-func (s *SweepingProvider) handleProvide(provideRequest provideReq) {
-	if len(provideRequest.keys) == 0 {
-		return
-	}
-
-	keys := provideRequest.keys
-	if provideRequest.reprovide {
-		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
-		// newly added keys.
-		newKeys, err := s.keyStore.Put(context.Background(), provideRequest.keys...)
-		if err != nil {
-			logger.Errorf("couldn't add keys to keystore: %s", err)
-			return
-		}
-		if !provideRequest.force {
-			keys = newKeys
-		}
-	}
-
-	prefixes := s.groupAndScheduleKeysByPrefix(keys, provideRequest.reprovide)
-	if len(prefixes) == 0 {
-		return
-	}
-
-	// Sort prefixes by number of keys.
-	sortedPrefixesAndKeys := helpers.SortPrefixesBySize(prefixes)
-	// Add keys to the provide queue.
-	for _, prefixAndKeys := range sortedPrefixesAndKeys {
-		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
-	}
-
-	go s.provideLoop()
-}
-
-func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
-	avgPrefixLen := -1
-	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	seen := make(map[bit256.Key]struct{})
-
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
-	for _, h := range keys {
-		k := helpers.MhToBit256(h)
-		// Don't add duplicates
-		if _, ok := seen[k]; ok {
-			continue
-		}
-		seen[k] = struct{}{}
-
-		prefixConsolidation := false
-		prefix, scheduled := helpers.FindPrefixOfKey(s.schedule, k)
-		if !scheduled {
-			if avgPrefixLen == -1 {
-				avgPrefixLen = s.getAvgPrefixLenNoLock()
-			}
-			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
-
-			if schedule {
-				if subtrie, ok := helpers.FindSubtrie(s.schedule, prefix); ok {
-					// If generated prefix is a prefix of existing scheduled keyspace
-					// zones, consolidate these zones around the shorter prefix.
-					for _, entry := range helpers.AllEntries(subtrie, s.order) {
-						s.schedule.Remove(entry.Key)
-					}
-					prefixConsolidation = true
-				}
-				s.addPrefixToScheduleNoLock(prefix)
-			}
-		}
-
-		if _, ok := prefixes[prefix]; !ok {
-			prefixes[prefix] = []mh.Multihash{h}
-		} else {
-			prefixes[prefix] = append(prefixes[prefix], h)
-		}
-		if prefixConsolidation {
-			// prefix is a shorted prefix of a prefix already in the schedule.
-			// Consolidate everything into prefix.
-			for p, keys := range prefixes {
-				if helpers.IsBitstrPrefix(p, prefix) {
-					seen := make(map[string]struct{})
-					for _, key := range prefixes[prefix] {
-						seen[string(key)] = struct{}{}
-					}
-					for _, key := range keys {
-						strKey := string(key)
-						if _, ok := seen[strKey]; ok {
-							continue
-						}
-						seen[strKey] = struct{}{}
-						prefixes[prefix] = append(prefixes[prefix], key)
-					}
-					delete(prefixes, p)
-				}
-			}
-		}
-	}
-	return prefixes
-}
-
-func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys ...mh.Multihash) {
-	// Put keys back to the provide queue.
-	s.provideQueue.Enqueue(prefix, keys...)
-
-	s.connectivity.TriggerCheck()
-}
-
-func (s *SweepingProvider) failedReprovide(prefix bitstr.Key) {
-	// Put prefix in the reprovide queue.
-	s.reprovideQueue.Enqueue(prefix)
-
-	s.connectivity.TriggerCheck()
 }
 
 func (s *SweepingProvider) provideLoop() {
@@ -632,6 +493,19 @@ func (s *SweepingProvider) handleReprovide() {
 	}()
 }
 
+func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
+	s.prefixCursor = prefix
+	s.scheduleTimer.Reset(timeUntilReprovide)
+	s.scheduleTimerStartedAt = s.clock.Now()
+}
+
+func (s *SweepingProvider) failedReprovide(prefix bitstr.Key) {
+	// Put prefix in the reprovide queue.
+	s.reprovideQueue.Enqueue(prefix)
+
+	s.connectivity.TriggerCheck()
+}
+
 func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovide bool) error {
 	selfAddrs := s.getSelfAddrs()
 	if len(selfAddrs) == 0 {
@@ -658,14 +532,11 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	logger.Debugf("Starting to explore prefix %s for reproviding %d matching keys", prefix, len(keys))
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
-		if err == errTooManyIterationsDuringExploration {
-			logger.Errorf("prefix key exploration not complete: %s", prefix)
-		}
 		s.failedReprovide(prefix)
 		if periodicReprovide {
 			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
 		}
-		return err
+		return fmt.Errorf("reprovide '%s': %w", prefix, err)
 	}
 	if len(peers) == 0 {
 		s.failedReprovide(prefix)
@@ -739,6 +610,13 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	return nil
 }
 
+func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys ...mh.Multihash) {
+	// Put keys back to the provide queue.
+	s.provideQueue.Enqueue(prefix, keys...)
+
+	s.connectivity.TriggerCheck()
+}
+
 func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
@@ -758,10 +636,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	peers, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
 		s.failedProvide(prefix, keys...)
-		if err == errTooManyIterationsDuringExploration {
-			err = fmt.Errorf("%w for '%s'", err, prefix)
-		}
-		return err
+		return fmt.Errorf("provide '%s': %w", prefix, err)
 	}
 	if len(peers) == 0 {
 		s.failedProvide(prefix, keys...)
@@ -966,7 +841,7 @@ explorationLoop:
 		peers = append(peers, p)
 	}
 	if !earlyExit {
-		return peers, errTooManyIterationsDuringExploration
+		return peers, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 	}
 	logger.Debugf("Region %s exploration required %d requests to discover %d peers in %s", prefix, i, len(allClosestPeers), time.Since(startTime))
 	return peers, err
@@ -1214,24 +1089,6 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-func (s *SweepingProvider) catchupPendingWork() {
-	if s.lateReprovideRunning.TryLock() {
-		go func() {
-			// Reprovide late regions if any.
-			s.reprovideLateRegions()
-			s.lateReprovideRunning.Unlock()
-
-			// Provides are handled after reprovides, because keys pending to be
-			// provided will be provided as part of a region reprovide if they belong
-			// to that region. Hence, the provideLoop will use less resources if run
-			// after the reprovides.
-
-			// Restart provide loop if it was stopped.
-			s.provideLoop()
-		}()
-	}
-}
-
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
 // prefixes.
 //
@@ -1267,14 +1124,133 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	return s.cachedAvgPrefixLen
 }
 
+func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) {
+	if len(keys) == 0 {
+		return
+	}
+
+	if reprovide {
+		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
+		// newly added keys.
+		newKeys, err := s.keyStore.Put(context.Background(), keys...)
+		if err != nil {
+			logger.Errorf("couldn't add keys to keystore: %s", err)
+			return
+		}
+		if !force {
+			keys = newKeys
+		}
+	}
+
+	prefixes := s.groupAndScheduleKeysByPrefix(keys, reprovide)
+	if len(prefixes) == 0 {
+		return
+	}
+
+	// Sort prefixes by number of keys.
+	sortedPrefixesAndKeys := helpers.SortPrefixesBySize(prefixes)
+	// Add keys to the provide queue.
+	for _, prefixAndKeys := range sortedPrefixesAndKeys {
+		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
+	}
+
+	go s.provideLoop()
+}
+
+func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
+	avgPrefixLen := -1
+	prefixes := make(map[bitstr.Key][]mh.Multihash)
+	seen := make(map[bit256.Key]struct{})
+
+	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
+	for _, h := range keys {
+		k := helpers.MhToBit256(h)
+		// Don't add duplicates
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+
+		prefixConsolidation := false
+		prefix, scheduled := helpers.FindPrefixOfKey(s.schedule, k)
+		if !scheduled {
+			if avgPrefixLen == -1 {
+				avgPrefixLen = s.getAvgPrefixLenNoLock()
+			}
+			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
+
+			if schedule {
+				if subtrie, ok := helpers.FindSubtrie(s.schedule, prefix); ok {
+					// If generated prefix is a prefix of existing scheduled keyspace
+					// zones, consolidate these zones around the shorter prefix.
+					for _, entry := range helpers.AllEntries(subtrie, s.order) {
+						s.schedule.Remove(entry.Key)
+					}
+					prefixConsolidation = true
+				}
+				s.addPrefixToScheduleNoLock(prefix)
+			}
+		}
+
+		if _, ok := prefixes[prefix]; !ok {
+			prefixes[prefix] = []mh.Multihash{h}
+		} else {
+			prefixes[prefix] = append(prefixes[prefix], h)
+		}
+		if prefixConsolidation {
+			// prefix is a shorted prefix of a prefix already in the schedule.
+			// Consolidate everything into prefix.
+			for p, keys := range prefixes {
+				if helpers.IsBitstrPrefix(p, prefix) {
+					seen := make(map[string]struct{})
+					for _, key := range prefixes[prefix] {
+						seen[string(key)] = struct{}{}
+					}
+					for _, key := range keys {
+						strKey := string(key)
+						if _, ok := seen[strKey]; ok {
+							continue
+						}
+						seen[strKey] = struct{}{}
+						prefixes[prefix] = append(prefixes[prefix], key)
+					}
+					delete(prefixes, p)
+				}
+			}
+		}
+	}
+	return prefixes
+}
+
+func (s *SweepingProvider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
+	reprovideTime := s.reprovideTimeForPrefix(prefix)
+	s.schedule.Add(prefix, reprovideTime)
+
+	currentTimeOffset := s.currentTimeOffset()
+	timeUntilReprovide := s.timeBetween(currentTimeOffset, reprovideTime)
+	if s.prefixCursor == "" {
+		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+	} else {
+		followingKey := helpers.NextNonEmptyLeaf(s.schedule, prefix, s.order).Key
+		if s.prefixCursor == followingKey {
+			found, scheduledAlarm := trie.Find(s.schedule, s.prefixCursor)
+			if !found {
+				s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+			} else {
+				timeUntilScheduledAlarm := s.timeBetween(currentTimeOffset, scheduledAlarm)
+				if timeUntilReprovide < timeUntilScheduledAlarm {
+					s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+				}
+			}
+		}
+	}
+}
+
 // ProvideOnce only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
 func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
-	s.provideChan <- provideReq{
-		keys:      keys,
-		reprovide: false,
-		force:     true,
-	}
+	s.handleProvide(true, false, keys...)
 }
 
 // StartProviding provides the given keys to the DHT swarm unless they were
@@ -1282,11 +1258,7 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
 func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
-	s.provideChan <- provideReq{
-		keys:      keys,
-		reprovide: true,
-		force:     force,
-	}
+	s.handleProvide(force, true, keys...)
 }
 
 // StopProviding stops reproviding the given keys to the DHT swarm. The node

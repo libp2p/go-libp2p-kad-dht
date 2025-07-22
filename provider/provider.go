@@ -137,7 +137,7 @@ type SweepingProvider struct {
 	provideCounter metric.Int64Counter
 }
 
-func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error) {
+func NewProvider(opts ...Option) (*SweepingProvider, error) {
 	var cfg config
 	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
@@ -145,7 +145,7 @@ func NewProvider(ctx context.Context, opts ...Option) (*SweepingProvider, error)
 	}
 	if cfg.keyStore == nil {
 		// Setup KeyStore if missing
-		keyStore, err := datastore.NewKeyStore(ctx, ds.NewMapDatastore())
+		keyStore, err := datastore.NewKeyStore(ds.NewMapDatastore())
 		if err != nil {
 			return nil, err
 		}

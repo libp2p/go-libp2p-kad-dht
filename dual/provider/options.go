@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -55,7 +54,7 @@ func (c *config) validate() error {
 
 var DefaultConfig = func(cfg *config) error {
 	var err error
-	cfg.keyStore, err = datastore.NewKeyStore(context.Background(), ds.NewMapDatastore())
+	cfg.keyStore, err = datastore.NewKeyStore(ds.NewMapDatastore())
 	if err != nil {
 		return err
 	}

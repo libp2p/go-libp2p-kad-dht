@@ -472,7 +472,6 @@ func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args
 }
 
 func TestProvideOnce(t *testing.T) {
-	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
@@ -510,7 +509,7 @@ func TestProvideOnce(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(checkInterval),
 		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
-	reprovider, err := NewProvider(ctx, opts...)
+	reprovider, err := NewProvider(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 	reprovider.cachedAvgPrefixLen = 4
@@ -539,7 +538,6 @@ func TestProvideOnce(t *testing.T) {
 }
 
 func TestProvideSingle(t *testing.T) {
-	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 	replicationFactor := 4
@@ -579,7 +577,7 @@ func TestProvideSingle(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := NewProvider(ctx, opts...)
+	reprovider, err := NewProvider(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 
@@ -618,8 +616,6 @@ func TestProvideSingle(t *testing.T) {
 }
 
 func TestProvideMany(t *testing.T) {
-	ctx := context.Background()
-
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
@@ -681,7 +677,7 @@ func TestProvideMany(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := NewProvider(ctx, opts...)
+	reprovider, err := NewProvider(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 	mockClock.Add(reprovideInterval - 1)
@@ -750,7 +746,6 @@ func TestProvideMany(t *testing.T) {
 }
 
 func TestProvideManyUnstableNetwork(t *testing.T) {
-	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
@@ -821,7 +816,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
-	reprovider, err := NewProvider(ctx, opts...)
+	reprovider, err := NewProvider(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 	time.Sleep(10 * time.Millisecond)

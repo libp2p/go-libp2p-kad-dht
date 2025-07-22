@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"github.com/gammazero/deque"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
@@ -26,9 +26,9 @@ type prefixQueue struct {
 // remove all superstrings from the queue. The prefixes are consolidated around
 // the shortest prefix.
 func (q *prefixQueue) Push(prefix bitstr.Key) {
-	if subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix); ok {
+	if subtrie, ok := keyspace.FindSubtrie(q.prefixes, prefix); ok {
 		// Prefix is a prefix of (at least) an existing prefix in the queue.
-		entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
+		entriesToRemove := keyspace.AllEntries(subtrie, bit256.ZeroKey())
 		prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
 		for i, entry := range entriesToRemove {
 			prefixesToRemove[i] = entry.Key
@@ -40,7 +40,7 @@ func (q *prefixQueue) Push(prefix bitstr.Key) {
 		q.queue.Insert(firstRemovedIndex, prefix)
 		// Add `prefix` to prefixes trie.
 		q.prefixes.Add(prefix, struct{}{})
-	} else if _, ok := helpers.FindPrefixOfKey(q.prefixes, prefix); !ok {
+	} else if _, ok := keyspace.FindPrefixOfKey(q.prefixes, prefix); !ok {
 		// No prefixes of `prefix` found in the queue.
 		q.queue.PushBack(prefix)
 		q.prefixes.Add(prefix, struct{}{})
@@ -62,11 +62,11 @@ func (q *prefixQueue) Pop() (bitstr.Key, bool) {
 
 // Remove removes a prefix or all its superstrings from the queue, if any.
 func (q *prefixQueue) Remove(prefix bitstr.Key) bool {
-	subtrie, ok := helpers.FindSubtrie(q.prefixes, prefix)
+	subtrie, ok := keyspace.FindSubtrie(q.prefixes, prefix)
 	if !ok {
 		return false
 	}
-	entriesToRemove := helpers.AllEntries(subtrie, bit256.ZeroKey())
+	entriesToRemove := keyspace.AllEntries(subtrie, bit256.ZeroKey())
 	prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
 	for i, entry := range entriesToRemove {
 		prefixesToRemove[i] = entry.Key

@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
 	mh "github.com/multiformats/go-multihash"
+
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 	"github.com/stretchr/testify/require"
+
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 )
 
 func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
@@ -22,8 +24,8 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 		if err != nil {
 			panic(err)
 		}
-		k := helpers.MhToBit256(h)
-		if helpers.IsPrefix(prefix, k) {
+		k := keyspace.MhToBit256(h)
+		if keyspace.IsPrefix(prefix, k) {
 			mhs = append(mhs, h)
 		}
 	}

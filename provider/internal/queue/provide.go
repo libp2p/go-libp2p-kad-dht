@@ -3,13 +3,13 @@ package queue
 import (
 	"sync"
 
-	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
+	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 
-	mh "github.com/multiformats/go-multihash"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 )
 
 // ProvideQueue is a thread-safe queue storing multihashes about to be provided
@@ -63,7 +63,7 @@ func (q *ProvideQueue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 
 	// Add keys to the keys trie.
 	for _, h := range keys {
-		q.keys.Add(helpers.MhToBit256(h), h)
+		q.keys.Add(keyspace.MhToBit256(h), h)
 	}
 }
 
@@ -80,11 +80,11 @@ func (q *ProvideQueue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
 	}
 
 	// Get all keys that match the prefix.
-	subtrie, _ := helpers.FindSubtrie(q.keys, prefix)
-	keys := helpers.AllValues(subtrie, bit256.ZeroKey())
+	subtrie, _ := keyspace.FindSubtrie(q.keys, prefix)
+	keys := keyspace.AllValues(subtrie, bit256.ZeroKey())
 
 	// Remove the keys from the keys trie.
-	helpers.PruneSubtrie(q.keys, prefix)
+	keyspace.PruneSubtrie(q.keys, prefix)
 
 	return prefix, keys, true
 }
@@ -97,25 +97,25 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	subtrie, ok := helpers.FindSubtrie(q.keys, prefix)
+	subtrie, ok := keyspace.FindSubtrie(q.keys, prefix)
 	if !ok {
 		// No keys matching the prefix.
 		return nil
 	}
-	keys := helpers.AllValues(subtrie, bit256.ZeroKey())
+	keys := keyspace.AllValues(subtrie, bit256.ZeroKey())
 
 	// Remove the keys from the keys trie.
-	helpers.PruneSubtrie(q.keys, prefix)
+	keyspace.PruneSubtrie(q.keys, prefix)
 
 	// Remove prefix and its superstrings from queue if any.
 	removed := q.queue.Remove(prefix)
 	if !removed {
 		// prefix and superstrings not in queue.
-		if shorterPrefix, ok := helpers.FindPrefixOfKey(q.queue.prefixes, prefix); ok {
+		if shorterPrefix, ok := keyspace.FindPrefixOfKey(q.queue.prefixes, prefix); ok {
 			// prefix is a superstring of some other shorter prefix in the queue.
 			// Leave it in the queue, unless the shorter prefix doesn't have any
 			// matching keys left.
-			if _, ok := helpers.FindSubtrie(q.keys, shorterPrefix); !ok {
+			if _, ok := keyspace.FindSubtrie(q.keys, shorterPrefix); !ok {
 				// No keys matching shorterPrefix, remove shorterPrefix from queue.
 				q.queue.Remove(shorterPrefix)
 			}
@@ -136,9 +136,9 @@ func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
 
 	// Remove keys from the keys trie.
 	for _, h := range keys {
-		k := helpers.MhToBit256(h)
+		k := keyspace.MhToBit256(h)
 		q.keys.Remove(k)
-		if prefix, ok := helpers.FindPrefixOfKey(q.queue.prefixes, k); ok {
+		if prefix, ok := keyspace.FindPrefixOfKey(q.queue.prefixes, k); ok {
 			// Get the trie leaf matching the key, if any.
 			matchingPrefixes[prefix] = struct{}{}
 		}
@@ -148,7 +148,7 @@ func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
 	// queue.
 	prefixesToRemove := make([]bitstr.Key, 0)
 	for prefix := range matchingPrefixes {
-		if _, ok := helpers.FindSubtrie(q.keys, prefix); !ok {
+		if _, ok := keyspace.FindSubtrie(q.keys, prefix); !ok {
 			prefixesToRemove = append(prefixesToRemove, prefix)
 		}
 	}

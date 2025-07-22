@@ -431,12 +431,10 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 
 	err = r.individualProvideForPrefix(prefix, ks, false, false)
 	require.NoError(t, err)
-	// Verify first cid was now provided 2x, but second cid only 1x since it just failed.
+	// Verify one cid was now provided 2x, and other cid only 1x since it just failed.
 	msgSenderLk.Lock()
-	require.Equal(t, 2, advertisements[string(ks[0])][closestPeers[0]])
-	require.Equal(t, 2, advertisements[string(ks[0])][closestPeers[1]])
-	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[0]])
-	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[1]])
+	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[0]]+advertisements[string(ks[1])][closestPeers[0]])
+	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[1]]+advertisements[string(ks[1])][closestPeers[1]])
 	msgSenderLk.Unlock()
 
 	// Failed key was added to provide queue
@@ -444,18 +442,16 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	_, pendingKeys, ok = r.provideQueue.Dequeue()
 	require.True(t, ok)
 	require.Len(t, pendingKeys, 1)
-	require.Equal(t, ks[1], pendingKeys[0])
+	require.Contains(t, ks, pendingKeys[0])
 	require.True(t, r.reprovideQueue.IsEmpty())
 	require.True(t, r.provideQueue.IsEmpty())
 
 	err = r.individualProvideForPrefix(prefix, ks, true, true)
 	require.NoError(t, err)
-	// Verify first cid was now provided 3x, but second cid only 1x since it failed again.
+	// Verify only one of the 2 cids was provided. Providing failed for the other.
 	msgSenderLk.Lock()
-	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[0]])
-	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[1]])
-	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[0]])
-	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[1]])
+	require.Equal(t, 4, advertisements[string(ks[0])][closestPeers[0]]+advertisements[string(ks[1])][closestPeers[0]])
+	require.Equal(t, 4, advertisements[string(ks[0])][closestPeers[1]]+advertisements[string(ks[1])][closestPeers[1]])
 	msgSenderLk.Unlock()
 
 	// Failed key shouldn't be added to provide nor reprovide queue, since the

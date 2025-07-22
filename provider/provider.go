@@ -96,6 +96,6 @@ const (
 // When `state == StateProvided`, `ts` is the wall‑clock time of the most recent
 // successful provide operation (UTC).
 // For `StateQueued` or `StateUnknown`, `ts` is the zero `time.Time`.
-func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, ts time.Time) {
+func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, stateTime time.Time) {
 	return StateUnknown, time.Time{}
 }

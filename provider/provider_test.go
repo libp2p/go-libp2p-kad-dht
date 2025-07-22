@@ -798,7 +798,8 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		},
 	}
 	msgSenderLk := sync.Mutex{}
-	addProviderRpcs := make(map[string][]peer.ID) // key -> peerid
+	addProviderRpcs := make(map[string]map[peer.ID]int) // key -> peerid -> count
+	provideCount := atomic.Int32{}
 	msgSender := &mockMsgSender{
 		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
 			msgSenderLk.Lock()
@@ -809,10 +810,10 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 			_, k, err := mh.MHFromBytes(m.GetKey())
 			require.NoError(t, err)
 			if _, ok := addProviderRpcs[string(k)]; !ok {
-				addProviderRpcs[string(k)] = []peer.ID{p}
-			} else {
-				addProviderRpcs[string(k)] = append(addProviderRpcs[string(k)], p)
+				addProviderRpcs[string(k)] = make(map[peer.ID]int)
 			}
+			addProviderRpcs[string(k)][p]++
+			provideCount.Add(1)
 			return nil
 		},
 	}
@@ -840,7 +841,9 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	routerOffline.Store(true)
 
-	reprovider.StartProviding(true, mhs...) // TODO: this errors, check that
+	reprovider.StartProviding(true, mhs...)
+	time.Sleep(10 * time.Millisecond) // wait for StartProviding to finish
+	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
 
 	nodeOffline := func() bool {
 		return !reprovider.connectivity.IsOnline()
@@ -867,7 +870,7 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		}
 		return true
 	}
-	waitUntil(t, providedAllKeys, 200*time.Millisecond, "waiting for all keys to be provided")
+	waitUntil(t, providedAllKeys, 200*time.Millisecond, "waiting for all keys to be reprovided")
 }
 
 // TODO: test shrinking/expanding network

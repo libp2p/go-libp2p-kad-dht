@@ -537,7 +537,7 @@ func TestProvideOnce(t *testing.T) {
 	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
 }
 
-func TestProvideSingle(t *testing.T) {
+func TestStartProvidingSingle(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 	replicationFactor := 4
@@ -563,7 +563,13 @@ func TestProvideSingle(t *testing.T) {
 			return peers, nil
 		},
 	}
-	msgSender := &mockMsgSender{}
+	provideCount := atomic.Int32{}
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			provideCount.Add(1)
+			return nil
+		},
+	}
 	opts := []Option{
 		WithReplicationFactor(replicationFactor),
 		WithReprovideInterval(reprovideInterval),
@@ -583,7 +589,7 @@ func TestProvideSingle(t *testing.T) {
 
 	// Blocks until cid is provided
 	reprovider.StartProviding(true, h) // TODO: no error
-	time.Sleep(10 * time.Millisecond)  // wait for ProvideOnce to finish
+	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
@@ -602,17 +608,22 @@ func TestProvideSingle(t *testing.T) {
 	// Try to provide the same cid again -> noop
 	reprovider.StartProviding(false, h)
 	time.Sleep(5 * time.Millisecond)
+	require.Equal(t, int32(len(peers)), provideCount.Load())
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide happens as scheduled.
 	mockClock.Add(reprovideTime - 1)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, int32(len(peers)), provideCount.Load())
 	mockClock.Add(1)
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval - 1)
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval) // 1
 	require.Equal(t, 3+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 3*int32(len(peers)), provideCount.Load())
 }
 
 func TestProvideMany(t *testing.T) {

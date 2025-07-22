@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -588,7 +587,7 @@ func TestStartProvidingSingle(t *testing.T) {
 	defer reprovider.Close()
 
 	// Blocks until cid is provided
-	reprovider.StartProviding(true, h) // TODO: no error
+	reprovider.StartProviding(true, h)
 	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
@@ -626,14 +625,13 @@ func TestStartProvidingSingle(t *testing.T) {
 	require.Equal(t, 3*int32(len(peers)), provideCount.Load())
 }
 
-func TestProvideMany(t *testing.T) {
+func TestStartProvidingMany(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
 	nKeysExponent := 10
 	nCids := 1 << nKeysExponent
 	mhs := genBalancedMultihashes(nKeysExponent)
-	fmt.Println(mhs)
 
 	replicationFactor := 4
 	peerPrefixBitlen := 6
@@ -657,7 +655,8 @@ func TestProvideMany(t *testing.T) {
 		},
 	}
 	msgSenderLk := sync.Mutex{}
-	addProviderRpcs := make(map[string][]peer.ID) // cid -> peerid
+	addProviderRpcs := make(map[string]map[peer.ID]int) // cid -> peerid -> count
+	provideCount := atomic.Int32{}
 	msgSender := &mockMsgSender{
 		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
 			msgSenderLk.Lock()
@@ -665,10 +664,10 @@ func TestProvideMany(t *testing.T) {
 			_, k, err := mh.MHFromBytes(m.GetKey())
 			require.NoError(t, err)
 			if _, ok := addProviderRpcs[string(k)]; !ok {
-				addProviderRpcs[string(k)] = []peer.ID{p}
-			} else {
-				addProviderRpcs[string(k)] = append(addProviderRpcs[string(k)], p)
+				addProviderRpcs[string(k)] = make(map[peer.ID]int)
 			}
+			addProviderRpcs[string(k)][p]++
+			provideCount.Add(1)
 			return nil
 		},
 	}
@@ -691,10 +690,9 @@ func TestProvideMany(t *testing.T) {
 	reprovider, err := NewProvider(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
-	mockClock.Add(reprovideInterval - 1)
 
-	reprovider.StartProviding(true, mhs...) // TODO: verify no error
-	time.Sleep(50 * time.Millisecond)       // wait for ProvideMany to finish
+	reprovider.StartProviding(true, mhs...)
+	waitUntil(t, func() bool { return provideCount.Load() == int32(len(mhs)*replicationFactor) }, 50*time.Millisecond, "waiting for ProvideMany to finish")
 
 	// Each cid should have been provided at least once.
 	msgSenderLk.Lock()
@@ -703,6 +701,9 @@ func TestProvideMany(t *testing.T) {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.
 		require.Len(t, holders, replicationFactor)
+		for _, count := range holders {
+			require.Equal(t, 1, count)
+		}
 		// Verify provider records are assigned to the closest peers
 		closestPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))[:replicationFactor]
 		for _, p := range closestPeers {
@@ -711,13 +712,13 @@ func TestProvideMany(t *testing.T) {
 	}
 
 	step := 10 * time.Second
-	// Test reprovides
+	// Test reprovides, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
 	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
-	time.Sleep(20 * time.Millisecond) // wait for reprovide to finish
+	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 50*time.Millisecond, "waiting for reprovide to finish")
 
 	msgSenderLk.Lock()
 	require.Equal(t, nCids, len(addProviderRpcs))
@@ -725,6 +726,9 @@ func TestProvideMany(t *testing.T) {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.
 		require.Len(t, holders, replicationFactor, key.BitString(helpers.MhToBit256([]byte(k))))
+		for _, count := range holders {
+			require.Equal(t, 1, count)
+		}
 		// Verify provider records are assigned to the closest peers
 		closestPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))[:replicationFactor]
 		for _, p := range closestPeers {
@@ -733,13 +737,13 @@ func TestProvideMany(t *testing.T) {
 	}
 
 	step = time.Minute // speed up test since prefixes have been consolidated in schedule
-	// Test reprovides again
+	// Test reprovides again, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
 	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
-	time.Sleep(20 * time.Millisecond) // wait for reprovide to finish
+	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 50*time.Millisecond, "waiting for reprovide to finish")
 
 	msgSenderLk.Lock()
 	require.Equal(t, nCids, len(addProviderRpcs))
@@ -747,6 +751,9 @@ func TestProvideMany(t *testing.T) {
 		// Verify that all cids have been provided to exactly replicationFactor
 		// distinct peers.
 		require.Len(t, holders, replicationFactor)
+		for _, count := range holders {
+			require.Equal(t, 1, count)
+		}
 		// Verify provider records are assigned to the closest peers
 		closestPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))[:replicationFactor]
 		for _, p := range closestPeers {

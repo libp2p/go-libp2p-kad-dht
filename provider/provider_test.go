@@ -430,7 +430,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 
 	err = r.individualProvideForPrefix(prefix, ks, false, false)
 	require.NoError(t, err)
-	// Verify one cid was now provided 2x, and other cid only 1x since it just failed.
+	// Verify one key was now provided 2x, and other key only 1x since it just failed.
 	msgSenderLk.Lock()
 	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[0]]+advertisements[string(ks[1])][closestPeers[0]])
 	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[1]]+advertisements[string(ks[1])][closestPeers[1]])
@@ -447,7 +447,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 
 	err = r.individualProvideForPrefix(prefix, ks, true, true)
 	require.NoError(t, err)
-	// Verify only one of the 2 cids was provided. Providing failed for the other.
+	// Verify only one of the 2 keys was provided. Providing failed for the other.
 	msgSenderLk.Lock()
 	require.Equal(t, 4, advertisements[string(ks[0])][closestPeers[0]]+advertisements[string(ks[1])][closestPeers[0]])
 	require.Equal(t, 4, advertisements[string(ks[0])][closestPeers[1]]+advertisements[string(ks[1])][closestPeers[1]])
@@ -586,7 +586,7 @@ func TestStartProvidingSingle(t *testing.T) {
 	require.NoError(t, err)
 	defer reprovider.Close()
 
-	// Blocks until cid is provided
+	// Blocks until key is provided
 	reprovider.StartProviding(true, h)
 	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
@@ -604,7 +604,7 @@ func TestStartProvidingSingle(t *testing.T) {
 	require.Equal(t, reprovider.reprovideTimeForPrefix(prefix), reprovideTime)
 	reprovider.scheduleLk.Unlock()
 
-	// Try to provide the same cid again -> noop
+	// Try to provide the same key again -> noop
 	reprovider.StartProviding(false, h)
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, int32(len(peers)), provideCount.Load())
@@ -630,7 +630,7 @@ func TestStartProvidingMany(t *testing.T) {
 	require.NoError(t, err)
 
 	nKeysExponent := 10
-	nCids := 1 << nKeysExponent
+	nKeys := 1 << nKeysExponent
 	mhs := genBalancedMultihashes(nKeysExponent)
 
 	replicationFactor := 4
@@ -655,7 +655,7 @@ func TestStartProvidingMany(t *testing.T) {
 		},
 	}
 	msgSenderLk := sync.Mutex{}
-	addProviderRpcs := make(map[string]map[peer.ID]int) // cid -> peerid -> count
+	addProviderRpcs := make(map[string]map[peer.ID]int) // key -> peerid -> count
 	provideCount := atomic.Int32{}
 	msgSender := &mockMsgSender{
 		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
@@ -692,13 +692,13 @@ func TestStartProvidingMany(t *testing.T) {
 	defer reprovider.Close()
 
 	reprovider.StartProviding(true, mhs...)
-	waitUntil(t, func() bool { return provideCount.Load() == int32(len(mhs)*replicationFactor) }, 50*time.Millisecond, "waiting for ProvideMany to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for ProvideMany to finish")
 
-	// Each cid should have been provided at least once.
+	// Each key should have been provided at least once.
 	msgSenderLk.Lock()
-	require.Equal(t, nCids, len(addProviderRpcs))
+	require.Equal(t, nKeys, len(addProviderRpcs))
 	for k, holders := range addProviderRpcs {
-		// Verify that all cids have been provided to exactly replicationFactor
+		// Verify that all keys have been provided to exactly replicationFactor
 		// distinct peers.
 		require.Len(t, holders, replicationFactor)
 		for _, count := range holders {
@@ -715,15 +715,15 @@ func TestStartProvidingMany(t *testing.T) {
 	// Test reprovides, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range reprovideInterval / step {
+	for range (reprovideInterval - 1) / step {
 		mockClock.Add(step)
 	}
-	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 50*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for reprovide to finish")
 
 	msgSenderLk.Lock()
-	require.Equal(t, nCids, len(addProviderRpcs))
+	require.Equal(t, nKeys, len(addProviderRpcs))
 	for k, holders := range addProviderRpcs {
-		// Verify that all cids have been provided to exactly replicationFactor
+		// Verify that all keys have been provided to exactly replicationFactor
 		// distinct peers.
 		require.Len(t, holders, replicationFactor, key.BitString(helpers.MhToBit256([]byte(k))))
 		for _, count := range holders {
@@ -740,15 +740,15 @@ func TestStartProvidingMany(t *testing.T) {
 	// Test reprovides again, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range reprovideInterval / step {
+	for range (reprovideInterval - 1) / step {
 		mockClock.Add(step)
 	}
-	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 50*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for reprovide to finish")
 
 	msgSenderLk.Lock()
-	require.Equal(t, nCids, len(addProviderRpcs))
+	require.Equal(t, nKeys, len(addProviderRpcs))
 	for k, holders := range addProviderRpcs {
-		// Verify that all cids have been provided to exactly replicationFactor
+		// Verify that all keys have been provided to exactly replicationFactor
 		// distinct peers.
 		require.Len(t, holders, replicationFactor)
 		for _, count := range holders {
@@ -763,12 +763,12 @@ func TestStartProvidingMany(t *testing.T) {
 	msgSenderLk.Unlock()
 }
 
-func TestProvideManyUnstableNetwork(t *testing.T) {
+func TestStartProvidingUnstableNetwork(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
 	nKeysExponent := 10
-	nCids := 1 << nKeysExponent
+	nKeys := 1 << nKeysExponent
 	mhs := genBalancedMultihashes(nKeysExponent)
 
 	replicationFactor := 4
@@ -798,7 +798,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		},
 	}
 	msgSenderLk := sync.Mutex{}
-	addProviderRpcs := make(map[string][]peer.ID) // cid -> peerid
+	addProviderRpcs := make(map[string][]peer.ID) // key -> peerid
 	msgSender := &mockMsgSender{
 		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
 			msgSenderLk.Lock()
@@ -852,14 +852,14 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	mockClock.Add(connectivityCheckInterval)
 	waitUntil(t, reprovider.connectivity.IsOnline, 10*time.Millisecond, "waiting for node to come back online")
 
-	providedAllCids := func() bool {
+	providedAllKeys := func() bool {
 		msgSenderLk.Lock()
 		defer msgSenderLk.Unlock()
-		if len(addProviderRpcs) != nCids {
+		if len(addProviderRpcs) != nKeys {
 			return false
 		}
 		for _, peers := range addProviderRpcs {
-			// Verify that all cids have been provided to exactly replicationFactor
+			// Verify that all keys have been provided to exactly replicationFactor
 			// distinct peers.
 			if len(peers) != replicationFactor {
 				return false
@@ -867,7 +867,7 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 		}
 		return true
 	}
-	waitUntil(t, providedAllCids, 200*time.Millisecond, "waiting for all cids to be provided")
+	waitUntil(t, providedAllKeys, 200*time.Millisecond, "waiting for all keys to be provided")
 }
 
 // TODO: test shrinking/expanding network

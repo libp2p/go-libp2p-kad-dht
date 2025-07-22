@@ -36,10 +36,11 @@ type KeyChanFunc = func(context.Context) (<-chan cid.Cid, error) // TODO: update
 // This automatic refresh keeps the KeyStore in sync with your source of truth
 // even if it’s difficult to know exactly when to call Remove() manually.
 type KeyStore struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	lk     sync.Mutex
+	done      chan struct{}
+	closeOnce sync.Once
+
+	wg sync.WaitGroup
+	lk sync.Mutex
 
 	ds        ds.Batching
 	base      ds.Key
@@ -49,6 +50,8 @@ type KeyStore struct {
 	gcInterval  time.Duration
 	gcBatchSize int
 }
+
+var ErrKeyStoreClosed = fmt.Errorf("keystore is closed")
 
 type keyStoreCfg struct {
 	base       string
@@ -140,7 +143,7 @@ func WithGCBatchSize(size int) KeyStoreOption {
 }
 
 // NewKeyStore creates a new KeyStore backed by the provided datastore.
-func NewKeyStore(ctx context.Context, d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
+func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
 	var cfg keyStoreCfg
 	opts = append([]KeyStoreOption{KeyStoreDefaultCfg}, opts...)
 	for i, o := range opts {
@@ -148,11 +151,7 @@ func NewKeyStore(ctx context.Context, d ds.Batching, opts ...KeyStoreOption) (*K
 			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
 		}
 	}
-	keyStoreCtx, cancel := context.WithCancel(ctx)
 	keyStore := KeyStore{
-		ctx:    keyStoreCtx,
-		cancel: cancel,
-
 		ds:        d,
 		base:      ds.NewKey(cfg.base),
 		prefixLen: cfg.prefixBits,
@@ -168,9 +167,18 @@ func NewKeyStore(ctx context.Context, d ds.Batching, opts ...KeyStoreOption) (*K
 }
 
 func (s *KeyStore) Close() error {
-	s.cancel()
+	s.closeOnce.Do(func() { close(s.done) })
 	s.wg.Wait()
 	return nil
+}
+
+func (s *KeyStore) closed() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // runGC periodically runs garbage collection.
@@ -185,15 +193,15 @@ func (s *KeyStore) runGC() {
 	ticker := time.NewTicker(s.gcInterval)
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-s.done:
 			return
 		case <-ticker.C:
-			keysChan, err := s.gcFunc(s.ctx)
+			keysChan, err := s.gcFunc(context.Background())
 			if err != nil {
 				logger.Errorf("garbage collection failed: %v", err)
 				continue
 			}
-			err = s.ResetCids(s.ctx, keysChan)
+			err = s.ResetCids(context.Background(), keysChan)
 			if err != nil {
 				logger.Errorf("reset failed: %v", err)
 			}
@@ -203,6 +211,9 @@ func (s *KeyStore) runGC() {
 
 // ResetCids purges the KeyStore and repopulates it with the provided cids.
 func (s *KeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
+	if s.closed() {
+		return ErrKeyStoreClosed
+	}
 	err := s.Empty(ctx)
 	if err != nil {
 		return fmt.Errorf("KeyStore empty failed during reset: %w", err)
@@ -283,6 +294,9 @@ func (s *KeyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Mu
 // the first prefixLen bits. It returns only the keys that were not previously
 // persisted in the datastore (i.e., newly added keys).
 func (s *KeyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
+	if s.closed() {
+		return nil, ErrKeyStoreClosed
+	}
 	if len(keys) == 0 {
 		return nil, nil
 	}
@@ -295,6 +309,9 @@ func (s *KeyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihas
 // Get returns all keys whose bit256 representation matches the provided
 // prefix.
 func (s *KeyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
+	if s.closed() {
+		return nil, ErrKeyStoreClosed
+	}
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -374,6 +391,9 @@ func (s *KeyStore) emptyLocked(ctx context.Context) error {
 
 // Empty deletes all entries under the datastore prefix.
 func (s *KeyStore) Empty(ctx context.Context) error {
+	if s.closed() {
+		return ErrKeyStoreClosed
+	}
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -384,9 +404,6 @@ func (s *KeyStore) Empty(ctx context.Context) error {
 func (s *KeyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	s.lk.Lock()
 	defer s.lk.Unlock()

@@ -13,7 +13,7 @@ import (
 )
 
 func TestKeyStoreStoreAndGet(t *testing.T) {
-	store, err := NewKeyStore(context.Background(), ds.NewMapDatastore())
+	store, err := NewKeyStore(ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 }
 
 func TestKeyStoreReset(t *testing.T) {
-	store, err := NewKeyStore(context.Background(), ds.NewMapDatastore())
+	store, err := NewKeyStore(ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestKeyStoreReset(t *testing.T) {
 }
 
 func TestKeyStoreDelete(t *testing.T) {
-	store, err := NewKeyStore(context.Background(), ds.NewMapDatastore())
+	store, err := NewKeyStore(ds.NewMapDatastore())
 	if err != nil {
 		t.Fatal(err)
 	}

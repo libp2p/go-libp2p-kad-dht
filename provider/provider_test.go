@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-clock"
-	"github.com/ipfs/go-cid"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/helpers"
@@ -61,52 +61,48 @@ func TestReprovideTimeForPrefixWithCustomOrder(t *testing.T) {
 	require.Equal(t, 15*time.Second, s.reprovideTimeForPrefix("0000"))
 }
 
-func TestKeyToBytes(t *testing.T) {
-	require.Equal(t, []byte{0b00000000}, helpers.KeyToBytes(bitstr.Key("0")))
-	require.Equal(t, []byte{0b00000000}, helpers.KeyToBytes(bitstr.Key("00000000")))
-	require.Equal(t, []byte{0b00000000, 0b00000000}, helpers.KeyToBytes(bitstr.Key("000000000")))
-	require.Equal(t, []byte{0b00110000}, helpers.KeyToBytes(bitstr.Key("0011")))
-	require.Equal(t, []byte{0b11111110}, helpers.KeyToBytes(bitstr.Key("1111111")))
-}
-
-func genCids(n int) []cid.Cid {
-	cids := make([]cid.Cid, n)
+func genMultihashes(n int) []mh.Multihash {
+	mhs := make([]mh.Multihash, n)
+	var err error
 	for i := range n {
-		h, err := mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
+		mhs[i], err = mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
 		if err != nil {
 			panic(err)
 		}
-		c := cid.NewCidV1(cid.Raw, h)
-		cids[i] = c
 	}
-	return cids
+	return mhs
 }
 
-func genBalancedCids(exponent int) []cid.Cid {
-	cids := make(map[bitstr.Key]cid.Cid)
-	for i := 0; len(cids) < (1 << exponent); i++ {
+// genBalancedMultihashes generates 2^exponent multihashes, with balanced
+// prefixes, in a random order.
+//
+// e.g genBalancedMultihashes(3) will generate 8 multihashes, with each
+// kademlia identifier starting with a distinct prefix (000, 001, 010, ...,
+// 111) of len 3.
+func genBalancedMultihashes(exponent int) []mh.Multihash {
+	n := 1 << exponent
+	mhs := make([]mh.Multihash, 0, n)
+	seen := make(map[bitstr.Key]struct{}, n)
+	for i := 0; len(mhs) < n; i++ {
 		h, err := mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
 		if err != nil {
 			panic(err)
 		}
 		prefix := bitstr.Key(key.BitString(helpers.MhToBit256(h))[:exponent])
-		if _, ok := cids[prefix]; !ok {
-			cids[prefix] = cid.NewCidV1(cid.Raw, h)
+		if _, ok := seen[prefix]; !ok {
+			mhs = append(mhs, h)
+			seen[prefix] = struct{}{}
 		}
 	}
-	out := make([]cid.Cid, 0, len(cids))
-	for _, c := range cids {
-		out = append(out, c)
-	}
-	return out
+	return mhs
 }
 
-func cidsToMhs(cids []cid.Cid) []mh.Multihash {
-	mhs := make([]mh.Multihash, len(cids))
-	for i, c := range cids {
-		mhs[i] = c.Hash()
-	}
-	return mhs
+func genRandPeerID(t *testing.T) peer.ID {
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	require.NoError(t, err)
+	pid, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	return pid
 }
 
 var _ KadClosestPeersRouter = (*mockRouter)(nil)
@@ -140,144 +136,12 @@ func (ms *mockMsgSender) SendMessage(ctx context.Context, p peer.ID, m *pb.Messa
 	return ms.sendMessageFunc(ctx, p, m)
 }
 
-func TestIndividualProvideForPrefixSingle(t *testing.T) {
-	ctx := context.Background()
-	cids := genCids(1)
-	k := cids[0].Hash()
-	prefix := bitstr.Key("1011101111")
-	router := &mockRouter{
-		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-			return nil, nil
-		},
+func noopConnectivityChecker() *connectivity.ConnectivityChecker {
+	connChecker, err := connectivity.New(func() bool { return true }, func() {})
+	if err != nil {
+		panic(err)
 	}
-	mockClock := clock.NewMock()
-	connCheker, err := connectivity.New(func() bool { return true }, func() {})
-	require.NoError(t, err)
-	r := SweepingProvider{
-		router:            router,
-		clock:             mockClock,
-		reprovideInterval: time.Hour,
-		provideQueue:      queue.NewProvideQueue(),
-		reprovideQueue:    queue.NewReprovideQueue(),
-		connectivity:      connCheker,
-		schedule:          trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer:     mockClock.Timer(time.Hour),
-		getSelfAddrs:      func() []ma.Multiaddr { return nil },
-		addLocalRecord:    func(mh mh.Multihash) error { return nil },
-	}
-
-	// Providing no cids returns no error
-	err = r.individualProvideForPrefix(ctx, prefix, nil, false, false)
-	require.NoError(t, err)
-
-	// Providing a single cid - success
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
-	require.NoError(t, err)
-
-	// Providing a single cid - failure
-	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
-		return nil, errors.New("GetClosestPeers error")
-	}
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, false, false)
-	require.Error(t, err)
-	_, mhs, ok := r.provideQueue.Dequeue()
-	require.True(t, ok)
-	require.Equal(t, []mh.Multihash{k}, mhs)
-
-	err = r.individualProvideForPrefix(ctx, prefix, []mh.Multihash{k}, true, true)
-	require.Error(t, err)
-	dequeued, ok := r.reprovideQueue.Dequeue()
-	require.True(t, ok)
-	require.Equal(t, prefix, dequeued)
-}
-
-func TestIndividualProvideForPrefixMultiple(t *testing.T) {
-	ctx := context.Background()
-	cids := genCids(2)
-	ks := make([]mh.Multihash, len(cids))
-	for i := range ks {
-		ks[i] = cids[i].Hash()
-	}
-	prefix := bitstr.Key("")
-	router := &mockRouter{
-		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-			return nil, nil
-		},
-	}
-	mockClock := clock.NewMock()
-	connCheker, err := connectivity.New(func() bool { return true }, func() {})
-	require.NoError(t, err)
-	r := SweepingProvider{
-		router:            router,
-		clock:             mockClock,
-		reprovideInterval: time.Hour,
-		provideQueue:      queue.NewProvideQueue(),
-		reprovideQueue:    queue.NewReprovideQueue(),
-		connectivity:      connCheker,
-		schedule:          trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer:     mockClock.Timer(time.Hour),
-		getSelfAddrs:      func() []ma.Multiaddr { return nil },
-		addLocalRecord:    func(mh mh.Multihash) error { return nil },
-	}
-
-	// Providing two cids - 2 successes
-	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
-	require.NoError(t, err)
-
-	// Providing two cids - 2 failures
-	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
-		return nil, errors.New("GetClosestPeers error")
-	}
-	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
-	require.Error(t, err)
-	require.Equal(t, len(ks), r.provideQueue.Size())
-	pendingCids := []mh.Multihash{}
-	for !r.provideQueue.IsEmpty() {
-		_, cids, ok := r.provideQueue.Dequeue()
-		require.True(t, ok)
-		pendingCids = append(pendingCids, cids...)
-	}
-	require.ElementsMatch(t, pendingCids, ks)
-
-	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
-	require.Error(t, err)
-	dequeued, ok := r.reprovideQueue.Dequeue()
-	require.True(t, ok)
-	require.Equal(t, prefix, dequeued)
-
-	// Providing two cids - 1 success, 1 failure
-	lk := sync.Mutex{}
-	counter := 0
-	router.getClosestPeersFunc = func(ctx context.Context, k string) (peers []peer.ID, err error) {
-		lk.Lock()
-		defer lk.Unlock()
-		if counter%2 == 0 {
-			err = errors.New("GetClosestPeers error")
-		}
-		counter++
-		return
-	}
-
-	err = r.individualProvideForPrefix(ctx, prefix, ks, false, false)
-	require.NoError(t, err)
-	require.Equal(t, 1, r.provideQueue.Size())
-	_, pendingCids, ok = r.provideQueue.Dequeue()
-	require.True(t, ok)
-	require.Len(t, pendingCids, 1)
-	require.Contains(t, ks, pendingCids[0])
-
-	err = r.individualProvideForPrefix(ctx, prefix, ks, true, true)
-	require.NoError(t, err)
-	require.True(t, r.reprovideQueue.IsEmpty())
-	require.True(t, r.provideQueue.IsEmpty())
-}
-
-func genRandPeerID(t *testing.T) peer.ID {
-	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	require.NoError(t, err)
-	pid, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-	return pid
+	return connChecker
 }
 
 func TestClosestPeersToPrefixRandom(t *testing.T) {
@@ -327,15 +191,15 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 	}
 }
 
-func TestCidsAllocationsToPeers(t *testing.T) {
-	nCids := 1024
+func TestKeysAllocationsToPeers(t *testing.T) {
+	nKeys := 1024
 	nPeers := 128
 	replicationFactor := 10
 
-	cids := cidsToMhs(genCids(nCids))
-	cidsTrie := trie.New[bit256.Key, mh.Multihash]()
-	for _, c := range cids {
-		cidsTrie.Add(helpers.MhToBit256(c), c)
+	mhs := genMultihashes(nKeys)
+	keysTrie := trie.New[bit256.Key, mh.Multihash]()
+	for _, c := range mhs {
+		keysTrie.Add(helpers.MhToBit256(c), c)
 	}
 	peers := make([]peer.ID, nPeers)
 	peersTrie := trie.New[bit256.Key, peer.ID]()
@@ -343,21 +207,21 @@ func TestCidsAllocationsToPeers(t *testing.T) {
 		peers[i] = genRandPeerID(t)
 		peersTrie.Add(helpers.PeerIDToBit256(peers[i]), peers[i])
 	}
-	cidsAllocations := helpers.AllocateToKClosest(cidsTrie, peersTrie, replicationFactor)
+	keysAllocations := helpers.AllocateToKClosest(keysTrie, peersTrie, replicationFactor)
 
-	for _, c := range cids {
+	for _, c := range mhs {
 		k := sha256.Sum256(c)
 		closestPeers := kb.SortClosestPeers(peers, k[:])[:replicationFactor]
 		for _, p := range closestPeers[:replicationFactor] {
-			require.Contains(t, cidsAllocations[p], c)
+			require.Contains(t, keysAllocations[p], c)
 		}
 		for _, p := range closestPeers[replicationFactor:] {
-			require.NotContains(t, cidsAllocations[p], c)
+			require.NotContains(t, keysAllocations[p], c)
 		}
 	}
 }
 
-func TestProvideCidsToPeer(t *testing.T) {
+func TestProvideKeysToPeer(t *testing.T) {
 	msgCount := 0
 	msgSender := &mockMsgSender{
 		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
@@ -369,10 +233,10 @@ func TestProvideCidsToPeer(t *testing.T) {
 		msgSender: msgSender,
 	}
 
-	nCids := 16
+	nKeys := 16
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
-	mhs := cidsToMhs(genCids(nCids))
+	mhs := genMultihashes(nKeys)
 	pmes := &pb.Message{}
 
 	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
@@ -391,7 +255,213 @@ func TestProvideCidsToPeer(t *testing.T) {
 	}
 	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
 	require.NoError(t, err)
-	require.Equal(t, nCids, msgCount)
+	require.Equal(t, nKeys, msgCount)
+}
+
+func TestIndividualProvideForPrefixSingle(t *testing.T) {
+	mhs := genMultihashes(1)
+	prefix := bitstr.Key("1011101111")
+
+	closestPeers := []peer.ID{peer.ID("12BoooooPEER1"), peer.ID("12BoooooPEER2")}
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			return closestPeers, nil
+		},
+	}
+
+	advertisements := make(map[peer.ID]int, len(closestPeers))
+	msgSenderLk := sync.Mutex{}
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			msgSenderLk.Lock()
+			defer msgSenderLk.Unlock()
+			advertisements[p]++
+			return nil
+		},
+	}
+	mockClock := clock.NewMock()
+	r := SweepingProvider{
+		router:                   router,
+		msgSender:                msgSender,
+		clock:                    mockClock,
+		reprovideInterval:        time.Hour,
+		maxProvideConnsPerWorker: 2,
+		provideQueue:             queue.NewProvideQueue(),
+		reprovideQueue:           queue.NewReprovideQueue(),
+		connectivity:             noopConnectivityChecker(),
+		schedule:                 trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:            mockClock.Timer(time.Hour),
+		getSelfAddrs:             func() []ma.Multiaddr { return nil },
+		addLocalRecord:           func(mh mh.Multihash) error { return nil },
+	}
+
+	assertAdvertisementCount := func(n int) {
+		msgSenderLk.Lock()
+		defer msgSenderLk.Unlock()
+		for _, count := range advertisements {
+			require.Equal(t, n, count)
+		}
+	}
+
+	// Providing no keys returns no error
+	err := r.individualProvideForPrefix(prefix, nil, false, false)
+	require.NoError(t, err)
+	assertAdvertisementCount(0)
+
+	// Providing a single key - success
+	err = r.individualProvideForPrefix(prefix, mhs, false, false)
+	require.NoError(t, err)
+	assertAdvertisementCount(1)
+
+	// Providing a single key - failure
+	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
+		return nil, errors.New("GetClosestPeers error")
+	}
+	err = r.individualProvideForPrefix(prefix, mhs, false, false)
+	require.Error(t, err)
+	assertAdvertisementCount(1)
+	// Verify failed key ends up in the provide queue.
+	_, keys, ok := r.provideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, mhs, keys)
+
+	// Reproviding a single key - failure
+	err = r.individualProvideForPrefix(prefix, mhs, true, true)
+	require.Error(t, err)
+	assertAdvertisementCount(1)
+	// Verify failed prefix ends up in the reprovide queue.
+	dequeued, ok := r.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefix, dequeued)
+}
+
+func TestIndividualProvideForPrefixMultiple(t *testing.T) {
+	ks := genMultihashes(2)
+	prefix := bitstr.Key("")
+	closestPeers := []peer.ID{peer.ID("12BoooooPEER1"), peer.ID("12BoooooPEER2")}
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			return closestPeers, nil
+		},
+	}
+	advertisements := make(map[string]map[peer.ID]int, len(closestPeers))
+	for _, k := range ks {
+		advertisements[string(k)] = make(map[peer.ID]int, len(closestPeers))
+	}
+	msgSenderLk := sync.Mutex{}
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			msgSenderLk.Lock()
+			defer msgSenderLk.Unlock()
+			_, k, err := mh.MHFromBytes(m.GetKey())
+			require.NoError(t, err)
+			advertisements[string(k)][p]++
+			return nil
+		},
+	}
+	mockClock := clock.NewMock()
+	r := SweepingProvider{
+		router:                   router,
+		msgSender:                msgSender,
+		clock:                    mockClock,
+		reprovideInterval:        time.Hour,
+		maxProvideConnsPerWorker: 2,
+		provideQueue:             queue.NewProvideQueue(),
+		reprovideQueue:           queue.NewReprovideQueue(),
+		connectivity:             noopConnectivityChecker(),
+		schedule:                 trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:            mockClock.Timer(time.Hour),
+		getSelfAddrs:             func() []ma.Multiaddr { return nil },
+		addLocalRecord:           func(mh mh.Multihash) error { return nil },
+	}
+
+	assertAdvertisementCount := func(n int) {
+		msgSenderLk.Lock()
+		defer msgSenderLk.Unlock()
+		for _, peerAllocs := range advertisements {
+			for _, count := range peerAllocs {
+				require.Equal(t, n, count)
+			}
+		}
+	}
+
+	// Providing two keys - success
+	err := r.individualProvideForPrefix(prefix, ks, false, false)
+	require.NoError(t, err)
+	assertAdvertisementCount(1)
+
+	// Providing two keys - failure
+	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
+		return nil, errors.New("GetClosestPeers error")
+	}
+	err = r.individualProvideForPrefix(prefix, ks, false, false)
+	require.Error(t, err)
+	assertAdvertisementCount(1)
+	// Assert keys are added to provide queue
+	require.Equal(t, len(ks), r.provideQueue.Size())
+	pendingKeys := []mh.Multihash{}
+	for !r.provideQueue.IsEmpty() {
+		_, keys, ok := r.provideQueue.Dequeue()
+		require.True(t, ok)
+		pendingKeys = append(pendingKeys, keys...)
+	}
+	require.ElementsMatch(t, pendingKeys, ks)
+
+	// Reproviding two keys - failure
+	err = r.individualProvideForPrefix(prefix, ks, true, true)
+	require.Error(t, err)
+	assertAdvertisementCount(1)
+	// Assert prefix is added to reprovide queue.
+	dequeued, ok := r.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefix, dequeued)
+
+	// Providing two keys - 1 success, 1 failure
+	lk := sync.Mutex{}
+	counter := 0
+	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
+		lk.Lock()
+		defer lk.Unlock()
+		counter++
+		if counter%2 == 1 {
+			return nil, errors.New("GetClosestPeers error")
+		}
+		return closestPeers, nil
+	}
+
+	err = r.individualProvideForPrefix(prefix, ks, false, false)
+	require.NoError(t, err)
+	// Verify first cid was now provided 2x, but second cid only 1x since it just failed.
+	msgSenderLk.Lock()
+	require.Equal(t, 2, advertisements[string(ks[0])][closestPeers[0]])
+	require.Equal(t, 2, advertisements[string(ks[0])][closestPeers[1]])
+	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[0]])
+	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[1]])
+	msgSenderLk.Unlock()
+
+	// Failed key was added to provide queue
+	require.Equal(t, 1, r.provideQueue.Size())
+	_, pendingKeys, ok = r.provideQueue.Dequeue()
+	require.True(t, ok)
+	require.Len(t, pendingKeys, 1)
+	require.Equal(t, ks[1], pendingKeys[0])
+	require.True(t, r.reprovideQueue.IsEmpty())
+	require.True(t, r.provideQueue.IsEmpty())
+
+	err = r.individualProvideForPrefix(prefix, ks, true, true)
+	require.NoError(t, err)
+	// Verify first cid was now provided 3x, but second cid only 1x since it failed again.
+	msgSenderLk.Lock()
+	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[0]])
+	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[1]])
+	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[0]])
+	require.Equal(t, 1, advertisements[string(ks[1])][closestPeers[1]])
+	msgSenderLk.Unlock()
+
+	// Failed key shouldn't be added to provide nor reprovide queue, since the
+	// reprovide didn't completely failed.
+	require.True(t, r.reprovideQueue.IsEmpty())
+	require.True(t, r.provideQueue.IsEmpty())
 }
 
 func TestProvideNoBootstrap(t *testing.T) {
@@ -432,20 +502,20 @@ func TestProvideNoBootstrap(t *testing.T) {
 	defer reprovider.Close()
 	reprovider.cachedAvgPrefixLen = 4
 
-	c := genCids(1)[0]
+	h := genMultihashes(1)[0]
 
 	// Set the reprovider as offline
 	online.Store(false)
 	reprovider.connectivity.TriggerCheck()
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	reprovider.ProvideOnce(c.Hash())
+	reprovider.ProvideOnce(h)
 	// TODO: require.ErrorIs(t, ErrNodeOffline, err)
 
 	// Set the reprovider as online, but don't bootstrap it
 	online.Store(true)
 	clk.Add(checkInterval)           // trigger connectivity check
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	reprovider.ProvideOnce(c.Hash()) // TODO: no err
+	reprovider.ProvideOnce(h)        // TODO: no err
 }
 
 func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args ...any) {
@@ -464,7 +534,7 @@ func TestProvideSingle(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 	replicationFactor := 4
-	c := genCids(1)[0]
+	h := genMultihashes(1)[0]
 
 	mockClock := clock.NewMock()
 	reprovideInterval := time.Hour
@@ -505,12 +575,12 @@ func TestProvideSingle(t *testing.T) {
 	defer reprovider.Close()
 
 	// Blocks until cid is provided
-	reprovider.StartProviding(true, c.Hash()) // TODO: no error
-	time.Sleep(10 * time.Millisecond)         // wait for ProvideOnce to finish
+	reprovider.StartProviding(true, h) // TODO: no error
+	time.Sleep(10 * time.Millisecond)  // wait for ProvideOnce to finish
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
-	prefix := bitstr.Key(key.BitString(helpers.MhToBit256(c.Hash()))[:prefixLen])
+	prefix := bitstr.Key(key.BitString(helpers.MhToBit256(h))[:prefixLen])
 	reprovider.scheduleLk.Lock()
 	require.Equal(t, 1, reprovider.schedule.Size())
 	found, reprovideTime := trie.Find(reprovider.schedule, prefix)
@@ -523,7 +593,7 @@ func TestProvideSingle(t *testing.T) {
 	reprovider.scheduleLk.Unlock()
 
 	// Try to provide the same cid again -> noop
-	reprovider.StartProviding(false, c.Hash())
+	reprovider.StartProviding(false, h)
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
@@ -544,10 +614,10 @@ func TestProvideMany(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
-	nCidsExponent := 10
-	nCids := 1 << nCidsExponent
-	cids := genBalancedCids(nCidsExponent)
-	mhs := cidsToMhs(cids)
+	nKeysExponent := 10
+	nCids := 1 << nKeysExponent
+	mhs := genBalancedMultihashes(nKeysExponent)
+	fmt.Println(mhs)
 
 	replicationFactor := 4
 	peerPrefixBitlen := 6
@@ -675,10 +745,9 @@ func TestProvideManyUnstableNetwork(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
-	nCidsExponent := 10
-	nCids := 1 << nCidsExponent
-	cids := genBalancedCids(nCidsExponent)
-	mhs := cidsToMhs(cids)
+	nKeysExponent := 10
+	nCids := 1 << nKeysExponent
+	mhs := genBalancedMultihashes(nKeysExponent)
 
 	replicationFactor := 4
 	peerPrefixBitlen := 6

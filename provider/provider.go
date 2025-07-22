@@ -526,7 +526,7 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	} else if len(keys) <= 2 {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
-		return s.individualProvideForPrefix(context.Background(), prefix, keys, true, periodicReprovide)
+		return s.individualProvideForPrefix(prefix, keys, true, periodicReprovide)
 	}
 
 	logger.Debugf("Starting to explore prefix %s for reproviding %d matching keys", prefix, len(keys))
@@ -630,7 +630,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	if len(keys) <= 2 {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
-		return s.individualProvideForPrefix(context.Background(), prefix, keys, false, false)
+		return s.individualProvideForPrefix(prefix, keys, false, false)
 	}
 	logger.Debugf("Starting to explore prefix %s for %d matching keys", prefix, len(keys))
 	peers, err := s.closestPeersToPrefix(prefix)
@@ -677,7 +677,7 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	return nil
 }
 
-func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) error {
+func (s *SweepingProvider) individualProvideForPrefix(prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -685,7 +685,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 	var provideErr error
 
 	if len(keys) == 1 {
-		coveredPrefix, err := s.vanillaProvide(ctx, keys[0])
+		coveredPrefix, err := s.vanillaProvide(keys[0])
 		if err != nil && !reprovide {
 			s.failedProvide(prefix, keys...)
 		}
@@ -700,7 +700,7 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, err := s.vanillaProvide(ctx, key)
+				_, err := s.vanillaProvide(key)
 				if err == nil {
 					success.Store(true)
 				} else if !reprovide {
@@ -730,11 +730,11 @@ func (s *SweepingProvider) individualProvideForPrefix(ctx context.Context, prefi
 // optimization. It should be used for providing a small number of keys
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of keys.
-func (s *SweepingProvider) vanillaProvide(ctx context.Context, k mh.Multihash) (bitstr.Key, error) {
+func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 	// Add provider record to local provider store.
 	s.addLocalRecord(k)
 	// Get peers to which the record will be allocated.
-	peers, err := s.router.GetClosestPeers(ctx, string(k))
+	peers, err := s.router.GetClosestPeers(context.Background(), string(k))
 	if err != nil {
 		return "", err
 	}

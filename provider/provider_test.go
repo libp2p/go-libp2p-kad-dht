@@ -460,7 +460,18 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.True(t, r.provideQueue.IsEmpty())
 }
 
-func TestProvideNoBootstrap(t *testing.T) {
+func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args ...any) {
+	step := time.Millisecond
+	for range maxDelay / step {
+		if condition() {
+			return
+		}
+		time.Sleep(step)
+	}
+	t.Fatal(args...)
+}
+
+func TestProvideOnce(t *testing.T) {
 	ctx := context.Background()
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
@@ -475,7 +486,13 @@ func TestProvideNoBootstrap(t *testing.T) {
 			return nil, errors.New("offline")
 		},
 	}
-	msgSender := &mockMsgSender{}
+	provideCount := atomic.Int32{}
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			provideCount.Add(1)
+			return nil
+		},
+	}
 	clk := clock.NewMock()
 
 	checkInterval := time.Minute
@@ -505,24 +522,20 @@ func TestProvideNoBootstrap(t *testing.T) {
 	reprovider.connectivity.TriggerCheck()
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	reprovider.ProvideOnce(h)
-	// TODO: require.ErrorIs(t, ErrNodeOffline, err)
+	time.Sleep(5 * time.Millisecond) // wait for ProvideOnce to finish
+	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
+	// Ensure the key is in the provide queue
+	_, keys, ok := reprovider.provideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, 1, len(keys))
+	require.Equal(t, h, keys[0])
 
-	// Set the reprovider as online, but don't bootstrap it
+	// Set the reprovider as online
 	online.Store(true)
 	clk.Add(checkInterval)           // trigger connectivity check
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	reprovider.ProvideOnce(h)        // TODO: no err
-}
-
-func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args ...any) {
-	step := time.Millisecond
-	for range maxDelay / step {
-		if condition() {
-			return
-		}
-		time.Sleep(step)
-	}
-	t.Fatal(args...)
+	reprovider.ProvideOnce(h)
+	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
 }
 
 func TestProvideSingle(t *testing.T) {

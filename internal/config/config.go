@@ -12,7 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -49,7 +49,7 @@ type Config struct {
 	MaxRecordAge           time.Duration
 	EnableProviders        bool
 	EnableValues           bool
-	ProviderStore          providers.ProviderStore
+	ProviderStore          records.ProviderStore
 	QueryPeerFilter        QueryFilterFunc
 	LookupCheckConcurrency int
 	MsgSenderBuilder       func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect
@@ -128,7 +128,7 @@ var Defaults = func(o *Config) error {
 	o.RoutingTable.AutoRefresh = true
 	o.RoutingTable.PeerFilter = EmptyRTFilter
 
-	o.MaxRecordAge = providers.ProvideValidity
+	o.MaxRecordAge = records.ProvideValidity
 
 	o.BucketSize = amino.DefaultBucketSize
 	o.Concurrency = amino.DefaultConcurrency

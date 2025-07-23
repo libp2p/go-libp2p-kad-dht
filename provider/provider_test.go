@@ -511,7 +511,9 @@ func TestProvideOnce(t *testing.T) {
 	reprovider, err := NewProvider(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
+	reprovider.avgPrefixLenLk.Lock()
 	reprovider.cachedAvgPrefixLen = 4
+	reprovider.avgPrefixLenLk.Unlock()
 
 	h := genMultihashes(1)[0]
 

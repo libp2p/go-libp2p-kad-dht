@@ -109,10 +109,7 @@ func TestTriggerCheck_OfflineRecovery(t *testing.T) {
 	c.TriggerCheck()                                  // launches goroutine
 
 	// First offline tick (still disconnected).
-	time.Sleep(1 * time.Millisecond)
-	if c.IsOnline() {
-		t.Fatal("node should be marked offline after failing first check")
-	}
+	eventually(t, func() bool { return !c.IsOnline() })
 
 	// Bring the node back online, next tick should succeed.
 	online.Store(true)

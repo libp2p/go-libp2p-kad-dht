@@ -150,6 +150,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		EnableProviders:  true,
 		EnableValues:     true,
 		ProtocolPrefix:   protocolPrefix,
+		MsgSenderBuilder: net.NewMessageSenderImpl,
 	}
 
 	if err := dhtcfg.Apply(fullrtcfg.dhtOpts...); err != nil {
@@ -163,7 +164,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		return nil, err
 	}
 
-	ms := net.NewMessageSenderImpl(h, amino.Protocols)
+	ms := dhtcfg.MsgSenderBuilder(h, amino.Protocols)
 	protoMessenger, err := dht_pb.NewProtocolMessenger(ms)
 	if err != nil {
 		return nil, err

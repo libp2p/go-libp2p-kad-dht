@@ -109,6 +109,9 @@ var DefaultConfig = func(cfg *config) error {
 // allocated to the ReplicationFactor closest peers in the DHT swarm.
 func WithReplicationFactor(n int) Option {
 	return func(cfg *config) error {
+		if n <= 0 {
+			return errors.New("reprovider config: replication factor must be a positive integer")
+		}
 		cfg.replicationFactor = n
 		return nil
 	}
@@ -117,6 +120,9 @@ func WithReplicationFactor(n int) Option {
 // WithReprovideInterval sets the interval at which regions are reprovided.
 func WithReprovideInterval(d time.Duration) Option {
 	return func(cfg *config) error {
+		if d <= 0 {
+			return errors.New("reprovider config: reprovide interval must be greater than 0")
+		}
 		cfg.reprovideInterval = d
 		return nil
 	}
@@ -130,6 +136,9 @@ func WithReprovideInterval(d time.Duration) Option {
 // the network churn.
 func WithMaxReprovideDelay(d time.Duration) Option {
 	return func(cfg *config) error {
+		if d <= 0 {
+			return errors.New("reprovider config: max reprovide delay must be greater than 0")
+		}
 		cfg.maxReprovideDelay = d
 		return nil
 	}

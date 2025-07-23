@@ -177,24 +177,12 @@ func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0,
 	return false
 }
 
-// mapInsert appends a slice of values to the map entry for the given key. If
-// the key doesn't exist, it creates a new slice pre-sized to the length of the
-// values being inserted to avoid multiple allocations.
-func mapInsert[K comparable, V any](m map[K][]V, k K, vs []V) {
-	if cur := m[k]; cur == nil {
-		// pre-size once
-		m[k] = append(make([]V, 0, len(vs)), vs...)
-	} else {
-		m[k] = append(cur, vs...)
-	}
-}
-
 // mapMerge merges all key-value pairs from the source map into the destination
 // map. Values from the source are appended to existing slices in the
 // destination.
 func mapMerge[K comparable, V any](dst, src map[K][]V) {
 	for k1, vs1 := range src {
-		mapInsert(dst, k1, vs1)
+		dst[k1] = append(dst[k1], vs1...)
 	}
 }
 
@@ -239,14 +227,13 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		matchingItemsBranch := items.Branch(i)
 		matchingItems := AllValues(matchingItemsBranch, bit256.ZeroKey())
 		if len(matchingItems) == 0 {
-			if items.IsNonEmptyLeaf() && int((*items.Key()).Bit(depth)) == i {
-				// items' current branch contains a single leaf
-				matchingItems = []V0{items.Data()}
-				matchingItemsBranch = items
-			} else {
+			if !items.IsNonEmptyLeaf() || int((*items.Key()).Bit(depth)) != i {
 				// items' current branch is empty, skip it
 				continue
 			}
+			// items' current branch contains a single leaf
+			matchingItems = []V0{items.Data()}
+			matchingItemsBranch = items
 		}
 
 		matchingDestsBranch := dests.Branch(i)
@@ -274,7 +261,7 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		if nMatchingDests := len(matchingDests); nMatchingDests <= k {
 			// Allocate matching items to the matching dests branch
 			for _, dest := range matchingDests {
-				mapInsert(m, dest, matchingItems)
+				m[dest] = append(m[dest], matchingItems...)
 			}
 			if nMatchingDests == k || len(otherDests) == 0 {
 				// Items were assigned to all k dests, or other branch is empty.
@@ -286,7 +273,7 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 				// Other branch contains at most the missing number of dests to be
 				// allocated to. Allocate matching items to the other dests branch.
 				for _, dest := range otherDests {
-					mapInsert(m, dest, matchingItems)
+					m[dest] = append(m[dest], matchingItems...)
 				}
 			} else {
 				// Other branch contains more than the missing number of dests, go one

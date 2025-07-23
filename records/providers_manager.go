@@ -1,4 +1,4 @@
-package providers
+package records
 
 import (
 	"context"
@@ -26,23 +26,18 @@ import (
 const (
 	// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
 	// keys stored in the data store.
-	//
-	// Deprecated: use records.ProvidersKeyPrefix
 	ProvidersKeyPrefix = "/providers/"
 
 	// ProviderAddrTTL is the TTL to keep the multi addresses of provider
 	// peers around. Those addresses are returned alongside provider. After
 	// it expires, the returned records will require an extra lookup, to
 	// find the multiaddress associated with the returned peer id.
-	//
-	// Deprecated: use records.ProviderAddrTTL
 	ProviderAddrTTL = amino.DefaultProviderAddrTTL
 )
 
 // ProvideValidity is the default time that a Provider Record should last on DHT
 // This value is also known as Provider Record Expiration Interval.
 var (
-	// Deprecated: use records.ProvideValidity
 	ProvideValidity        = amino.DefaultProvideValidity
 	defaultCleanupInterval = time.Hour
 	lruCacheSize           = 256
@@ -51,8 +46,6 @@ var (
 )
 
 // ProviderStore represents a store that associates peers and their addresses to keys.
-//
-// Deprecated: use records.ProviderStore
 type ProviderStore interface {
 	AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error
 	GetProviders(ctx context.Context, key []byte) ([]peer.AddrInfo, error)
@@ -61,8 +54,6 @@ type ProviderStore interface {
 
 // ProviderManager adds and pulls providers out of the datastore,
 // caching them in between
-//
-// Deprecated: use records.ProviderManager
 type ProviderManager struct {
 	self peer.ID
 	// all non channel fields are meant to be accessed only within
@@ -84,8 +75,6 @@ type ProviderManager struct {
 var _ ProviderStore = (*ProviderManager)(nil)
 
 // Option is a function that sets a provider manager option.
-//
-// Deprecated: use records.Option
 type Option func(*ProviderManager) error
 
 func (pm *ProviderManager) applyOptions(opts ...Option) error {
@@ -99,8 +88,6 @@ func (pm *ProviderManager) applyOptions(opts ...Option) error {
 
 // CleanupInterval sets the time between GC runs.
 // Defaults to 1h.
-//
-// Deprecated: use records package instead
 func CleanupInterval(d time.Duration) Option {
 	return func(pm *ProviderManager) error {
 		pm.cleanupInterval = d
@@ -110,8 +97,6 @@ func CleanupInterval(d time.Duration) Option {
 
 // Cache sets the LRU cache implementation.
 // Defaults to a simple LRU cache.
-//
-// Deprecated: use records package instead
 func Cache(c lru.LRUCache) Option {
 	return func(pm *ProviderManager) error {
 		pm.cache = c
@@ -132,8 +117,6 @@ type getProv struct {
 }
 
 // NewProviderManager constructor
-//
-// Deprecated: use records.NewProviderManager
 func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peerstore, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
 	pm := new(ProviderManager)
 	pm.self = local

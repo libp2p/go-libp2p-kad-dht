@@ -2,7 +2,6 @@ package datastore
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -13,10 +12,10 @@ import (
 	query "github.com/ipfs/go-datastore/query"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
@@ -247,7 +246,7 @@ func (s *KeyStore) dsKey(prefix bitstr.Key) ds.Key {
 func (s *KeyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
 	groups := make(map[bitstr.Key][]mh.Multihash)
 	for _, h := range keys {
-		k := mhToBit256(h)
+		k := keyspace.MhToBit256(h)
 		bs := bitstr.Key(key.BitString(k)[:s.prefixLen])
 		groups[bs] = append(groups[bs], h)
 	}
@@ -332,7 +331,7 @@ func (s *KeyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 			return nil, err
 		}
 		for _, h := range stored {
-			bs := bitstr.Key(key.BitString(mhToBit256(h)))
+			bs := bitstr.Key(key.BitString(keyspace.MhToBit256(h)))
 			if len(bs) >= len(prefix) && bs[:len(prefix)] == prefix {
 				if _, ok := uniq[string(h)]; !ok {
 					uniq[string(h)] = struct{}{}
@@ -410,7 +409,7 @@ func (s *KeyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 
 	groups := make(map[bitstr.Key][]mh.Multihash)
 	for _, h := range keys {
-		bs := bitstr.Key(key.BitString(mhToBit256(h)))
+		bs := bitstr.Key(key.BitString(keyspace.MhToBit256(h)))
 		p := bitstr.Key(bs[:s.prefixLen])
 		groups[p] = append(groups[p], h)
 	}
@@ -462,10 +461,4 @@ func (s *KeyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 		}
 	}
 	return nil
-}
-
-// mhToBit256 converts a multihash to a bit256.Key by hashing it with SHA-256.
-func mhToBit256(h mh.Multihash) bit256.Key {
-	hash := sha256.Sum256(h)
-	return bit256.NewKey(hash[:])
 }

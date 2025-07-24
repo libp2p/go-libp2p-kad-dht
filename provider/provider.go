@@ -292,7 +292,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 					cplSamples.Add(1)
 					return
 				}
-				s.clock.Sleep(500 * time.Millisecond)
+				s.clock.Sleep(time.Second) // retry every second until success
 			}
 		}()
 	}
@@ -677,20 +677,27 @@ func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multiha
 	return nil
 }
 
+// individualProvideForPrefix provides the keys sharing the same prefix to the
+// network without exploring the associated keyspace regions. It performs
+// "normal" DHT provides for the supplied keys, handles failures and schedules
+// next reprovide is necessary.
 func (s *SweepingProvider) individualProvideForPrefix(prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) error {
 	if len(keys) == 0 {
 		return nil
 	}
 
 	var provideErr error
-
 	if len(keys) == 1 {
 		coveredPrefix, err := s.vanillaProvide(keys[0])
 		if err != nil && !reprovide {
+			// Put the key back in the provide queue.
 			s.failedProvide(prefix, keys...)
 		}
 		provideErr = err
 		if periodicReprovide {
+			// Schedule next reprovide for the prefix that was actually covered by
+			// the GCP, otherwise we may schedule a reprovide for a prefix too short
+			// or too long.
 			s.scheduleNextReprovide(coveredPrefix, s.currentTimeOffset())
 		}
 	} else {
@@ -704,7 +711,7 @@ func (s *SweepingProvider) individualProvideForPrefix(prefix bitstr.Key, keys []
 				if err == nil {
 					success.Store(true)
 				} else if !reprovide {
-					// Individual provide failed
+					// Individual provide failed, put key back in provide queue.
 					s.failedProvide(prefix, key)
 				}
 			}()
@@ -712,6 +719,7 @@ func (s *SweepingProvider) individualProvideForPrefix(prefix bitstr.Key, keys []
 		wg.Wait()
 
 		if !success.Load() {
+			// Only return an error if all provides failed.
 			provideErr = errors.New("all individual provides failed for prefix " + string(prefix))
 		}
 		if periodicReprovide {
@@ -940,7 +948,6 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 			for job := range jobChan {
 				err := s.provideKeysToPeer(job.pid, job.keys, pmes)
 				if err != nil {
-					// logger.Debug(err)
 					errCount.Add(1)
 				}
 			}
@@ -1124,11 +1131,12 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	return s.cachedAvgPrefixLen
 }
 
+// handleProvide provides supplied keys to the network if needed and schedules
+// the keys to be reprovided if needed.
 func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) {
 	if len(keys) == 0 {
 		return
 	}
-
 	if reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
@@ -1146,7 +1154,6 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 	if len(prefixes) == 0 {
 		return
 	}
-
 	// Sort prefixes by number of keys.
 	sortedPrefixesAndKeys := keyspace.SortPrefixesBySize(prefixes)
 	// Add keys to the provide queue.
@@ -1157,6 +1164,9 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 	go s.provideLoop()
 }
 
+// groupAndScheduleKeysByPrefix groups the supplied keys by their prefixes as
+// present in the schedule, and if `schedule` is set to true, add these
+// prefixes to the schedule to be reprovided.
 func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
 	avgPrefixLen := -1
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
@@ -1223,6 +1233,8 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 	return prefixes
 }
 
+// addPrefixToScheduleNoLock adds the given prefix to the schedule so that the
+// keys matching the prefix are periodically reprovided.
 func (s *SweepingProvider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
 	reprovideTime := s.reprovideTimeForPrefix(prefix)
 	s.schedule.Add(prefix, reprovideTime)

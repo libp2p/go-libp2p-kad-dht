@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key"
@@ -44,7 +45,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 	}
 
 	for _, h := range mhs {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultKeyStorePrefixLen])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -62,7 +63,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 	}
 
 	short := DefaultKeyStorePrefixLen / 2
-	p := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:short])
+	p := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:short])
 	res, err := store.Get(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -71,13 +72,13 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 		t.Fatalf("expected results for prefix %s", p)
 	}
 
-	longPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:15])
+	longPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:15])
 	res, err = store.Get(context.Background(), longPrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, h := range res {
-		bs := bitstr.Key(key.BitString(mhToBit256(h)))
+		bs := bitstr.Key(key.BitString(keyspace.MhToBit256(h)))
 		if bs[:15] != longPrefix {
 			t.Fatalf("returned hash does not match long prefix")
 		}
@@ -121,7 +122,7 @@ func TestKeyStoreReset(t *testing.T) {
 
 	// old hashes should not be present
 	for _, h := range first {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultKeyStorePrefixLen])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -135,7 +136,7 @@ func TestKeyStoreReset(t *testing.T) {
 
 	// new hashes should be retrievable
 	for _, h := range second {
-		prefix := bitstr.Key(key.BitString(mhToBit256(h))[:DefaultKeyStorePrefixLen])
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultKeyStorePrefixLen])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -171,7 +172,7 @@ func TestKeyStoreDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	delPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[0]))[:DefaultKeyStorePrefixLen])
+	delPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:DefaultKeyStorePrefixLen])
 	if err := store.Delete(context.Background(), mhs[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestKeyStoreDelete(t *testing.T) {
 	}
 
 	// other hashes should still be retrievable
-	otherPrefix := bitstr.Key(key.BitString(mhToBit256(mhs[1]))[:DefaultKeyStorePrefixLen])
+	otherPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[1]))[:DefaultKeyStorePrefixLen])
 	res, err = store.Get(context.Background(), otherPrefix)
 	if err != nil {
 		t.Fatal(err)

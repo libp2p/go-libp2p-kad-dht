@@ -118,10 +118,10 @@ type SweepingProvider struct {
 
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
 	scheduleLk             sync.Mutex
+	scheduleCursor         bitstr.Key
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
 
-	prefixCursor        bitstr.Key
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
 	ongoingReprovidesLk sync.Mutex
 
@@ -266,7 +266,8 @@ const initialGetClosestPeers = 4
 // measureInitialPrefixLen makes a few GetClosestPeers calls to get an estimate
 // of the prefix length to be used in the network.
 //
-// This function blocks until GetClosestPeers succeeds.
+// This function blocks until GetClosestPeers succeeds or the provider is
+// closed. No provide operation can happen until this function returns.
 func (s *SweepingProvider) measureInitialPrefixLen() {
 	cplSum := atomic.Int32{}
 	cplSamples := atomic.Int32{}
@@ -278,6 +279,9 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 			bytes := [32]byte{}
 			rand.Read(bytes[:])
 			for {
+				if s.closed() {
+					return
+				}
 				peers, err := s.router.GetClosestPeers(context.Background(), string(bytes[:]))
 				if err == nil && len(peers) > 0 {
 					if len(peers) <= 2 {
@@ -398,7 +402,7 @@ func (s *SweepingProvider) reprovideLateRegions() {
 func (s *SweepingProvider) handleReprovide() {
 	online := s.connectivity.IsOnline()
 	s.scheduleLk.Lock()
-	currentPrefix := s.prefixCursor
+	currentPrefix := s.scheduleCursor
 	// Get next prefix to reprovide, and set timer for it.
 	next := keyspace.NextNonEmptyLeaf(s.schedule, currentPrefix, s.order)
 
@@ -493,8 +497,10 @@ func (s *SweepingProvider) handleReprovide() {
 	}()
 }
 
+// scheduleNextReprovideNoLock makes sure the scheduler wakes up in
+// `timeUntilReprovide` to reprovide the region identified by `prefix`.
 func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
-	s.prefixCursor = prefix
+	s.scheduleCursor = prefix
 	s.scheduleTimer.Reset(timeUntilReprovide)
 	s.scheduleTimerStartedAt = s.clock.Now()
 }
@@ -517,7 +523,9 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	if err != nil {
 		s.failedReprovide(prefix)
 		if periodicReprovide {
-			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+			s.scheduleLk.Lock()
+			s.schedulePrefixNoLock(prefix, true)
+			s.scheduleLk.Unlock()
 		}
 		return fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 	} else if len(keys) == 0 {
@@ -534,14 +542,18 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 	if err != nil {
 		s.failedReprovide(prefix)
 		if periodicReprovide {
-			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+			s.scheduleLk.Lock()
+			s.schedulePrefixNoLock(prefix, true)
+			s.scheduleLk.Unlock()
 		}
 		return fmt.Errorf("reprovide '%s': %w", prefix, err)
 	}
 	if len(peers) == 0 {
 		s.failedReprovide(prefix)
 		if periodicReprovide {
-			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+			s.scheduleLk.Lock()
+			s.schedulePrefixNoLock(prefix, true)
+			s.scheduleLk.Unlock()
 		}
 		return errors.New("no peers found when exploring prefix " + string(prefix))
 	}
@@ -552,7 +564,9 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		if err != nil {
 			s.failedReprovide(prefix)
 			if periodicReprovide {
-				s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+				s.scheduleLk.Lock()
+				s.schedulePrefixNoLock(prefix, true)
+				s.scheduleLk.Unlock()
 			}
 			return fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 		}
@@ -569,7 +583,9 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 
 	// When reproviding a region, remove all scheduled regions starting with
 	// the currently covered prefix.
-	s.unscheduleSubsumedPrefixes(coveredPrefix)
+	s.scheduleLk.Lock()
+	s.unscheduleSubsumedPrefixesNoLock(coveredPrefix)
+	s.scheduleLk.Unlock()
 
 	// Claim the regions to be reprovided, so that no other thread will try to
 	// reprovdie them concurrently.
@@ -592,7 +608,9 @@ func (s *SweepingProvider) reprovideForPrefix(prefix bitstr.Key, periodicReprovi
 		err := s.sendProviderRecords(keysAllocations, addrInfo)
 		s.releaseRegionReprovide(r.Prefix)
 		if periodicReprovide {
-			s.scheduleNextReprovide(r.Prefix, s.currentTimeOffset())
+			s.scheduleLk.Lock()
+			s.schedulePrefixNoLock(r.Prefix, true)
+			s.scheduleLk.Unlock()
 		}
 		if err != nil {
 			logger.Warn(err, ": region ", r.Prefix)
@@ -698,7 +716,9 @@ func (s *SweepingProvider) individualProvideForPrefix(prefix bitstr.Key, keys []
 			// Schedule next reprovide for the prefix that was actually covered by
 			// the GCP, otherwise we may schedule a reprovide for a prefix too short
 			// or too long.
-			s.scheduleNextReprovide(coveredPrefix, s.currentTimeOffset())
+			s.scheduleLk.Lock()
+			s.schedulePrefixNoLock(coveredPrefix, true)
+			s.scheduleLk.Unlock()
 		}
 	} else {
 		wg := sync.WaitGroup{}
@@ -723,7 +743,9 @@ func (s *SweepingProvider) individualProvideForPrefix(prefix bitstr.Key, keys []
 			provideErr = errors.New("all individual provides failed for prefix " + string(prefix))
 		}
 		if periodicReprovide {
-			s.scheduleNextReprovide(prefix, s.currentTimeOffset())
+			s.scheduleLk.Lock()
+			s.schedulePrefixNoLock(prefix, true)
+			s.scheduleLk.Unlock()
 		}
 	}
 	if reprovide {
@@ -864,29 +886,26 @@ func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 }
 
 // unscheduleSubsumedPrefixes removes all superstrings of `prefix` that are
-// scheduled in the future.
-func (s *SweepingProvider) unscheduleSubsumedPrefixes(prefix bitstr.Key) {
-	s.scheduleLk.Lock()
+// scheduled in the future. Assumes that the schedule lock is held.
+func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 	// Pop prefixes scheduled in the future being covered by the explored peers.
 	if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-		logger.Warnf("previous next scheduled prefix is %s", s.prefixCursor)
 		for _, entry := range keyspace.AllEntries(subtrie, s.order) {
 			if s.schedule.Remove(entry.Key) {
 				logger.Warnf("removed %s from schedule because of %s", entry.Key, prefix)
-				if s.prefixCursor == entry.Key {
-					next := keyspace.NextNonEmptyLeaf(s.schedule, s.prefixCursor, s.order)
+				if s.scheduleCursor == entry.Key {
+					next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
 					if next == nil {
 						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
 					} else {
 						timeUntilReprovide := s.timeUntil(next.Data)
 						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+						logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
 					}
 				}
 			}
 		}
-		logger.Warnf("next scheduled prefix now is %s", s.prefixCursor)
 	}
-	s.scheduleLk.Unlock()
 }
 
 // claimRegionReprovide checks if the region is already being reprovided by
@@ -1004,32 +1023,50 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pme
 	return nil
 }
 
-// scheduleNextReprovide schedules the next periodical reprovide for the given
-// prefix, should be used only if the current operation is a periodic reprovide
-// (not if initial provide or late reprovide).
+// schedulePrefixNoLock adds the supplied prefix to the schedule, unless
+// already present.
 //
-// If the given prefix is already on the schedule, this function is a no op.
-func (s *SweepingProvider) scheduleNextReprovide(prefix bitstr.Key, lastReprovide time.Duration) {
-	// Schedule next reprovide given that the prefix was just reprovided on
-	// schedule. In the case the next reprovide time should be delayed due to a
-	// growth in the number of network peers matching the prefix, don't delay
-	// more than s.maxReprovideDelay.
-	nextReprovideTime := min(s.reprovideTimeForPrefix(prefix), lastReprovide+s.reprovideInterval+s.maxReprovideDelay)
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
+// If `justReprovided` is true, it will schedule the next reprovide at most
+// s.reprovideInterval+s.maxReprovideDelay in the future, allowing the
+// reprovide to be delayed of at most maxReprovideDelay.
+//
+// If the supplied prefix is the next prefix to be reprovided, update the
+// schedule cursor and timer.
+func (s *SweepingProvider) schedulePrefixNoLock(prefix bitstr.Key, justReprovided bool) {
+	nextReprovideTime := s.reprovideTimeForPrefix(prefix)
+	if justReprovided {
+		// Schedule next reprovide given that the prefix was just reprovided on
+		// schedule. In the case the next reprovide time should be delayed due to a
+		// growth in the number of network peers matching the prefix, don't delay
+		// more than s.maxReprovideDelay.
+		nextReprovideTime = min(nextReprovideTime, s.currentTimeOffset()+s.reprovideInterval+s.maxReprovideDelay)
+	}
 	// If schedule contains keys starting with prefix, remove them to avoid
 	// overlap.
-	if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-		for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-			s.schedule.Remove(entry.Key)
-		}
-	} else if _, ok := keyspace.FindPrefixOfKey(s.schedule, prefix); ok {
+	if _, ok := keyspace.FindPrefixOfKey(s.schedule, prefix); ok {
+		// Already scheduled.
 		return
 	}
+	// Unschedule superstrings in schedule if any.
+	s.unscheduleSubsumedPrefixesNoLock(prefix)
+
 	s.schedule.Add(prefix, nextReprovideTime)
+
+	// Check if the prefix that was just added is the next one to be reprovided.
 	if s.schedule.IsNonEmptyLeaf() {
-		timeUntilReprovide := s.timeUntil(nextReprovideTime)
-		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
+		// The prefix we insterted is the only element in the schedule.
+		timeUntilPrefixReprovide := s.timeUntil(nextReprovideTime)
+		s.scheduleNextReprovideNoLock(prefix, timeUntilPrefixReprovide)
+		return
+	}
+	followingKey := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order).Key
+	if followingKey == s.scheduleCursor {
+		// The key following prefix is the schedule cursor.
+		timeUntilPrefixReprovide := s.timeUntil(nextReprovideTime)
+		_, scheduledAlarm := trie.Find(s.schedule, s.scheduleCursor)
+		if timeUntilPrefixReprovide < s.timeUntil(scheduledAlarm) {
+			s.scheduleNextReprovideNoLock(prefix, timeUntilPrefixReprovide)
+		}
 	}
 }
 
@@ -1199,7 +1236,7 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 					}
 					prefixConsolidation = true
 				}
-				s.addPrefixToScheduleNoLock(prefix)
+				s.schedulePrefixNoLock(prefix, false)
 			}
 		}
 
@@ -1231,32 +1268,6 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 		}
 	}
 	return prefixes
-}
-
-// addPrefixToScheduleNoLock adds the given prefix to the schedule so that the
-// keys matching the prefix are periodically reprovided.
-func (s *SweepingProvider) addPrefixToScheduleNoLock(prefix bitstr.Key) {
-	reprovideTime := s.reprovideTimeForPrefix(prefix)
-	s.schedule.Add(prefix, reprovideTime)
-
-	currentTimeOffset := s.currentTimeOffset()
-	timeUntilReprovide := s.timeBetween(currentTimeOffset, reprovideTime)
-	if s.prefixCursor == "" {
-		s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
-	} else {
-		followingKey := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order).Key
-		if s.prefixCursor == followingKey {
-			found, scheduledAlarm := trie.Find(s.schedule, s.prefixCursor)
-			if !found {
-				s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
-			} else {
-				timeUntilScheduledAlarm := s.timeBetween(currentTimeOffset, scheduledAlarm)
-				if timeUntilReprovide < timeUntilScheduledAlarm {
-					s.scheduleNextReprovideNoLock(prefix, timeUntilReprovide)
-				}
-			}
-		}
-	}
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

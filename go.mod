@@ -4,6 +4,7 @@ go 1.23.8
 
 require (
 	github.com/filecoin-project/go-clock v0.1.0
+	github.com/gammazero/deque v1.0.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru v1.0.2

@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/filecoin-project/go-clock"
 	logging "github.com/ipfs/go-log/v2"
@@ -14,7 +16,9 @@ import (
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/probe-lab/go-libdht/kad/trie"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
@@ -65,16 +69,132 @@ type KadClosestPeersRouter interface {
 
 type SweepingProvider struct {
 	// TODO: complete me
+	done      chan struct{}
+	closeOnce sync.Once
+
 	peerid peer.ID
+	order  bit256.Key
 	router KadClosestPeersRouter
 
 	clock clock.Clock
 
 	maxProvideConnsPerWorker int
 
+	schedule   *trie.Trie[bitstr.Key, time.Duration]
+	scheduleLk sync.Mutex
+
+	avgPrefixLenLk       sync.Mutex
+	avgPrefixLenReady    chan struct{}
+	cachedAvgPrefixLen   int
+	lastAvgPrefixLen     time.Time
+	avgPrefixLenValidity time.Duration
+
 	msgSender      pb.MessageSender
 	getSelfAddrs   func() []ma.Multiaddr
 	addLocalRecord func(mh.Multihash) error
+}
+
+// Close stops the provider and releases all resources.
+func (s *SweepingProvider) Close() {
+	s.closeOnce.Do(func() { close(s.done) })
+}
+
+func (s *SweepingProvider) closed() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
+}
+
+const initialGetClosestPeers = 4
+
+// measureInitialPrefixLen makes a few GetClosestPeers calls to get an estimate
+// of the prefix length to be used in the network.
+//
+// This function blocks until GetClosestPeers succeeds or the provider is
+// closed. No provide operation can happen until this function returns.
+func (s *SweepingProvider) measureInitialPrefixLen() {
+	cplSum := atomic.Int32{}
+	cplSamples := atomic.Int32{}
+	wg := sync.WaitGroup{}
+	wg.Add(initialGetClosestPeers)
+	for range initialGetClosestPeers {
+		go func() {
+			defer wg.Done()
+			bytes := [32]byte{}
+			rand.Read(bytes[:])
+			for {
+				if s.closed() {
+					return
+				}
+				peers, err := s.router.GetClosestPeers(context.Background(), string(bytes[:]))
+				if err == nil && len(peers) > 0 {
+					if len(peers) <= 2 {
+						return // Ignore result if only 2 other peers in DHT.
+					}
+					cpl := keyspace.KeyLen
+					firstPeerKey := keyspace.PeerIDToBit256(peers[0])
+					for _, p := range peers[1:] {
+						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, keyspace.PeerIDToBit256(p)))
+					}
+					cplSum.Add(int32(cpl))
+					cplSamples.Add(1)
+					return
+				}
+				s.clock.Sleep(time.Second) // retry every second until success
+			}
+		}()
+	}
+	wg.Wait()
+
+	nSamples := cplSamples.Load()
+	s.avgPrefixLenLk.Lock()
+	defer s.avgPrefixLenLk.Unlock()
+	if nSamples == 0 {
+		s.cachedAvgPrefixLen = 0
+	} else {
+		s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
+	}
+	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
+	s.lastAvgPrefixLen = s.clock.Now()
+	s.avgPrefixLenReady <- struct{}{}
+}
+
+// getAvgPrefixLenNoLock returns the average prefix length of all scheduled
+// prefixes.
+//
+// Hangs until the first measurement is done if the average prefix length is
+// missing.
+func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
+	s.avgPrefixLenLk.Lock()
+	defer s.avgPrefixLenLk.Unlock()
+
+	if s.cachedAvgPrefixLen == -1 {
+		// Wait for initial measurement to complete. Requires the node to come
+		// online.
+		s.avgPrefixLenLk.Unlock()
+		<-s.avgPrefixLenReady
+		s.avgPrefixLenLk.Lock()
+		return s.cachedAvgPrefixLen
+	}
+
+	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(s.clock.Now()) {
+		// Return cached value if it is still valid.
+		return s.cachedAvgPrefixLen
+	}
+	prefixLenSum := 0
+	scheduleSize := s.schedule.Size()
+	if scheduleSize > 0 {
+		// Take average prefix length of all scheduled prefixes.
+		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {
+			prefixLenSum += len(entry.Key)
+		}
+		s.cachedAvgPrefixLen = prefixLenSum / scheduleSize
+		s.lastAvgPrefixLen = s.clock.Now()
+	}
+	return s.cachedAvgPrefixLen
 }
 
 // vanillaProvide provides a single key to the network without any

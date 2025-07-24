@@ -16,7 +16,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -635,7 +635,7 @@ type testProviderManager struct {
 	close        func() error
 }
 
-var _ providers.ProviderStore = (*testProviderManager)(nil)
+var _ records.ProviderStore = (*testProviderManager)(nil)
 
 func (t *testProviderManager) AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error {
 	return t.addProvider(ctx, key, prov)

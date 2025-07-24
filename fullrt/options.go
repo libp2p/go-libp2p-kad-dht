@@ -6,7 +6,7 @@ import (
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/crawler"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 )
 
 type config struct {
@@ -17,7 +17,7 @@ type config struct {
 	bulkSendParallelism    int
 	timeoutPerOp           time.Duration
 	crawler                crawler.Crawler
-	pmOpts                 []providers.Option
+	pmOpts                 []records.Option
 	ipDiversityFilterLimit int
 }
 
@@ -94,8 +94,8 @@ func WithTimeoutPerOperation(t time.Duration) Option {
 }
 
 // WithProviderManagerOptions sets the options to use when instantiating
-// providers.ProviderManager.
-func WithProviderManagerOptions(pmOpts ...providers.Option) Option {
+// records.ProviderManager.
+func WithProviderManagerOptions(pmOpts ...records.Option) Option {
 	return func(opt *config) error {
 		opt.pmOpts = pmOpts
 		return nil

@@ -41,7 +41,7 @@ import (
 	internalConfig "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	dht_pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
 	record "github.com/libp2p/go-libp2p-record"
@@ -82,7 +82,7 @@ type FullRT struct {
 
 	enableValues, enableProviders bool
 	Validator                     record.Validator
-	ProviderManager               *providers.ProviderManager
+	ProviderManager               *records.ProviderManager
 	datastore                     ds.Datastore
 	h                             host.Host
 
@@ -184,7 +184,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 	ctx, cancel := context.WithCancel(context.Background())
 
 	self := h.ID()
-	pm, err := providers.NewProviderManager(ctx, self, h.Peerstore(), dhtcfg.Datastore, fullrtcfg.pmOpts...)
+	pm, err := records.NewProviderManager(ctx, self, h.Peerstore(), dhtcfg.Datastore, fullrtcfg.pmOpts...)
 	if err != nil {
 		cancel()
 		return nil, err

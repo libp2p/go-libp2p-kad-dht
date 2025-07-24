@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
 
@@ -555,14 +554,6 @@ func TestAllocateToKClosest(t *testing.T) {
 			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
 		}
 	}
-}
-
-func genRandPeerID(t *testing.T) peer.ID {
-	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	require.NoError(t, err)
-	pid, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-	return pid
 }
 
 func TestRegionsFromPeers(t *testing.T) {

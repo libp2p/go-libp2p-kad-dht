@@ -48,6 +48,11 @@ const (
 	// find the multiaddress associated with the returned peer id.
 	DefaultProviderAddrTTL = 24 * time.Hour
 
+	// DefaultReprovideInterval is the default interval at which the keys should
+	// be reprovided to the DHT swarm to ensure there are enough live records in
+	// the swarm.
+	DefaultReprovideInterval = 22 * time.Hour
+
 	// DefaultMaxPeersPerIPGroup is the maximal number of peers with addresses in
 	// the same IP group allowed in the routing table. Once this limit is
 	// reached, newly discovered peers with addresses in the same IP group will

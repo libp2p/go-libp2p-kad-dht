@@ -351,3 +351,203 @@ func TestSimpleNextNonEmptyLeaf(t *testing.T) {
 		tr.Remove(k)
 	}
 }
+
+func TestPruneSubtrie(t *testing.T) {
+	tr := trie.New[bitstr.Key, struct{}]()
+
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+
+	resetTrie := func() {
+		*tr = trie.Trie[bitstr.Key, struct{}]{}
+		for _, k := range keys {
+			tr.Add(k, struct{}{})
+		}
+		require.Equal(t, len(keys), tr.Size())
+	}
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key(""))
+	require.Equal(t, 0, tr.Size())
+	require.True(t, tr.IsEmptyLeaf())
+	require.Nil(t, tr.Key())
+	require.Nil(t, tr.Branch(0))
+	require.Nil(t, tr.Branch(1))
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("0"))
+	require.Equal(t, 3, tr.Size())
+	require.True(t, tr.Branch(0).IsEmptyLeaf())
+	require.False(t, tr.Branch(1).IsLeaf())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("00"))
+	require.Equal(t, 5, tr.Size())
+	require.True(t, tr.Branch(0).Branch(0).IsEmptyLeaf())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("0000"))
+	require.Equal(t, 7, tr.Size())
+
+	keys = []bitstr.Key{
+		"0000",
+		"0001",
+		"1000",
+	}
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("11"))
+	require.Equal(t, 3, tr.Size())
+
+	resetTrie()
+	PruneSubtrie(tr, bitstr.Key("000"))
+	require.Equal(t, 1, tr.Size())
+	require.True(t, tr.Branch(0).IsEmptyLeaf())
+}
+
+func TestAllocateToKClosestSingle(t *testing.T) {
+	destKeys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+	dests := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range destKeys {
+		dests.Add(k, k)
+	}
+	itemKeys := []bitstr.Key{
+		"0000",
+	}
+	items := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range itemKeys {
+		items.Add(k, k)
+	}
+	allocs := AllocateToKClosest(items, dests, 3)
+
+	// "0000" should be assigned to ["0000", "0001", "0011"]
+	expected := map[bitstr.Key][]bitstr.Key{
+		"0000": {"0000"},
+		"0001": {"0000"},
+		"0011": {"0000"},
+	}
+	require.Equal(t, expected, allocs)
+}
+
+func TestAllocateToKClosestBasic(t *testing.T) {
+	destKeys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0011",
+		"0100",
+		"0110",
+		"1010",
+		"1101",
+		"1110",
+	}
+	dests := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range destKeys {
+		dests.Add(k, k)
+	}
+	itemKeys := []bitstr.Key{
+		"0000",
+		"0011",
+		"0111",
+		"1001",
+		"1011",
+		"1100",
+		"1101",
+	}
+	items := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range itemKeys {
+		items.Add(k, k)
+	}
+	allocs := AllocateToKClosest(items, dests, 3)
+
+	expected := map[bitstr.Key][]bitstr.Key{
+		"0000": {"0000", "0011"},
+		"0001": {"0000", "0011"},
+		"0011": {"0000", "0011", "0111"},
+		"0100": {"0111"},
+		"0110": {"0111"},
+		"1010": {"1001", "1011", "1100", "1101"},
+		"1101": {"1001", "1011", "1100", "1101"},
+		"1110": {"1001", "1011", "1100", "1101"},
+	}
+	require.Equal(t, expected, allocs)
+}
+
+func TestAllocateToKClosestSingleDest(t *testing.T) {
+	destKeys := []bitstr.Key{
+		"0000",
+	}
+	dests := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range destKeys {
+		dests.Add(k, k)
+	}
+	itemKeys := []bitstr.Key{
+		"0000",
+		"0011",
+		"0111",
+		"1001",
+		"1011",
+		"1100",
+		"1101",
+	}
+	items := trie.New[bitstr.Key, bitstr.Key]()
+	for _, k := range itemKeys {
+		items.Add(k, k)
+	}
+	allocs := AllocateToKClosest(items, dests, 3)
+
+	require.Len(t, allocs, 1)
+	require.ElementsMatch(t, allocs[destKeys[0]], itemKeys)
+}
+
+func genRandBit256() bit256.Key {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return bit256.NewKey(b[:])
+}
+
+func TestAllocateToKClosest(t *testing.T) {
+	nItems := 2 << 12
+	nDests := 2 << 10
+	replication := 12
+
+	items := trie.New[bit256.Key, bit256.Key]()
+	for range nItems {
+		i := genRandBit256()
+		items.Add(i, i)
+	}
+	dests := trie.New[bit256.Key, bit256.Key]()
+	for range nDests {
+		d := genRandBit256()
+		dests.Add(d, d)
+	}
+
+	allocs := AllocateToKClosest(items, dests, replication)
+
+	for _, itemEntry := range AllEntries(items, bit256.ZeroKey()) {
+		i := itemEntry.Key
+		closest := trie.Closest(dests, i, replication)
+		for _, closestEntry := range closest {
+			d := closestEntry.Key
+			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
+		}
+	}
+}

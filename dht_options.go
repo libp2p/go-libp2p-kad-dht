@@ -9,7 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -42,7 +42,7 @@ const DefaultPrefix protocol.ID = amino.ProtocolPrefix
 type Option = dhtcfg.Option
 
 // ProviderStore sets the provider storage manager.
-func ProviderStore(ps providers.ProviderStore) Option {
+func ProviderStore(ps records.ProviderStore) Option {
 	return func(c *dhtcfg.Config) error {
 		c.ProviderStore = ps
 		return nil

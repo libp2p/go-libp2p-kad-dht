@@ -78,3 +78,64 @@ func TestFindPrefixOfKey(t *testing.T) {
 	_, ok = FindPrefixOfKey(tr, bitstr.Key("11000000"))
 	require.False(t, ok)
 }
+
+func TestFindSubtrie(t *testing.T) {
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0010",
+		"0100",
+		"0111",
+		"1010",
+		"1011",
+		"1101",
+		"1110",
+	}
+	tr := trie.New[bitstr.Key, struct{}]()
+
+	_, ok := FindSubtrie(tr, bitstr.Key("0000"))
+	require.False(t, ok)
+
+	for _, k := range keys {
+		tr.Add(k, struct{}{})
+	}
+
+	subtrie, ok := FindSubtrie(tr, bitstr.Key(""))
+	require.True(t, ok)
+	require.Equal(t, tr, subtrie)
+	require.Equal(t, 9, subtrie.Size())
+
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("0"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0), subtrie)
+	require.Equal(t, 5, subtrie.Size())
+
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("1"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(1), subtrie)
+	require.Equal(t, 4, subtrie.Size())
+
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("000"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0).Branch(0).Branch(0), subtrie)
+	require.Equal(t, 2, subtrie.Size())
+
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("0000"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(0).Branch(0).Branch(0).Branch(0), subtrie)
+	require.Equal(t, 1, subtrie.Size())
+	require.True(t, subtrie.IsNonEmptyLeaf())
+
+	subtrie, ok = FindSubtrie(tr, bitstr.Key("111"))
+	require.True(t, ok)
+	require.Equal(t, tr.Branch(1).Branch(1).Branch(1), subtrie)
+	require.Equal(t, 1, subtrie.Size())
+	require.True(t, subtrie.IsNonEmptyLeaf())
+
+	_, ok = FindSubtrie(tr, bitstr.Key("100"))
+	require.False(t, ok)
+	_, ok = FindSubtrie(tr, bitstr.Key("1001"))
+	require.False(t, ok)
+	_, ok = FindSubtrie(tr, bitstr.Key("00000"))
+	require.False(t, ok)
+}

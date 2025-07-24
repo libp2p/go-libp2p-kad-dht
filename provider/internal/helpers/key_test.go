@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	kb "github.com/libp2p/go-libp2p-kbucket"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key"
@@ -109,6 +112,104 @@ func TestKeyToBytesPadding(t *testing.T) {
 	k = bitstr.Key("111111111") // 9 ones
 	bs = KeyToBytes(k)
 	require.Equal(t, []byte{0b11111111, 0b10000000}, bs)
+}
+
+func genRandPeerID(t *testing.T) peer.ID {
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	require.NoError(t, err)
+	pid, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	return pid
+}
+
+func TestShortestCoveredPrefix(t *testing.T) {
+	// All keys share CPL of 5, except one sharing a CPL of 4
+	var target [32]byte
+	_, err := rand.Read(target[:])
+	require.NoError(t, err)
+	targetBitstr := bitstr.Key(key.BitString(bit256.NewKey(target[:])))
+
+	cpl := 5
+	nPeers := 16
+	peers := make([]peer.ID, nPeers)
+	for i := range peers {
+		peers[i], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl))
+		require.NoError(t, err)
+	}
+
+	// This is a corner case.
+	// All peers share exactly `cpl` bits with the target, meaning that the
+	// prefix with `cpl+1` bits has been fully covered and contains 0 peers. No
+	// peers match this covered prefix.
+	prefix, coveredPeers := ShortestCoveredPrefix(targetBitstr, peers)
+	require.Len(t, coveredPeers, 0)
+	require.Equal(t, targetBitstr[:cpl+1], prefix)
+
+	// Last peer has a lower CPL
+	peers[len(peers)-1], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl-1))
+	require.NoError(t, err)
+	prefix, coveredPeers = ShortestCoveredPrefix(targetBitstr, peers)
+	require.Len(t, coveredPeers, len(peers)-1)
+	require.Equal(t, targetBitstr[:cpl], prefix)
+	peers[len(peers)-1], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl))
+	require.NoError(t, err)
+
+	// First peer has a lower CPL
+	peers[0], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl-1))
+	require.NoError(t, err)
+	prefix, coveredPeers = ShortestCoveredPrefix(targetBitstr, peers)
+	require.Len(t, coveredPeers, len(peers)-1)
+	require.Equal(t, targetBitstr[:cpl], prefix)
+
+	// First peer has a much lower CPL
+	peers[0], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl-3))
+	require.NoError(t, err)
+	prefix, coveredPeers = ShortestCoveredPrefix(targetBitstr, peers)
+	require.Len(t, coveredPeers, len(peers)-1)
+	require.Equal(t, targetBitstr[:cpl-2], prefix)
+
+	// First peer has a higher CPL
+	peers[0], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl+1))
+	require.NoError(t, err)
+	prefix, coveredPeers = ShortestCoveredPrefix(targetBitstr, peers)
+	require.Len(t, coveredPeers, 1)
+	require.Equal(t, targetBitstr[:cpl+1], prefix)
+
+	// First peer has a much higher CPL
+	peers[0], err = kb.GenRandPeerIDWithCPL(target[:], uint(cpl+3))
+	require.NoError(t, err)
+	prefix, coveredPeers = ShortestCoveredPrefix(targetBitstr, peers)
+	require.Len(t, coveredPeers, 1)
+	require.Equal(t, targetBitstr[:cpl+1], prefix)
+
+	// Test with random peer ids
+	nIterations := 64
+	for range nIterations {
+		minCpl := KeyLen
+		largestCplCount := 0
+		for i := range peers {
+			peers[i] = genRandPeerID(t)
+		}
+		peers = kb.SortClosestPeers(peers, target[:])
+		for i := range peers {
+			cpl = kb.CommonPrefixLen(kb.ConvertPeerID(peers[i]), target[:])
+			if cpl < minCpl {
+				minCpl = cpl
+				largestCplCount = 1
+			} else {
+				largestCplCount++
+			}
+		}
+		prefix, coveredPeers = ShortestCoveredPrefix(targetBitstr, peers)
+		require.Len(t, coveredPeers, len(peers)-largestCplCount)
+		require.Equal(t, targetBitstr[:minCpl+1], prefix)
+	}
+
+	// Test without supplying peers
+	bstrTarget := bitstr.Key("110101111")
+	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget, nil)
+	require.Equal(t, bstrTarget, prefix)
+	require.Empty(t, coveredPeers)
 }
 
 func genMultihashes(n int) []mh.Multihash {

@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/filecoin-project/go-clock"
+	logging "github.com/ipfs/go-log/v2"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
@@ -26,6 +28,10 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 const (
@@ -143,6 +149,18 @@ func noopConnectivityChecker() *connectivity.ConnectivityChecker {
 	return connChecker
 }
 
+func provideCounter() metric.Int64Counter {
+	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
+	provideCounter, err := meter.Int64Counter(
+		"total_provide_count",
+		metric.WithDescription("Number of successful provides since node is running"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return provideCounter
+}
+
 func TestClosestPeersToPrefixRandom(t *testing.T) {
 	replicationFactor := 10
 	nPeers := 128
@@ -257,7 +275,27 @@ func TestProvideKeysToPeer(t *testing.T) {
 	require.Equal(t, nKeys, msgCount)
 }
 
+func noWarningsNorAbove(obsLogs *observer.ObservedLogs) bool {
+	return obsLogs.Filter(func(le observer.LoggedEntry) bool {
+		return le.Level >= zap.WarnLevel
+	}).Len() == 0
+}
+
+func takeAllContainsErr(obsLogs *observer.ObservedLogs, errStr string) bool {
+	for _, le := range obsLogs.TakeAll() {
+		if le.Level >= zap.WarnLevel && strings.Contains(le.Message, errStr) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestIndividualProvideForPrefixSingle(t *testing.T) {
+	obsCore, obsLogs := observer.New(zap.WarnLevel)
+	logging.SetPrimaryCore(obsCore)
+	logging.SetAllLoggers(logging.LevelError)
+	logging.SetLogLevel(loggerName, "warn")
+
 	mhs := genMultihashes(1)
 	prefix := bitstr.Key("1011101111")
 
@@ -292,6 +330,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 		scheduleTimer:            mockClock.Timer(time.Hour),
 		getSelfAddrs:             func() []ma.Multiaddr { return nil },
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
+		provideCounter:           provideCounter(),
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -303,21 +342,22 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	}
 
 	// Providing no keys returns no error
-	err := r.individualProvideForPrefix(prefix, nil, false, false)
-	require.NoError(t, err)
+	r.individualProvideForPrefix(prefix, nil, false, false)
+	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(0)
 
 	// Providing a single key - success
-	err = r.individualProvideForPrefix(prefix, mhs, false, false)
-	require.NoError(t, err)
+	r.individualProvideForPrefix(prefix, mhs, false, false)
+	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
 	// Providing a single key - failure
+	gcpErr := errors.New("GetClosestPeers error")
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
-		return nil, errors.New("GetClosestPeers error")
+		return nil, gcpErr
 	}
-	err = r.individualProvideForPrefix(prefix, mhs, false, false)
-	require.Error(t, err)
+	r.individualProvideForPrefix(prefix, mhs, false, false)
+	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed key ends up in the provide queue.
 	_, keys, ok := r.provideQueue.Dequeue()
@@ -325,8 +365,8 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	require.Equal(t, mhs, keys)
 
 	// Reproviding a single key - failure
-	err = r.individualProvideForPrefix(prefix, mhs, true, true)
-	require.Error(t, err)
+	r.individualProvideForPrefix(prefix, mhs, true, true)
+	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed prefix ends up in the reprovide queue.
 	dequeued, ok := r.reprovideQueue.Dequeue()
@@ -335,6 +375,11 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 }
 
 func TestIndividualProvideForPrefixMultiple(t *testing.T) {
+	obsCore, obsLogs := observer.New(zap.WarnLevel)
+	logging.SetPrimaryCore(obsCore)
+	logging.SetAllLoggers(logging.LevelError)
+	logging.SetLogLevel(loggerName, "warn")
+
 	ks := genMultihashes(2)
 	prefix := bitstr.Key("")
 	closestPeers := []peer.ID{peer.ID("12BoooooPEER1"), peer.ID("12BoooooPEER2")}
@@ -372,6 +417,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		scheduleTimer:            mockClock.Timer(time.Hour),
 		getSelfAddrs:             func() []ma.Multiaddr { return nil },
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
+		provideCounter:           provideCounter(),
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -385,16 +431,17 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	}
 
 	// Providing two keys - success
-	err := r.individualProvideForPrefix(prefix, ks, false, false)
-	require.NoError(t, err)
+	r.individualProvideForPrefix(prefix, ks, false, false)
+	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
 	// Providing two keys - failure
+	gcpErr := errors.New("GetClosestPeers error")
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
-		return nil, errors.New("GetClosestPeers error")
+		return nil, gcpErr
 	}
-	err = r.individualProvideForPrefix(prefix, ks, false, false)
-	require.Error(t, err)
+	r.individualProvideForPrefix(prefix, ks, false, false)
+	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Assert keys are added to provide queue
 	require.Equal(t, len(ks), r.provideQueue.Size())
@@ -407,8 +454,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.ElementsMatch(t, pendingKeys, ks)
 
 	// Reproviding two keys - failure
-	err = r.individualProvideForPrefix(prefix, ks, true, true)
-	require.Error(t, err)
+	r.individualProvideForPrefix(prefix, ks, true, true)
+	require.True(t, takeAllContainsErr(obsLogs, "all individual provides failed for prefix"))
 	assertAdvertisementCount(1)
 	// Assert prefix is added to reprovide queue.
 	dequeued, ok := r.reprovideQueue.Dequeue()
@@ -428,8 +475,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		return closestPeers, nil
 	}
 
-	err = r.individualProvideForPrefix(prefix, ks, false, false)
-	require.NoError(t, err)
+	r.individualProvideForPrefix(prefix, ks, false, false)
+	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	// Verify one key was now provided 2x, and other key only 1x since it just failed.
 	msgSenderLk.Lock()
 	require.Equal(t, 3, advertisements[string(ks[0])][closestPeers[0]]+advertisements[string(ks[1])][closestPeers[0]])
@@ -445,8 +492,8 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.True(t, r.reprovideQueue.IsEmpty())
 	require.True(t, r.provideQueue.IsEmpty())
 
-	err = r.individualProvideForPrefix(prefix, ks, true, true)
-	require.NoError(t, err)
+	r.individualProvideForPrefix(prefix, ks, true, true)
+	require.True(t, noWarningsNorAbove(obsLogs))
 	// Verify only one of the 2 keys was provided. Providing failed for the other.
 	msgSenderLk.Lock()
 	require.Equal(t, 4, advertisements[string(ks[0])][closestPeers[0]]+advertisements[string(ks[1])][closestPeers[0]])
@@ -617,14 +664,14 @@ func TestStartProvidingSingle(t *testing.T) {
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, int32(len(peers)), provideCount.Load())
 	mockClock.Add(1)
+	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 50*time.Millisecond, "waiting for reprovide to finish")
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
-	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval - 1)
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval) // 1
+	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 50*time.Millisecond, "waiting for reprovide to finish")
 	require.Equal(t, 3+initialGetClosestPeers, int(getClosestPeersCount.Load()))
-	require.Equal(t, 3*int32(len(peers)), provideCount.Load())
 }
 
 func TestStartProvidingMany(t *testing.T) {
@@ -850,12 +897,12 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 	nodeOffline := func() bool {
 		return !reprovider.connectivity.IsOnline()
 	}
-	waitUntil(t, nodeOffline, 10*time.Millisecond, "waiting for node to be offline")
+	waitUntil(t, nodeOffline, 100*time.Millisecond, "waiting for node to be offline")
 	mockClock.Add(connectivityCheckInterval)
 
 	routerOffline.Store(false)
 	mockClock.Add(connectivityCheckInterval)
-	waitUntil(t, reprovider.connectivity.IsOnline, 10*time.Millisecond, "waiting for node to come back online")
+	waitUntil(t, reprovider.connectivity.IsOnline, 100*time.Millisecond, "waiting for node to come back online")
 
 	providedAllKeys := func() bool {
 		msgSenderLk.Lock()

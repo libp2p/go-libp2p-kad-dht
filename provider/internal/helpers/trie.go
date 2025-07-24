@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
@@ -32,4 +33,25 @@ func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 		out[i] = entry.Data
 	}
 	return out
+}
+
+// FindPrefixOfKey checks whether the trie contains a leave whose key is a
+// prefix or exact match of `k`.
+//
+// If there is a match, the function returns the matching key and true.
+// Otherwise it returns the zero key and false.
+func FindPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1) (K0, bool) {
+	return findPrefixOfKeyAtDepth(t, k, 0)
+}
+
+func findPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) (K0, bool) {
+	if t.IsLeaf() {
+		if !t.HasKey() {
+			var zero K0
+			return zero, false
+		}
+		return *t.Key(), key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen()
+	}
+	b := int(k.Bit(depth))
+	return findPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)
 }

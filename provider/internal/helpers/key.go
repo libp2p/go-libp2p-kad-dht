@@ -1,9 +1,11 @@
 package helpers
 
 import (
+	"cmp"
 	"crypto/sha256"
-	"sort"
+	"slices"
 
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
 
@@ -99,6 +101,37 @@ func KeyToBytes[K kad.Key[K]](k K) []byte {
 	return b
 }
 
+// ShortestCoveredPrefix takes as input the `target` key and the list of
+// closest peers to this key. It returns a prefix of `requested` that is
+// covered by these peers, along with the peers matching this prefix.
+//
+// We say that a set of peers fully "covers" a prefix of the global keyspace,
+// if all the peers matching this prefix are included in the set.
+//
+// If every peer shares the same CPL to `target`, then no deeper zone is
+// covered, we learn that the adjacent sibling branch is empty. In this case we
+// return the prefix one bit deeper (`minCPL+1`) and an empty peer list.
+func ShortestCoveredPrefix(target bitstr.Key, peers []peer.ID) (bitstr.Key, []peer.ID) {
+	if len(peers) == 0 {
+		return target, peers
+	}
+	// Sort the peers by their distance to the requested key.
+	peers = kb.SortClosestPeers(peers, KeyToBytes(target))
+
+	minCpl := target.BitLen() // key bitlen
+	coveredCpl := 0
+	lastCoveredPeerIndex := 0
+	for i, p := range peers {
+		cpl := key.CommonPrefixLength(target, PeerIDToBit256(p))
+		if cpl < minCpl {
+			coveredCpl = cpl + 1
+			lastCoveredPeerIndex = i
+			minCpl = cpl
+		}
+	}
+	return target[:coveredCpl], peers[:lastCoveredPeerIndex]
+}
+
 // PrefixAndKeys is a struct that holds a prefix and the multihashes whose
 // kademlia identifier share the same prefix.
 type PrefixAndKeys struct {
@@ -115,8 +148,8 @@ func SortPrefixesBySize(prefixes map[bitstr.Key][]mh.Multihash) []PrefixAndKeys 
 			out = append(out, PrefixAndKeys{Prefix: prefix, Keys: keys})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return len(out[i].Keys) > len(out[j].Keys)
+	slices.SortFunc(out, func(a, b PrefixAndKeys) int {
+		return -cmp.Compare(len(a.Keys), len(b.Keys))
 	})
 	return out
 }

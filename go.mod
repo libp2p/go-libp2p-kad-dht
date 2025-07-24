@@ -3,6 +3,7 @@ module github.com/libp2p/go-libp2p-kad-dht
 go 1.23.8
 
 require (
+	github.com/filecoin-project/go-clock v0.1.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru v1.0.2
@@ -13,7 +14,7 @@ require (
 	github.com/ipfs/go-log/v2 v2.6.0
 	github.com/ipfs/go-test v0.2.2
 	github.com/libp2p/go-libp2p v0.41.1
-	github.com/libp2p/go-libp2p-kbucket v0.7.0
+	github.com/libp2p/go-libp2p-kbucket v0.7.1-0.20250718125122-f77e735b68e8
 	github.com/libp2p/go-libp2p-record v0.3.1
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.5
 	github.com/libp2p/go-libp2p-testing v0.12.0

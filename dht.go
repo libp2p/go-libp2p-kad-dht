@@ -23,7 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal/metrics"
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/providers"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
@@ -86,7 +86,7 @@ type IpfsDHT struct {
 
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
 	// providerStore stores & manages the provider records for this Dht peer.
-	providerStore providers.ProviderStore
+	providerStore records.ProviderStore
 
 	// manages Routing Table refresh
 	rtRefreshManager *rtrefresh.RtRefreshManager
@@ -365,7 +365,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	if cfg.ProviderStore != nil {
 		dht.providerStore = cfg.ProviderStore
 	} else {
-		dht.providerStore, err = providers.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.Datastore)
+		dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.Datastore)
 		if err != nil {
 			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
 		}
@@ -456,7 +456,7 @@ func makeRoutingTable(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutbound
 }
 
 // ProviderStore returns the provider storage object for storing and retrieving provider records.
-func (dht *IpfsDHT) ProviderStore() providers.ProviderStore {
+func (dht *IpfsDHT) ProviderStore() records.ProviderStore {
 	return dht.providerStore
 }
 

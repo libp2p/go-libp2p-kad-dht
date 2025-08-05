@@ -26,22 +26,14 @@ type prefixQueue struct {
 // remove all superstrings from the queue. The prefixes are consolidated around
 // the shortest prefix.
 func (q *prefixQueue) Push(prefix bitstr.Key) {
-	if subtrie, ok := keyspace.FindSubtrie(q.prefixes, prefix); ok {
-		// Prefix is a prefix of (at least) an existing prefix in the queue.
-		entriesToRemove := keyspace.AllEntries(subtrie, bit256.ZeroKey())
-		prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
-		for i, entry := range entriesToRemove {
-			prefixesToRemove[i] = entry.Key
-		}
-		// Remove superstrings of `prefix` from the queue
-		firstRemovedIndex := q.removePrefixesFromQueue(prefixesToRemove)
-		// Insert `prefix` in the queue at the location of the first removed
-		// prefix (last in order of deletion).
+	if firstRemovedIndex := q.removeSuperstrings(prefix); firstRemovedIndex >= 0 {
+		// `prefix` has superstrings in the queue. Remove them all and insert
+		// `prefix` in the queue at the location of the first removed superstring.
 		q.queue.Insert(firstRemovedIndex, prefix)
 		// Add `prefix` to prefixes trie.
 		q.prefixes.Add(prefix, struct{}{})
 	} else if _, ok := keyspace.FindPrefixOfKey(q.prefixes, prefix); !ok {
-		// No prefixes of `prefix` found in the queue.
+		// No prefixes nor superstrings of `prefix` found in the queue.
 		q.queue.PushBack(prefix)
 		q.prefixes.Add(prefix, struct{}{})
 	}
@@ -62,17 +54,7 @@ func (q *prefixQueue) Pop() (bitstr.Key, bool) {
 
 // Remove removes a prefix or all its superstrings from the queue, if any.
 func (q *prefixQueue) Remove(prefix bitstr.Key) bool {
-	subtrie, ok := keyspace.FindSubtrie(q.prefixes, prefix)
-	if !ok {
-		return false
-	}
-	entriesToRemove := keyspace.AllEntries(subtrie, bit256.ZeroKey())
-	prefixesToRemove := make([]bitstr.Key, len(entriesToRemove))
-	for i, entry := range entriesToRemove {
-		prefixesToRemove[i] = entry.Key
-	}
-	q.removePrefixesFromQueue(prefixesToRemove)
-	return true
+	return q.removeSuperstrings(prefix) >= 0
 }
 
 // Returns the number of prefixes in the queue.
@@ -89,6 +71,22 @@ func (q *prefixQueue) Clear() int {
 	*q.prefixes = trie.Trie[bitstr.Key, struct{}]{}
 
 	return size
+}
+
+// removeSuperstrings finds all superstrings of `prefix` in the trie, removes
+// them from the queue, and returns the index at which the first removal
+// occurred, or -1 if none.
+func (q *prefixQueue) removeSuperstrings(prefix bitstr.Key) int {
+	subtrie, ok := keyspace.FindSubtrie(q.prefixes, prefix)
+	if !ok {
+		return -1
+	}
+	entries := keyspace.AllEntries(subtrie, bit256.ZeroKey())
+	toRemove := make([]bitstr.Key, len(entries))
+	for i, e := range entries {
+		toRemove[i] = e.Key
+	}
+	return q.removePrefixesFromQueue(toRemove)
 }
 
 // removeSubtrieFromQueue removes all keys in the provided subtrie from q.queue

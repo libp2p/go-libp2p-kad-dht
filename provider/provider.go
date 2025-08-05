@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"strconv"
 	"sync"
@@ -12,6 +11,7 @@ import (
 	"github.com/filecoin-project/go-clock"
 	pool "github.com/guillaumemichel/reservedpool"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipfs/go-test/random"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -108,7 +108,6 @@ type SweepingProvider struct {
 	maxReprovideDelay time.Duration
 
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
-	scheduleLk             sync.Mutex
 	scheduleCursor         bitstr.Key
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
@@ -122,6 +121,15 @@ type SweepingProvider struct {
 	msgSender      pb.MessageSender
 	getSelfAddrs   func() []ma.Multiaddr
 	addLocalRecord func(mh.Multihash) error
+}
+
+// FIXME: remove me
+func (s *SweepingProvider) SatisfyLinter() {
+	s.vanillaProvide([]byte{})
+	s.closestPeersToKey("")
+	s.measureInitialPrefixLen()
+	s.getAvgPrefixLenNoLock()
+	s.schedulePrefixNoLock("", false)
 }
 
 // Close stops the provider and releases all resources.
@@ -206,8 +214,7 @@ func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 					if next == nil {
 						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
 					} else {
-						timeUntilReprovide := s.timeUntil(next.Data)
-						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+						s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
 						logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
 					}
 				}
@@ -294,14 +301,17 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 	for range initialGetClosestPeers {
 		go func() {
 			defer wg.Done()
-			bytes := [32]byte{}
-			rand.Read(bytes[:])
+			randomMh := random.Multihashes(1)[0]
 			for {
 				if s.closed() {
 					return
 				}
-				peers, err := s.router.GetClosestPeers(context.Background(), string(bytes[:]))
-				if err == nil && len(peers) > 0 {
+				peers, err := s.router.GetClosestPeers(context.Background(), string(randomMh))
+				if err != nil {
+					logger.Infof("GetClosestPeers failed during initial prefix len measurement: %s", err)
+				} else if len(peers) == 0 {
+					logger.Info("GetClosestPeers found not peers during initial prefix len measurement")
+				} else {
 					if len(peers) <= 2 {
 						return // Ignore result if only 2 other peers in DHT.
 					}
@@ -314,6 +324,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 					cplSamples.Add(1)
 					return
 				}
+
 				s.clock.Sleep(time.Second) // retry every second until success
 			}
 		}()

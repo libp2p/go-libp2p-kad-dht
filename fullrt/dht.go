@@ -503,7 +503,7 @@ func (dht *FullRT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID, 
 			// Recover the peer ID from the key
 			p, ok := dht.keyToPeerMap[string(k)]
 			if !ok {
-				logger.Errorf("key not found in map")
+				logger.Warnf("key not found in map")
 				continue
 			}
 

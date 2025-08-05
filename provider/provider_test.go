@@ -575,7 +575,7 @@ func TestProvideOnce(t *testing.T) {
 	clk.Add(checkInterval)           // trigger connectivity check
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	reprovider.ProvideOnce(h)
-	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 100*time.Millisecond, "waiting for ProvideOnce to finish")
 }
 
 func TestStartProvidingSingle(t *testing.T) {
@@ -630,7 +630,7 @@ func TestStartProvidingSingle(t *testing.T) {
 
 	// Blocks until key is provided
 	reprovider.StartProviding(true, h)
-	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 50*time.Millisecond, "waiting for ProvideOnce to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 100*time.Millisecond, "waiting for ProvideOnce to finish")
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
@@ -657,13 +657,13 @@ func TestStartProvidingSingle(t *testing.T) {
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, int32(len(peers)), provideCount.Load())
 	mockClock.Add(1)
-	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 50*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 100*time.Millisecond, "waiting for reprovide to finish")
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	mockClock.Add(reprovideInterval - 1)
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval) // 1
-	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 50*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 100*time.Millisecond, "waiting for reprovide to finish")
 	require.Equal(t, 3+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 }
 

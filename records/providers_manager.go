@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/simplelru"
@@ -67,9 +66,8 @@ type ProviderManager struct {
 
 	cleanupInterval time.Duration
 
-	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	closed chan struct{}
 }
 
 var _ ProviderStore = (*ProviderManager)(nil)
@@ -118,30 +116,31 @@ type getProv struct {
 
 // NewProviderManager constructor
 func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peerstore, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
-	pm := new(ProviderManager)
-	pm.self = local
-	pm.getprovs = make(chan *getProv)
-	pm.newprovs = make(chan *addProv)
-	pm.pstore = ps
-	pm.dstore = autobatch.NewAutoBatching(dstore, batchBufferSize)
 	cache, err := lru.NewLRU(lruCacheSize, nil)
 	if err != nil {
 		return nil, err
 	}
-	pm.cache = cache
-	pm.cleanupInterval = defaultCleanupInterval
+	pm := &ProviderManager{
+		self:            local,
+		getprovs:        make(chan *getProv),
+		newprovs:        make(chan *addProv),
+		closed:          make(chan struct{}),
+		pstore:          ps,
+		dstore:          autobatch.NewAutoBatching(dstore, batchBufferSize),
+		cache:           cache,
+		cleanupInterval: defaultCleanupInterval,
+	}
 	if err := pm.applyOptions(opts...); err != nil {
 		return nil, err
 	}
-	pm.ctx, pm.cancel = context.WithCancel(ctx)
-	pm.run()
+	ctx, pm.cancel = context.WithCancel(ctx)
+	pm.run(ctx)
 	return pm, nil
 }
 
-func (pm *ProviderManager) run() {
-	pm.wg.Add(1)
+func (pm *ProviderManager) run(ctx context.Context) {
 	go func() {
-		defer pm.wg.Done()
+		defer close(pm.closed)
 
 		var gcQuery dsq.Results
 		gcTimer := time.NewTimer(pm.cleanupInterval)
@@ -164,17 +163,17 @@ func (pm *ProviderManager) run() {
 			case np := <-pm.newprovs:
 				err := pm.addProv(np.ctx, np.key, np.val)
 				if err != nil {
-					log.Error("error adding new providers: ", err)
+					log.Error("error adding new provider: ", err)
 					continue
 				}
 				if gcSkip != nil {
-					// we have an gc, tell it to skip this provider
+					// gc in progress, tell it to skip this provider
 					// as we've updated it since the GC started.
 					gcSkip[mkProvKeyFor(np.key, np.val)] = struct{}{}
 				}
 			case gp := <-pm.getprovs:
 				provs, err := pm.getProvidersForKey(gp.ctx, gp.key)
-				if err != nil && err != ds.ErrNotFound {
+				if err != nil && !errors.Is(err, ds.ErrNotFound) {
 					log.Error("error reading providers: ", err)
 				}
 
@@ -210,7 +209,7 @@ func (pm *ProviderManager) run() {
 					fallthrough
 				case gcTime.Sub(t) > ProvideValidity:
 					// or expired
-					err = pm.dstore.Delete(pm.ctx, ds.RawKey(res.Key))
+					err = pm.dstore.Delete(ctx, ds.RawKey(res.Key))
 					if err != nil && err != ds.ErrNotFound {
 						log.Error("failed to remove provider record from disk: ", err)
 					}
@@ -224,7 +223,7 @@ func (pm *ProviderManager) run() {
 				pm.cache.Purge()
 
 				// Now, kick off a GC of the datastore.
-				q, err := pm.dstore.Query(pm.ctx, dsq.Query{
+				q, err := pm.dstore.Query(ctx, dsq.Query{
 					Prefix: ProvidersKeyPrefix,
 				})
 				if err != nil {
@@ -234,7 +233,7 @@ func (pm *ProviderManager) run() {
 				gcQuery = q
 				gcQueryRes = q.Next()
 				gcSkip = make(map[string]struct{})
-			case <-pm.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -243,7 +242,7 @@ func (pm *ProviderManager) run() {
 
 func (pm *ProviderManager) Close() error {
 	pm.cancel()
-	pm.wg.Wait()
+	<-pm.closed
 	return nil
 }
 
@@ -377,7 +376,7 @@ func loadProviderSet(ctx context.Context, dstore ds.Datastore, k []byte) (*provi
 		case now.Sub(t) > ProvideValidity:
 			// or just expired
 			err = dstore.Delete(ctx, ds.RawKey(e.Key))
-			if err != nil && err != ds.ErrNotFound {
+			if err != nil && errors.Is(err, ds.ErrNotFound) {
 				log.Error("failed to remove provider record from disk: ", err)
 			}
 			continue
@@ -389,7 +388,7 @@ func loadProviderSet(ctx context.Context, dstore ds.Datastore, k []byte) (*provi
 		if err != nil {
 			log.Error("base32 decoding error: ", err)
 			err = dstore.Delete(ctx, ds.RawKey(e.Key))
-			if err != nil && err != ds.ErrNotFound {
+			if err != nil && errors.Is(err, ds.ErrNotFound) {
 				log.Error("failed to remove provider record from disk: ", err)
 			}
 			continue

@@ -168,12 +168,6 @@ func (q *ProvideQueue) IsEmpty() bool {
 func (q *ProvideQueue) Size() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.sizeNoLock()
-}
-
-// sizeNoLock returns the number of regions containing at least one key in the
-// queue. It assumes the mutex is held already.
-func (q *ProvideQueue) sizeNoLock() int {
 	return q.keys.Size()
 }
 
@@ -182,7 +176,7 @@ func (q *ProvideQueue) sizeNoLock() int {
 func (q *ProvideQueue) Clear() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	size := q.sizeNoLock()
+	size := q.keys.Size()
 
 	q.queue.Clear()
 	*q.keys = trie.Trie[bit256.Key, mh.Multihash]{}

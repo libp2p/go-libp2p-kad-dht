@@ -12,26 +12,30 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/filecoin-project/go-clock"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipfs/go-test/random"
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
+	mh "github.com/multiformats/go-multihash"
+
+	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
+	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/probe-lab/go-libdht/kad/trie"
+
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
-	ma "github.com/multiformats/go-multiaddr"
-	mh "github.com/multiformats/go-multihash"
-	"github.com/probe-lab/go-libdht/kad/key"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
-	"github.com/probe-lab/go-libdht/kad/trie"
+
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 const (
@@ -102,14 +106,6 @@ func genBalancedMultihashes(exponent int) []mh.Multihash {
 	return mhs
 }
 
-func genRandPeerID(t *testing.T) peer.ID {
-	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	require.NoError(t, err)
-	pid, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-	return pid
-}
-
 var _ KadClosestPeersRouter = (*mockRouter)(nil)
 
 type mockRouter struct {
@@ -164,11 +160,9 @@ func provideCounter() metric.Int64Counter {
 func TestClosestPeersToPrefixRandom(t *testing.T) {
 	replicationFactor := 10
 	nPeers := 128
-	peers := make([]peer.ID, nPeers)
+	peers := random.Peers(nPeers)
 	peersTrie := trie.New[bit256.Key, peer.ID]()
-	for i := range peers {
-		p := genRandPeerID(t)
-		peers[i] = p
+	for _, p := range peers {
 		peersTrie.Add(keyspace.PeerIDToBit256(p), p)
 	}
 
@@ -218,10 +212,9 @@ func TestKeysAllocationsToPeers(t *testing.T) {
 	for _, c := range mhs {
 		keysTrie.Add(keyspace.MhToBit256(c), c)
 	}
-	peers := make([]peer.ID, nPeers)
+	peers := random.Peers(nPeers)
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 	for i := range peers {
-		peers[i] = genRandPeerID(t)
 		peersTrie.Add(keyspace.PeerIDToBit256(peers[i]), peers[i])
 	}
 	keysAllocations := keyspace.AllocateToKClosest(keysTrie, peersTrie, replicationFactor)
@@ -246,7 +239,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 			return errors.New("error")
 		},
 	}
-	reprovider := SweepingProvider{
+	prov := SweepingProvider{
 		msgSender: msgSender,
 	}
 
@@ -257,7 +250,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 	pmes := &pb.Message{}
 
 	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
-	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
+	err = prov.provideKeysToPeer(pid, mhs, pmes)
 	require.Error(t, err)
 	require.Equal(t, maxConsecutiveProvideFailuresAllowed+1, msgCount)
 
@@ -270,7 +263,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 		}
 		return nil
 	}
-	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
+	err = prov.provideKeysToPeer(pid, mhs, pmes)
 	require.NoError(t, err)
 	require.Equal(t, nKeys, msgCount)
 }

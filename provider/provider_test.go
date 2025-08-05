@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ipfs/go-test/random"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
 
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/trie"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -31,14 +31,6 @@ func genMultihashes(n int) []mh.Multihash {
 		}
 	}
 	return mhs
-}
-
-func genRandPeerID(t *testing.T) peer.ID {
-	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	require.NoError(t, err)
-	pid, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-	return pid
 }
 
 var _ pb.MessageSender = (*mockMsgSender)(nil)
@@ -67,7 +59,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 			return errors.New("error")
 		},
 	}
-	reprovider := SweepingProvider{
+	prov := SweepingProvider{
 		msgSender: msgSender,
 	}
 
@@ -78,7 +70,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 	pmes := &pb.Message{}
 
 	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
-	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
+	err = prov.provideKeysToPeer(pid, mhs, pmes)
 	require.Error(t, err)
 	require.Equal(t, maxConsecutiveProvideFailuresAllowed+1, msgCount)
 
@@ -91,7 +83,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 		}
 		return nil
 	}
-	err = reprovider.provideKeysToPeer(pid, mhs, pmes)
+	err = prov.provideKeysToPeer(pid, mhs, pmes)
 	require.NoError(t, err)
 	require.Equal(t, nKeys, msgCount)
 }
@@ -106,10 +98,9 @@ func TestKeysAllocationsToPeers(t *testing.T) {
 	for _, c := range mhs {
 		keysTrie.Add(keyspace.MhToBit256(c), c)
 	}
-	peers := make([]peer.ID, nPeers)
+	peers := random.Peers(nPeers)
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 	for i := range peers {
-		peers[i] = genRandPeerID(t)
 		peersTrie.Add(keyspace.PeerIDToBit256(peers[i]), peers[i])
 	}
 	keysAllocations := keyspace.AllocateToKClosest(keysTrie, peersTrie, replicationFactor)

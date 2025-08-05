@@ -1,9 +1,9 @@
 package queue
 
 import (
-	"crypto/rand"
 	"testing"
 
+	"github.com/ipfs/go-test/random"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
@@ -16,14 +16,7 @@ import (
 func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 	mhs := make([]mh.Multihash, 0, n)
 	for i := 0; len(mhs) < n; i++ {
-		digest := make([]byte, 32)
-		if _, err := rand.Read(digest); err != nil {
-			panic(err)
-		}
-		h, err := mh.Encode(digest, mh.SHA2_256)
-		if err != nil {
-			panic(err)
-		}
+		h := random.Multihashes(1)[0]
 		k := keyspace.MhToBit256(h)
 		if keyspace.IsPrefix(prefix, k) {
 			mhs = append(mhs, h)

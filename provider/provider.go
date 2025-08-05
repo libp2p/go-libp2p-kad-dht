@@ -191,8 +191,7 @@ func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 					if next == nil {
 						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
 					} else {
-						timeUntilReprovide := s.timeUntil(next.Data)
-						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+						s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
 						logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
 					}
 				}

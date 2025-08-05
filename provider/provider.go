@@ -94,10 +94,8 @@ type SweepingProvider struct {
 
 	keyStore *datastore.KeyStore
 
-	provideQueue         *queue.ProvideQueue
-	provideRunning       sync.Mutex
-	reprovideQueue       *queue.ReprovideQueue
-	lateReprovideRunning sync.Mutex
+	provideQueue   *queue.ProvideQueue
+	provideRunning sync.Mutex
 
 	workerPool               *pool.Pool[workerType]
 	maxProvideConnsPerWorker int
@@ -108,6 +106,7 @@ type SweepingProvider struct {
 	maxReprovideDelay time.Duration
 
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
+	scheduleLk             sync.Mutex
 	scheduleCursor         bitstr.Key
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
@@ -128,8 +127,6 @@ func (s *SweepingProvider) SatisfyLinter() {
 	s.vanillaProvide([]byte{})
 	s.closestPeersToKey("")
 	s.measureInitialPrefixLen()
-	s.getAvgPrefixLenNoLock()
-	s.schedulePrefixNoLock("", false)
 }
 
 // Close stops the provider and releases all resources.
@@ -570,11 +567,8 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 			}
 		}
 
-		if _, ok := prefixes[prefix]; !ok {
-			prefixes[prefix] = []mh.Multihash{h}
-		} else {
-			prefixes[prefix] = append(prefixes[prefix], h)
-		}
+		prefixes[prefix] = append(prefixes[prefix], h)
+
 		if prefixConsolidation {
 			// prefix is a shorted prefix of a prefix already in the schedule.
 			// Consolidate everything into prefix.

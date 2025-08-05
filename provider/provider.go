@@ -85,7 +85,6 @@ type SweepingProvider struct {
 	maxReprovideDelay time.Duration
 
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
-	scheduleLk             sync.Mutex
 	scheduleCursor         bitstr.Key
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
@@ -107,6 +106,7 @@ func (s *SweepingProvider) SatisfyLinter() {
 	s.closestPeersToKey("")
 	s.measureInitialPrefixLen()
 	s.getAvgPrefixLenNoLock()
+	s.schedulePrefixNoLock("", false)
 }
 
 // Close stops the provider and releases all resources.

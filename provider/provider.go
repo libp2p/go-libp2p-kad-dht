@@ -468,7 +468,6 @@ func (s *SweepingProvider) handleReprovide() {
 			// failed regions.
 			s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
 			s.scheduleLk.Unlock()
-			s.connectivity.TriggerCheck()
 			return
 		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
@@ -481,12 +480,6 @@ func (s *SweepingProvider) handleReprovide() {
 				next = keyspace.NextNonEmptyLeaf(s.schedule, next.Key, s.order)
 				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 				count++
-			}
-			s.connectivity.TriggerCheck()
-			if count == scheduleSize {
-				// No reprovides are scheduled in the future, return here.
-				s.scheduleLk.Unlock()
-				return
 			}
 		}
 

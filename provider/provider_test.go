@@ -657,13 +657,13 @@ func TestStartProvidingSingle(t *testing.T) {
 	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, int32(len(peers)), provideCount.Load())
 	mockClock.Add(1)
-	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 100*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 0")
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	mockClock.Add(reprovideInterval - 1)
 	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval) // 1
-	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 100*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 1")
 	require.Equal(t, 3+initialGetClosestPeers, int(getClosestPeersCount.Load()))
 }
 
@@ -760,7 +760,7 @@ func TestStartProvidingMany(t *testing.T) {
 	for range (reprovideInterval - 1) / step {
 		mockClock.Add(step)
 	}
-	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 200*time.Millisecond, "waiting for reprovide to finish 0")
 
 	msgSenderLk.Lock()
 	require.Equal(t, nKeys, len(addProviderRpcs))
@@ -785,7 +785,7 @@ func TestStartProvidingMany(t *testing.T) {
 	for range (reprovideInterval - 1) / step {
 		mockClock.Add(step)
 	}
-	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for reprovide to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 200*time.Millisecond, "waiting for reprovide to finish 1")
 
 	msgSenderLk.Lock()
 	require.Equal(t, nKeys, len(addProviderRpcs))

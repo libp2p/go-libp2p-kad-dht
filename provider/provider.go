@@ -97,5 +97,6 @@ const (
 // most recent successful provide operation (UTC).
 // For `StateQueued` or `StateUnknown`, `lastProvide` is the zero `time.Time`.
 func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, lastProvide time.Time) {
+	// TODO: implement me
 	return StateUnknown, time.Time{}
 }

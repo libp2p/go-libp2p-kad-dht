@@ -1314,3 +1314,22 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 func (s *SweepingProvider) ClearProvideQueue() int {
 	return s.provideQueue.Clear()
 }
+
+// ProvideState encodes the current relationship between this node and `key`.
+type ProvideState uint8
+
+const (
+	StateUnknown  ProvideState = iota // we have no record of the key
+	StateQueued                       // key is queued to be provided
+	StateProvided                     // key was provided at least once
+)
+
+// ProvideStatus reports the provider’s view of a key.
+//
+// When `state == StateProvided`, `lastProvide` is the wall‑clock time of the
+// most recent successful provide operation (UTC).
+// For `StateQueued` or `StateUnknown`, `lastProvide` is the zero `time.Time`.
+func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, lastProvide time.Time) {
+	// TODO: implement me
+	return StateUnknown, time.Time{}
+}

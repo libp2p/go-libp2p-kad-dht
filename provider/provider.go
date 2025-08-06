@@ -17,6 +17,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
@@ -123,12 +124,13 @@ type SweepingProvider struct {
 	msgSender      pb.MessageSender
 	getSelfAddrs   func() []ma.Multiaddr
 	addLocalRecord func(mh.Multihash) error
+
+	provideCounter metric.Int64Counter
 }
 
 // FIXME: remove me
 func (s *SweepingProvider) SatisfyLinter() {
 	s.vanillaProvide([]byte{})
-	s.exploreSwarm("")
 	s.measureInitialPrefixLen()
 }
 
@@ -740,14 +742,106 @@ func (s *SweepingProvider) provideLoop() {
 
 			prefix, keys, ok := s.provideQueue.Dequeue()
 			if ok {
-				s.provideForPrefix(prefix, keys)
+				s.batchProvide(prefix, keys)
 			}
 		}()
 	}
 }
 
-func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash) {
+const individualProvideThreshold = 2
+
+func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
+	if len(keys) == 0 {
+		return
+	}
+	addrInfo, ok := s.selfAddrInfo()
+	if !ok {
+		// Don't provide if the node doesn't have a valid address to include in the
+		// provider record.
+		return
+	}
+	if len(keys) <= individualProvideThreshold {
+		// Don't fully explore the region, execute simple DHT provides for these
+		// keys. It isn't worth it to fully explore a region for just a few keys.
+		s.individualProvide(prefix, keys, false, false)
+		return
+	}
+
+	regions, coveredPrefix, err := s.exploreSwarm(prefix)
+	if err != nil {
+		s.failedProvide(prefix, keys, fmt.Errorf("reprovide '%s': %w", prefix, err))
+		return
+	}
+	logger.Debugf("provide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
+
+	// Add any key matching the covered prefix from the provide queue to the
+	// current provide batch.
+	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
+	keys = append(keys, extraKeys...)
+	regions = keyspace.AssignKeysToRegions(regions, keys)
+
+	if !s.provideRegions(regions, addrInfo) {
+		logger.Errorf("failed to reprovide any region for prefix %s", prefix)
+	}
+}
+
+func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash, err error) {
+	logger.Error(err)
+	// Put keys back to the provide queue.
+	s.provideQueue.Enqueue(prefix, keys...)
+
+	s.connectivity.TriggerCheck()
+}
+
+// selfAddrInfo returns the current peer.AddrInfo to be used in the provider
+// records sent to remote peers.
+//
+// If the node currently has no valid multiaddress, return an empty AddrInfo
+// and false.
+func (s *SweepingProvider) selfAddrInfo() (peer.AddrInfo, bool) {
+	addrs := s.getSelfAddrs()
+	if len(addrs) == 0 {
+		logger.Warn("provider: no self addresses available for providing keys")
+		return peer.AddrInfo{}, false
+	}
+	return peer.AddrInfo{ID: s.peerid, Addrs: addrs}, true
+}
+
+// individualProvide provides the keys sharing the same prefix to the network
+// without exploring the associated keyspace regions. It performs "normal" DHT
+// provides for the supplied keys, handles failures and schedules next
+// reprovide is necessary.
+func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) {
 	// TODO: implement me
+}
+
+// provideRegions contains common logic to batchProvide() and batchReprovide().
+// It iterate over supplied regions, and allocates the regions provider records
+// to the appropriate DHT servers.
+func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo) bool {
+	errCount := 0
+	for _, r := range regions {
+		nKeys := r.Keys.Size()
+		if nKeys == 0 {
+			continue
+		}
+		// Add keys to local provider store
+		for _, h := range keyspace.AllValues(r.Keys, s.order) {
+			s.addLocalRecord(h)
+		}
+		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
+		err := s.sendProviderRecords(keysAllocations, addrInfo)
+		if err != nil {
+			errCount++
+			err = fmt.Errorf("%s: region %s", err, r.Prefix)
+			s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
+			continue
+		}
+		s.provideCounter.Add(context.Background(), int64(nKeys))
+
+	}
+	// If at least 1 regions was provided, we don't consider it a failure.
+	return errCount < len(regions)
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

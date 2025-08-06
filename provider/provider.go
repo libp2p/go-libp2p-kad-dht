@@ -226,6 +226,7 @@ func (s *SweepingProvider) run() {
 	go s.measureInitialPrefixLen()
 
 	// TODO: complete me
+	s.handleReprovide() // FIXME: to satisfy linter
 }
 
 // Close stops the provider and releases all resources.
@@ -710,6 +711,106 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pme
 		}
 	}
 	return nil
+}
+
+// handleReprovide advances the reprovider schedule and (asynchronously)
+// reprovides the region at the current schedule cursor.
+//
+// Behavior:
+//   - Determines the next region to reprovide based on the current cursor and
+//     the schedule, reprovides the region under the cursor, and moves the cursor
+//     to the next region.
+//   - Programs the schedule timer (alarm) for the next region’s reprovide
+//     time. When the timer fires, this method must be invoked again.
+//   - If the node has been blocked past the reprovide interval or if one or
+//     more regions’ times are already in the past, those regions are added to
+//     the reprovide queue for catch-up and a connectivity check is triggered.
+//   - If the node is currently offline, it skips the immediate reprovide of
+//     the current region and enqueues it to the reprovide queue for later.
+//   - If the node is online it removes the current region from the reprovide
+//     queue (if present) and starts an asynchronous batch reprovide using a
+//     periodic worker.
+func (s *SweepingProvider) handleReprovide() {
+	s.scheduleLk.Lock()
+	currentPrefix := s.scheduleCursor
+	// Get next prefix to reprovide, and set timer for it.
+	next := keyspace.NextNonEmptyLeaf(s.schedule, currentPrefix, s.order)
+
+	if next == nil {
+		// Schedule is empty, don't reprovide anything.
+		s.scheduleLk.Unlock()
+		return
+	}
+
+	var nextPrefix bitstr.Key
+	var timeUntilNextReprovide time.Duration
+	if next.Key == currentPrefix {
+		// There is a single prefix in the schedule.
+		nextPrefix = currentPrefix
+		timeUntilNextReprovide = s.timeUntil(s.reprovideTimeForPrefix(currentPrefix))
+	} else {
+		currentTimeOffset := s.currentTimeOffset()
+		timeSinceTimerRunning := s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), currentTimeOffset)
+		timeSinceTimerUntilNext := s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
+
+		if s.scheduleTimerStartedAt.Add(s.reprovideInterval).Before(s.clock.Now()) {
+			// Alarm was programmed more than reprovideInterval ago, which means that
+			// no regions has been reprovided since. Add all regions to
+			// failedRegionsChan. This only happens if the main thread gets blocked
+			// for more than reprovideInterval.
+			nextKeyFound := false
+			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
+			next = scheduleEntries[0]
+			for _, entry := range scheduleEntries {
+				if !nextKeyFound && entry.Data > currentTimeOffset {
+					next = entry
+					nextKeyFound = true
+				}
+				s.reprovideQueue.Enqueue(entry.Key)
+			}
+			// Don't reprovide any region now, but schedule the next one. All regions
+			// are expected to be reprovided when the provider is catching up with
+			// failed regions.
+			s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
+			s.scheduleLk.Unlock()
+			return
+		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
+			// next is scheduled in the past. While next is in the past, add next to
+			// failedRegions and take nextLeaf as next.
+			count := 0
+			scheduleSize := s.schedule.Size()
+			for timeSinceTimerUntilNext < timeSinceTimerRunning && count < scheduleSize {
+				prefix := next.Key
+				s.reprovideQueue.Enqueue(prefix)
+				next = keyspace.NextNonEmptyLeaf(s.schedule, next.Key, s.order)
+				timeSinceTimerUntilNext = s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
+				count++
+			}
+		}
+
+		// next is in the future
+		nextPrefix = next.Key
+		timeUntilNextReprovide = s.timeUntil(next.Data)
+	}
+
+	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilNextReprovide)
+	s.scheduleLk.Unlock()
+
+	// If we are offline, don't try to reprovide region.
+	if !s.connectivity.IsOnline() {
+		s.reprovideQueue.Enqueue(currentPrefix)
+		return
+	}
+
+	// Remove prefix that is about to be reprovided from the reprovide queue if
+	// present.
+	s.reprovideQueue.Remove(currentPrefix)
+
+	go func() {
+		s.workerPool.Acquire(periodicWorker)
+		defer s.workerPool.Release(periodicWorker)
+		s.batchReprovide(currentPrefix, true)
+	}()
 }
 
 // handleProvide provides supplied keys to the network if needed and schedules

@@ -63,7 +63,7 @@ func NewSweepingProvider(d *dual.DHT, opts ...Option) (*SweepingProvider, error)
 			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
 			provider.WithMaxProvideConnsPerWorker(cfg.maxProvideConnsPerWorker[i]),
 		}
-		sweepingProviders[i], err = provider.NewProvider(dhtOpts...)
+		sweepingProviders[i], err = provider.New(dhtOpts...)
 		if err != nil {
 			return nil, err
 		}

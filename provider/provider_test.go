@@ -283,7 +283,7 @@ func takeAllContainsErr(obsLogs *observer.ObservedLogs, errStr string) bool {
 	return false
 }
 
-func TestIndividualProvideForPrefixSingle(t *testing.T) {
+func TestIndividualProvideSingle(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
@@ -335,12 +335,12 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	}
 
 	// Providing no keys returns no error
-	r.individualProvideForPrefix(prefix, nil, false, false)
+	r.individualProvide(prefix, nil, false, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(0)
 
 	// Providing a single key - success
-	r.individualProvideForPrefix(prefix, mhs, false, false)
+	r.individualProvide(prefix, mhs, false, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
@@ -349,7 +349,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, gcpErr
 	}
-	r.individualProvideForPrefix(prefix, mhs, false, false)
+	r.individualProvide(prefix, mhs, false, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed key ends up in the provide queue.
@@ -358,7 +358,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	require.Equal(t, mhs, keys)
 
 	// Reproviding a single key - failure
-	r.individualProvideForPrefix(prefix, mhs, true, true)
+	r.individualProvide(prefix, mhs, true, true)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed prefix ends up in the reprovide queue.
@@ -367,7 +367,7 @@ func TestIndividualProvideForPrefixSingle(t *testing.T) {
 	require.Equal(t, prefix, dequeued)
 }
 
-func TestIndividualProvideForPrefixMultiple(t *testing.T) {
+func TestIndividualProvideMultiple(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
@@ -424,7 +424,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	}
 
 	// Providing two keys - success
-	r.individualProvideForPrefix(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
@@ -433,7 +433,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, gcpErr
 	}
-	r.individualProvideForPrefix(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Assert keys are added to provide queue
@@ -447,7 +447,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.ElementsMatch(t, pendingKeys, ks)
 
 	// Reproviding two keys - failure
-	r.individualProvideForPrefix(prefix, ks, true, true)
+	r.individualProvide(prefix, ks, true, true)
 	require.True(t, takeAllContainsErr(obsLogs, "all individual provides failed for prefix"))
 	assertAdvertisementCount(1)
 	// Assert prefix is added to reprovide queue.
@@ -468,7 +468,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 		return closestPeers, nil
 	}
 
-	r.individualProvideForPrefix(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	// Verify one key was now provided 2x, and other key only 1x since it just failed.
 	msgSenderLk.Lock()
@@ -485,7 +485,7 @@ func TestIndividualProvideForPrefixMultiple(t *testing.T) {
 	require.True(t, r.reprovideQueue.IsEmpty())
 	require.True(t, r.provideQueue.IsEmpty())
 
-	r.individualProvideForPrefix(prefix, ks, true, true)
+	r.individualProvide(prefix, ks, true, true)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	// Verify only one of the 2 keys was provided. Providing failed for the other.
 	msgSenderLk.Lock()
@@ -548,7 +548,7 @@ func TestProvideOnce(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(checkInterval),
 		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
-	reprovider, err := NewProvider(opts...)
+	reprovider, err := New(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 	reprovider.avgPrefixLenLk.Lock()
@@ -624,7 +624,7 @@ func TestStartProvidingSingle(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := NewProvider(opts...)
+	reprovider, err := New(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 
@@ -729,7 +729,7 @@ func TestStartProvidingMany(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := NewProvider(opts...)
+	reprovider, err := New(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 
@@ -877,7 +877,7 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
-	reprovider, err := NewProvider(opts...)
+	reprovider, err := New(opts...)
 	require.NoError(t, err)
 	defer reprovider.Close()
 	time.Sleep(10 * time.Millisecond)

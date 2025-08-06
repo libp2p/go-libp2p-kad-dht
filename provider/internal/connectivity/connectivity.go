@@ -58,8 +58,9 @@ func New(checkFunc func() bool, backOnlineNotify func(), opts ...Option) (*Conne
 }
 
 // Close stops any running connectivity checks and prevents future ones.
-func (c *ConnectivityChecker) Close() {
+func (c *ConnectivityChecker) Close() error {
 	c.closeOnce.Do(func() { close(c.done) })
+	return nil
 }
 
 func (c *ConnectivityChecker) closed() bool {

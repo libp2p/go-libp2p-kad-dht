@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -87,8 +88,10 @@ const (
 )
 
 type SweepingProvider struct {
-	done      chan struct{}
-	closeOnce sync.Once
+	done         chan struct{}
+	closeOnce    sync.Once
+	wg           sync.WaitGroup
+	cleanupFuncs []func() error
 
 	peerid peer.ID
 	order  bit256.Key
@@ -142,14 +145,21 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	if err != nil {
 		return nil, err
 	}
+	cleanupFuncs := []func() error{}
+
 	if cfg.keyStore == nil {
 		// Setup KeyStore if missing
-		cfg.keyStore, err = datastore.NewKeyStore(ds.NewMapDatastore())
+		mapDs := ds.NewMapDatastore()
+		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
+		cfg.keyStore, err = datastore.NewKeyStore(mapDs)
 		if err != nil {
+			cleanup(cleanupFuncs)
 			return nil, err
 		}
+		cleanupFuncs = append(cleanupFuncs, cfg.keyStore.Close)
 	}
 	if err := cfg.validate(); err != nil {
+		cleanup(cleanupFuncs)
 		return nil, err
 	}
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
@@ -158,13 +168,15 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		metric.WithDescription("Number of successful provides since node is running"),
 	)
 	if err != nil {
+		cleanup(cleanupFuncs)
 		return nil, err
 	}
 	prov := &SweepingProvider{
-		done:   make(chan struct{}),
-		router: cfg.router,
-		peerid: cfg.peerid,
-		order:  keyspace.PeerIDToBit256(cfg.peerid),
+		done:         make(chan struct{}),
+		cleanupFuncs: cleanupFuncs,
+		router:       cfg.router,
+		peerid:       cfg.peerid,
+		order:        keyspace.PeerIDToBit256(cfg.peerid),
 
 		replicationFactor: cfg.replicationFactor,
 		reprovideInterval: cfg.reprovideInterval,
@@ -201,6 +213,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	// Don't need to start schedule timer yet
 	prov.scheduleTimer.Stop()
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close)
 
 	prov.connectivity, err = connectivity.New(
 		func() bool {
@@ -213,25 +226,74 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		connectivity.WithOfflineCheckInterval(cfg.connectivityCheckOfflineInterval),
 	)
 	if err != nil {
+		cleanup(prov.cleanupFuncs)
 		return nil, err
 	}
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.connectivity.Close)
 
 	go prov.run()
 
 	return prov, nil
 }
 
+const retryInterval = 5 * time.Minute
+
 func (s *SweepingProvider) run() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	logger.Debug("Starting SweepingProvider")
 	go s.measureInitialPrefixLen()
 
-	// TODO: complete me
-	s.handleReprovide() // FIXME: to satisfy linter
+	retryTicker := time.NewTicker(retryInterval)
+	defer retryTicker.Stop()
+
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-retryTicker.C:
+			if s.connectivity.IsOnline() {
+				s.catchupPendingWork()
+			}
+		case <-s.scheduleTimer.C:
+			s.handleReprovide()
+		}
+	}
 }
 
 // Close stops the provider and releases all resources.
-func (s *SweepingProvider) Close() {
-	s.closeOnce.Do(func() { close(s.done) })
+func (s *SweepingProvider) Close() error {
+	var err error
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.wg.Wait()
+
+		s.scheduleTimer.Stop()
+		err = cleanup(s.cleanupFuncs)
+	})
+	return err
+}
+
+func cleanup(funcs []func() error) error {
+	slices.Reverse(funcs) // LIFO: last-added is cleaned up first
+	var errs []error
+	for _, f := range funcs {
+		if f == nil {
+			continue
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					errs = append(errs, fmt.Errorf("cleanup panic: %v", r))
+				}
+			}()
+			if err := f(); err != nil {
+				errs = append(errs, err)
+			}
+		}()
+	}
+	return errors.Join(errs...)
 }
 
 func (s *SweepingProvider) closed() bool {
@@ -397,6 +459,9 @@ const initialGetClosestPeers = 4
 // This function blocks until GetClosestPeers succeeds or the provider is
 // closed. No provide operation can happen until this function returns.
 func (s *SweepingProvider) measureInitialPrefixLen() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	cplSum := atomic.Int32{}
 	cplSamples := atomic.Int32{}
 	wg := sync.WaitGroup{}
@@ -947,6 +1012,8 @@ func (s *SweepingProvider) provideLoop() {
 		return
 	}
 	defer s.provideRunning.Unlock()
+	s.wg.Add(1)
+	defer s.wg.Done()
 
 	for !s.provideQueue.IsEmpty() {
 		if s.closed() {
@@ -977,6 +1044,8 @@ func (s *SweepingProvider) provideLoop() {
 // reprovideLateRegions is the loop reproviding regions that failed to be
 // reprovided on time. It returns once the reprovide queue is empty.
 func (s *SweepingProvider) reprovideLateRegions() {
+	s.wg.Add(1)
+	defer s.wg.Done()
 	for !s.reprovideQueue.IsEmpty() {
 		if s.closed() {
 			// Exit loop if provider is closed.
@@ -1006,6 +1075,9 @@ func (s *SweepingProvider) reprovideLateRegions() {
 const individualProvideThreshold = 2
 
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	if len(keys) == 0 {
 		return
 	}
@@ -1041,6 +1113,9 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 }
 
 func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide bool) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the

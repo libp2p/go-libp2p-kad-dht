@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -94,6 +95,8 @@ type SweepingProvider struct {
 
 	keyStore *datastore.KeyStore
 
+	replicationFactor int
+
 	provideQueue   *queue.ProvideQueue
 	provideRunning sync.Mutex
 
@@ -125,7 +128,7 @@ type SweepingProvider struct {
 // FIXME: remove me
 func (s *SweepingProvider) SatisfyLinter() {
 	s.vanillaProvide([]byte{})
-	s.closestPeersToKey("")
+	s.exploreSwarm("")
 	s.measureInitialPrefixLen()
 }
 
@@ -395,6 +398,118 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 		keysAllocations[p] = []mh.Multihash{k}
 	}
 	return coveredPrefix, s.sendProviderRecords(keysAllocations, addrInfo)
+}
+
+// exploreSwarm finds all peers whose kademlia identifier matches `prefix` in
+// the DHT swarm, and organizes them in keyspace regions.
+//
+// A region is identified by a keyspace prefix, and contains all the peers
+// matching this prefix. A region always has strictly more than
+// s.replicationFactor peers. Regions are non-overlapping.
+//
+// If there less than s.replicationFactor+1 peers match `prefix`, explore
+// shorter prefixes until at least s.replicationFactor+1 peers are included in
+// the region.
+//
+// The returned `coveredPrefix` represents the keyspace prefix covered by all
+// returned regions combined. It is different to the supplied `prefix` if there
+// aren't enough peers matching `prefix`.
+func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.Region, coveredPrefix bitstr.Key, err error) {
+	peers, err := s.closestPeersToPrefix(prefix)
+	if err != nil {
+		return nil, "", fmt.Errorf("exploreSwarm '%s': %w", prefix, err)
+	}
+	if len(peers) == 0 {
+		return nil, "", fmt.Errorf("no peers found when exploring prefix %s", prefix)
+	}
+	regions, coveredPrefix = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order)
+	return regions, coveredPrefix, nil
+}
+
+const maxPrefixSearches = 128
+
+// closestPeersToPrefix returns at least s.replicationFactor+1 peers
+// corresponding to the branch of the network peers trie matching the provided
+// prefix. In the case there aren't enough peers matching the provided prefix,
+// it will find and return the closest peers to the prefix, even if they don't
+// exactly match it.
+func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
+	allClosestPeers := make(map[peer.ID]struct{}, 2*s.replicationFactor)
+
+	nextPrefix := prefix
+	startTime := time.Now()
+	coveredPrefixesStack := []bitstr.Key{}
+
+	i := 0
+	// Go down the trie to fully cover prefix.
+exploration:
+	for {
+		if i == maxPrefixSearches {
+			return nil, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
+		}
+		if !s.connectivity.IsOnline() {
+			return nil, errors.New("provider: node is offline")
+		}
+		i++
+		fullKey := keyspace.FirstFullKeyWithPrefix(nextPrefix, s.order)
+		closestPeers, err := s.closestPeersToKey(fullKey)
+		if err != nil {
+			// We only get an err if something really bad happened, e.g no peers in
+			// routing table, invalid key, etc.
+			return nil, err
+		}
+		if len(closestPeers) == 0 {
+			return nil, errors.New("dht lookup didn't return any peers")
+		}
+		coveredPrefix, coveredPeers := keyspace.ShortestCoveredPrefix(fullKey, closestPeers)
+		for _, p := range coveredPeers {
+			allClosestPeers[p] = struct{}{}
+		}
+
+		coveredPrefixLen := len(coveredPrefix)
+		if i == 1 {
+			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) > s.replicationFactor {
+				// Exit early if the prefix is fully covered at the first request and
+				// we have enough peers.
+				break exploration
+			}
+		} else {
+			latestPrefix := coveredPrefixesStack[len(coveredPrefixesStack)-1]
+			for coveredPrefixLen <= len(latestPrefix) && coveredPrefix[:coveredPrefixLen-1] == latestPrefix[:coveredPrefixLen-1] {
+				// Pop latest prefix from stack, because current prefix is
+				// complementary.
+				// e.g latestPrefix=0010, currentPrefix=0011. latestPrefix is
+				// replaced by 001, unless 000 was also in the stack, etc.
+				coveredPrefixesStack = coveredPrefixesStack[:len(coveredPrefixesStack)-1]
+				coveredPrefix = coveredPrefix[:len(coveredPrefix)-1]
+				coveredPrefixLen = len(coveredPrefix)
+
+				if len(coveredPrefixesStack) == 0 {
+					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) > s.replicationFactor {
+						break exploration
+					}
+					// Not enough peers -> add coveredPrefix to stack and continue.
+					break
+				}
+				if coveredPrefixLen == 0 {
+					logger.Error("coveredPrefixLen==0, coveredPrefixStack ", coveredPrefixesStack)
+					break exploration
+				}
+				latestPrefix = coveredPrefixesStack[len(coveredPrefixesStack)-1]
+			}
+		}
+		// Push coveredPrefix to stack
+		coveredPrefixesStack = append(coveredPrefixesStack, coveredPrefix)
+		// Flip last bit of last covered prefix
+		nextPrefix = keyspace.FlipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
+	}
+
+	peers := make([]peer.ID, 0, len(allClosestPeers))
+	for p := range allClosestPeers {
+		peers = append(peers, p)
+	}
+	logger.Debugf("Region %s exploration required %d requests to discover %d peers in %s", prefix, i, len(allClosestPeers), time.Since(startTime))
+	return peers, nil
 }
 
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with

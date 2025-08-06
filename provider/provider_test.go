@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/filecoin-project/go-clock"
+	"github.com/guillaumemichel/reservedpool"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -508,6 +509,114 @@ func waitUntil(t *testing.T, condition func() bool, maxDelay time.Duration, args
 		time.Sleep(step)
 	}
 	t.Fatal(args...)
+}
+
+func TestHandleReprovide(t *testing.T) {
+	mockClock := clock.NewMock()
+
+	online := atomic.Bool{}
+	online.Store(true)
+	connectivityCheckInterval := time.Second
+	connChecker, err := connectivity.New(
+		func() bool { return online.Load() },
+		func() {},
+		connectivity.WithClock(mockClock),
+		connectivity.WithOfflineCheckInterval(connectivityCheckInterval),
+		connectivity.WithOnlineCheckInterval(connectivityCheckInterval),
+	)
+	require.NoError(t, err)
+	defer connChecker.Close()
+
+	prov := SweepingProvider{
+		order: bit256.ZeroKey(),
+
+		connectivity: connChecker,
+
+		clock:         mockClock,
+		cycleStart:    mockClock.Now(),
+		scheduleTimer: mockClock.Timer(time.Hour),
+		schedule:      trie.New[bitstr.Key, time.Duration](),
+
+		reprovideQueue: queue.NewReprovideQueue(),
+		workerPool:     reservedpool.New[workerType](1, nil), // single worker
+
+		reprovideInterval: time.Minute,
+		maxReprovideDelay: 5 * time.Second,
+
+		getSelfAddrs: func() []ma.Multiaddr { return nil },
+	}
+	prov.scheduleTimer.Stop()
+
+	prefixes := []bitstr.Key{
+		"00",
+		"10",
+		"11",
+	}
+
+	// Empty schedule -> early return
+	prov.handleReprovide()
+	require.Zero(t, prov.scheduleCursor)
+
+	// Single prefix in schedule
+	prov.schedule.Add(prefixes[0], prov.reprovideTimeForPrefix(prefixes[0]))
+	prov.scheduleCursor = prefixes[0]
+	prov.handleReprovide()
+	require.Equal(t, prefixes[0], prov.scheduleCursor)
+
+	// Two prefixes in schedule
+	mockClock.Add(1)
+	prov.schedule.Add(prefixes[1], prov.reprovideTimeForPrefix(prefixes[1]))
+	prov.handleReprovide() // reprovides prefixes[0], set scheduleCursor to prefixes[1]
+	require.Equal(t, prefixes[1], prov.scheduleCursor)
+
+	// Wait more than reprovideInterval to call handleReprovide again.
+	// All prefixes should be added to the reprovide queue.
+	mockClock.Add(prov.reprovideInterval + 1)
+	require.True(t, prov.reprovideQueue.IsEmpty())
+	prov.handleReprovide()
+	require.Equal(t, prefixes[1], prov.scheduleCursor)
+
+	require.Equal(t, 2, prov.reprovideQueue.Size())
+	dequeued, ok := prov.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefixes[0], dequeued)
+	dequeued, ok = prov.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefixes[1], dequeued)
+	require.True(t, prov.reprovideQueue.IsEmpty())
+
+	// Go in time past prefixes[1] and prefixes[2]
+	prov.schedule.Add(prefixes[2], prov.reprovideTimeForPrefix(prefixes[2]))
+	mockClock.Add(3 * prov.reprovideInterval / 4)
+	// reprovides prefixes[1], add prefixes[2] to reprovide queue, set
+	// scheduleCursor to prefixes[0]
+	prov.handleReprovide()
+	require.Equal(t, prefixes[0], prov.scheduleCursor)
+
+	require.Equal(t, 1, prov.reprovideQueue.Size())
+	dequeued, ok = prov.reprovideQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, prefixes[2], dequeued)
+	require.True(t, prov.reprovideQueue.IsEmpty())
+
+	// Now all prefixes are in the past, but s.scheduleTimerStartedAt is less
+	// than s.reprovideInterval ago. No reprovides are scheduled in the future yet.
+	prov.handleReprovide()
+
+	mockClock.Add(prov.reprovideInterval / 4)
+
+	// Node goes offline -> prefixes are queued
+	online.Store(false)
+	prov.connectivity.TriggerCheck()
+	waitUntil(t, func() bool { return !prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be offline")
+	// require.True(t, prov.reprovideQueue.IsEmpty())
+	prov.handleReprovide()
+	// require.Equal(t, 1, prov.reprovideQueue.Size())
+
+	// Node comes back online
+	online.Store(true)
+	mockClock.Add(connectivityCheckInterval)
+	waitUntil(t, func() bool { return prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be online")
 }
 
 func TestProvideOnce(t *testing.T) {

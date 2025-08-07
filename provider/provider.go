@@ -1005,6 +1005,8 @@ func (s *SweepingProvider) claimRegionReprovide(regions []keyspace.Region) []key
 			continue
 		}
 		if _, ok := keyspace.FindPrefixOfKey(s.ongoingReprovides, r.Prefix); !ok {
+			// Prune superstrings of r.Prefix if any
+			keyspace.PruneSubtrie(s.ongoingReprovides, r.Prefix)
 			out = append(out, r)
 			s.ongoingReprovides.Add(r.Prefix, struct{}{})
 		}

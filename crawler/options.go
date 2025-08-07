@@ -1,9 +1,12 @@
 package crawler
 
 import (
+	"slices"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
@@ -11,10 +14,11 @@ import (
 type Option func(*options) error
 
 type options struct {
-	protocols      []protocol.ID
-	parallelism    int
-	connectTimeout time.Duration
-	perMsgTimeout  time.Duration
+	protocols        []protocol.ID
+	parallelism      int
+	connectTimeout   time.Duration
+	perMsgTimeout    time.Duration
+	msgSenderBuilder func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect
 }
 
 // defaults are the default crawler options. This option will be automatically
@@ -31,7 +35,7 @@ var defaults = func(o *options) error {
 // WithProtocols defines the ordered set of protocols the crawler will use to talk to other nodes
 func WithProtocols(protocols []protocol.ID) Option {
 	return func(o *options) error {
-		o.protocols = append([]protocol.ID{}, protocols...)
+		o.protocols = slices.Clone(protocols)
 		return nil
 	}
 }
@@ -56,6 +60,15 @@ func WithMsgTimeout(timeout time.Duration) Option {
 func WithConnectTimeout(timeout time.Duration) Option {
 	return func(o *options) error {
 		o.connectTimeout = timeout
+		return nil
+	}
+}
+
+// WithCustomMessageSender configures the pb.MessageSender of the IpfsDHT to use the
+// custom implementation of the pb.MessageSender
+func WithCustomMessageSender(messageSenderBuilder func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect) Option {
+	return func(o *options) error {
+		o.msgSenderBuilder = messageSenderBuilder
 		return nil
 	}
 }

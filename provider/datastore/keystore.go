@@ -151,6 +151,7 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
 		}
 	}
 	keyStore := KeyStore{
+		done:      make(chan struct{}),
 		ds:        d,
 		base:      ds.NewKey(cfg.base),
 		prefixLen: cfg.prefixBits,

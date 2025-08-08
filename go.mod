@@ -7,7 +7,7 @@ require (
 	github.com/gammazero/deque v1.0.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
-	github.com/guillaumemichel/reservedpool v0.1.0
+	github.com/guillaumemichel/reservedpool v0.2.0
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/ipfs/boxo v0.31.0
 	github.com/ipfs/go-cid v0.5.0

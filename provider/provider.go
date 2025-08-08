@@ -404,11 +404,11 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 // the DHT swarm, and organizes them in keyspace regions.
 //
 // A region is identified by a keyspace prefix, and contains all the peers
-// matching this prefix. A region always has strictly more than
-// s.replicationFactor peers. Regions are non-overlapping.
+// matching this prefix. A region always has at least s.replicationFactor
+// peers. Regions are non-overlapping.
 //
-// If there less than s.replicationFactor+1 peers match `prefix`, explore
-// shorter prefixes until at least s.replicationFactor+1 peers are included in
+// If there less than s.replicationFactor peers match `prefix`, explore
+// shorter prefixes until at least s.replicationFactor peers are included in
 // the region.
 //
 // The returned `coveredPrefix` represents the keyspace prefix covered by all
@@ -436,7 +436,7 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 // supplied prefix is too short.
 const maxPrefixSearches = 64
 
-// closestPeersToPrefix returns at least s.replicationFactor+1 peers
+// closestPeersToPrefix returns at least s.replicationFactor peers
 // corresponding to the branch of the network peers trie matching the provided
 // prefix. In the case there aren't enough peers matching the provided prefix,
 // it will find and return the closest peers to the prefix, even if they don't
@@ -476,9 +476,9 @@ exploration:
 
 		coveredPrefixLen := len(coveredPrefix)
 		if i == 1 {
-			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) > s.replicationFactor {
+			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) >= s.replicationFactor {
 				// Exit early if the prefix is fully covered at the first request and
-				// we have enough (at least replicationFactor+1) peers.
+				// we have enough (at least replicationFactor) peers.
 				break exploration
 			}
 		} else {
@@ -493,7 +493,7 @@ exploration:
 				coveredPrefixLen = len(coveredPrefix)
 
 				if len(coveredPrefixesStack) == 0 {
-					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) > s.replicationFactor {
+					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) >= s.replicationFactor {
 						break exploration
 					}
 					// Not enough peers -> add coveredPrefix to stack and continue.

@@ -207,20 +207,17 @@ func (s *SweepingProvider) schedulePrefixNoLock(prefix bitstr.Key, justReprovide
 // scheduled in the future. Assumes that the schedule lock is held.
 func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 	// Pop prefixes scheduled in the future being covered by the explored peers.
-	if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-		for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-			if s.schedule.Remove(entry.Key) {
-				logger.Warnf("removed %s from schedule because of %s", entry.Key, prefix)
-				if s.scheduleCursor == entry.Key {
-					next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
-					if next == nil {
-						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
-					} else {
-						s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
-						logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
-					}
-				}
-			}
+	keyspace.PruneSubtrie(s.schedule, prefix)
+
+	// If we removed s.scheduleCursor from schedule, select the next one
+	if keyspace.IsBitstrPrefix(prefix, s.scheduleCursor) {
+		next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
+		if next == nil {
+			s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
+		} else {
+			timeUntilReprovide := s.timeUntil(next.Data)
+			s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+			logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
 		}
 	}
 }
@@ -406,11 +403,11 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 // the DHT swarm, and organizes them in keyspace regions.
 //
 // A region is identified by a keyspace prefix, and contains all the peers
-// matching this prefix. A region always has strictly more than
-// s.replicationFactor peers. Regions are non-overlapping.
+// matching this prefix. A region always has at least s.replicationFactor
+// peers. Regions are non-overlapping.
 //
-// If there less than s.replicationFactor+1 peers match `prefix`, explore
-// shorter prefixes until at least s.replicationFactor+1 peers are included in
+// If there less than s.replicationFactor peers match `prefix`, explore
+// shorter prefixes until at least s.replicationFactor peers are included in
 // the region.
 //
 // The returned `coveredPrefix` represents the keyspace prefix covered by all
@@ -428,15 +425,23 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 	return regions, coveredPrefix, nil
 }
 
-const maxPrefixSearches = 128
+// maxPrefixSearches is the maximum number of GetClosestPeers operations that
+// are allowed to explore a prefix, preventing an infinite loop, since the exit
+// condition depends on the network topology.
+//
+// A lower bound estimate on the number of fresh peers returned by GCP is
+// replicationFactor/2. Hence, 64 GCP are expected to return at least
+// 32*replicatonFactor peers, which should be more than enough, even if the
+// supplied prefix is too short.
+const maxPrefixSearches = 64
 
-// closestPeersToPrefix returns at least s.replicationFactor+1 peers
+// closestPeersToPrefix returns at least s.replicationFactor peers
 // corresponding to the branch of the network peers trie matching the provided
 // prefix. In the case there aren't enough peers matching the provided prefix,
 // it will find and return the closest peers to the prefix, even if they don't
 // exactly match it.
 func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
-	allClosestPeers := make(map[peer.ID]struct{}, 2*s.replicationFactor)
+	allClosestPeers := make(map[peer.ID]struct{})
 
 	nextPrefix := prefix
 	startTime := time.Now()
@@ -461,7 +466,7 @@ exploration:
 			return nil, err
 		}
 		if len(closestPeers) == 0 {
-			return nil, errors.New("dht lookup didn't return any peers")
+			return nil, errors.New("dht lookup did not return any peers")
 		}
 		coveredPrefix, coveredPeers := keyspace.ShortestCoveredPrefix(fullKey, closestPeers)
 		for _, p := range coveredPeers {
@@ -470,9 +475,9 @@ exploration:
 
 		coveredPrefixLen := len(coveredPrefix)
 		if i == 1 {
-			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) > s.replicationFactor {
+			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) >= s.replicationFactor {
 				// Exit early if the prefix is fully covered at the first request and
-				// we have enough peers.
+				// we have enough (at least replicationFactor) peers.
 				break exploration
 			}
 		} else {
@@ -487,7 +492,7 @@ exploration:
 				coveredPrefixLen = len(coveredPrefix)
 
 				if len(coveredPrefixesStack) == 0 {
-					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) > s.replicationFactor {
+					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) >= s.replicationFactor {
 						break exploration
 					}
 					// Not enough peers -> add coveredPrefix to stack and continue.
@@ -737,14 +742,15 @@ func (s *SweepingProvider) provideLoop() {
 			// Provider was closed while waiting for a worker.
 			return
 		}
-		go func() {
-			defer s.workerPool.Release(burstWorker)
-
-			prefix, keys, ok := s.provideQueue.Dequeue()
-			if ok {
-				s.batchProvide(prefix, keys)
-			}
-		}()
+		prefix, keys, ok := s.provideQueue.Dequeue()
+		if ok {
+			go func(prefix bitstr.Key, keys []mh.Multihash) {
+				defer s.workerPool.Release(burstWorker)
+				s.provideForPrefix(prefix, keys)
+			}(prefix, keys)
+		} else {
+			s.workerPool.Release(burstWorker)
+		}
 	}
 }
 
@@ -873,4 +879,23 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 // the number of keys that were cleared.
 func (s *SweepingProvider) ClearProvideQueue() int {
 	return s.provideQueue.Clear()
+}
+
+// ProvideState encodes the current relationship between this node and `key`.
+type ProvideState uint8
+
+const (
+	StateUnknown  ProvideState = iota // we have no record of the key
+	StateQueued                       // key is queued to be provided
+	StateProvided                     // key was provided at least once
+)
+
+// ProvideStatus reports the provider’s view of a key.
+//
+// When `state == StateProvided`, `lastProvide` is the wall‑clock time of the
+// most recent successful provide operation (UTC).
+// For `StateQueued` or `StateUnknown`, `lastProvide` is the zero `time.Time`.
+func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, lastProvide time.Time) {
+	// TODO: implement me
+	return StateUnknown, time.Time{}
 }

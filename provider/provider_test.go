@@ -642,6 +642,12 @@ func TestClose(t *testing.T) {
 		WithMaxWorkers(4),
 		WithDedicatedBurstWorkers(0),
 		WithDedicatedPeriodicWorkers(0),
+
+		WithSelfAddrs(func() []ma.Multiaddr {
+			addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+			require.NoError(t, err)
+			return []ma.Multiaddr{addr}
+		}),
 	)
 	require.NoError(t, err)
 
@@ -918,7 +924,7 @@ func TestStartProvidingMany(t *testing.T) {
 	// Test reprovides, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range (reprovideInterval - 1) / step {
+	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
 	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 200*time.Millisecond, "waiting for reprovide to finish 0")
@@ -939,11 +945,10 @@ func TestStartProvidingMany(t *testing.T) {
 		}
 	}
 
-	step = time.Minute // speed up test since prefixes have been consolidated in schedule
 	// Test reprovides again, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range (reprovideInterval - 1) / step {
+	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
 	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 200*time.Millisecond, "waiting for reprovide to finish 1")

@@ -617,14 +617,15 @@ func (s *SweepingProvider) provideLoop() {
 			// Provider was closed while waiting for a worker.
 			return
 		}
-		go func() {
-			defer s.workerPool.Release(burstWorker)
-
-			prefix, keys, ok := s.provideQueue.Dequeue()
-			if ok {
+		prefix, keys, ok := s.provideQueue.Dequeue()
+		if ok {
+			go func(prefix bitstr.Key, keys []mh.Multihash) {
+				defer s.workerPool.Release(burstWorker)
 				s.provideForPrefix(prefix, keys)
-			}
-		}()
+			}(prefix, keys)
+		} else {
+			s.workerPool.Release(burstWorker)
+		}
 	}
 }
 

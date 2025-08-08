@@ -318,9 +318,9 @@ type Region struct {
 	Keys   *trie.Trie[bit256.Key, mh.Multihash]
 }
 
-// RegionsFromPeers returns the keyspace regions of size `regionSize` from the
-// given `peers` sorted according to `order` along with the Common Prefix
-// shared by all peers.
+// RegionsFromPeers returns the keyspace regions of size at least `regionSize`
+// from the given `peers` sorted according to `order` along with the Common
+// Prefix shared by all peers.
 func RegionsFromPeers(peers []peer.ID, regionSize int, order bit256.Key) ([]Region, bitstr.Key) {
 	if len(peers) == 0 {
 		return []Region{}, ""
@@ -339,14 +339,14 @@ func RegionsFromPeers(peers []peer.ID, regionSize int, order bit256.Key) ([]Regi
 }
 
 // extractMinimalRegions returns the list of all non-overlapping subtries of
-// `t` having strictly more than `size` elements, sorted according to `order`.
-// Every element is included in exactly one region.
+// `t` having at least `size` elements, sorted according to `order`. Every
+// element is included in exactly one region.
 func extractMinimalRegions(t *trie.Trie[bit256.Key, peer.ID], path bitstr.Key, size int, order bit256.Key) []Region {
 	if t.IsEmptyLeaf() {
 		return nil
 	}
 	branch0, branch1 := t.Branch(0), t.Branch(1)
-	if branch0 != nil && branch1 != nil && branch0.Size() > size && branch1.Size() > size {
+	if branch0 != nil && branch1 != nil && branch0.Size() >= size && branch1.Size() >= size {
 		b := int(order.Bit(len(path)))
 		return append(extractMinimalRegions(t.Branch(b), path+bitstr.Key(byte('0'+b)), size, order),
 			extractMinimalRegions(t.Branch(1-b), path+bitstr.Key(byte('1'-b)), size, order)...)

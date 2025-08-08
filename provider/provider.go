@@ -202,20 +202,17 @@ func (s *SweepingProvider) schedulePrefixNoLock(prefix bitstr.Key, justReprovide
 // scheduled in the future. Assumes that the schedule lock is held.
 func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 	// Pop prefixes scheduled in the future being covered by the explored peers.
-	if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-		for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-			if s.schedule.Remove(entry.Key) {
-				logger.Warnf("removed %s from schedule because of %s", entry.Key, prefix)
-				if s.scheduleCursor == entry.Key {
-					next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
-					if next == nil {
-						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
-					} else {
-						s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
-						logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
-					}
-				}
-			}
+	keyspace.PruneSubtrie(s.schedule, prefix)
+
+	// If we removed s.scheduleCursor from schedule, select the next one
+	if keyspace.IsBitstrPrefix(prefix, s.scheduleCursor) {
+		next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
+		if next == nil {
+			s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
+		} else {
+			timeUntilReprovide := s.timeUntil(next.Data)
+			s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+			logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
 		}
 	}
 }
@@ -664,4 +661,23 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 // the number of keys that were cleared.
 func (s *SweepingProvider) ClearProvideQueue() int {
 	return s.provideQueue.Clear()
+}
+
+// ProvideState encodes the current relationship between this node and `key`.
+type ProvideState uint8
+
+const (
+	StateUnknown  ProvideState = iota // we have no record of the key
+	StateQueued                       // key is queued to be provided
+	StateProvided                     // key was provided at least once
+)
+
+// ProvideStatus reports the provider’s view of a key.
+//
+// When `state == StateProvided`, `lastProvide` is the wall‑clock time of the
+// most recent successful provide operation (UTC).
+// For `StateQueued` or `StateUnknown`, `lastProvide` is the zero `time.Time`.
+func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, lastProvide time.Time) {
+	// TODO: implement me
+	return StateUnknown, time.Time{}
 }

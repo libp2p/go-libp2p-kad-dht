@@ -801,14 +801,15 @@ func (s *SweepingProvider) reprovideLateRegions() {
 			// Provider was closed while waiting for a worker.
 			return
 		}
-		go func() {
-			defer s.workerPool.Release(burstWorker)
-
-			prefix, ok := s.reprovideQueue.Dequeue()
-			if ok {
+		prefix, ok := s.reprovideQueue.Dequeue()
+		if ok {
+			go func(prefix bitstr.Key) {
+				defer s.workerPool.Release(burstWorker)
 				s.batchReprovide(prefix, false)
-			}
-		}()
+			}(prefix)
+		} else {
+			s.workerPool.Release(burstWorker)
+		}
 	}
 }
 

@@ -763,7 +763,15 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 	return regions, coveredPrefix, nil
 }
 
-const maxPrefixSearches = 128
+// maxPrefixSearches is the maximum number of GetClosestPeers operations that
+// are allowed to explore a prefix, preventing an infinite loop, since the exit
+// condition depends on the network topology.
+//
+// A lower bound estimate on the number of fresh peers returned by GCP is
+// replicationFactor/2. Hence, 64 GCP are expected to return at least
+// 32*replicatonFactor peers, which should be more than enough, even if the
+// supplied prefix is too short.
+const maxPrefixSearches = 64
 
 // closestPeersToPrefix returns at least s.replicationFactor+1 peers
 // corresponding to the branch of the network peers trie matching the provided
@@ -771,7 +779,7 @@ const maxPrefixSearches = 128
 // it will find and return the closest peers to the prefix, even if they don't
 // exactly match it.
 func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
-	allClosestPeers := make(map[peer.ID]struct{}, 2*s.replicationFactor)
+	allClosestPeers := make(map[peer.ID]struct{})
 
 	nextPrefix := prefix
 	startTime := time.Now()
@@ -796,7 +804,7 @@ exploration:
 			return nil, err
 		}
 		if len(closestPeers) == 0 {
-			return nil, errors.New("dht lookup didn't return any peers")
+			return nil, errors.New("dht lookup did not return any peers")
 		}
 		coveredPrefix, coveredPeers := keyspace.ShortestCoveredPrefix(fullKey, closestPeers)
 		for _, p := range coveredPeers {
@@ -807,7 +815,7 @@ exploration:
 		if i == 1 {
 			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) > s.replicationFactor {
 				// Exit early if the prefix is fully covered at the first request and
-				// we have enough peers.
+				// we have enough (at least replicationFactor+1) peers.
 				break exploration
 			}
 		} else {

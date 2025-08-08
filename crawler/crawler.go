@@ -52,7 +52,13 @@ func NewDefaultCrawler(host host.Host, opts ...Option) (*DefaultCrawler, error) 
 		}
 	}
 
-	pm, err := pb.NewProtocolMessenger(&messageSender{h: host, protocols: o.protocols, timeout: o.perMsgTimeout})
+	var err error
+	var pm *pb.ProtocolMessenger
+	if o.msgSenderBuilder != nil {
+		pm, err = pb.NewProtocolMessenger(o.msgSenderBuilder(host, o.protocols))
+	} else {
+		pm, err = pb.NewProtocolMessenger(&messageSender{h: host, protocols: o.protocols, timeout: o.perMsgTimeout})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +198,7 @@ func (c *DefaultCrawler) Run(ctx context.Context, startingPeers []*peer.AddrInfo
 	// Start worker goroutines
 	var wg sync.WaitGroup
 	wg.Add(c.parallelism)
-	for i := 0; i < c.parallelism; i++ {
+	for range c.parallelism {
 		go func() {
 			defer wg.Done()
 			for p := range jobs {

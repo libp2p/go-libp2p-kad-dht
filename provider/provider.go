@@ -756,7 +756,7 @@ func (s *SweepingProvider) provideLoop() {
 		if ok {
 			go func(prefix bitstr.Key, keys []mh.Multihash) {
 				defer s.workerPool.Release(burstWorker)
-				s.provideForPrefix(prefix, keys)
+				s.batchProvide(prefix, keys)
 			}(prefix, keys)
 		} else {
 			s.workerPool.Release(burstWorker)

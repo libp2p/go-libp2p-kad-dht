@@ -911,21 +911,17 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 // scheduled in the future. Assumes that the schedule lock is held.
 func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 	// Pop prefixes scheduled in the future being covered by the explored peers.
-	if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-		for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-			if s.schedule.Remove(entry.Key) {
-				logger.Warnf("removed %s from schedule because of %s", entry.Key, prefix)
-				if s.scheduleCursor == entry.Key {
-					next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
-					if next == nil {
-						s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
-					} else {
-						timeUntilReprovide := s.timeUntil(next.Data)
-						s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
-						logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
-					}
-				}
-			}
+	keyspace.PruneSubtrie(s.schedule, prefix)
+
+	// If we removed s.scheduleCursor from schedule, select the next one
+	if keyspace.IsBitstrPrefix(prefix, s.scheduleCursor) {
+		next := keyspace.NextNonEmptyLeaf(s.schedule, s.scheduleCursor, s.order)
+		if next == nil {
+			s.scheduleNextReprovideNoLock(prefix, s.reprovideInterval)
+		} else {
+			timeUntilReprovide := s.timeUntil(next.Data)
+			s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
+			logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
 		}
 	}
 }

@@ -194,7 +194,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 			subtrie, ok := keyspace.FindSubtrie(peersTrie, currPrefix)
 			require.True(t, ok)
 			subtrieSize = subtrie.Size()
-			if subtrieSize > replicationFactor {
+			if subtrieSize >= replicationFactor {
 				break
 			}
 			currPrefix = currPrefix[:len(currPrefix)-1]
@@ -866,7 +866,7 @@ func TestStartProvidingMany(t *testing.T) {
 	// Test reprovides, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range (reprovideInterval - 1) / step {
+	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
 	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(mhs)*replicationFactor) }, 200*time.Millisecond, "waiting for reprovide to finish 0")
@@ -887,11 +887,10 @@ func TestStartProvidingMany(t *testing.T) {
 		}
 	}
 
-	step = time.Minute // speed up test since prefixes have been consolidated in schedule
 	// Test reprovides again, clear addProviderRpcs
 	clear(addProviderRpcs)
 	msgSenderLk.Unlock()
-	for range (reprovideInterval - 1) / step {
+	for range reprovideInterval / step {
 		mockClock.Add(step)
 	}
 	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(mhs)*replicationFactor) }, 200*time.Millisecond, "waiting for reprovide to finish 1")

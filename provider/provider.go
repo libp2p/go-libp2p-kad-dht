@@ -529,63 +529,46 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 // present in the schedule, and if `schedule` is set to true, add these
 // prefixes to the schedule to be reprovided.
 func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
-	avgPrefixLen := -1
+	seen := make(map[string]struct{})
+	prefixTrie := trie.New[bitstr.Key, struct{}]()
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	seen := make(map[bit256.Key]struct{})
+	avgPrefixLen := -1
 
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
 	for _, h := range keys {
 		k := keyspace.MhToBit256(h)
+		kStr := string(keyspace.KeyToBytes(k))
 		// Don't add duplicates
-		if _, ok := seen[k]; ok {
+		if _, ok := seen[kStr]; ok {
 			continue
 		}
-		seen[k] = struct{}{}
+		seen[kStr] = struct{}{}
 
-		prefixConsolidation := false
-		prefix, scheduled := keyspace.FindPrefixOfKey(s.schedule, k)
-		if !scheduled {
-			if avgPrefixLen == -1 {
-				avgPrefixLen = s.getAvgPrefixLenNoLock()
-			}
-			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
-
-			if schedule {
-				if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-					// If generated prefix is a prefix of existing scheduled keyspace
-					// zones, consolidate these zones around the shorter prefix.
-					for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-						s.schedule.Remove(entry.Key)
-					}
-					prefixConsolidation = true
+		if prefix, ok := keyspace.FindPrefixOfKey(prefixTrie, k); ok {
+			prefixes[prefix] = append(prefixes[prefix], h)
+		} else {
+			if prefix, ok = keyspace.FindPrefixOfKey(s.schedule, k); !ok {
+				if avgPrefixLen == -1 {
+					avgPrefixLen = s.getAvgPrefixLenNoLock()
 				}
-				s.schedulePrefixNoLock(prefix, false)
-			}
-		}
-
-		prefixes[prefix] = append(prefixes[prefix], h)
-
-		if prefixConsolidation {
-			// prefix is a shorted prefix of a prefix already in the schedule.
-			// Consolidate everything into prefix.
-			for p, keys := range prefixes {
-				if keyspace.IsBitstrPrefix(p, prefix) {
-					seen := make(map[string]struct{})
-					for _, key := range prefixes[prefix] {
-						seen[string(key)] = struct{}{}
-					}
-					for _, key := range keys {
-						strKey := string(key)
-						if _, ok := seen[strKey]; ok {
-							continue
-						}
-						seen[strKey] = struct{}{}
-						prefixes[prefix] = append(prefixes[prefix], key)
-					}
-					delete(prefixes, p)
+				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
+				if schedule {
+					s.schedulePrefixNoLock(prefix, false)
 				}
 			}
+			mhs := []mh.Multihash{h}
+			if subtrie, ok := keyspace.FindSubtrie(prefixTrie, prefix); ok {
+				// If prefixes already contains superstrings of prefix, consolidate the
+				// keys to prefix.
+				for _, entry := range keyspace.AllEntries(subtrie, s.order) {
+					mhs = append(mhs, prefixes[entry.Key]...)
+					delete(prefixes, entry.Key)
+				}
+				keyspace.PruneSubtrie(prefixTrie, prefix)
+			}
+			prefixTrie.Add(prefix, struct{}{})
+			prefixes[prefix] = mhs
 		}
 	}
 	return prefixes

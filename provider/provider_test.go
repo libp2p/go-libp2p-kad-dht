@@ -209,7 +209,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 			subtrie, ok := keyspace.FindSubtrie(peersTrie, currPrefix)
 			require.True(t, ok)
 			subtrieSize = subtrie.Size()
-			if subtrieSize > replicationFactor {
+			if subtrieSize >= replicationFactor {
 				break
 			}
 			currPrefix = currPrefix[:len(currPrefix)-1]

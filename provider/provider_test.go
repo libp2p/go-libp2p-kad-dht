@@ -31,6 +31,7 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
@@ -236,7 +237,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 			subtrie, ok := keyspace.FindSubtrie(peersTrie, currPrefix)
 			require.True(t, ok)
 			subtrieSize = subtrie.Size()
-			if subtrieSize > replicationFactor {
+			if subtrieSize >= replicationFactor {
 				break
 			}
 			currPrefix = currPrefix[:len(currPrefix)-1]
@@ -609,6 +610,63 @@ func TestHandleReprovide(t *testing.T) {
 	online.Store(true)
 	mockClock.Add(connectivityCheckInterval)
 	waitUntil(t, func() bool { return prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be online")
+}
+
+func TestClose(t *testing.T) {
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return []peer.ID{peer.ID("12BoooooPEER1"), peer.ID("12BoooooPEER2")}, nil
+		},
+	}
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
+		},
+	}
+	mockClock := clock.NewMock()
+	prov, err := New(
+		WithPeerID(pid),
+		WithClock(mockClock),
+		WithRouter(router),
+		WithMessageSender(msgSender),
+		WithReplicationFactor(1),
+
+		WithMaxWorkers(4),
+		WithDedicatedBurstWorkers(0),
+		WithDedicatedPeriodicWorkers(0),
+	)
+	require.NoError(t, err)
+
+	mhs := genMultihashes(128)
+	prov.StartProviding(false, mhs...)
+
+	time.Sleep(20 * time.Millisecond)         // leave time to perform provide
+	mockClock.Add(prov.reprovideInterval / 2) // some keys should have been reprovided
+	time.Sleep(20 * time.Millisecond)         // leave time to perform reprovide
+
+	err = prov.Close()
+	require.NoError(t, err)
+
+	newMh := random.Multihashes(1)[0]
+
+	prov.StartProviding(false, newMh)
+	prov.StopProviding(newMh)
+	prov.ProvideOnce(newMh)
+	require.Equal(t, 0, prov.ClearProvideQueue())
+
+	_, err = prov.keyStore.Get(context.Background(), "")
+	require.ErrorIs(t, err, datastore.ErrKeyStoreClosed)
+
+	err = prov.workerPool.Acquire(burstWorker)
+	require.ErrorIs(t, err, reservedpool.ErrClosed)
 }
 
 func TestProvideOnce(t *testing.T) {

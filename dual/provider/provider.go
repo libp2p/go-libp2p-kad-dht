@@ -112,3 +112,9 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	}
 	// TODO: delete from provider queue
 }
+
+// ClearProvideQueue removes all keys from the provide queues of both DHT
+// clients and returns the total number of cleared keys (sum of both queues).
+func (s *SweepingProvider) ClearProvideQueue() int {
+	return s.LAN.ClearProvideQueue() + s.WAN.ClearProvideQueue()
+}

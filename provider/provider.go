@@ -897,7 +897,7 @@ func (s *SweepingProvider) handleReprovide() {
 
 	s.wg.Add(1)
 	go func() {
-		if err := s.workerPool.Acquire(periodicWorker); err != nil {
+		if err := s.workerPool.Acquire(periodicWorker); err == nil {
 			s.batchReprovide(currentPrefix, true)
 			s.workerPool.Release(periodicWorker)
 		}
@@ -1319,7 +1319,6 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			continue
 		}
 		s.provideCounter.Add(s.ctx, int64(len(allKeys)))
-
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

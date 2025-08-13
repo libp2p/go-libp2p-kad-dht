@@ -95,10 +95,14 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 		rLogger.Errorf("failed to store multihashes: %v", err)
 		return
 	}
+
+	s.LAN.AddToSchedule(newKeys...)
+	s.WAN.AddToSchedule(newKeys...)
+
 	if !force {
 		keys = newKeys
 	}
-	// TODO: add to schedule
+
 	go s.ProvideOnce(keys...)
 }
 
@@ -113,8 +117,11 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	// TODO: delete from provider queue
 }
 
-// ClearProvideQueue removes all keys from the provide queues of both DHT
-// clients and returns the total number of cleared keys (sum of both queues).
-func (s *SweepingProvider) ClearProvideQueue() int {
-	return s.LAN.ClearProvideQueue() + s.WAN.ClearProvideQueue()
+// Clear clears the all the keys from the provide queues of both DHTs and returns the number
+// of keys that were cleared (sum of both queues).
+//
+// The keys are not deleted from the keystore, so they will continue to be
+// reprovided as scheduled.
+func (s *SweepingProvider) Clear() int {
+	return s.LAN.Clear() + s.WAN.Clear()
 }

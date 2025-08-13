@@ -1289,9 +1289,12 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	s.provideQueue.Remove(keys...)
 }
 
-// ClearProvideQueue clears the all the keys from the provide queue and returns
-// the number of keys that were cleared.
-func (s *SweepingProvider) ClearProvideQueue() int {
+// Clear clears the all the keys from the provide queue and returns the number
+// of keys that were cleared.
+//
+// The keys are not deleted from the keystore, so they will continue to be
+// reprovided as scheduled.
+func (s *SweepingProvider) Clear() int {
 	return s.provideQueue.Clear()
 }
 
@@ -1314,15 +1317,8 @@ func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, 
 	return StateUnknown, time.Time{}
 }
 
-// func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) {
-// 	s.scheduleLk.Lock()
-// 	defer s.scheduleLk.Unlock()
-// 	if len(keys) <= s.schedule.Size() {
-// 		for _, h := range keys {
-// 			k := keyspace.MhToBit256(h)
-// 			if _, ok := keyspace.FindPrefixOfKey(s.schedule, k); !ok {
-// 			}
-// 		}
-// 		return
-// 	}
-// }
+// AddToSchedule makes sure the prefixes associated with the supplied keys are
+// scheduled to be reprovided.
+func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) {
+	s.groupAndScheduleKeysByPrefix(keys, true)
+}

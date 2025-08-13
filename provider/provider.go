@@ -760,13 +760,16 @@ func (s *SweepingProvider) handleReprovide() {
 
 		if s.scheduleTimerStartedAt.Add(s.reprovideInterval).Before(s.clock.Now()) {
 			// Alarm was programmed more than reprovideInterval ago, which means that
-			// no regions has been reprovided since. Add all regions to
-			// failedRegionsChan. This only happens if the main thread gets blocked
-			// for more than reprovideInterval.
+			// no regions has been reprovided since. Add all regions to the reprovide
+			// queue. This only happens if the main thread gets blocked for more than
+			// reprovideInterval.
 			nextKeyFound := false
 			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
 			next = scheduleEntries[0]
 			for _, entry := range scheduleEntries {
+				// Add all regions from the schedule to the reprovide queue. The next
+				// region to be scheduled for reprovide is the one immediately
+				// following the current time offset in the schedule.
 				if !nextKeyFound && entry.Data > currentTimeOffset {
 					next = entry
 					nextKeyFound = true
@@ -779,7 +782,8 @@ func (s *SweepingProvider) handleReprovide() {
 			s.scheduleNextReprovideNoLock(next.Key, s.timeUntil(next.Data))
 			s.scheduleLk.Unlock()
 			return
-		} else if timeSinceTimerUntilNext < timeSinceTimerRunning {
+		}
+		if timeSinceTimerUntilNext < timeSinceTimerRunning {
 			// next is scheduled in the past. While next is in the past, add next to
 			// failedRegions and take nextLeaf as next.
 			count := 0

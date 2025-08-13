@@ -874,7 +874,7 @@ func TestStartProvidingSingle(t *testing.T) {
 	// Blocks until key is provided
 	reprovider.StartProviding(true, h)
 	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 100*time.Millisecond, "waiting for ProvideOnce to finish")
-	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 1+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
 	prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixLen])
@@ -893,21 +893,21 @@ func TestStartProvidingSingle(t *testing.T) {
 	reprovider.StartProviding(false, h)
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, int32(len(peers)), provideCount.Load())
-	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 1+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide happens as scheduled.
 	mockClock.Add(reprovideTime - 1)
-	require.Equal(t, 1+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 1+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
 	require.Equal(t, int32(len(peers)), provideCount.Load())
 	mockClock.Add(1)
 	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 0")
-	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 2+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
 	mockClock.Add(reprovideInterval - 1)
-	require.Equal(t, 2+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 2+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
 	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
 	mockClock.Add(reprovideInterval) // 1
 	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 1")
-	require.Equal(t, 3+initialGetClosestPeers, int(getClosestPeersCount.Load()))
+	require.Equal(t, 3+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
 }
 
 const bitsPerByte = 8

@@ -734,21 +734,22 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 // This function is guarded by s.lateReprovideRunning, ensuring the function
 // cannot be called again while it is working on reproviding late regions.
 func (s *SweepingProvider) catchupPendingWork() {
-	if s.lateReprovideRunning.TryLock() {
-		go func() {
-			// Reprovide late regions if any.
-			s.reprovideLateRegions()
-			s.lateReprovideRunning.Unlock()
-
-			// Provides are handled after reprovides, because keys pending to be
-			// provided will be provided as part of a region reprovide if they belong
-			// to that region. Hence, the provideLoop will use less resources if run
-			// after the reprovides.
-
-			// Restart provide loop if it was stopped.
-			s.provideLoop()
-		}()
+	if !s.lateReprovideRunning.TryLock() {
+		return
 	}
+	go func() {
+		// Reprovide late regions if any.
+		s.reprovideLateRegions()
+		s.lateReprovideRunning.Unlock()
+
+		// Provides are handled after reprovides, because keys pending to be
+		// provided will be provided as part of a region reprovide if they belong
+		// to that region. Hence, the provideLoop will use less resources if run
+		// after the reprovides.
+
+		// Restart provide loop if it was stopped.
+		s.provideLoop()
+	}()
 }
 
 // provideLoop is the loop providing keys to the DHT swarm as long as the

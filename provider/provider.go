@@ -73,7 +73,7 @@ const maxPrefixSize = 24
 
 const loggerName = "dht/SweepingProvider"
 
-var logger = logging.Logger("dht/SweepingProvider")
+var logger = logging.Logger(loggerName)
 
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)

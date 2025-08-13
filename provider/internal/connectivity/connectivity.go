@@ -23,6 +23,7 @@ import (
 //     is invoked exactly once.
 type ConnectivityChecker struct {
 	done      chan struct{}
+	closed    bool
 	closeOnce sync.Once
 
 	online atomic.Bool
@@ -58,17 +59,14 @@ func New(checkFunc func() bool, backOnlineNotify func(), opts ...Option) (*Conne
 }
 
 // Close stops any running connectivity checks and prevents future ones.
-func (c *ConnectivityChecker) Close() {
-	c.closeOnce.Do(func() { close(c.done) })
-}
-
-func (c *ConnectivityChecker) closed() bool {
-	select {
-	case <-c.done:
-		return true
-	default:
-		return false
-	}
+func (c *ConnectivityChecker) Close() error {
+	c.closeOnce.Do(func() {
+		close(c.done)
+		c.mutex.Lock()
+		c.closed = true
+		c.mutex.Unlock()
+	})
+	return nil
 }
 
 // IsOnline returns true if the node is currently online, false otherwise.
@@ -86,12 +84,12 @@ func (c *ConnectivityChecker) IsOnline() bool {
 //   - Exit if context is cancelled, or ConnectivityChecker is closed.
 //   - When node is found back online, run the `backOnlineNotify` callback.
 func (c *ConnectivityChecker) TriggerCheck() {
-	if c.closed() {
-		// Noop
-		return
-	}
 	if !c.mutex.TryLock() {
 		return // already checking
+	}
+	if c.closed {
+		c.mutex.Unlock()
+		return
 	}
 	if c.online.Load() && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
 		c.mutex.Unlock()
@@ -117,7 +115,9 @@ func (c *ConnectivityChecker) TriggerCheck() {
 				return
 			case <-ticker.C:
 				if c.checkFunc() {
-					if !c.closed() {
+					select {
+					case <-c.done:
+					default:
 						// Node is back online.
 						c.online.Store(true)
 						c.lastCheck = c.clock.Now()

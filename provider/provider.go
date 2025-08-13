@@ -178,7 +178,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 		avgPrefixLenValidity: 5 * time.Minute,
 		cachedAvgPrefixLen:   -1,
-		avgPrefixLenReady:    make(chan struct{}, 1),
+		avgPrefixLenReady:    make(chan struct{}),
 
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),
@@ -312,7 +312,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 	}
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
-	s.avgPrefixLenReady <- struct{}{}
+	close(s.avgPrefixLenReady)
 }
 
 // catchupPendingWork is called when the provider comes back online after being offline.

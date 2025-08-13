@@ -897,7 +897,7 @@ func (s *SweepingProvider) handleReprovide() {
 
 	s.wg.Add(1)
 	go func() {
-		if err := s.workerPool.Acquire(periodicWorker); err != nil {
+		if err := s.workerPool.Acquire(periodicWorker); err == nil {
 			s.batchReprovide(currentPrefix, true)
 			s.workerPool.Release(periodicWorker)
 		}
@@ -1026,8 +1026,6 @@ func (s *SweepingProvider) provideLoop() {
 		return
 	}
 	defer s.provideRunning.Unlock()
-	s.wg.Add(1)
-	defer s.wg.Done()
 
 	for !s.provideQueue.IsEmpty() {
 		if s.closed() {
@@ -1092,9 +1090,6 @@ func (s *SweepingProvider) reprovideLateRegions() {
 }
 
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	if len(keys) == 0 {
 		return
 	}
@@ -1130,9 +1125,6 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 }
 
 func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide bool) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the

@@ -1017,6 +1017,35 @@ func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 	s.ongoingReprovides.Remove(prefix)
 }
 
+// provideRegions contains common logic to batchProvide() and batchReprovide().
+// It iterate over supplied regions, and allocates the regions provider records
+// to the appropriate DHT servers.
+func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo) bool {
+	errCount := 0
+	for _, r := range regions {
+		nKeys := r.Keys.Size()
+		if nKeys == 0 {
+			continue
+		}
+		// Add keys to local provider store
+		for _, h := range keyspace.AllValues(r.Keys, s.order) {
+			s.addLocalRecord(h)
+		}
+		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
+		err := s.sendProviderRecords(keysAllocations, addrInfo)
+		if err != nil {
+			errCount++
+			err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
+			s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
+			continue
+		}
+		s.provideCounter.Add(context.Background(), int64(nKeys))
+
+	}
+	// If at least 1 regions was provided, we don't consider it a failure.
+	return errCount < len(regions)
+}
+
 // ProvideOnce only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
 func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {

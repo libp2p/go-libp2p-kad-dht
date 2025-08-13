@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-clock"
+	pool "github.com/guillaumemichel/reservedpool"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	kb "github.com/libp2p/go-libp2p-kbucket"
@@ -22,7 +23,10 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
 )
 
 // DHTProvider is an interface for providing keys to a DHT swarm. It holds a
@@ -66,11 +70,20 @@ var _ DHTProvider = &SweepingProvider{}
 // region.
 const maxPrefixSize = 24
 
-var logger = logging.Logger("dht/SweepingProvider")
+const loggerName = "dht/SweepingProvider"
+
+var logger = logging.Logger(loggerName)
 
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
 }
+
+type workerType uint8
+
+const (
+	periodicWorker workerType = iota
+	burstWorker
+)
 
 type SweepingProvider struct {
 	// TODO: complete me
@@ -81,6 +94,14 @@ type SweepingProvider struct {
 	order  bit256.Key
 	router KadClosestPeersRouter
 
+	connectivity *connectivity.ConnectivityChecker
+
+	keyStore *datastore.KeyStore
+
+	provideQueue   *queue.ProvideQueue
+	provideRunning sync.Mutex
+
+	workerPool               *pool.Pool[workerType]
 	maxProvideConnsPerWorker int
 
 	clock             clock.Clock
@@ -89,6 +110,7 @@ type SweepingProvider struct {
 	maxReprovideDelay time.Duration
 
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
+	scheduleLk             sync.Mutex
 	scheduleCursor         bitstr.Key
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
@@ -109,8 +131,6 @@ func (s *SweepingProvider) SatisfyLinter() {
 	s.vanillaProvide([]byte{})
 	s.closestPeersToKey("")
 	s.measureInitialPrefixLen()
-	s.getAvgPrefixLenNoLock()
-	s.schedulePrefixNoLock("", false)
 }
 
 // Close stops the provider and releases all resources.
@@ -474,39 +494,159 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pme
 	return nil
 }
 
-// ProvideOnce sends provider records for the specified keys to the DHT swarm
-// only once. It does not automatically reprovide those keys afterward.
+// handleProvide provides supplied keys to the network if needed and schedules
+// the keys to be reprovided if needed.
+func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) {
+	if len(keys) == 0 {
+		return
+	}
+	if reprovide {
+		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
+		// newly added keys.
+		newKeys, err := s.keyStore.Put(context.Background(), keys...)
+		if err != nil {
+			logger.Errorf("couldn't add keys to keystore: %s", err)
+			return
+		}
+		if !force {
+			keys = newKeys
+		}
+	}
+
+	prefixes := s.groupAndScheduleKeysByPrefix(keys, reprovide)
+	if len(prefixes) == 0 {
+		return
+	}
+	// Sort prefixes by number of keys.
+	sortedPrefixesAndKeys := keyspace.SortPrefixesBySize(prefixes)
+	// Add keys to the provide queue.
+	for _, prefixAndKeys := range sortedPrefixesAndKeys {
+		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
+	}
+
+	go s.provideLoop()
+}
+
+// groupAndScheduleKeysByPrefix groups the supplied keys by their prefixes as
+// present in the schedule, and if `schedule` is set to true, add these
+// prefixes to the schedule to be reprovided.
+func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
+	seen := make(map[string]struct{})
+	prefixTrie := trie.New[bitstr.Key, struct{}]()
+	prefixes := make(map[bitstr.Key][]mh.Multihash)
+	avgPrefixLen := -1
+
+	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
+	for _, h := range keys {
+		k := keyspace.MhToBit256(h)
+		kStr := string(keyspace.KeyToBytes(k))
+		// Don't add duplicates
+		if _, ok := seen[kStr]; ok {
+			continue
+		}
+		seen[kStr] = struct{}{}
+
+		if prefix, ok := keyspace.FindPrefixOfKey(prefixTrie, k); ok {
+			prefixes[prefix] = append(prefixes[prefix], h)
+		} else {
+			if prefix, ok = keyspace.FindPrefixOfKey(s.schedule, k); !ok {
+				if avgPrefixLen == -1 {
+					avgPrefixLen = s.getAvgPrefixLenNoLock()
+				}
+				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
+				if schedule {
+					s.schedulePrefixNoLock(prefix, false)
+				}
+			}
+			mhs := []mh.Multihash{h}
+			if subtrie, ok := keyspace.FindSubtrie(prefixTrie, prefix); ok {
+				// If prefixes already contains superstrings of prefix, consolidate the
+				// keys to prefix.
+				for _, entry := range keyspace.AllEntries(subtrie, s.order) {
+					mhs = append(mhs, prefixes[entry.Key]...)
+					delete(prefixes, entry.Key)
+				}
+				keyspace.PruneSubtrie(prefixTrie, prefix)
+			}
+			prefixTrie.Add(prefix, struct{}{})
+			prefixes[prefix] = mhs
+		}
+	}
+	return prefixes
+}
+
+// provideLoop is the loop providing keys to the DHT swarm as long as the
+// provide queue isn't empty.
 //
-// Add the supplied multihashes to the provide queue, and return immediately.
-// The provide operation happens asynchronously.
-func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
+// The s.provideRunning mutex prevents concurrent executions of the loop.
+func (s *SweepingProvider) provideLoop() {
+	if !s.provideRunning.TryLock() {
+		// Ensure that only one goroutine is running the provide loop at a time.
+		return
+	}
+	defer s.provideRunning.Unlock()
+
+	for !s.provideQueue.IsEmpty() {
+		if s.closed() {
+			// Exit loop if provider is closed.
+			return
+		}
+		if !s.connectivity.IsOnline() {
+			// Don't try to provide if node is offline.
+			return
+		}
+		// Block until we can acquire a worker from the pool.
+		err := s.workerPool.Acquire(burstWorker)
+		if err != nil {
+			// Provider was closed while waiting for a worker.
+			return
+		}
+		prefix, keys, ok := s.provideQueue.Dequeue()
+		if ok {
+			go func(prefix bitstr.Key, keys []mh.Multihash) {
+				defer s.workerPool.Release(burstWorker)
+				s.provideForPrefix(prefix, keys)
+			}(prefix, keys)
+		} else {
+			s.workerPool.Release(burstWorker)
+		}
+	}
+}
+
+func (s *SweepingProvider) provideForPrefix(prefix bitstr.Key, keys []mh.Multihash) {
 	// TODO: implement me
 }
 
-// StartProviding ensures keys are periodically advertised to the DHT swarm.
-//
-// If the `keys` aren't currently being reprovided, they are added to the
-// queue to be provided to the DHT swarm as soon as possible, and scheduled
-// to be reprovided periodically. If `force` is set to true, all keys are
-// provided to the DHT swarm, regardless of whether they were already being
-// reprovided in the past. `keys` keep being reprovided until `StopProviding`
-// is called.
-//
-// This operation is asynchronous, it returns as soon as the `keys` are added
-// to the provide queue, and provides happens asynchronously.
+// ProvideOnce only sends provider records for the given keys out to the DHT
+// swarm. It does NOT take the responsibility to reprovide these keys.
+func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
+	s.handleProvide(true, false, keys...)
+}
+
+// StartProviding provides the given keys to the DHT swarm unless they were
+// already provided in the past. The keys will be periodically reprovided until
+// StopProviding is called for the same keys or user defined garbage collection
+// deletes the keys.
 func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
-	// TODO: implement me
+	s.handleProvide(force, true, keys...)
 }
 
 // StopProviding stops reproviding the given keys to the DHT swarm. The node
 // stops being referred as a provider when the provider records in the DHT
 // swarm expire.
-//
-// Remove the `keys` from the schedule and return immediately. Valid records
-// can remain in the DHT swarm up to the provider record TTL after calling
-// `StopProviding`.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
-	// TODO: implement me
+	err := s.keyStore.Delete(context.Background(), keys...)
+	if err != nil {
+		logger.Errorf("failed to stop providing keys: %s", err)
+	}
+	s.provideQueue.Remove(keys...)
+}
+
+// ClearProvideQueue clears the all the keys from the provide queue and returns
+// the number of keys that were cleared.
+func (s *SweepingProvider) ClearProvideQueue() int {
+	return s.provideQueue.Clear()
 }
 
 // ProvideState encodes the current relationship between this node and `key`.

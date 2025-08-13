@@ -189,7 +189,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 		avgPrefixLenValidity: 5 * time.Minute,
 		cachedAvgPrefixLen:   -1,
-		avgPrefixLenReady:    make(chan struct{}, 1),
+		avgPrefixLenReady:    make(chan struct{}),
 
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),

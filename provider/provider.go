@@ -68,9 +68,16 @@ type DHTProvider interface {
 
 var _ DHTProvider = &SweepingProvider{}
 
-// maxPrefixSize is the maximum size of a prefix used to define a keyspace
-// region.
-const maxPrefixSize = 24
+const (
+	// maxPrefixSize is the maximum size of a prefix used to define a keyspace
+	// region.
+	maxPrefixSize = 24
+	// individualProvideThreshold is the threshold for the number of keys to
+	// trigger a region exploration. If the number of keys to provide for a
+	// region is less or equal to the threshold, the keys will be individually
+	// provided.
+	individualProvideThreshold = 2
+)
 
 const loggerName = "dht/SweepingProvider"
 
@@ -739,8 +746,6 @@ func (s *SweepingProvider) provideLoop() {
 	}
 }
 
-const individualProvideThreshold = 2
-
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
 	if len(keys) == 0 {
 		return
@@ -824,7 +829,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		err := s.sendProviderRecords(keysAllocations, addrInfo)
 		if err != nil {
 			errCount++
-			err = fmt.Errorf("%s: region %s", err, r.Prefix)
+			err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
 			s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
 			continue
 		}

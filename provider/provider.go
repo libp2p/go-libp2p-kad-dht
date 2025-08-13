@@ -95,7 +95,6 @@ const (
 )
 
 type SweepingProvider struct {
-	// TODO: complete me
 	done      chan struct{}
 	closeOnce sync.Once
 
@@ -109,9 +108,10 @@ type SweepingProvider struct {
 
 	replicationFactor int
 
-	provideQueue   *queue.ProvideQueue
-	provideRunning sync.Mutex
-	reprovideQueue *queue.ReprovideQueue
+	provideQueue         *queue.ProvideQueue
+	provideRunning       sync.Mutex
+	reprovideQueue       *queue.ReprovideQueue
+	lateReprovideRunning sync.Mutex
 
 	workerPool               *pool.Pool[workerType]
 	maxProvideConnsPerWorker int
@@ -146,7 +146,7 @@ type SweepingProvider struct {
 // FIXME: remove me
 func (s *SweepingProvider) SatisfyLinter() {
 	s.measureInitialPrefixLen()
-	s.batchReprovide("", true)
+	s.catchupPendingWork()
 }
 
 // Close stops the provider and releases all resources.
@@ -718,6 +718,32 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 	return prefixes
 }
 
+// catchupPendingWork is called when the provider comes back online after being offline.
+//
+// 1. Try again to reprovide regions that failed to be reprovided on time.
+// 2. Try again to provide keys that failed to be provided.
+//
+// This function is guarded by s.lateReprovideRunning, ensuring the function
+// cannot be called again while it is working on reproviding late regions.
+func (s *SweepingProvider) catchupPendingWork() {
+	if !s.lateReprovideRunning.TryLock() {
+		return
+	}
+	go func() {
+		// Reprovide late regions if any.
+		s.reprovideLateRegions()
+		s.lateReprovideRunning.Unlock()
+
+		// Provides are handled after reprovides, because keys pending to be
+		// provided will be provided as part of a region reprovide if they belong
+		// to that region. Hence, the provideLoop will use less resources if run
+		// after the reprovides.
+
+		// Restart provide loop if it was stopped.
+		s.provideLoop()
+	}()
+}
+
 // provideLoop is the loop providing keys to the DHT swarm as long as the
 // provide queue isn't empty.
 //
@@ -750,6 +776,36 @@ func (s *SweepingProvider) provideLoop() {
 				defer s.workerPool.Release(burstWorker)
 				s.batchProvide(prefix, keys)
 			}(prefix, keys)
+		} else {
+			s.workerPool.Release(burstWorker)
+		}
+	}
+}
+
+// reprovideLateRegions is the loop reproviding regions that failed to be
+// reprovided on time. It returns once the reprovide queue is empty.
+func (s *SweepingProvider) reprovideLateRegions() {
+	for !s.reprovideQueue.IsEmpty() {
+		if s.closed() {
+			// Exit loop if provider is closed.
+			return
+		}
+		if !s.connectivity.IsOnline() {
+			// Don't try to reprovide a region if node is offline.
+			return
+		}
+		// Block until we can acquire a worker from the pool.
+		err := s.workerPool.Acquire(burstWorker)
+		if err != nil {
+			// Provider was closed while waiting for a worker.
+			return
+		}
+		prefix, ok := s.reprovideQueue.Dequeue()
+		if ok {
+			go func(prefix bitstr.Key) {
+				defer s.workerPool.Release(burstWorker)
+				s.batchReprovide(prefix, false)
+			}(prefix)
 		} else {
 			s.workerPool.Release(burstWorker)
 		}

@@ -11,13 +11,15 @@ import (
 
 	"github.com/filecoin-project/go-clock"
 	pool "github.com/guillaumemichel/reservedpool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+
+	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
-	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
-	"go.opentelemetry.io/otel/metric"
 
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
@@ -29,6 +31,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 )
 
 // DHTProvider is an interface for providing keys to a DHT swarm. It holds a
@@ -143,10 +146,95 @@ type SweepingProvider struct {
 	provideCounter metric.Int64Counter
 }
 
-// FIXME: remove me
-func (s *SweepingProvider) SatisfyLinter() {
-	s.measureInitialPrefixLen()
-	s.catchupPendingWork()
+// New creates a new SweepingProvider instance with the supplied options.
+func New(opts ...Option) (*SweepingProvider, error) {
+	var cfg config
+	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.keyStore == nil {
+		// Setup KeyStore if missing
+		cfg.keyStore, err = datastore.NewKeyStore(ds.NewMapDatastore())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
+	providerCounter, err := meter.Int64Counter(
+		"total_provide_count",
+		metric.WithDescription("Number of successful provides since node is running"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	prov := &SweepingProvider{
+		done:   make(chan struct{}),
+		router: cfg.router,
+		peerid: cfg.peerid,
+		order:  keyspace.PeerIDToBit256(cfg.peerid),
+
+		replicationFactor: cfg.replicationFactor,
+		reprovideInterval: cfg.reprovideInterval,
+		maxReprovideDelay: cfg.maxReprovideDelay,
+
+		workerPool: pool.New(cfg.maxWorkers, map[workerType]int{
+			periodicWorker: cfg.dedicatedPeriodicWorkers,
+			burstWorker:    cfg.dedicatedBurstWorkers,
+		}),
+		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
+
+		avgPrefixLenValidity: 5 * time.Minute,
+		cachedAvgPrefixLen:   -1,
+		avgPrefixLenReady:    make(chan struct{}),
+
+		clock:      cfg.clock,
+		cycleStart: cfg.clock.Now(),
+
+		msgSender:      cfg.msgSender,
+		getSelfAddrs:   cfg.selfAddrs,
+		addLocalRecord: cfg.addLocalRecord,
+
+		keyStore: cfg.keyStore,
+
+		schedule:      trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer: cfg.clock.Timer(time.Hour),
+
+		provideQueue:   queue.NewProvideQueue(),
+		reprovideQueue: queue.NewReprovideQueue(),
+
+		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
+
+		provideCounter: providerCounter,
+	}
+	// Don't need to start schedule timer yet
+	prov.scheduleTimer.Stop()
+
+	prov.connectivity, err = connectivity.New(
+		func() bool {
+			peers, err := cfg.router.GetClosestPeers(context.Background(), string(cfg.peerid))
+			return err == nil && len(peers) > 0
+		},
+		prov.catchupPendingWork,
+		connectivity.WithClock(cfg.clock),
+		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
+		connectivity.WithOfflineCheckInterval(cfg.connectivityCheckOfflineInterval),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	go prov.run()
+
+	return prov, nil
+}
+
+func (s *SweepingProvider) run() {
+	logger.Debug("Starting SweepingProvider")
+	go s.measureInitialPrefixLen()
 }
 
 // Close stops the provider and releases all resources.

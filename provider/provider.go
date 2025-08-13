@@ -807,10 +807,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 			s.reschedulePrefix(prefix)
 		}
 		return
-	} else if len(keys) == 0 {
+	}
+	if len(keys) == 0 {
 		logger.Infof("No keys to reprovide for prefix %s", prefix)
 		return
-	} else if len(keys) <= individualProvideThreshold {
+	}
+	if len(keys) <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
 		s.individualProvide(prefix, keys, true, periodicReprovide)
@@ -975,7 +977,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		}
 		if err != nil {
 			errCount++
-      err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
+			err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
 			if reprovide {
 				s.failedReprovide(r.Prefix, err)
 			} else { // provide operation
@@ -1015,35 +1017,6 @@ func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 	s.ongoingReprovidesLk.Lock()
 	defer s.ongoingReprovidesLk.Unlock()
 	s.ongoingReprovides.Remove(prefix)
-}
-
-// provideRegions contains common logic to batchProvide() and batchReprovide().
-// It iterate over supplied regions, and allocates the regions provider records
-// to the appropriate DHT servers.
-func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo) bool {
-	errCount := 0
-	for _, r := range regions {
-		nKeys := r.Keys.Size()
-		if nKeys == 0 {
-			continue
-		}
-		// Add keys to local provider store
-		for _, h := range keyspace.AllValues(r.Keys, s.order) {
-			s.addLocalRecord(h)
-		}
-		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
-		err := s.sendProviderRecords(keysAllocations, addrInfo)
-		if err != nil {
-			errCount++
-			err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
-			s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
-			continue
-		}
-		s.provideCounter.Add(context.Background(), int64(nKeys))
-
-	}
-	// If at least 1 regions was provided, we don't consider it a failure.
-	return errCount < len(regions)
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

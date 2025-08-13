@@ -564,13 +564,13 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 		return s.cachedAvgPrefixLen
 	}
 	prefixLenSum := 0
-	scheduleSize := s.schedule.Size()
-	if scheduleSize > 0 {
+	if !s.schedule.IsEmptyLeaf() {
 		// Take average prefix length of all scheduled prefixes.
-		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {
+		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
+		for _, entry := range scheduleEntries {
 			prefixLenSum += len(entry.Key)
 		}
-		s.cachedAvgPrefixLen = prefixLenSum / scheduleSize
+		s.cachedAvgPrefixLen = prefixLenSum / len(scheduleEntries)
 		s.lastAvgPrefixLen = s.clock.Now()
 	}
 	return s.cachedAvgPrefixLen
@@ -1289,15 +1289,15 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo, reprovide, periodicReprovide bool) bool {
 	errCount := 0
 	for _, r := range regions {
-		nKeys := r.Keys.Size()
-		if nKeys == 0 {
+		allKeys := keyspace.AllValues(r.Keys, s.order)
+		if len(allKeys) == 0 {
 			if reprovide {
 				s.releaseRegionReprovide(r.Prefix)
 			}
 			continue
 		}
 		// Add keys to local provider store
-		for _, h := range keyspace.AllValues(r.Keys, s.order) {
+		for _, h := range allKeys {
 			s.addLocalRecord(h)
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
@@ -1318,7 +1318,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			}
 			continue
 		}
-		s.provideCounter.Add(s.ctx, int64(nKeys))
+		s.provideCounter.Add(s.ctx, int64(len(allKeys)))
 
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.

@@ -315,7 +315,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 	}
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
-	s.avgPrefixLenReady <- struct{}{}
+	close(s.avgPrefixLenReady)
 }
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled

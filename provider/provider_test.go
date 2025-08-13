@@ -50,6 +50,18 @@ func genMultihashes(n int) []mh.Multihash {
 	return mhs
 }
 
+func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
+	mhs := make([]mh.Multihash, 0, n)
+	for i := 0; len(mhs) < n; i++ {
+		h := random.Multihashes(1)[0]
+		k := keyspace.MhToBit256(h)
+		if keyspace.IsPrefix(prefix, k) {
+			mhs = append(mhs, h)
+		}
+	}
+	return mhs
+}
+
 var _ pb.MessageSender = (*mockMsgSender)(nil)
 
 type mockMsgSender struct {
@@ -218,6 +230,72 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		}
 		require.Len(t, closestPeers, subtrieSize, "prefix: %s", prefix)
 	}
+}
+
+func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
+	mockClock := clock.NewMock()
+	prov := SweepingProvider{
+		order:             bit256.ZeroKey(),
+		clock:             mockClock,
+		reprovideInterval: time.Hour,
+
+		schedule:      trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer: mockClock.Timer(time.Hour),
+
+		cachedAvgPrefixLen: 3,
+		lastAvgPrefixLen:   mockClock.Now(),
+	}
+
+	mhs00000 := genMultihashesMatchingPrefix("00000", 3)
+	mhs00000 = append(mhs00000, mhs00000[0])
+	mhs1000 := genMultihashesMatchingPrefix("0100", 2)
+
+	mhs := append(mhs00000, mhs1000...)
+
+	prefixes := prov.groupAndScheduleKeysByPrefix(mhs, false)
+	require.Len(t, prefixes, 2)
+	require.Contains(t, prefixes, bitstr.Key("000"))
+	require.Len(t, prefixes["000"], 3) // no duplicate entry
+	require.Contains(t, prefixes, bitstr.Key("010"))
+	require.Len(t, prefixes["010"], 2)
+
+	// Schedule is still empty
+	require.True(t, prov.schedule.IsEmptyLeaf())
+
+	prefixes = prov.groupAndScheduleKeysByPrefix(mhs, true)
+	require.Len(t, prefixes, 2)
+	require.Contains(t, prefixes, bitstr.Key("000"))
+	require.Len(t, prefixes["000"], 3)
+	require.Contains(t, prefixes, bitstr.Key("010"))
+	require.Len(t, prefixes["010"], 2)
+
+	// Schedule now contains the 2 prefixes
+	require.Equal(t, 2, prov.schedule.Size())
+
+	// Manually add prefix to schedule
+	prov.schedule.Add(bitstr.Key("11111"), 0*time.Second)
+	mhs11111 := genMultihashesMatchingPrefix("11111", 4)
+	mhs1110 := genMultihashesMatchingPrefix("1110", 4)
+	mhs = append(mhs11111, mhs1110...)
+	prefixes = prov.groupAndScheduleKeysByPrefix(mhs, true)
+	// All keys should be consolidated into "111"
+	require.Len(t, prefixes, 1)
+	require.Contains(t, prefixes, bitstr.Key("111"))
+	require.Len(t, prefixes["111"], 8)
+
+	// "11111" is removed from schedule
+	found, _ := trie.Find(prov.schedule, bitstr.Key("11111"))
+	require.False(t, found)
+	found, _ = trie.Find(prov.schedule, bitstr.Key("111"))
+	require.True(t, found)
+
+	prov.schedule.Add(bitstr.Key("10"), 0*time.Second)
+
+	mhs1 := genMultihashesMatchingPrefix("10", 6)
+	prefixes = prov.groupAndScheduleKeysByPrefix(mhs1, true)
+	require.Len(t, prefixes, 1)
+	require.Contains(t, prefixes, bitstr.Key("10"))
+	require.Len(t, prefixes["10"], 6)
 }
 
 func noWarningsNorAbove(obsLogs *observer.ObservedLogs) bool {

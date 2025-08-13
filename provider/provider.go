@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -33,6 +32,47 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
 	kb "github.com/libp2p/go-libp2p-kbucket"
+)
+
+const (
+	// maxPrefixSize is the maximum size of a prefix used to define a keyspace
+	// region.
+	maxPrefixSize = 24
+
+	// initialGetClosestPeersCount is the number of GetClosestPeers calls run by
+	// the measureInitialPrefixLen function. This function makes GetClosestPeers
+	// requests to get an estimate of the network size, to set the initial
+	// keyspace region prefix length. A high number increases the precision of
+	// the measurement, but adds network load and latency before the initial
+	// provide request can be performed.
+	initialGetClosestPeersCount = 4
+
+	// retryInterval is the interval at which the provider tries to perform any
+	// previously failed work (provide or reprovide).
+	retryInterval = 5 * time.Minute
+
+	// individualProvideThreshold is the threshold for the number of keys to
+	// trigger a region exploration. If the number of keys to provide for a
+	// region is less or equal to the threshold, the keys will be individually
+	// provided.
+	individualProvideThreshold = 2
+
+	// maxExplorationPrefixSearches is the maximum number of GetClosestPeers
+	// operations that are allowed to explore a prefix, preventing an infinite
+	// loop, since the exit condition depends on the network topology.
+	// A lower bound estimate on the number of fresh peers returned by GCP is
+	// replicationFactor/2. Hence, 64 GCP are expected to return at least
+	// 32*replicatonFactor peers, which should be more than enough, even if the
+	// supplied prefix is too short.
+	maxExplorationPrefixSearches = 64
+
+	// maxConsecutiveProvideFailuresAllowed is the maximum number of consecutive
+	// provides that are allowed to fail to the same remote peer before cancelling
+	// all pending requests to this peer.
+	maxConsecutiveProvideFailuresAllowed = 2
+	// minimalRegionReachablePeersRatio is the minimum ratio of reachable peers
+	// in a region for the provide to be considered a success.
+	minimalRegionReachablePeersRatio float32 = 0.2
 )
 
 // DHTProvider is an interface for providing keys to a DHT swarm. It holds a
@@ -71,17 +111,6 @@ type DHTProvider interface {
 }
 
 var _ DHTProvider = &SweepingProvider{}
-
-const (
-	// maxPrefixSize is the maximum size of a prefix used to define a keyspace
-	// region.
-	maxPrefixSize = 24
-	// individualProvideThreshold is the threshold for the number of keys to
-	// trigger a region exploration. If the number of keys to provide for a
-	// region is less or equal to the threshold, the keys will be individually
-	// provided.
-	individualProvideThreshold = 2
-)
 
 const loggerName = "dht/SweepingProvider"
 
@@ -234,7 +263,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 	prov.connectivity, err = connectivity.New(
 		func() bool {
-			peers, err := cfg.router.GetClosestPeers(prov.ctx, string(cfg.peerid))
+			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 			return err == nil && len(peers) > 0
 		},
 		prov.catchupPendingWork,
@@ -248,18 +277,17 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.connectivity.Close)
 
+	prov.wg.Add(1)
 	go prov.run()
 
 	return prov, nil
 }
 
-const retryInterval = 5 * time.Minute
-
 func (s *SweepingProvider) run() {
-	s.wg.Add(1)
 	defer s.wg.Done()
 
 	logger.Debug("Starting SweepingProvider")
+	s.wg.Add(1)
 	go s.measureInitialPrefixLen()
 
 	retryTicker := time.NewTicker(retryInterval)
@@ -294,22 +322,13 @@ func (s *SweepingProvider) Close() error {
 }
 
 func cleanup(funcs []func() error) error {
-	slices.Reverse(funcs) // LIFO: last-added is cleaned up first
 	var errs []error
-	for _, f := range funcs {
-		if f == nil {
-			continue
-		}
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					errs = append(errs, fmt.Errorf("cleanup panic: %v", r))
-				}
-			}()
+	for i := len(funcs) - 1; i >= 0; i-- { // LIFO: last-added is cleaned up first
+		if f := funcs[i]; f != nil {
 			if err := f(); err != nil {
 				errs = append(errs, err)
 			}
-		}()
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -464,22 +483,19 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-const initialGetClosestPeers = 4
-
 // measureInitialPrefixLen makes a few GetClosestPeers calls to get an estimate
 // of the prefix length to be used in the network.
 //
 // This function blocks until GetClosestPeers succeeds or the provider is
 // closed. No provide operation can happen until this function returns.
 func (s *SweepingProvider) measureInitialPrefixLen() {
-	s.wg.Add(1)
 	defer s.wg.Done()
 
 	cplSum := atomic.Int32{}
 	cplSamples := atomic.Int32{}
 	wg := sync.WaitGroup{}
-	wg.Add(initialGetClosestPeers)
-	for range initialGetClosestPeers {
+	wg.Add(initialGetClosestPeersCount)
+	for range initialGetClosestPeersCount {
 		go func() {
 			defer wg.Done()
 			randomMh := random.Multihashes(1)[0]
@@ -607,16 +623,6 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 	return regions, coveredPrefix, nil
 }
 
-// maxPrefixSearches is the maximum number of GetClosestPeers operations that
-// are allowed to explore a prefix, preventing an infinite loop, since the exit
-// condition depends on the network topology.
-//
-// A lower bound estimate on the number of fresh peers returned by GCP is
-// replicationFactor/2. Hence, 64 GCP are expected to return at least
-// 32*replicatonFactor peers, which should be more than enough, even if the
-// supplied prefix is too short.
-const maxPrefixSearches = 64
-
 // closestPeersToPrefix returns at least s.replicationFactor peers
 // corresponding to the branch of the network peers trie matching the provided
 // prefix. In the case there aren't enough peers matching the provided prefix,
@@ -633,7 +639,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	// Go down the trie to fully cover prefix.
 exploration:
 	for {
-		if i == maxPrefixSearches {
+		if i == maxExplorationPrefixSearches {
 			return nil, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
 		}
 		if !s.connectivity.IsOnline() {
@@ -709,8 +715,6 @@ func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 	return s.router.GetClosestPeers(s.ctx, string(p))
 }
 
-const minimalRegionReachablePeersRatio float32 = 0.2
-
 type provideJob struct {
 	pid  peer.ID
 	keys []mh.Multihash
@@ -772,11 +776,6 @@ func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 	pmes.ProviderPeers = pb.RawPeerInfosToPBPeers([]peer.AddrInfo{addrInfo})
 	return pmes
 }
-
-// maxConsecutiveProvideFailuresAllowed is the maximum number of consecutive
-// provides that are allowed to fail to the same remote peer before cancelling
-// all pending requests to this peer.
-const maxConsecutiveProvideFailuresAllowed = 2
 
 // provideKeysToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given keys.
@@ -896,10 +895,13 @@ func (s *SweepingProvider) handleReprovide() {
 	// present.
 	s.reprovideQueue.Remove(currentPrefix)
 
+	s.wg.Add(1)
 	go func() {
-		s.workerPool.Acquire(periodicWorker)
-		defer s.workerPool.Release(periodicWorker)
-		s.batchReprovide(currentPrefix, true)
+		if err := s.workerPool.Acquire(periodicWorker); err != nil {
+			s.batchReprovide(currentPrefix, true)
+			s.workerPool.Release(periodicWorker)
+		}
+		s.wg.Done()
 	}()
 }
 
@@ -933,6 +935,7 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
 	}
 
+	s.wg.Add(1)
 	go s.provideLoop()
 }
 
@@ -996,6 +999,7 @@ func (s *SweepingProvider) catchupPendingWork() {
 	if !s.lateReprovideRunning.TryLock() {
 		return
 	}
+	s.wg.Add(2)
 	go func() {
 		// Reprovide late regions if any.
 		s.reprovideLateRegions()
@@ -1016,13 +1020,12 @@ func (s *SweepingProvider) catchupPendingWork() {
 //
 // The s.provideRunning mutex prevents concurrent executions of the loop.
 func (s *SweepingProvider) provideLoop() {
+	defer s.wg.Done()
 	if !s.provideRunning.TryLock() {
 		// Ensure that only one goroutine is running the provide loop at a time.
 		return
 	}
 	defer s.provideRunning.Unlock()
-	s.wg.Add(1)
-	defer s.wg.Done()
 
 	for !s.provideQueue.IsEmpty() {
 		if s.closed() {
@@ -1041,9 +1044,11 @@ func (s *SweepingProvider) provideLoop() {
 		}
 		prefix, keys, ok := s.provideQueue.Dequeue()
 		if ok {
+			s.wg.Add(1)
 			go func(prefix bitstr.Key, keys []mh.Multihash) {
-				defer s.workerPool.Release(burstWorker)
 				s.batchProvide(prefix, keys)
+				s.workerPool.Release(burstWorker)
+				s.wg.Done()
 			}(prefix, keys)
 		} else {
 			s.workerPool.Release(burstWorker)
@@ -1054,7 +1059,6 @@ func (s *SweepingProvider) provideLoop() {
 // reprovideLateRegions is the loop reproviding regions that failed to be
 // reprovided on time. It returns once the reprovide queue is empty.
 func (s *SweepingProvider) reprovideLateRegions() {
-	s.wg.Add(1)
 	defer s.wg.Done()
 	for !s.reprovideQueue.IsEmpty() {
 		if s.closed() {
@@ -1073,9 +1077,11 @@ func (s *SweepingProvider) reprovideLateRegions() {
 		}
 		prefix, ok := s.reprovideQueue.Dequeue()
 		if ok {
+			s.wg.Add(1)
 			go func(prefix bitstr.Key) {
-				defer s.workerPool.Release(burstWorker)
 				s.batchReprovide(prefix, false)
+				s.workerPool.Release(burstWorker)
+				s.wg.Done()
 			}(prefix)
 		} else {
 			s.workerPool.Release(burstWorker)
@@ -1084,9 +1090,6 @@ func (s *SweepingProvider) reprovideLateRegions() {
 }
 
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	if len(keys) == 0 {
 		return
 	}
@@ -1122,9 +1125,6 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 }
 
 func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide bool) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the

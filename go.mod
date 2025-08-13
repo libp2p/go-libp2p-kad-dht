@@ -16,7 +16,7 @@ require (
 	github.com/ipfs/go-log/v2 v2.8.0
 	github.com/ipfs/go-test v0.2.2
 	github.com/libp2p/go-libp2p v0.43.0
-	github.com/libp2p/go-libp2p-kbucket v0.7.1-0.20250718125122-f77e735b68e8
+	github.com/libp2p/go-libp2p-kbucket v0.8.0
 	github.com/libp2p/go-libp2p-record v0.3.1
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.5
 	github.com/libp2p/go-libp2p-testing v0.12.0
@@ -28,7 +28,7 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-multistream v0.6.1
-	github.com/probe-lab/go-libdht v0.2.1-0.20250704053741-31e98600d9ec
+	github.com/probe-lab/go-libdht v0.2.1
 	github.com/stretchr/testify v1.10.0
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opentelemetry.io/otel v1.37.0

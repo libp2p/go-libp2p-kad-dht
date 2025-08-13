@@ -66,9 +66,13 @@ type DHTProvider interface {
 
 var _ DHTProvider = &SweepingProvider{}
 
+// maxPrefixSize is the maximum size of a prefix used to define a keyspace
+// region.
+const maxPrefixSize = 24
+
 const loggerName = "dht/SweepingProvider"
 
-var logger = logging.Logger(loggerName)
+var logger = logging.Logger("dht/SweepingProvider")
 
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
@@ -239,8 +243,6 @@ func (s *SweepingProvider) timeBetween(from, to time.Duration) time.Duration {
 	return (to-from+s.reprovideInterval-1)%s.reprovideInterval + 1
 }
 
-const maxPrefixSize = 24
-
 // reprovideTimeForPrefix calculates the scheduled time offset for reproviding
 // keys associated with a given prefix based on its bitstring prefix. The
 // function maps the given binary prefix to a fraction of the overall reprovide
@@ -335,7 +337,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 	}
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
-	s.avgPrefixLenReady <- struct{}{}
+	close(s.avgPrefixLenReady)
 }
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled

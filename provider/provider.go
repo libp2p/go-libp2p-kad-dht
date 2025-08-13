@@ -72,6 +72,17 @@ type DHTProvider interface {
 
 var _ DHTProvider = &SweepingProvider{}
 
+const (
+	// maxPrefixSize is the maximum size of a prefix used to define a keyspace
+	// region.
+	maxPrefixSize = 24
+	// individualProvideThreshold is the threshold for the number of keys to
+	// trigger a region exploration. If the number of keys to provide for a
+	// region is less or equal to the threshold, the keys will be individually
+	// provided.
+	individualProvideThreshold = 2
+)
+
 const loggerName = "dht/SweepingProvider"
 
 var logger = logging.Logger(loggerName)
@@ -196,7 +207,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 		avgPrefixLenValidity: 5 * time.Minute,
 		cachedAvgPrefixLen:   -1,
-		avgPrefixLenReady:    make(chan struct{}, 1),
+		avgPrefixLenReady:    make(chan struct{}),
 
 		clock:      cfg.clock,
 		cycleStart: cfg.clock.Now(),
@@ -414,8 +425,6 @@ func (s *SweepingProvider) timeBetween(from, to time.Duration) time.Duration {
 	return (to-from+s.reprovideInterval-1)%s.reprovideInterval + 1
 }
 
-const maxPrefixSize = 24
-
 // reprovideTimeForPrefix calculates the scheduled time offset for reproviding
 // keys associated with a given prefix based on its bitstring prefix. The
 // function maps the given binary prefix to a fraction of the overall reprovide
@@ -513,7 +522,7 @@ func (s *SweepingProvider) measureInitialPrefixLen() {
 	}
 	logger.Debugf("initial avgPrefixLen is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = s.clock.Now()
-	s.avgPrefixLenReady <- struct{}{}
+	close(s.avgPrefixLenReady)
 }
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
@@ -927,63 +936,46 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 // present in the schedule, and if `schedule` is set to true, add these
 // prefixes to the schedule to be reprovided.
 func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
-	avgPrefixLen := -1
+	seen := make(map[string]struct{})
+	prefixTrie := trie.New[bitstr.Key, struct{}]()
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
-	seen := make(map[bit256.Key]struct{})
+	avgPrefixLen := -1
 
 	s.scheduleLk.Lock()
 	defer s.scheduleLk.Unlock()
 	for _, h := range keys {
 		k := keyspace.MhToBit256(h)
+		kStr := string(keyspace.KeyToBytes(k))
 		// Don't add duplicates
-		if _, ok := seen[k]; ok {
+		if _, ok := seen[kStr]; ok {
 			continue
 		}
-		seen[k] = struct{}{}
+		seen[kStr] = struct{}{}
 
-		prefixConsolidation := false
-		prefix, scheduled := keyspace.FindPrefixOfKey(s.schedule, k)
-		if !scheduled {
-			if avgPrefixLen == -1 {
-				avgPrefixLen = s.getAvgPrefixLenNoLock()
-			}
-			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
-
-			if schedule {
-				if subtrie, ok := keyspace.FindSubtrie(s.schedule, prefix); ok {
-					// If generated prefix is a prefix of existing scheduled keyspace
-					// zones, consolidate these zones around the shorter prefix.
-					for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-						s.schedule.Remove(entry.Key)
-					}
-					prefixConsolidation = true
+		if prefix, ok := keyspace.FindPrefixOfKey(prefixTrie, k); ok {
+			prefixes[prefix] = append(prefixes[prefix], h)
+		} else {
+			if prefix, ok = keyspace.FindPrefixOfKey(s.schedule, k); !ok {
+				if avgPrefixLen == -1 {
+					avgPrefixLen = s.getAvgPrefixLenNoLock()
 				}
-				s.schedulePrefixNoLock(prefix, false)
-			}
-		}
-
-		prefixes[prefix] = append(prefixes[prefix], h)
-
-		if prefixConsolidation {
-			// prefix is a shorted prefix of a prefix already in the schedule.
-			// Consolidate everything into prefix.
-			for p, keys := range prefixes {
-				if keyspace.IsBitstrPrefix(p, prefix) {
-					seen := make(map[string]struct{})
-					for _, key := range prefixes[prefix] {
-						seen[string(key)] = struct{}{}
-					}
-					for _, key := range keys {
-						strKey := string(key)
-						if _, ok := seen[strKey]; ok {
-							continue
-						}
-						seen[strKey] = struct{}{}
-						prefixes[prefix] = append(prefixes[prefix], key)
-					}
-					delete(prefixes, p)
+				prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
+				if schedule {
+					s.schedulePrefixNoLock(prefix, false)
 				}
 			}
+			mhs := []mh.Multihash{h}
+			if subtrie, ok := keyspace.FindSubtrie(prefixTrie, prefix); ok {
+				// If prefixes already contains superstrings of prefix, consolidate the
+				// keys to prefix.
+				for _, entry := range keyspace.AllEntries(subtrie, s.order) {
+					mhs = append(mhs, prefixes[entry.Key]...)
+					delete(prefixes, entry.Key)
+				}
+				keyspace.PruneSubtrie(prefixTrie, prefix)
+			}
+			prefixTrie.Add(prefix, struct{}{})
+			prefixes[prefix] = mhs
 		}
 	}
 	return prefixes
@@ -1086,8 +1078,6 @@ func (s *SweepingProvider) reprovideLateRegions() {
 	}
 }
 
-const individualProvideThreshold = 2
-
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
 	s.wg.Add(1)
 	defer s.wg.Done()
@@ -1110,7 +1100,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 
 	regions, coveredPrefix, err := s.exploreSwarm(prefix)
 	if err != nil {
-		s.failedProvide(prefix, keys, fmt.Errorf("reprovide '%s': %w", prefix, err))
+		s.failedProvide(prefix, keys, fmt.Errorf("provide '%s': %w", prefix, err))
 		return
 	}
 	logger.Debugf("provide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
@@ -1122,7 +1112,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
-		logger.Errorf("failed to reprovide any region for prefix %s", prefix)
+		logger.Errorf("failed to provide any region for prefix %s", prefix)
 	}
 }
 
@@ -1145,10 +1135,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 			s.reschedulePrefix(prefix)
 		}
 		return
-	} else if len(keys) == 0 {
+	}
+	if len(keys) == 0 {
 		logger.Infof("No keys to reprovide for prefix %s", prefix)
 		return
-	} else if len(keys) <= individualProvideThreshold {
+	}
+	if len(keys) <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
 		s.individualProvide(prefix, keys, true, periodicReprovide)
@@ -1313,7 +1305,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		}
 		if err != nil {
 			errCount++
-			err = fmt.Errorf("%s: region %s", err, r.Prefix)
+			err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
 			if reprovide {
 				s.failedReprovide(r.Prefix, err)
 			} else { // provide operation

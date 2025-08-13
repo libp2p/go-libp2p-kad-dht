@@ -235,8 +235,6 @@ func New(opts ...Option) (*SweepingProvider, error) {
 func (s *SweepingProvider) run() {
 	logger.Debug("Starting SweepingProvider")
 	go s.measureInitialPrefixLen()
-
-	// TODO: complete me
 }
 
 // Close stops the provider and releases all resources.

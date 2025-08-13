@@ -111,6 +111,7 @@ type SweepingProvider struct {
 
 	provideQueue   *queue.ProvideQueue
 	provideRunning sync.Mutex
+	reprovideQueue *queue.ReprovideQueue
 
 	workerPool               *pool.Pool[workerType]
 	maxProvideConnsPerWorker int
@@ -125,6 +126,9 @@ type SweepingProvider struct {
 	scheduleCursor         bitstr.Key
 	scheduleTimer          *clock.Timer
 	scheduleTimerStartedAt time.Time
+
+	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
+	ongoingReprovidesLk sync.Mutex
 
 	avgPrefixLenLk       sync.Mutex
 	avgPrefixLenReady    chan struct{}
@@ -141,8 +145,8 @@ type SweepingProvider struct {
 
 // FIXME: remove me
 func (s *SweepingProvider) SatisfyLinter() {
-	s.vanillaProvide([]byte{})
 	s.measureInitialPrefixLen()
+	s.batchReprovide("", true)
 }
 
 // Close stops the provider and releases all resources.
@@ -165,6 +169,12 @@ func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUn
 	s.scheduleCursor = prefix
 	s.scheduleTimer.Reset(timeUntilReprovide)
 	s.scheduleTimerStartedAt = s.clock.Now()
+}
+
+func (s *SweepingProvider) reschedulePrefix(prefix bitstr.Key) {
+	s.scheduleLk.Lock()
+	s.schedulePrefixNoLock(prefix, true)
+	s.scheduleLk.Unlock()
 }
 
 // schedulePrefixNoLock adds the supplied prefix to the schedule, unless
@@ -776,7 +786,79 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	keys = append(keys, extraKeys...)
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
-	if !s.provideRegions(regions, addrInfo) {
+	if !s.provideRegions(regions, addrInfo, false, false) {
+		logger.Errorf("failed to reprovide any region for prefix %s", prefix)
+	}
+}
+
+func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide bool) {
+	addrInfo, ok := s.selfAddrInfo()
+	if !ok {
+		// Don't provide if the node doesn't have a valid address to include in the
+		// provider record.
+		return
+	}
+
+	// Load keys matching prefix from the keystore.
+	keys, err := s.keyStore.Get(context.Background(), prefix)
+	if err != nil {
+		s.failedReprovide(prefix, fmt.Errorf("couldn't reprovide, error when loading keys: %s", err))
+		if periodicReprovide {
+			s.reschedulePrefix(prefix)
+		}
+		return
+	}
+	if len(keys) == 0 {
+		logger.Infof("No keys to reprovide for prefix %s", prefix)
+		return
+	}
+	if len(keys) <= individualProvideThreshold {
+		// Don't fully explore the region, execute simple DHT provides for these
+		// keys. It isn't worth it to fully explore a region for just a few keys.
+		s.individualProvide(prefix, keys, true, periodicReprovide)
+		return
+	}
+
+	regions, coveredPrefix, err := s.exploreSwarm(prefix)
+	if err != nil {
+		s.failedReprovide(prefix, fmt.Errorf("reprovide '%s': %w", prefix, err))
+		if periodicReprovide {
+			s.reschedulePrefix(prefix)
+		}
+		return
+	}
+	logger.Debugf("reprovide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
+
+	regions = s.claimRegionReprovide(regions)
+
+	// Remove all keys matching coveredPrefix from provide queue. No need to
+	// provide them anymore since they are about to be reprovided.
+	s.provideQueue.DequeueMatching(coveredPrefix)
+	// Remove covered prefix from the reprovide queue, so since we are about the
+	// reprovide the region.
+	s.reprovideQueue.Remove(coveredPrefix)
+
+	// When reproviding a region, remove all scheduled regions starting with
+	// the currently covered prefix.
+	s.scheduleLk.Lock()
+	s.unscheduleSubsumedPrefixesNoLock(coveredPrefix)
+	s.scheduleLk.Unlock()
+
+	if len(coveredPrefix) < len(prefix) {
+		// Covered prefix is shorter than the requested one, load all the keys
+		// matching the covered prefix from the keystore.
+		keys, err = s.keyStore.Get(context.Background(), coveredPrefix)
+		if err != nil {
+			err = fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
+			s.failedReprovide(prefix, err)
+			if periodicReprovide {
+				s.reschedulePrefix(prefix)
+			}
+		}
+	}
+	regions = keyspace.AssignKeysToRegions(regions, keys)
+
+	if !s.provideRegions(regions, addrInfo, true, periodicReprovide) {
 		logger.Errorf("failed to reprovide any region for prefix %s", prefix)
 	}
 }
@@ -785,6 +867,14 @@ func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash,
 	logger.Error(err)
 	// Put keys back to the provide queue.
 	s.provideQueue.Enqueue(prefix, keys...)
+
+	s.connectivity.TriggerCheck()
+}
+
+func (s *SweepingProvider) failedReprovide(prefix bitstr.Key, err error) {
+	logger.Error(err)
+	// Put prefix in the reprovide queue.
+	s.reprovideQueue.Enqueue(prefix)
 
 	s.connectivity.TriggerCheck()
 }
@@ -808,17 +898,69 @@ func (s *SweepingProvider) selfAddrInfo() (peer.AddrInfo, bool) {
 // provides for the supplied keys, handles failures and schedules next
 // reprovide is necessary.
 func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) {
-	// TODO: implement me
+	if len(keys) == 0 {
+		return
+	}
+
+	var provideErr error
+	if len(keys) == 1 {
+		coveredPrefix, err := s.vanillaProvide(keys[0])
+		if err == nil {
+			s.provideCounter.Add(context.Background(), 1)
+		} else if !reprovide {
+			// Put the key back in the provide queue.
+			s.failedProvide(prefix, keys, fmt.Errorf("individual provide failed for prefix '%s', %w", prefix, err))
+		}
+		provideErr = err
+		if periodicReprovide {
+			// Schedule next reprovide for the prefix that was actually covered by
+			// the GCP, otherwise we may schedule a reprovide for a prefix too short
+			// or too long.
+			s.reschedulePrefix(coveredPrefix)
+		}
+	} else {
+		wg := sync.WaitGroup{}
+		success := atomic.Bool{}
+		for _, key := range keys {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := s.vanillaProvide(key)
+				if err == nil {
+					s.provideCounter.Add(context.Background(), 1)
+					success.Store(true)
+				} else if !reprovide {
+					// Individual provide failed, put key back in provide queue.
+					s.failedProvide(prefix, []mh.Multihash{key}, err)
+				}
+			}()
+		}
+		wg.Wait()
+
+		if !success.Load() {
+			// Only errors if all provides failed.
+			provideErr = fmt.Errorf("all individual provides failed for prefix %s", prefix)
+		}
+		if periodicReprovide {
+			s.reschedulePrefix(prefix)
+		}
+	}
+	if reprovide && provideErr != nil {
+		s.failedReprovide(prefix, provideErr)
+	}
 }
 
 // provideRegions contains common logic to batchProvide() and batchReprovide().
 // It iterate over supplied regions, and allocates the regions provider records
 // to the appropriate DHT servers.
-func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo) bool {
+func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo, reprovide, periodicReprovide bool) bool {
 	errCount := 0
 	for _, r := range regions {
 		nKeys := r.Keys.Size()
 		if nKeys == 0 {
+			if reprovide {
+				s.releaseRegionReprovide(r.Prefix)
+			}
 			continue
 		}
 		// Add keys to local provider store
@@ -827,10 +969,20 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
 		err := s.sendProviderRecords(keysAllocations, addrInfo)
+		if reprovide {
+			s.releaseRegionReprovide(r.Prefix)
+			if periodicReprovide {
+				s.reschedulePrefix(r.Prefix)
+			}
+		}
 		if err != nil {
 			errCount++
 			err = fmt.Errorf("cannot send provider records for region %s: %s", r.Prefix, err)
-			s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
+			if reprovide {
+				s.failedReprovide(r.Prefix, err)
+			} else { // provide operation
+				s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
+			}
 			continue
 		}
 		s.provideCounter.Add(context.Background(), int64(nKeys))
@@ -838,6 +990,33 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)
+}
+
+// claimRegionReprovide checks if the region is already being reprovided by
+// another thread. If not it marks the region as being currently reprovided.
+func (s *SweepingProvider) claimRegionReprovide(regions []keyspace.Region) []keyspace.Region {
+	out := regions[:0]
+	s.ongoingReprovidesLk.Lock()
+	defer s.ongoingReprovidesLk.Unlock()
+	for _, r := range regions {
+		if r.Peers.IsEmptyLeaf() {
+			continue
+		}
+		if _, ok := keyspace.FindPrefixOfKey(s.ongoingReprovides, r.Prefix); !ok {
+			// Prune superstrings of r.Prefix if any
+			keyspace.PruneSubtrie(s.ongoingReprovides, r.Prefix)
+			out = append(out, r)
+			s.ongoingReprovides.Add(r.Prefix, struct{}{})
+		}
+	}
+	return out
+}
+
+// releaseRegionReprovide marks the region as no longer being reprovided.
+func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
+	s.ongoingReprovidesLk.Lock()
+	defer s.ongoingReprovidesLk.Unlock()
+	s.ongoingReprovides.Remove(prefix)
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

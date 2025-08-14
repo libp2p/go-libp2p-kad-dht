@@ -1122,25 +1122,29 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
-	reprovider, err := New(opts...)
+	prov, err := New(opts...)
 	require.NoError(t, err)
-	defer reprovider.Close()
-	time.Sleep(10 * time.Millisecond)
+	defer prov.Close()
+	waitUntil(t, func() bool {
+		prov.avgPrefixLenLk.Lock()
+		defer prov.avgPrefixLenLk.Unlock()
+		return prov.cachedAvgPrefixLen > 0
+	}, 100*time.Millisecond, "waiting for initial average prefix length to be set")
 	routerOffline.Store(true)
 
-	reprovider.StartProviding(true, mhs...)
+	prov.StartProviding(true, mhs...)
 	time.Sleep(10 * time.Millisecond) // wait for StartProviding to finish
 	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
 
 	nodeOffline := func() bool {
-		return !reprovider.connectivity.IsOnline()
+		return !prov.connectivity.IsOnline()
 	}
 	waitUntil(t, nodeOffline, 100*time.Millisecond, "waiting for node to be offline")
 	mockClock.Add(connectivityCheckInterval)
 
 	routerOffline.Store(false)
 	mockClock.Add(connectivityCheckInterval)
-	waitUntil(t, reprovider.connectivity.IsOnline, 100*time.Millisecond, "waiting for node to come back online")
+	waitUntil(t, prov.connectivity.IsOnline, 100*time.Millisecond, "waiting for node to come back online")
 
 	providedAllKeys := func() bool {
 		msgSenderLk.Lock()

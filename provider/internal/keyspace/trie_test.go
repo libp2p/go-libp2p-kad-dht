@@ -6,6 +6,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ipfs/go-test/random"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
@@ -415,6 +416,117 @@ func TestPruneSubtrie(t *testing.T) {
 	require.True(t, tr.Branch(0).IsEmptyLeaf())
 }
 
+func TestTrieGaps(t *testing.T) {
+	initTrie := func(keys []bitstr.Key) *trie.Trie[bitstr.Key, struct{}] {
+		tr := trie.New[bitstr.Key, struct{}]()
+		for _, k := range keys {
+			tr.Add(k, struct{}{})
+		}
+		return tr
+	}
+	t.Run("Gap in empty trie", func(t *testing.T) {
+		keys := []bitstr.Key{}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{""}, TrieGaps(tr))
+	})
+	t.Run("No gaps in flat trie", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0",
+			"1",
+		}
+		tr := initTrie(keys)
+		require.Empty(t, TrieGaps(tr))
+	})
+	t.Run("No gaps in unbalanced trie", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0",
+			"10",
+			"110",
+			"111",
+		}
+		tr := initTrie(keys)
+		require.Empty(t, TrieGaps(tr))
+	})
+	t.Run("No gaps in trie with empty key", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"",
+		}
+		tr := initTrie(keys)
+		require.Empty(t, TrieGaps(tr))
+	})
+	t.Run("Gap with single key - 0", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"1"}, TrieGaps(tr))
+	})
+	t.Run("Gap with single key - 1", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"1",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"0"}, TrieGaps(tr))
+	})
+	t.Run("Gap with single key - 11101101", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"11101101",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, SiblingPrefixes(keys[0]), TrieGaps(tr))
+	})
+	t.Run("Gap missing single key - 0", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0",
+			"10",
+			"110",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr))
+	})
+	t.Run("Gap missing single key - 1", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0",
+			"10",
+			"1100",
+			"1101",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr))
+	})
+	t.Run("Gap missing single key - 2", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"000",
+			"001",
+			"01",
+			"10",
+			"1100",
+			"1101",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr))
+	})
+	t.Run("Gap missing multiple keys - 0", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"000",
+			"01",
+			"10",
+			"1100",
+			"1101",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"001", "111"}, TrieGaps(tr))
+	})
+	t.Run("Gap missing multiple keys - 1", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"000",
+			"1101",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"01", "001", "10", "111", "1100"}, TrieGaps(tr))
+	})
+}
+
 func TestAllocateToKClosestSingle(t *testing.T) {
 	destKeys := []bitstr.Key{
 		"0000",
@@ -561,14 +673,14 @@ func TestRegionsFromPeers(t *testing.T) {
 	require.Equal(t, bitstr.Key(""), commonPrefix)
 
 	// Single peer
-	p0 := genRandPeerID(t)
+	p0 := random.Peers(1)[0]
 	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0}, 1, bit256.ZeroKey())
 	require.Len(t, regions, 1)
 	bstrPid0 := bitstr.Key(key.BitString(PeerIDToBit256(p0)))
 	require.Equal(t, bstrPid0, commonPrefix)
 
 	// Two peers
-	p1 := genRandPeerID(t)
+	p1 := random.Peers(1)[0]
 	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0, p1}, 2, bit256.ZeroKey())
 	require.Len(t, regions, 1)
 	cpl := key.CommonPrefixLength(bstrPid0, PeerIDToBit256(p1))
@@ -576,7 +688,7 @@ func TestRegionsFromPeers(t *testing.T) {
 	require.Equal(t, common, commonPrefix)
 
 	// Three peers
-	p2 := genRandPeerID(t)
+	p2 := random.Peers(1)[0]
 	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0, p1, p2}, 2, bit256.ZeroKey())
 	require.Len(t, regions, 1)
 	cpl = key.CommonPrefixLength(common, PeerIDToBit256(p2))

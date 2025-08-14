@@ -2,12 +2,15 @@ package datastore
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/stretchr/testify/require"
 
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
@@ -83,6 +86,60 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 			t.Fatalf("returned hash does not match long prefix")
 		}
 	}
+}
+
+func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
+	mhs := make([]mh.Multihash, 0, n)
+	for i := 0; len(mhs) < n; i++ {
+		h := random.Multihashes(1)[0]
+		k := keyspace.MhToBit256(h)
+		if keyspace.IsPrefix(prefix, k) {
+			mhs = append(mhs, h)
+		}
+	}
+	return mhs
+}
+
+func TestKeyStoreContainsPrefix(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewKeyStore(ds.NewMapDatastore())
+	require.NoError(t, err)
+
+	ok, err := store.ContainsPrefix(ctx, bitstr.Key("0000"))
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	generated := genMultihashesMatchingPrefix(bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixLen+4)), 1)
+	require.True(t, keyspace.IsPrefix(bitstr.Key("0000"), keyspace.MhToBit256(generated[0])))
+	store.Put(ctx, generated...)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key("0"))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key("0000"))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixLen)))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixLen+4)))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key("1"))
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key("0001"))
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixLen+2)+"1"))
+	require.NoError(t, err)
+	require.False(t, ok)
 }
 
 func TestKeyStoreReset(t *testing.T) {

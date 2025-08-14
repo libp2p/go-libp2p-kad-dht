@@ -114,7 +114,6 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	if err != nil {
 		rLogger.Errorf("failed to stop providing keys: %s", err)
 	}
-	// TODO: delete from provider queue
 }
 
 // Clear clears the all the keys from the provide queues of both DHTs and returns the number

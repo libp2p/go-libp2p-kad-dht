@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ipfs/go-test/random"
 	kb "github.com/libp2p/go-libp2p-kbucket"
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
 
@@ -17,6 +17,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func genMultihashes(n int) []mh.Multihash {
+	mhs := make([]mh.Multihash, n)
+	for i := range mhs {
+		h, err := mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
+		if err != nil {
+			panic(err)
+		}
+		mhs[i], err = mh.Encode(h, mh.SHA2_256)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return mhs
+}
 
 func TestFlipLastBit(t *testing.T) {
 	require.Equal(t, FlipLastBit(""), bitstr.Key(""))
@@ -102,14 +117,6 @@ func TestKeyToBytesPadding(t *testing.T) {
 	require.Equal(t, []byte{0b11111111, 0b10000000}, bs)
 }
 
-func genRandPeerID(t *testing.T) peer.ID {
-	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	require.NoError(t, err)
-	pid, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-	return pid
-}
-
 func TestShortestCoveredPrefix(t *testing.T) {
 	// All keys share CPL of 5, except one sharing a CPL of 4
 	var target [32]byte
@@ -175,9 +182,7 @@ func TestShortestCoveredPrefix(t *testing.T) {
 	for range nIterations {
 		minCpl := KeyLen
 		largestCplCount := 0
-		for i := range peers {
-			peers[i] = genRandPeerID(t)
-		}
+		peers = random.Peers(nPeers)
 		peers = kb.SortClosestPeers(peers, target[:])
 		for i := range peers {
 			cpl = kb.CommonPrefixLen(kb.ConvertPeerID(peers[i]), target[:])
@@ -212,19 +217,28 @@ func TestIsBitstrPrefix(t *testing.T) {
 	require.False(t, IsBitstrPrefix(bitstr.Key("0000"), fullKey))
 }
 
-func genMultihashes(n int) []mh.Multihash {
-	mhs := make([]mh.Multihash, n)
-	for i := range mhs {
-		h, err := mh.Sum([]byte(strconv.Itoa(i)), mh.SHA2_256, -1)
-		if err != nil {
-			panic(err)
-		}
-		mhs[i], err = mh.Encode(h, mh.SHA2_256)
-		if err != nil {
-			panic(err)
-		}
-	}
-	return mhs
+func TestExtendBinaryPrefix(t *testing.T) {
+	prefix := bitstr.Key("")
+	l := 1
+	require.Equal(t, []bitstr.Key{"0", "1"}, ExtendBinaryPrefix(prefix, l))
+	prefix = bitstr.Key("1101")
+	l = 6
+	require.Equal(t, []bitstr.Key{"110100", "110101", "110110", "110111"}, ExtendBinaryPrefix(prefix, l))
+}
+
+func TestSiblingPrefixes(t *testing.T) {
+	k := bitstr.Key("")
+	require.Empty(t, SiblingPrefixes(k))
+	k = bitstr.Key("0")
+	require.Equal(t, []bitstr.Key{"1"}, SiblingPrefixes(k))
+	k = bitstr.Key("1")
+	require.Equal(t, []bitstr.Key{"0"}, SiblingPrefixes(k))
+	k = bitstr.Key("00")
+	require.Equal(t, []bitstr.Key{"1", "01"}, SiblingPrefixes(k))
+	k = bitstr.Key("000")
+	require.Equal(t, []bitstr.Key{"1", "01", "001"}, SiblingPrefixes(k))
+	k = bitstr.Key("1100")
+	require.Equal(t, []bitstr.Key{"0", "10", "111", "1101"}, SiblingPrefixes(k))
 }
 
 func TestSortPrefixesBySize(t *testing.T) {

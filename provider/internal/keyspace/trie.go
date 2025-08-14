@@ -180,6 +180,47 @@ func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0,
 	return false
 }
 
+// TrieGaps returns all prefixes that aren't covered by a key (prefix) in the
+// trie. Combining the prefixes included in the trie with the gap prefixes
+// results in a full keyspace coverage.
+//
+// E.g Trie: ["00", "100"], GapsInTrie: ["01", "101", "11"]
+func TrieGaps[D any](t *trie.Trie[bitstr.Key, D]) []bitstr.Key {
+	if t.IsLeaf() {
+		if t.HasKey() {
+			return SiblingPrefixes(*t.Key())
+		}
+		return []bitstr.Key{""}
+	}
+	return trieGapsAtDepth(t, 0)
+}
+
+func trieGapsAtDepth[D any](t *trie.Trie[bitstr.Key, D], depth int) []bitstr.Key {
+	gaps := []bitstr.Key{}
+	for i := range 2 {
+		bstr := bitstr.Key(byte('0' + i))
+		if b := t.Branch(i); b == nil {
+			gaps = append(gaps, bstr)
+		} else if b.IsLeaf() {
+			if b.HasKey() {
+				k := *b.Key()
+				if len(k) > depth+1 {
+					for _, siblingPrefix := range SiblingPrefixes(k)[depth+1:] {
+						gaps = append(gaps, siblingPrefix[depth:])
+					}
+				}
+			} else {
+				gaps = append(gaps, bstr)
+			}
+		} else {
+			for _, gap := range trieGapsAtDepth(b, depth+1) {
+				gaps = append(gaps, bstr+gap)
+			}
+		}
+	}
+	return gaps
+}
+
 // mapMerge merges all key-value pairs from the source map into the destination
 // map. Values from the source are appended to existing slices in the
 // destination.

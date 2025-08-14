@@ -745,7 +745,7 @@ func TestClose(t *testing.T) {
 	prov.StartProviding(false, newMh)
 	prov.StopProviding(newMh)
 	prov.ProvideOnce(newMh)
-	require.Equal(t, 0, prov.ClearProvideQueue())
+	require.Equal(t, 0, prov.Clear())
 
 	_, err = prov.keyStore.Get(context.Background(), "")
 	require.ErrorIs(t, err, datastore.ErrKeyStoreClosed)

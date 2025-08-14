@@ -112,7 +112,7 @@ type DHTProvider interface {
 
 var _ DHTProvider = &SweepingProvider{}
 
-const loggerName = "dht/SweepingProvider"
+const loggerName = "dht/provider"
 
 var logger = logging.Logger(loggerName)
 
@@ -1385,9 +1385,12 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	s.provideQueue.Remove(keys...)
 }
 
-// ClearProvideQueue clears the all the keys from the provide queue and returns
-// the number of keys that were cleared.
-func (s *SweepingProvider) ClearProvideQueue() int {
+// Clear clears the all the keys from the provide queue and returns the number
+// of keys that were cleared.
+//
+// The keys are not deleted from the keystore, so they will continue to be
+// reprovided as scheduled.
+func (s *SweepingProvider) Clear() int {
 	if s.closed() {
 		return 0
 	}

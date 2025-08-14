@@ -303,6 +303,10 @@ func (dht *FullRT) Host() host.Host {
 	return dht.h
 }
 
+func (dht *FullRT) MessageSender() dht_pb.MessageSender {
+	return dht.messageSender
+}
+
 func (dht *FullRT) runCrawler(ctx context.Context) {
 	defer dht.wg.Done()
 	t := time.NewTicker(dht.crawlerInterval)

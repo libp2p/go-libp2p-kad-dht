@@ -942,6 +942,12 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 	dht.peerstore.AddAddrs(p, dht.filterAddrs(addrs), ttl)
 }
 
+// FilteredAddrs returns the set of addresses that this DHT instance
+// advertises to the swarm, after applying the configured addrFilter.
+//
+// For example:
+//   - In a public DHT, local and loopback addresses are filtered out.
+//   - In a LAN DHT, only loopback addresses are filtered out.
 func (dht *IpfsDHT) FilteredAddrs() []ma.Multiaddr {
 	return dht.filterAddrs(dht.host.Addrs())
 }

@@ -364,7 +364,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(loggerName, "warn")
+	logging.SetLogLevel(LoggerName, "warn")
 
 	mhs := genMultihashes(1)
 	prefix := bitstr.Key("1011101111")
@@ -448,7 +448,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(loggerName, "warn")
+	logging.SetLogLevel(LoggerName, "warn")
 
 	ks := genMultihashes(2)
 	prefix := bitstr.Key("")

@@ -96,278 +96,214 @@ func WithKeyStore(keyStore *datastore.KeyStore) Option {
 	}
 }
 
-func WithReprovideInterval(reprovideInterval time.Duration) Option {
+func withReprovideInterval(reprovideInterval time.Duration, dhts ...uint8) Option {
 	return func(cfg *config) error {
 		if reprovideInterval <= 0 {
-			return fmt.Errorf("invalid reprovide interval %s", reprovideInterval)
+			return fmt.Errorf("reprovide interval must be positive, got %s", reprovideInterval)
 		}
-		for i := range cfg.reprovideInterval {
-			cfg.reprovideInterval[i] = reprovideInterval
+		for _, dht := range dhts {
+			cfg.reprovideInterval[dht] = reprovideInterval
 		}
 		return nil
 	}
+}
+
+func WithReprovideInterval(reprovideInterval time.Duration) Option {
+	return withReprovideInterval(reprovideInterval, lanID, wanID)
 }
 
 func WithReprovideIntervalLAN(reprovideInterval time.Duration) Option {
-	return func(cfg *config) error {
-		if reprovideInterval <= 0 {
-			return fmt.Errorf("invalid LAN reprovide interval %s", reprovideInterval)
-		}
-		cfg.reprovideInterval[lanID] = reprovideInterval
-		return nil
-	}
+	return withReprovideInterval(reprovideInterval, lanID)
 }
 
 func WithReprovideIntervalWAN(reprovideInterval time.Duration) Option {
+	return withReprovideInterval(reprovideInterval, wanID)
+}
+
+func withMaxReprovideDelay(maxReprovideDelay time.Duration, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if reprovideInterval <= 0 {
-			return fmt.Errorf("invalid WAN reprovide interval %s", reprovideInterval)
+		if maxReprovideDelay <= 0 {
+			return fmt.Errorf("max reprovide delay must be positive, got %s", maxReprovideDelay)
 		}
-		cfg.reprovideInterval[wanID] = reprovideInterval
+		for _, dht := range dhts {
+			cfg.maxReprovideDelay[dht] = maxReprovideDelay
+		}
 		return nil
 	}
 }
 
 func WithMaxReprovideDelay(maxReprovideDelay time.Duration) Option {
-	return func(cfg *config) error {
-		if maxReprovideDelay <= 0 {
-			return fmt.Errorf("invalid max reprovide delay %s", maxReprovideDelay)
-		}
-		for i := range cfg.maxReprovideDelay {
-			cfg.maxReprovideDelay[i] = maxReprovideDelay
-		}
-		return nil
-	}
+	return withMaxReprovideDelay(maxReprovideDelay, lanID, wanID)
 }
 
 func WithMaxReprovideDelayLAN(maxReprovideDelay time.Duration) Option {
-	return func(cfg *config) error {
-		if maxReprovideDelay <= 0 {
-			return fmt.Errorf("invalid LAN max reprovide delay %s", maxReprovideDelay)
-		}
-		cfg.maxReprovideDelay[lanID] = maxReprovideDelay
-		return nil
-	}
+	return withMaxReprovideDelay(maxReprovideDelay, lanID)
 }
 
 func WithMaxReprovideDelayWAN(maxReprovideDelay time.Duration) Option {
+	return withMaxReprovideDelay(maxReprovideDelay, wanID)
+}
+
+func withConnectivityCheckOnlineInterval(onlineInterval time.Duration, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if maxReprovideDelay <= 0 {
-			return fmt.Errorf("invalid WAN max reprovide delay %s", maxReprovideDelay)
+		if onlineInterval <= 0 {
+			return fmt.Errorf("invalid connectivity check online interval %s", onlineInterval)
 		}
-		cfg.maxReprovideDelay[wanID] = maxReprovideDelay
+		for _, dht := range dhts {
+			cfg.connectivityCheckOnlineInterval[dht] = onlineInterval
+		}
 		return nil
 	}
 }
 
 func WithConnectivityCheckOnlineInterval(onlineInterval time.Duration) Option {
-	return func(cfg *config) error {
-		if onlineInterval <= 0 {
-			return fmt.Errorf("invalid connectivity check online interval %s", onlineInterval)
-		}
-		for i := range cfg.connectivityCheckOnlineInterval {
-			cfg.connectivityCheckOnlineInterval[i] = onlineInterval
-		}
-		return nil
-	}
+	return withConnectivityCheckOnlineInterval(onlineInterval, lanID, wanID)
 }
 
 func WithConnectivityCheckOnlineIntervalLAN(onlineInterval time.Duration) Option {
-	return func(cfg *config) error {
-		if onlineInterval <= 0 {
-			return fmt.Errorf("invalid LAN connectivity check online interval %s", onlineInterval)
-		}
-		cfg.connectivityCheckOnlineInterval[lanID] = onlineInterval
-		return nil
-	}
+	return withConnectivityCheckOnlineInterval(onlineInterval, lanID)
 }
 
 func WithConnectivityCheckOnlineIntervalWAN(onlineInterval time.Duration) Option {
+	return withConnectivityCheckOnlineInterval(onlineInterval, wanID)
+}
+
+func withConnectivityCheckOfflineInterval(offlineInterval time.Duration, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if onlineInterval <= 0 {
-			return fmt.Errorf("invalid WAN connectivity check online interval %s", onlineInterval)
+		if offlineInterval <= 0 {
+			return fmt.Errorf("invalid connectivity check offline interval %s", offlineInterval)
 		}
-		cfg.connectivityCheckOnlineInterval[wanID] = onlineInterval
+		for _, dht := range dhts {
+			cfg.connectivityCheckOfflineInterval[dht] = offlineInterval
+		}
 		return nil
 	}
 }
 
 func WithConnectivityCheckOfflineInterval(offlineInterval time.Duration) Option {
-	return func(cfg *config) error {
-		if offlineInterval <= 0 {
-			return fmt.Errorf("invalid connectivity check offline interval %s", offlineInterval)
-		}
-		for i := range cfg.connectivityCheckOfflineInterval {
-			cfg.connectivityCheckOfflineInterval[i] = offlineInterval
-		}
-		return nil
-	}
+	return withConnectivityCheckOfflineInterval(offlineInterval, lanID, wanID)
 }
 
 func WithConnectivityCheckOfflineIntervalLAN(offlineInterval time.Duration) Option {
-	return func(cfg *config) error {
-		if offlineInterval <= 0 {
-			return fmt.Errorf("invalid LAN connectivity check offline interval %s", offlineInterval)
-		}
-		cfg.connectivityCheckOfflineInterval[lanID] = offlineInterval
-		return nil
-	}
+	return withConnectivityCheckOfflineInterval(offlineInterval, lanID)
 }
 
 func WithConnectivityCheckOfflineIntervalWAN(offlineInterval time.Duration) Option {
+	return withConnectivityCheckOfflineInterval(offlineInterval, wanID)
+}
+
+func withMaxWorkers(maxWorkers int, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if offlineInterval <= 0 {
-			return fmt.Errorf("invalid WAN connectivity check offline interval %s", offlineInterval)
+		if maxWorkers <= 0 {
+			return fmt.Errorf("invalid max workers %d", maxWorkers)
 		}
-		cfg.connectivityCheckOfflineInterval[wanID] = offlineInterval
+		for _, dht := range dhts {
+			cfg.maxWorkers[dht] = maxWorkers
+		}
 		return nil
 	}
 }
 
 func WithMaxWorkers(maxWorkers int) Option {
-	return func(cfg *config) error {
-		if maxWorkers <= 0 {
-			return fmt.Errorf("invalid max workers %d", maxWorkers)
-		}
-		for i := range cfg.maxWorkers {
-			cfg.maxWorkers[i] = maxWorkers
-		}
-		return nil
-	}
+	return withMaxWorkers(maxWorkers, lanID, wanID)
 }
 
 func WithMaxWorkersLAN(maxWorkers int) Option {
-	return func(cfg *config) error {
-		if maxWorkers <= 0 {
-			return fmt.Errorf("invalid LAN max workers %d", maxWorkers)
-		}
-		cfg.maxWorkers[lanID] = maxWorkers
-		return nil
-	}
+	return withMaxWorkers(maxWorkers, lanID)
 }
 
 func WithMaxWorkersWAN(maxWorkers int) Option {
+	return withMaxWorkers(maxWorkers, wanID)
+}
+
+func withDedicatedPeriodicWorkers(dedicatedPeriodicWorkers int, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if maxWorkers <= 0 {
-			return fmt.Errorf("invalid WAN max workers %d", maxWorkers)
+		if dedicatedPeriodicWorkers < 0 {
+			return fmt.Errorf("invalid dedicated periodic workers %d", dedicatedPeriodicWorkers)
 		}
-		cfg.maxWorkers[wanID] = maxWorkers
+		for _, dht := range dhts {
+			cfg.dedicatedPeriodicWorkers[dht] = dedicatedPeriodicWorkers
+		}
 		return nil
 	}
 }
 
 func WithDedicatedPeriodicWorkers(dedicatedPeriodicWorkers int) Option {
-	return func(cfg *config) error {
-		if dedicatedPeriodicWorkers < 0 {
-			return fmt.Errorf("invalid dedicated periodic workers %d", dedicatedPeriodicWorkers)
-		}
-		for i := range cfg.dedicatedPeriodicWorkers {
-			cfg.dedicatedPeriodicWorkers[i] = dedicatedPeriodicWorkers
-		}
-		return nil
-	}
+	return withDedicatedPeriodicWorkers(dedicatedPeriodicWorkers, lanID, wanID)
 }
 
 func WithDedicatedPeriodicWorkersLAN(dedicatedPeriodicWorkers int) Option {
-	return func(cfg *config) error {
-		if dedicatedPeriodicWorkers < 0 {
-			return fmt.Errorf("invalid LAN dedicated periodic workers %d", dedicatedPeriodicWorkers)
-		}
-		cfg.dedicatedPeriodicWorkers[lanID] = dedicatedPeriodicWorkers
-		return nil
-	}
+	return withDedicatedPeriodicWorkers(dedicatedPeriodicWorkers, lanID)
 }
 
 func WithDedicatedPeriodicWorkersWAN(dedicatedPeriodicWorkers int) Option {
+	return withDedicatedPeriodicWorkers(dedicatedPeriodicWorkers, wanID)
+}
+
+func withDedicatedBurstWorkers(dedicatedBurstWorkers int, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if dedicatedPeriodicWorkers < 0 {
-			return fmt.Errorf("invalid WAN dedicated periodic workers %d", dedicatedPeriodicWorkers)
+		if dedicatedBurstWorkers < 0 {
+			return fmt.Errorf("invalid dedicated burst workers %d", dedicatedBurstWorkers)
 		}
-		cfg.dedicatedPeriodicWorkers[wanID] = dedicatedPeriodicWorkers
+		for _, dht := range dhts {
+			cfg.dedicatedBurstWorkers[dht] = dedicatedBurstWorkers
+		}
 		return nil
 	}
 }
 
 func WithDedicatedBurstWorkers(dedicatedBurstWorkers int) Option {
-	return func(cfg *config) error {
-		if dedicatedBurstWorkers < 0 {
-			return fmt.Errorf("invalid dedicated burst workers %d", dedicatedBurstWorkers)
-		}
-		for i := range cfg.dedicatedBurstWorkers {
-			cfg.dedicatedBurstWorkers[i] = dedicatedBurstWorkers
-		}
-		return nil
-	}
+	return withDedicatedBurstWorkers(dedicatedBurstWorkers, lanID, wanID)
 }
 
 func WithDedicatedBurstWorkersLAN(dedicatedBurstWorkers int) Option {
-	return func(cfg *config) error {
-		if dedicatedBurstWorkers < 0 {
-			return fmt.Errorf("invalid LAN dedicated burst workers %d", dedicatedBurstWorkers)
-		}
-		cfg.dedicatedBurstWorkers[lanID] = dedicatedBurstWorkers
-		return nil
-	}
+	return withDedicatedBurstWorkers(dedicatedBurstWorkers, lanID)
 }
 
 func WithDedicatedBurstWorkersWAN(dedicatedBurstWorkers int) Option {
+	return withDedicatedBurstWorkers(dedicatedBurstWorkers, wanID)
+}
+
+func withMaxProvideConnsPerWorker(maxProvideConnsPerWorker int, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if dedicatedBurstWorkers < 0 {
-			return fmt.Errorf("invalid WAN dedicated burst workers %d", dedicatedBurstWorkers)
+		if maxProvideConnsPerWorker <= 0 {
+			return fmt.Errorf("invalid max provide conns per worker %d", maxProvideConnsPerWorker)
 		}
-		cfg.dedicatedBurstWorkers[wanID] = dedicatedBurstWorkers
+		for _, dht := range dhts {
+			cfg.maxProvideConnsPerWorker[dht] = maxProvideConnsPerWorker
+		}
 		return nil
 	}
 }
 
 func WithMaxProvideConnsPerWorker(maxProvideConnsPerWorker int) Option {
-	return func(cfg *config) error {
-		if maxProvideConnsPerWorker <= 0 {
-			return fmt.Errorf("invalid max provide conns per worker %d", maxProvideConnsPerWorker)
-		}
-		for i := range cfg.maxProvideConnsPerWorker {
-			cfg.maxProvideConnsPerWorker[i] = maxProvideConnsPerWorker
-		}
-		return nil
-	}
+	return withMaxProvideConnsPerWorker(maxProvideConnsPerWorker, lanID, wanID)
 }
 
 func WithMaxProvideConnsPerWorkerLAN(maxProvideConnsPerWorker int) Option {
-	return func(cfg *config) error {
-		if maxProvideConnsPerWorker <= 0 {
-			return fmt.Errorf("invalid LAN max provide conns per worker %d", maxProvideConnsPerWorker)
-		}
-		cfg.maxProvideConnsPerWorker[lanID] = maxProvideConnsPerWorker
-		return nil
-	}
+	return withMaxProvideConnsPerWorker(maxProvideConnsPerWorker, lanID)
 }
 
 func WithMaxProvideConnsPerWorkerWAN(maxProvideConnsPerWorker int) Option {
+	return withMaxProvideConnsPerWorker(maxProvideConnsPerWorker, wanID)
+}
+
+func withMessageSender(msgSender pb.MessageSender, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if maxProvideConnsPerWorker <= 0 {
-			return fmt.Errorf("invalid WAN max provide conns per worker %d", maxProvideConnsPerWorker)
+		if msgSender == nil {
+			return errors.New("provider config: message sender cannot be nil")
 		}
-		cfg.maxProvideConnsPerWorker[wanID] = maxProvideConnsPerWorker
+		for _, dht := range dhts {
+			cfg.msgSenders[dht] = msgSender
+		}
 		return nil
 	}
 }
 
 func WithMessageSenderLAN(msgSender pb.MessageSender) Option {
-	return func(cfg *config) error {
-		if msgSender == nil {
-			return errors.New("provider config: LAN message sender cannot be nil")
-		}
-		cfg.msgSenders[lanID] = msgSender
-		return nil
-	}
+	return withMessageSender(msgSender, lanID)
 }
 
 func WithMessageSenderWAN(msgSender pb.MessageSender) Option {
-	return func(cfg *config) error {
-		if msgSender == nil {
-			return errors.New("provider config: WAN message sender cannot be nil")
-		}
-		cfg.msgSenders[wanID] = msgSender
-		return nil
-	}
+	return withMessageSender(msgSender, wanID)
 }

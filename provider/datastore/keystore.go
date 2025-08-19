@@ -402,8 +402,7 @@ func (s *KeyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 
 	// Fast path when asking exactly for a bucket prefix: existence implies non-empty.
 	if len(prefix) == s.prefixLen {
-		exists, err := s.ds.Has(ctx, dsKey)
-		return exists, err
+		return s.ds.Has(ctx, dsKey)
 	}
 
 	// Longer-than-bucket: must inspect entries and see if any starts with `prefix`.

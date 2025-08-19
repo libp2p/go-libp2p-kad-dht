@@ -3,6 +3,7 @@ package keyspace
 import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
+
 	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
@@ -196,7 +197,7 @@ func TrieGaps[D any](t *trie.Trie[bitstr.Key, D]) []bitstr.Key {
 }
 
 func trieGapsAtDepth[D any](t *trie.Trie[bitstr.Key, D], depth int) []bitstr.Key {
-	gaps := []bitstr.Key{}
+	var gaps []bitstr.Key
 	for i := range 2 {
 		bstr := bitstr.Key(byte('0' + i))
 		if b := t.Branch(i); b == nil {

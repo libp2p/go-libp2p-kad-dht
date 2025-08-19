@@ -14,6 +14,7 @@ import (
 
 	"github.com/filecoin-project/go-clock"
 	"github.com/guillaumemichel/reservedpool"
+	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -1157,4 +1158,105 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		return true
 	}
 	waitUntil(t, providedAllKeys, 200*time.Millisecond, "waiting for all keys to be reprovided")
+}
+
+func TestAddToSchedule(t *testing.T) {
+	mockClock := clock.NewMock()
+	prov := SweepingProvider{
+		clock:             mockClock,
+		reprovideInterval: time.Hour,
+		schedule:          trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:     mockClock.Timer(time.Hour),
+
+		cachedAvgPrefixLen:   4,
+		avgPrefixLenValidity: time.Minute,
+		lastAvgPrefixLen:     mockClock.Now(),
+	}
+
+	ok, _ := trie.Find(prov.schedule, "0000")
+
+	require.False(t, ok)
+	keys := genMultihashesMatchingPrefix("0000", 4)
+	prov.AddToSchedule(keys...)
+	ok, _ = trie.Find(prov.schedule, "0000")
+	require.True(t, ok)
+	require.Equal(t, 1, prov.schedule.Size())
+
+	// Nothing should have changed
+	prov.AddToSchedule(keys...)
+	ok, _ = trie.Find(prov.schedule, "0000")
+	require.True(t, ok)
+	require.Equal(t, 1, prov.schedule.Size())
+
+	keys = append(keys, append(genMultihashesMatchingPrefix("0111", 1), genMultihashesMatchingPrefix("1000", 3)...)...)
+	prov.AddToSchedule(keys...)
+	require.Equal(t, 3, prov.schedule.Size())
+	ok, _ = trie.Find(prov.schedule, "0000")
+	require.True(t, ok)
+	ok, _ = trie.Find(prov.schedule, "0111")
+	require.True(t, ok)
+	ok, _ = trie.Find(prov.schedule, "1000")
+	require.True(t, ok)
+}
+
+func TestRefreshSchedule(t *testing.T) {
+	ctx := context.Background()
+	mapDs := ds.NewMapDatastore()
+	defer mapDs.Close()
+	keyStore, err := datastore.NewKeyStore(mapDs)
+	require.NoError(t, err)
+
+	mockClock := clock.NewMock()
+	prov := SweepingProvider{
+		keyStore: keyStore,
+
+		clock:             mockClock,
+		reprovideInterval: time.Hour,
+		schedule:          trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:     mockClock.Timer(time.Hour),
+
+		cachedAvgPrefixLen:   4,
+		avgPrefixLenValidity: time.Minute,
+		lastAvgPrefixLen:     mockClock.Now(),
+	}
+
+	// Schedule is empty
+	require.Equal(t, 0, prov.schedule.Size())
+	prov.RefreshSchedule()
+	require.Equal(t, 0, prov.schedule.Size())
+
+	// Add key to keystore
+	k := genMultihashesMatchingPrefix("00000", 1)[0]
+	keyStore.Put(ctx, k)
+
+	// Refresh schedule should add the key to the schedule
+	require.Equal(t, 0, prov.schedule.Size())
+	prov.RefreshSchedule()
+	require.Equal(t, 1, prov.schedule.Size())
+	ok, _ := trie.Find(prov.schedule, bitstr.Key("0000"))
+	require.True(t, ok)
+
+	// Add another key starting with same prefix to keystore
+	k = genMultihashesMatchingPrefix("00001", 1)[0]
+	keyStore.Put(ctx, k)
+	prov.RefreshSchedule()
+	require.Equal(t, 1, prov.schedule.Size())
+	ok, _ = trie.Find(prov.schedule, bitstr.Key("0000"))
+	require.True(t, ok)
+
+	// Add multiple keys and verify associated prefixes are scheduled.
+	newPrefixes := []bitstr.Key{"0100", "0110", "0111"}
+	keys := make([]mh.Multihash, 0, len(newPrefixes))
+	for _, p := range newPrefixes {
+		keys = append(keys, genMultihashesMatchingPrefix(p, 1)...)
+	}
+	keyStore.Put(ctx, keys...)
+	prov.RefreshSchedule()
+	// Assert that only the prefixes containing matching keys in the KeyStore
+	// have been added to the schedule.
+	require.Equal(t, 1+len(newPrefixes), prov.schedule.Size())
+	for _, p := range newPrefixes {
+		ok, _ = trie.Find(prov.schedule, p)
+		require.True(t, ok)
+	}
 }

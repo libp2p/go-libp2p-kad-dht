@@ -369,6 +369,62 @@ func (s *KeyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 	return result, nil
 }
 
+// ContainsPrefix reports whether the KeyStore currently holds at least one
+// multihash whose kademlia identifier (bit256.Key) starts with the provided
+// bit-prefix.
+func (s *KeyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
+	if s.closed() {
+		return false, ErrKeyStoreClosed
+	}
+	s.lk.Lock()
+	defer s.lk.Unlock()
+
+	// Case 1: shorter than bucket length — any bucket with this key-prefix is enough.
+	if len(prefix) < s.prefixLen {
+		rem := s.prefixLen - len(prefix)
+		limit := 1 << rem
+		for i := range limit {
+			suffix := fmt.Sprintf("%0*b", rem, i)
+			dsKey := s.dsKey(prefix + bitstr.Key(suffix))
+			exists, err := s.ds.Has(ctx, dsKey)
+			if err != nil {
+				return false, err
+			}
+			if exists {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	// Case 2: at least a full bucket prefix — check that bucket's content.
+	dsKey := s.dsKey(bitstr.Key(prefix[:s.prefixLen]))
+
+	// Fast path when asking exactly for a bucket prefix: existence implies non-empty.
+	if len(prefix) == s.prefixLen {
+		return s.ds.Has(ctx, dsKey)
+	}
+
+	// Longer-than-bucket: must inspect entries and see if any starts with `prefix`.
+	data, err := s.ds.Get(ctx, dsKey)
+	if err != nil {
+		if err == ds.ErrNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	var stored []mh.Multihash
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return false, err
+	}
+	for _, h := range stored {
+		if keyspace.IsPrefix(prefix, keyspace.MhToBit256(h)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // emptyLocked deletes all entries under the datastore prefix, assuming s.lk is
 // already held.
 func (s *KeyStore) emptyLocked(ctx context.Context) error {

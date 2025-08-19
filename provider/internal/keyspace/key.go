@@ -131,6 +131,42 @@ func ShortestCoveredPrefix(target bitstr.Key, peers []peer.ID) (bitstr.Key, []pe
 	return target[:coveredCpl], peers[:lastCoveredPeerIndex]
 }
 
+// ExtendBinaryPrefix returns all bitstrings of length n that start with prefix.
+// Example: prefix="1101", n=6 -> ["110100", "110101", "110110", "110111"].
+func ExtendBinaryPrefix(prefix bitstr.Key, n int) []bitstr.Key {
+	extraBits := n - len(prefix)
+	if n < 0 || extraBits < 0 {
+		return nil
+	}
+
+	extLen := 1 << extraBits // 2^extraBits
+	rd := make([]bitstr.Key, 0, extLen)
+	wr := make([]bitstr.Key, 1, extLen)
+	wr[0] = prefix
+
+	// Iteratively append bits until reaching length n.
+	for range extraBits {
+		rd, wr = wr, rd[:0]
+		for _, s := range rd {
+			wr = append(wr, s+"0", s+"1")
+		}
+	}
+	return wr
+}
+
+// SiblingPrefixes returns the prefixes of the sibling subtrees along the path
+// to key. Together with the subtree under `key` itself, these prefixes
+// partition the keyspace.
+//
+// For key "1100" it returns: ["0", "10", "111", "1101"].
+func SiblingPrefixes(key bitstr.Key) []bitstr.Key {
+	complements := make([]bitstr.Key, len(key))
+	for i := range key {
+		complements[i] = FlipLastBit(key[:i+1])
+	}
+	return complements
+}
+
 // PrefixAndKeys is a struct that holds a prefix and the multihashes whose
 // kademlia identifier share the same prefix.
 type PrefixAndKeys struct {

@@ -1412,3 +1412,55 @@ func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, 
 	// TODO: implement me
 	return StateUnknown, time.Time{}
 }
+
+// AddToSchedule makes sure the prefixes associated with the supplied keys are
+// scheduled to be reprovided.
+func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) {
+	s.groupAndScheduleKeysByPrefix(keys, true)
+}
+
+// RefreshSchedule scans the KeyStore for any keys that are not currently
+// scheduled for reproviding. If such keys are found, it schedules their
+// associated keyspace region to be reprovided.
+//
+// This function doesn't remove prefixes that have no keys from the schedule.
+// This is done automatically during the reprovide operation if a region has no
+// keys.
+func (s *SweepingProvider) RefreshSchedule() {
+	// Look for prefixes not included in the schedule
+	s.scheduleLk.Lock()
+	prefixLen := s.getAvgPrefixLenNoLock()
+	gaps := keyspace.TrieGaps(s.schedule)
+	s.scheduleLk.Unlock()
+
+	missing := make([]bitstr.Key, 0, len(gaps))
+	for _, p := range gaps {
+		if len(p) >= prefixLen {
+			missing = append(missing, p)
+		} else {
+			missing = append(missing, keyspace.ExtendBinaryPrefix(p, prefixLen)...)
+		}
+	}
+
+	// Only keep the missing prefixes for which there are keys in the KeyStore.
+	toInsert := make([]bitstr.Key, 0)
+	for _, p := range missing {
+		ok, err := s.keyStore.ContainsPrefix(s.ctx, p)
+		if err != nil {
+			logger.Warnf("couldn't refresh schedule for prefix %s: %s", p, err)
+		}
+		if ok {
+			toInsert = append(toInsert, p)
+		}
+	}
+	if len(toInsert) == 0 {
+		return
+	}
+
+	// Insert prefixes into the schedule
+	s.scheduleLk.Lock()
+	for _, p := range toInsert {
+		s.schedulePrefixNoLock(p, false)
+	}
+	s.scheduleLk.Unlock()
+}

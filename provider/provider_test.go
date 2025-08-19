@@ -1252,6 +1252,8 @@ func TestRefreshSchedule(t *testing.T) {
 	}
 	keyStore.Put(ctx, keys...)
 	prov.RefreshSchedule()
+	// Assert that only the prefixes containing matching keys in the KeyStore
+	// have been added to the schedule.
 	require.Equal(t, 1+len(newPrefixes), prov.schedule.Size())
 	for _, p := range newPrefixes {
 		ok, _ = trie.Find(prov.schedule, p)

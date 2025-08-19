@@ -134,20 +134,24 @@ func ShortestCoveredPrefix(target bitstr.Key, peers []peer.ID) (bitstr.Key, []pe
 // ExtendBinaryPrefix returns all bitstrings of length n that start with prefix.
 // Example: prefix="1101", n=6 -> ["110100", "110101", "110110", "110111"].
 func ExtendBinaryPrefix(prefix bitstr.Key, n int) []bitstr.Key {
-	if n < 0 || len(prefix) > n {
+	extraBits := n - len(prefix)
+	if n < 0 || extraBits < 0 {
 		return nil
 	}
 
+	extLen := 1 << extraBits // 2^extraBits
+	rd := make([]bitstr.Key, 0, extLen)
+	wr := make([]bitstr.Key, 1, extLen)
+	wr[0] = prefix
+
 	// Iteratively append bits until reaching length n.
-	res := []bitstr.Key{prefix}
-	for i := len(prefix); i < n; i++ {
-		next := make([]bitstr.Key, 0, len(res)*2)
-		for _, s := range res {
-			next = append(next, s+"0", s+"1")
+	for range extraBits {
+		rd, wr = wr, rd[:0]
+		for _, s := range rd {
+			wr = append(wr, s+"0", s+"1")
 		}
-		res = next
 	}
-	return res
+	return wr
 }
 
 // SiblingPrefixes returns the prefixes of the sibling subtrees along the path

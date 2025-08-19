@@ -364,7 +364,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(loggerName, "warn")
+	logging.SetLogLevel(LoggerName, "warn")
 
 	mhs := genMultihashes(1)
 	prefix := bitstr.Key("1011101111")
@@ -448,7 +448,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(loggerName, "warn")
+	logging.SetLogLevel(LoggerName, "warn")
 
 	ks := genMultihashes(2)
 	prefix := bitstr.Key("")
@@ -745,7 +745,7 @@ func TestClose(t *testing.T) {
 	prov.StartProviding(false, newMh)
 	prov.StopProviding(newMh)
 	prov.ProvideOnce(newMh)
-	require.Equal(t, 0, prov.ClearProvideQueue())
+	require.Equal(t, 0, prov.Clear())
 
 	_, err = prov.keyStore.Get(context.Background(), "")
 	require.ErrorIs(t, err, datastore.ErrKeyStoreClosed)
@@ -1122,25 +1122,29 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
-	reprovider, err := New(opts...)
+	prov, err := New(opts...)
 	require.NoError(t, err)
-	defer reprovider.Close()
-	time.Sleep(10 * time.Millisecond)
+	defer prov.Close()
+	waitUntil(t, func() bool {
+		prov.avgPrefixLenLk.Lock()
+		defer prov.avgPrefixLenLk.Unlock()
+		return prov.cachedAvgPrefixLen > 0
+	}, 100*time.Millisecond, "waiting for initial average prefix length to be set")
 	routerOffline.Store(true)
 
-	reprovider.StartProviding(true, mhs...)
+	prov.StartProviding(true, mhs...)
 	time.Sleep(10 * time.Millisecond) // wait for StartProviding to finish
 	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
 
 	nodeOffline := func() bool {
-		return !reprovider.connectivity.IsOnline()
+		return !prov.connectivity.IsOnline()
 	}
 	waitUntil(t, nodeOffline, 100*time.Millisecond, "waiting for node to be offline")
 	mockClock.Add(connectivityCheckInterval)
 
 	routerOffline.Store(false)
 	mockClock.Add(connectivityCheckInterval)
-	waitUntil(t, reprovider.connectivity.IsOnline, 100*time.Millisecond, "waiting for node to come back online")
+	waitUntil(t, prov.connectivity.IsOnline, 100*time.Millisecond, "waiting for node to come back online")
 
 	providedAllKeys := func() bool {
 		msgSenderLk.Lock()

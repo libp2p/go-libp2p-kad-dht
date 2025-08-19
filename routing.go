@@ -457,7 +457,7 @@ func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihas
 			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
 			err := dht.protoMessenger.PutProviderAddrs(ctx, p, keyMH, peer.AddrInfo{
 				ID:    dht.self,
-				Addrs: dht.filterAddrs(dht.host.Addrs()),
+				Addrs: dht.FilteredAddrs(),
 			})
 			if err != nil {
 				logger.Debug(err)

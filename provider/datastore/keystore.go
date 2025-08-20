@@ -218,10 +218,10 @@ func (s *KeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error
 	if err != nil {
 		return fmt.Errorf("KeyStore empty failed during reset: %w", err)
 	}
-	keys := make([]mh.Multihash, s.gcBatchSize)
+	keys := make([]mh.Multihash, 0, s.gcBatchSize)
 	i := 0
 	for c := range keysChan {
-		keys[i] = c.Hash()
+		keys = append(keys, c.Hash())
 		i++
 		if i == s.gcBatchSize {
 			_, err = s.Put(ctx, keys...)
@@ -245,7 +245,7 @@ func (s *KeyStore) dsKey(prefix bitstr.Key) ds.Key {
 
 // putLocked stores the provided keys while assuming s.lk is already held.
 func (s *KeyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
-	groups := make(map[bitstr.Key][]mh.Multihash)
+	groups := make(map[bitstr.Key][]mh.Multihash, len(keys))
 	for _, h := range keys {
 		k := keyspace.MhToBit256(h)
 		bs := bitstr.Key(key.BitString(k)[:s.prefixLen])

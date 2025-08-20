@@ -89,6 +89,21 @@ func TestFindPrefixOfKey(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestFindPrefixOfTooShortKey(t *testing.T) {
+	tr := trie.New[bitstr.Key, struct{}]()
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0010",
+		"0011",
+	}
+	for _, k := range keys {
+		tr.Add(k, struct{}{})
+	}
+	_, ok := FindPrefixOfKey(tr, bitstr.Key("000"))
+	require.False(t, ok)
+}
+
 func TestFindSubtrie(t *testing.T) {
 	keys := []bitstr.Key{
 		"0000",

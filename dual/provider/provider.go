@@ -84,18 +84,27 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 
 // runOnBoth runs the provided function on both the LAN and WAN providers in
 // parallel and waits for both to complete.
-func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider)) {
-	wg := sync.WaitGroup{}
-	wg.Add(2)
+func (s *SweepingProvider) runOnBoth(wait bool, f func(*provider.SweepingProvider)) {
+	if wait {
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			f(s.LAN)
+		}()
+		go func() {
+			defer wg.Done()
+			f(s.WAN)
+		}()
+		wg.Wait()
+		return
+	}
 	go func() {
-		defer wg.Done()
-		f(s.LAN)
-	}()
-	go func() {
-		defer wg.Done()
 		f(s.WAN)
 	}()
-	wg.Wait()
+	go func() {
+		f(s.LAN)
+	}()
 }
 
 // ProvideOnce sends provider records for the specified keys to both DHT swarms
@@ -104,7 +113,7 @@ func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider)) {
 // Add the supplied multihashes to the provide queue, and return immediately.
 // The provide operation happens asynchronously.
 func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
-	s.runOnBoth(func(p *provider.SweepingProvider) {
+	s.runOnBoth(false, func(p *provider.SweepingProvider) {
 		p.ProvideOnce(keys...)
 	})
 }
@@ -128,7 +137,7 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 		return
 	}
 
-	s.runOnBoth(func(p *provider.SweepingProvider) {
+	s.runOnBoth(false, func(p *provider.SweepingProvider) {
 		p.AddToSchedule(newKeys...)
 	})
 
@@ -160,7 +169,7 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 // reprovided as scheduled.
 func (s *SweepingProvider) Clear() int {
 	var total atomic.Int32
-	s.runOnBoth(func(p *provider.SweepingProvider) {
+	s.runOnBoth(true, func(p *provider.SweepingProvider) {
 		total.Add(int32(p.Clear()))
 	})
 	return int(total.Load())
@@ -174,7 +183,7 @@ func (s *SweepingProvider) Clear() int {
 // This is done automatically during the reprovide operation if a region has no
 // keys.
 func (s *SweepingProvider) RefreshSchedule() {
-	s.runOnBoth(func(p *provider.SweepingProvider) {
+	go s.runOnBoth(false, func(p *provider.SweepingProvider) {
 		p.RefreshSchedule()
 	})
 }

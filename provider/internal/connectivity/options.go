@@ -11,6 +11,11 @@ type config struct {
 	clock                clock.Clock
 	onlineCheckInterval  time.Duration // minimum check interval when online
 	offlineCheckInterval time.Duration // periodic check frequency when offline
+
+	offlineDelay time.Duration
+
+	onOffline func()
+	onOnline  func()
 }
 
 func (cfg *config) apply(opts ...Option) error {
@@ -60,6 +65,30 @@ func WithOfflineCheckInterval(d time.Duration) Option {
 			return fmt.Errorf("offline check interval must be positive, got %s", d)
 		}
 		cfg.offlineCheckInterval = d
+		return nil
+	}
+}
+
+func WithOfflineDelay(d time.Duration) Option {
+	return func(cfg *config) error {
+		if d < 0 {
+			return fmt.Errorf("offline delay must be non-negative, got %s", d)
+		}
+		cfg.offlineDelay = d
+		return nil
+	}
+}
+
+func WithOnOffline(f func()) Option {
+	return func(cfg *config) error {
+		cfg.onOffline = f
+		return nil
+	}
+}
+
+func WithOnOnline(f func()) Option {
+	return func(cfg *config) error {
+		cfg.onOnline = f
 		return nil
 	}
 }

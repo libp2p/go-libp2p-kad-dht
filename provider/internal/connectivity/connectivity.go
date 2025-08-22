@@ -2,10 +2,17 @@ package connectivity
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/filecoin-project/go-clock"
+)
+
+type ConnectivityState uint8
+
+const (
+	Online ConnectivityState = iota
+	Offline
+	Disconnected
 )
 
 // ConnectivityChecker provides a thread-safe way to verify the connectivity of
@@ -25,17 +32,21 @@ type ConnectivityChecker struct {
 	done      chan struct{}
 	closed    bool
 	closeOnce sync.Once
+	mutex     sync.Mutex
 
-	online atomic.Bool
-	mutex  sync.Mutex
+	state      ConnectivityState
+	stateMutex sync.RWMutex
 
 	clock                clock.Clock
 	lastCheck            time.Time
 	onlineCheckInterval  time.Duration // minimum check interval when online
 	offlineCheckInterval time.Duration // periodic check frequency when offline
 
-	checkFunc        func() bool // function to check whether node is online
-	backOnlineNotify func()      // callback when node comes back online
+	checkFunc func() bool // function to check whether node is online
+
+	onOffline    func()
+	onOnline     func()
+	offlineDelay time.Duration
 }
 
 // New creates a new ConnectivityChecker instance.
@@ -47,13 +58,27 @@ func New(checkFunc func() bool, backOnlineNotify func(), opts ...Option) (*Conne
 	}
 	c := &ConnectivityChecker{
 		done:                 make(chan struct{}),
+		checkFunc:            checkFunc,
+		state:                Offline,
 		clock:                cfg.clock,
 		onlineCheckInterval:  cfg.onlineCheckInterval,
 		offlineCheckInterval: cfg.offlineCheckInterval,
-		checkFunc:            checkFunc,
-		backOnlineNotify:     backOnlineNotify,
+		onOffline:            cfg.onOffline,
+		onOnline:             cfg.onOnline,
 	}
-	c.online.Store(true) // Start with the node considered online
+
+	// Start probing until the node comes online
+	c.mutex.Lock()
+	go func() {
+		defer c.mutex.Unlock()
+
+		if c.probe() {
+			// Node is already online
+			return
+		}
+		// Wait for node to come online
+		c.probeLoop(true)
+	}()
 
 	return c, nil
 }
@@ -71,7 +96,21 @@ func (c *ConnectivityChecker) Close() error {
 
 // IsOnline returns true if the node is currently online, false otherwise.
 func (c *ConnectivityChecker) IsOnline() bool {
-	return c.online.Load()
+	c.stateMutex.RLock()
+	defer c.stateMutex.RUnlock()
+	return c.state == Online
+}
+
+func (c *ConnectivityChecker) IsOffline() bool {
+	c.stateMutex.RLock()
+	defer c.stateMutex.RUnlock()
+	return c.state == Offline
+}
+
+func (c *ConnectivityChecker) State() ConnectivityState {
+	c.stateMutex.RLock()
+	defer c.stateMutex.RUnlock()
+	return c.state
 }
 
 // TriggerCheck triggers an asynchronous connectivity check.
@@ -91,10 +130,13 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		c.mutex.Unlock()
 		return
 	}
-	if c.online.Load() && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
+	c.stateMutex.RLock()
+	if c.state == Online && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
+		c.stateMutex.RUnlock()
 		c.mutex.Unlock()
 		return // last check was too recent
 	}
+	c.stateMutex.RUnlock()
 
 	go func() {
 		defer c.mutex.Unlock()
@@ -105,27 +147,56 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		}
 
 		// Node is offline, start periodic checks
-		c.online.Store(false)
+		c.stateMutex.Lock()
+		c.state = Disconnected
+		c.stateMutex.Unlock()
 
-		ticker := c.clock.Ticker(c.offlineCheckInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-c.done:
-				return
-			case <-ticker.C:
-				if c.checkFunc() {
-					select {
-					case <-c.done:
-					default:
-						// Node is back online.
-						c.online.Store(true)
-						c.lastCheck = c.clock.Now()
-						c.backOnlineNotify()
-					}
-					return
-				}
-			}
-		}
+		c.probeLoop(false)
 	}()
+}
+
+func (c *ConnectivityChecker) probeLoop(init bool) {
+	offlineTimer := c.clock.Timer(c.offlineDelay)
+	if init {
+		offlineTimer.Stop()
+	}
+
+	ticker := c.clock.Ticker(c.offlineCheckInterval)
+	// TODO: exponential backoff
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+			if c.probe() {
+				return
+			}
+		case <-offlineTimer.C:
+			// Node is now offline
+			c.stateMutex.Lock()
+			c.state = Offline
+			c.stateMutex.Unlock()
+
+			c.onOffline()
+		}
+	}
+}
+
+func (c *ConnectivityChecker) probe() bool {
+	if c.checkFunc() {
+		select {
+		case <-c.done:
+		default:
+			// Node is back online.
+			c.stateMutex.Lock()
+			c.state = Online
+			c.stateMutex.Unlock()
+
+			c.lastCheck = c.clock.Now()
+			c.onOnline()
+		}
+		return true
+	}
+	return false
 }

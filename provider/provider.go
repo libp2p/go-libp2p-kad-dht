@@ -46,6 +46,10 @@ const (
 	// the measurement, but adds network load and latency before the initial
 	// provide request can be performed.
 	initialGetClosestPeersCount = 4
+	// defaultPrefixLenValidity is the validity of the cached average region
+	// prefix length computed from the schedule. It allows to avoid recomputing
+	// the average everytime we need to average prefix length.
+	defaultPrefixLenValidity = 5 * time.Minute
 
 	// retryInterval is the interval at which the provider tries to perform any
 	// previously failed work (provide or reprovide).
@@ -197,7 +201,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		}),
 		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
 
-		avgPrefixLenValidity: 5 * time.Minute,
+		avgPrefixLenValidity: defaultPrefixLenValidity,
 		cachedAvgPrefixLen:   -1,
 		avgPrefixLenReady:    make(chan struct{}),
 
@@ -380,7 +384,7 @@ func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 		} else {
 			timeUntilReprovide := s.timeUntil(next.Data)
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
-			logger.Warnf("next scheduled prefix now is %s", s.scheduleCursor)
+			logger.Debugf("next scheduled prefix now is %s", s.scheduleCursor)
 		}
 	}
 }
@@ -1083,7 +1087,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
-		logger.Errorf("failed to provide any region for prefix %s", prefix)
+		logger.Warnf("failed to provide any region for prefix %s", prefix)
 	}
 }
 
@@ -1155,12 +1159,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, true, periodicReprovide) {
-		logger.Errorf("failed to reprovide any region for prefix %s", prefix)
+		logger.Warnf("failed to reprovide any region for prefix %s", prefix)
 	}
 }
 
 func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash, err error) {
-	logger.Error(err)
+	logger.Warn(err)
 	// Put keys back to the provide queue.
 	s.provideQueue.Enqueue(prefix, keys...)
 
@@ -1168,7 +1172,7 @@ func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash,
 }
 
 func (s *SweepingProvider) failedReprovide(prefix bitstr.Key, err error) {
-	logger.Error(err)
+	logger.Warn(err)
 	// Put prefix in the reprovide queue.
 	s.reprovideQueue.Enqueue(prefix)
 

@@ -3,8 +3,11 @@ module github.com/libp2p/go-libp2p-kad-dht
 go 1.24
 
 require (
+	github.com/filecoin-project/go-clock v0.1.0
+	github.com/gammazero/deque v1.0.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
+	github.com/guillaumemichel/reservedpool v0.2.0
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/ipfs/boxo v0.33.1
 	github.com/ipfs/go-cid v0.5.0
@@ -13,7 +16,7 @@ require (
 	github.com/ipfs/go-log/v2 v2.8.0
 	github.com/ipfs/go-test v0.2.2
 	github.com/libp2p/go-libp2p v0.43.0
-	github.com/libp2p/go-libp2p-kbucket v0.7.0
+	github.com/libp2p/go-libp2p-kbucket v0.8.0
 	github.com/libp2p/go-libp2p-record v0.3.1
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.5
 	github.com/libp2p/go-libp2p-testing v0.12.0
@@ -25,6 +28,7 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-multistream v0.6.1
+	github.com/probe-lab/go-libdht v0.2.1
 	github.com/stretchr/testify v1.10.0
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opentelemetry.io/otel v1.37.0
@@ -44,7 +48,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
-	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect

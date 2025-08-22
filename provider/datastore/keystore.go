@@ -238,16 +238,13 @@ func (s *KeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error
 		return fmt.Errorf("KeyStore empty failed during reset: %w", err)
 	}
 	keys := make([]mh.Multihash, 0, s.gcBatchSize)
-	i := 0
 	for c := range keysChan {
 		keys = append(keys, c.Hash())
-		i++
-		if i == s.gcBatchSize {
+		if len(keys) == s.gcBatchSize {
 			_, err = s.Put(ctx, keys...)
 			if err != nil {
 				return fmt.Errorf("KeyStore put failed during reset: %w", err)
 			}
-			i = 0
 			keys = keys[:0]
 		}
 	}

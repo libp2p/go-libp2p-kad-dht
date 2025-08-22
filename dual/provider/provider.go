@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 
 	"github.com/ipfs/go-cid"
@@ -86,25 +85,17 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 // parallel and waits for both to complete.
 func (s *SweepingProvider) runOnBoth(wait bool, f func(*provider.SweepingProvider)) {
 	if wait {
-		wg := sync.WaitGroup{}
-		wg.Add(2)
+		done := make(chan struct{})
 		go func() {
-			defer wg.Done()
+			defer close(done)
 			f(s.LAN)
 		}()
-		go func() {
-			defer wg.Done()
-			f(s.WAN)
-		}()
-		wg.Wait()
+		f(s.WAN)
+		<-done
 		return
 	}
-	go func() {
-		f(s.WAN)
-	}()
-	go func() {
-		f(s.LAN)
-	}()
+	go f(s.LAN)
+	go f(s.WAN)
 }
 
 // ProvideOnce sends provider records for the specified keys to both DHT swarms

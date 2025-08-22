@@ -46,6 +46,7 @@ type KeyStore struct {
 	prefixLen int
 
 	gcFunc      KeyChanFunc // optional function to get keys for garbage collection
+	gcFuncLk    sync.Mutex
 	gcInterval  time.Duration
 	gcBatchSize int
 }
@@ -103,17 +104,6 @@ func WithDatastorePrefix(base string) KeyStoreOption {
 	}
 }
 
-// WithGCFunc sets the function periodically used to garbage collect keys that
-// shouldn't be provided anymore. During the garbage collection process, the
-// store is entirely purged, and is repopulated from the keys supplied by the
-// KeyChanFunc.
-func WithGCFunc(gcFunc KeyChanFunc) KeyStoreOption {
-	return func(cfg *keyStoreCfg) error {
-		cfg.gcFunc = gcFunc
-		return nil
-	}
-}
-
 // WithGCInterval defines the interval at which the KeyStore is garbage
 // collected. During the garbage collection process, the store is entirely
 // purged, and is repopulated from the keys supplied by the gcFunc.
@@ -141,6 +131,33 @@ func WithGCBatchSize(size int) KeyStoreOption {
 	}
 }
 
+// WithGCFunc sets the function periodically used to garbage collect keys that
+// shouldn't be provided anymore. During the garbage collection process, the
+// store is entirely purged, and is repopulated from the keys supplied by the
+// KeyChanFunc.
+func WithGCFunc(gcFunc KeyChanFunc) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
+		cfg.gcFunc = gcFunc
+		return nil
+	}
+}
+
+func (s *KeyStore) SetGCFunc(gcFunc KeyChanFunc) {
+	if gcFunc == nil {
+		return
+	}
+	s.gcFuncLk.Lock()
+	defer s.gcFuncLk.Unlock()
+
+	startGC := s.gcFunc == nil && s.gcInterval > 0
+	s.gcFunc = gcFunc
+
+	if startGC {
+		s.wg.Add(1)
+		go s.runGC()
+	}
+}
+
 // NewKeyStore creates a new KeyStore backed by the provided datastore.
 func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
 	var cfg keyStoreCfg
@@ -161,6 +178,7 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
 		gcBatchSize: cfg.gcBatchSize,
 	}
 	if cfg.gcFunc != nil && cfg.gcInterval > 0 {
+		keyStore.wg.Add(1)
 		go keyStore.runGC()
 	}
 	return &keyStore, nil
@@ -188,7 +206,6 @@ func (s *KeyStore) closed() bool {
 // resets the state of the KeyStore to match the state returned by the GC
 // function.
 func (s *KeyStore) runGC() {
-	s.wg.Add(1)
 	defer s.wg.Done()
 	ticker := time.NewTicker(s.gcInterval)
 	for {
@@ -196,7 +213,9 @@ func (s *KeyStore) runGC() {
 		case <-s.done:
 			return
 		case <-ticker.C:
+			s.gcFuncLk.Lock()
 			keysChan, err := s.gcFunc(context.Background())
+			s.gcFuncLk.Unlock()
 			if err != nil {
 				logger.Errorf("garbage collection failed: %v", err)
 				continue
@@ -218,17 +237,14 @@ func (s *KeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error
 	if err != nil {
 		return fmt.Errorf("KeyStore empty failed during reset: %w", err)
 	}
-	keys := make([]mh.Multihash, s.gcBatchSize)
-	i := 0
+	keys := make([]mh.Multihash, 0, s.gcBatchSize)
 	for c := range keysChan {
-		keys[i] = c.Hash()
-		i++
-		if i == s.gcBatchSize {
+		keys = append(keys, c.Hash())
+		if len(keys) == s.gcBatchSize {
 			_, err = s.Put(ctx, keys...)
 			if err != nil {
 				return fmt.Errorf("KeyStore put failed during reset: %w", err)
 			}
-			i = 0
 			keys = keys[:0]
 		}
 	}
@@ -245,7 +261,7 @@ func (s *KeyStore) dsKey(prefix bitstr.Key) ds.Key {
 
 // putLocked stores the provided keys while assuming s.lk is already held.
 func (s *KeyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
-	groups := make(map[bitstr.Key][]mh.Multihash)
+	groups := make(map[bitstr.Key][]mh.Multihash, len(keys))
 	for _, h := range keys {
 		k := keyspace.MhToBit256(h)
 		bs := bitstr.Key(key.BitString(k)[:s.prefixLen])

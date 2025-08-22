@@ -50,12 +50,15 @@ func FindPrefixOfKey[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D],
 }
 
 func findPrefixOfKeyAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], k K1, depth int) (K0, bool) {
+	var zero K0
 	if t.IsLeaf() {
 		if !t.HasKey() {
-			var zero K0
 			return zero, false
 		}
 		return *t.Key(), key.CommonPrefixLength(*t.Key(), k) == (*t.Key()).BitLen()
+	}
+	if depth == k.BitLen() {
+		return zero, false
 	}
 	b := int(k.Bit(depth))
 	return findPrefixOfKeyAtDepth(t.Branch(b), k, depth+1)

@@ -50,7 +50,7 @@ type ConnectivityChecker struct {
 }
 
 // New creates a new ConnectivityChecker instance.
-func New(checkFunc func() bool, backOnlineNotify func(), opts ...Option) (*ConnectivityChecker, error) {
+func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 	var cfg config
 	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
 	if err != nil {
@@ -65,6 +65,7 @@ func New(checkFunc func() bool, backOnlineNotify func(), opts ...Option) (*Conne
 		offlineCheckInterval: cfg.offlineCheckInterval,
 		onOffline:            cfg.onOffline,
 		onOnline:             cfg.onOnline,
+		offlineDelay:         cfg.offlineDelay,
 	}
 
 	// Start probing until the node comes online
@@ -178,7 +179,9 @@ func (c *ConnectivityChecker) probeLoop(init bool) {
 			c.state = Offline
 			c.stateMutex.Unlock()
 
-			c.onOffline()
+			if c.onOffline != nil {
+				c.onOffline()
+			}
 		}
 	}
 }
@@ -194,7 +197,9 @@ func (c *ConnectivityChecker) probe() bool {
 			c.stateMutex.Unlock()
 
 			c.lastCheck = c.clock.Now()
-			c.onOnline()
+			if c.onOnline != nil {
+				c.onOnline()
+			}
 		}
 		return true
 	}

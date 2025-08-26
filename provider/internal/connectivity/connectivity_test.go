@@ -59,7 +59,6 @@ func TestConnectivityChecker_New(t *testing.T) {
 		checker, err := New(checkFunc,
 			WithClock(mockClock),
 			WithOnlineCheckInterval(30*time.Second),
-			WithOfflineCheckInterval(10*time.Second),
 		)
 		require.NoError(t, err)
 		defer checker.Close()
@@ -72,11 +71,6 @@ func TestConnectivityChecker_New(t *testing.T) {
 
 		_, err := New(checkFunc,
 			WithOnlineCheckInterval(-1*time.Second),
-		)
-		assert.Error(t, err)
-
-		_, err = New(checkFunc,
-			WithOfflineCheckInterval(0),
 		)
 		assert.Error(t, err)
 
@@ -173,8 +167,7 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 
 		checker, err := New(checkFunc,
 			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
-			WithOfflineCheckInterval(20*time.Millisecond),
-			WithOfflineDelay(100*time.Millisecond), // Short delay for testing
+			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
 			WithOnOnline(onlineNotify),
 			WithOnOffline(offlineNotify),
 		)
@@ -220,7 +213,6 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 
 		checker, err := New(checkFunc,
 			WithClock(mockClock),
-			WithOfflineCheckInterval(30*time.Second),
 			WithOnOnline(onlineNotify),
 		)
 		require.NoError(t, err)
@@ -305,7 +297,6 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 
 		checker, err := New(checkFunc,
 			WithClock(mockClock),
-			WithOfflineCheckInterval(30*time.Second),
 			WithOnOnline(onlineNotify),
 		)
 		require.NoError(t, err)
@@ -350,7 +341,6 @@ func TestConnectivityChecker_StateTransitions(t *testing.T) {
 		checker, err := New(checkFunc,
 			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval to allow quick trigger
 			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
-			WithOfflineCheckInterval(20*time.Millisecond),
 		)
 		require.NoError(t, err)
 		checker.Start()
@@ -393,8 +383,7 @@ func TestConnectivityChecker_Callbacks(t *testing.T) {
 
 		checker, err := New(checkFunc,
 			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
-			WithOfflineCheckInterval(20*time.Millisecond),
-			WithOfflineDelay(100*time.Millisecond), // Short delay for testing
+			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
 			WithOnOnline(onlineNotify),
 			WithOnOffline(offlineNotify),
 		)
@@ -448,7 +437,6 @@ func TestConnectivityChecker_Callbacks(t *testing.T) {
 		checker, err := New(checkFunc,
 			WithOnOnline(safeCallback),
 			WithOnOffline(safeCallback),
-			WithOfflineCheckInterval(10*time.Millisecond),
 			WithOfflineDelay(50*time.Millisecond),
 		)
 		require.NoError(t, err)
@@ -478,9 +466,7 @@ func TestConnectivityChecker_EdgeCases(t *testing.T) {
 			return false
 		}
 
-		checker, err := New(checkFunc,
-			WithOfflineCheckInterval(10*time.Millisecond),
-		)
+		checker, err := New(checkFunc)
 		require.NoError(t, err)
 		checker.Start()
 
@@ -578,7 +564,6 @@ func TestConnectivityChecker_Options(t *testing.T) {
 		checker, err := New(checkFunc,
 			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
 			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
-			WithOfflineCheckInterval(20*time.Millisecond),
 			WithOnOffline(offlineNotify),
 		)
 		require.NoError(t, err)
@@ -623,7 +608,6 @@ func TestConnectivityChecker_Options(t *testing.T) {
 		checker, err := New(checkFunc,
 			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
 			WithOfflineDelay(0),
-			WithOfflineCheckInterval(10*time.Millisecond),
 			WithOnOffline(offlineNotify),
 		)
 		require.NoError(t, err)

@@ -604,7 +604,6 @@ func TestHandleReprovide(t *testing.T) {
 		func() bool { return online.Load() },
 		connectivity.WithClock(mockClock),
 		connectivity.WithOfflineDelay(offlineDelay),
-		connectivity.WithOfflineCheckInterval(connectivityCheckInterval),
 		connectivity.WithOnlineCheckInterval(connectivityCheckInterval),
 	)
 	require.NoError(t, err)
@@ -800,7 +799,6 @@ func TestProvideOnce(t *testing.T) {
 		WithClock(clk),
 		WithOfflineDelay(offlineDelay),
 		WithConnectivityCheckOnlineInterval(checkInterval),
-		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
 	prov, err := New(opts...)
 	require.NoError(t, err)
@@ -812,34 +810,32 @@ func TestProvideOnce(t *testing.T) {
 	err = prov.ProvideOnce(h)
 	require.ErrorIs(t, err, ErrOffline)
 	require.True(t, prov.provideQueue.IsEmpty())
-	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
+	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline 0")
 
 	// Wait for provider to come online
 	online.Store(true)
 	clk.Add(checkInterval) // trigger connectivity check
-	waitUntil(t, func() bool { return prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be online")
+	waitUntil(t, prov.connectivity.IsOnline, 200*time.Millisecond, "connectivity should be online 0")
 
-	// Set the reprovider as offline
+	// Set the provider as disconnected
 	online.Store(false)
-	prov.connectivity.TriggerCheck()
-	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
 	err = prov.ProvideOnce(h)
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond) // wait for ProvideOnce to finish
-	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
+	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline 1")
 	// Ensure the key is in the provide queue
 	_, keys, ok := prov.provideQueue.Dequeue()
 	require.True(t, ok)
 	require.Equal(t, 1, len(keys))
 	require.Equal(t, h, keys[0])
 
-	// Set the reprovider as online
+	// Set the provider as online
 	online.Store(true)
-	clk.Add(checkInterval)           // trigger connectivity check
-	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
+	clk.Add(checkInterval) // trigger connectivity check
+	waitUntil(t, prov.connectivity.IsOnline, 200*time.Millisecond, "connectivity should be online 1")
 	err = prov.ProvideOnce(h)
 	require.NoError(t, err)
-	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 100*time.Millisecond, "waiting for ProvideOnce to finish")
+	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 200*time.Millisecond, "waiting for ProvideOnce to finish")
 }
 
 func TestStartProvidingSingle(t *testing.T) {
@@ -891,7 +887,6 @@ func TestStartProvidingSingle(t *testing.T) {
 		WithClock(mockClock),
 		WithOfflineDelay(offlineDelay),
 		WithConnectivityCheckOnlineInterval(checkInterval),
-		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
 	prov, err := New(opts...)
 	require.NoError(t, err)
@@ -1014,11 +1009,12 @@ func TestStartProvidingMany(t *testing.T) {
 		}),
 		WithClock(mockClock),
 	}
-	reprovider, err := New(opts...)
+	prov, err := New(opts...)
 	require.NoError(t, err)
-	defer reprovider.Close()
+	defer prov.Close()
+	waitUntil(t, prov.connectivity.IsOnline, 100*time.Millisecond, "connectivity should be online")
 
-	err = reprovider.StartProviding(true, mhs...)
+	err = prov.StartProviding(true, mhs...)
 	require.NoError(t, err)
 	waitUntil(t, func() bool { return provideCount.Load() == int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for ProvideMany to finish")
 
@@ -1162,7 +1158,6 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 		WithClock(mockClock),
 		WithOfflineDelay(offlineDelay),
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
-		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
 	prov, err := New(opts...)
 	require.NoError(t, err)
@@ -1308,4 +1303,124 @@ func TestRefreshSchedule(t *testing.T) {
 		ok, _ = trie.Find(prov.schedule, p)
 		require.True(t, ok)
 	}
+}
+
+func TestOperationsOffline(t *testing.T) {
+	pid, err := peer.Decode("12BoooooPEER")
+	require.NoError(t, err)
+
+	mockClock := clock.NewMock()
+	checkInterval := time.Second
+	offlineDelay := time.Minute
+
+	online := atomic.Bool{} // false, start offline
+
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			if online.Load() {
+				return []peer.ID{pid}, nil
+			}
+			return nil, errors.New("offline")
+		},
+	}
+	opts := []Option{
+		WithReprovideInterval(time.Hour),
+		WithReplicationFactor(1),
+		WithMaxWorkers(1),
+		WithDedicatedBurstWorkers(0),
+		WithDedicatedPeriodicWorkers(0),
+		WithPeerID(pid),
+		WithRouter(router),
+		WithMessageSender(&mockMsgSender{}),
+		WithSelfAddrs(func() []ma.Multiaddr {
+			addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+			require.NoError(t, err)
+			return []ma.Multiaddr{addr}
+		}),
+		WithClock(mockClock),
+		WithOfflineDelay(offlineDelay),
+		WithConnectivityCheckOnlineInterval(checkInterval),
+	}
+	prov, err := New(opts...)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	k := random.Multihashes(1)[0]
+
+	// Not bootstrapped yet, OFFLINE
+	err = prov.ProvideOnce(k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.StartProviding(false, k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.StartProviding(true, k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.RefreshSchedule()
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.AddToSchedule(k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.StopProviding(k) // no error for StopProviding
+	require.NoError(t, err)
+
+	online.Store(true)
+	mockClock.Add(checkInterval) // trigger connectivity check
+	waitUntil(t, prov.connectivity.IsOnline, 100*time.Millisecond, "connectivity should be online")
+
+	// ONLINE, operations shouldn't error
+	err = prov.ProvideOnce(k)
+	require.NoError(t, err)
+	err = prov.StartProviding(false, k)
+	require.NoError(t, err)
+	err = prov.StartProviding(true, k)
+	require.NoError(t, err)
+	err = prov.RefreshSchedule()
+	require.NoError(t, err)
+	err = prov.AddToSchedule(k)
+	require.NoError(t, err)
+	err = prov.StopProviding(k) // no error for StopProviding
+	require.NoError(t, err)
+
+	online.Store(false)
+	mockClock.Add(checkInterval) // trigger connectivity check
+	prov.connectivity.TriggerCheck()
+	waitUntil(t, func() bool { return !prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be offline")
+
+	// DISCONNECTED, operations shoudln't error until node is OFFLINE
+	err = prov.ProvideOnce(k)
+	require.NoError(t, err)
+	err = prov.StartProviding(false, k)
+	require.NoError(t, err)
+	err = prov.StartProviding(true, k)
+	require.NoError(t, err)
+	err = prov.RefreshSchedule()
+	require.NoError(t, err)
+	err = prov.AddToSchedule(k)
+	require.NoError(t, err)
+	err = prov.StopProviding(k) // no error for StopProviding
+	require.NoError(t, err)
+
+	prov.provideQueue.Enqueue("0000", k)
+	require.Equal(t, 1, prov.provideQueue.Size())
+	mockClock.Add(offlineDelay)
+	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
+
+	// OFFLINE
+	// Verify that provide queue has been emptied by the onOffline callback
+	require.True(t, prov.provideQueue.IsEmpty())
+	prov.avgPrefixLenLk.Lock()
+	require.Equal(t, -1, prov.cachedAvgPrefixLen)
+	prov.avgPrefixLenLk.Unlock()
+
+	// All operations should error again
+	err = prov.ProvideOnce(k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.StartProviding(false, k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.StartProviding(true, k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.RefreshSchedule()
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.AddToSchedule(k)
+	require.ErrorIs(t, err, ErrOffline)
+	err = prov.StopProviding(k) // no error for StopProviding
+	require.NoError(t, err)
 }

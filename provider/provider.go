@@ -199,7 +199,6 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		connectivity.WithClock(cfg.clock),
 		connectivity.WithOfflineDelay(cfg.offlineDelay),
 		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
-		connectivity.WithOfflineCheckInterval(cfg.connectivityCheckOfflineInterval),
 	)
 	if err != nil {
 		cancelCtx()
@@ -897,6 +896,9 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 		}
 	}
 
+	if s.isOffline() {
+		return ErrOffline
+	}
 	prefixes, err := s.groupAndScheduleKeysByPrefix(keys, reprovide)
 	if err != nil {
 		return err
@@ -971,6 +973,12 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 	return prefixes, nil
 }
 
+func (s *SweepingProvider) isOffline() bool {
+	s.avgPrefixLenLk.Lock()
+	defer s.avgPrefixLenLk.Unlock()
+	return s.cachedAvgPrefixLen == -1
+}
+
 func (s *SweepingProvider) onOffline() {
 	s.provideQueue.Clear()
 
@@ -980,7 +988,7 @@ func (s *SweepingProvider) onOffline() {
 }
 
 func (s *SweepingProvider) onOnline() {
-	if !s.approxPrefixLenRunning.TryLock() {
+	if s.closed() || !s.approxPrefixLenRunning.TryLock() {
 		return
 	}
 	s.wg.Add(1)
@@ -1001,7 +1009,7 @@ func (s *SweepingProvider) onOnline() {
 // This function is guarded by s.lateReprovideRunning, ensuring the function
 // cannot be called again while it is working on reproviding late regions.
 func (s *SweepingProvider) catchupPendingWork() {
-	if !s.lateReprovideRunning.TryLock() {
+	if s.closed() || !s.lateReprovideRunning.TryLock() {
 		return
 	}
 	s.wg.Add(2)
@@ -1358,6 +1366,12 @@ func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 
 // ProvideOnce only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
+//
+// Returns an error if the keys couldn't be added to the provide queue. This
+// can happen if the provider is closed or if the node is currently Offline
+// (either never bootstrapped, or disconnected since more than `OfflineDelay`).
+// The schedule and provide queue depend on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
@@ -1369,6 +1383,12 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 // already provided in the past. The keys will be periodically reprovided until
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
+//
+// Returns an error if the keys couldn't be added to the provide queue. This
+// can happen if the provider is closed or if the node is currently Offline
+// (either never bootstrapped, or disconnected since more than `OfflineDelay`).
+// The schedule and provide queue depend on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
@@ -1424,9 +1444,17 @@ func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, 
 
 // AddToSchedule makes sure the prefixes associated with the supplied keys are
 // scheduled to be reprovided.
+//
+// Returns an error if the provider is closed or if the node is currently
+// Offline (either never bootstrapped, or disconnected since more than
+// `OfflineDelay`). The schedule depends on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
+	}
+	if s.isOffline() {
+		return ErrOffline
 	}
 	_, err := s.groupAndScheduleKeysByPrefix(keys, true)
 	return err
@@ -1439,6 +1467,11 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 // This function doesn't remove prefixes that have no keys from the schedule.
 // This is done automatically during the reprovide operation if a region has no
 // keys.
+//
+// Returns an error if the provider is closed or if the node is currently
+// Offline (either never bootstrapped, or disconnected since more than
+// `OfflineDelay`). The schedule depends on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) RefreshSchedule() error {
 	if s.closed() {
 		return ErrClosed

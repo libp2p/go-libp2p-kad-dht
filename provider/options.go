@@ -21,14 +21,14 @@ const (
 	// since regions can grow and shrink depending on the network churn.
 	DefaultMaxReprovideDelay = 1 * time.Hour
 
+	// DefaultOfflineDelay is the default delay after which a disconnected node
+	// is considered as Offline.
+	DefaultOfflineDelay = 2 * time.Hour
 	// DefaultConnectivityCheckOnlineInterval is the default minimum interval for
 	// checking whether the node is still online. Such a check is performed when
 	// a network operation fails, and the ConnectivityCheckOnlineInterval limits
 	// how often such a check is performed.
 	DefaultConnectivityCheckOnlineInterval = 1 * time.Minute
-	// DefaultConnectivityCheckOfflineInterval is the default interval for
-	// checking if the offline node has come online again.
-	DefaultConnectivityCheckOfflineInterval = 5 * time.Minute
 )
 
 type config struct {
@@ -36,9 +36,8 @@ type config struct {
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
 
-	offlineDelay                     time.Duration
-	connectivityCheckOnlineInterval  time.Duration
-	connectivityCheckOfflineInterval time.Duration
+	offlineDelay                    time.Duration
+	connectivityCheckOnlineInterval time.Duration
 
 	peerid peer.ID
 	router KadClosestPeersRouter
@@ -91,8 +90,8 @@ var DefaultConfig = func(cfg *config) error {
 	cfg.replicationFactor = amino.DefaultBucketSize
 	cfg.reprovideInterval = amino.DefaultReprovideInterval
 	cfg.maxReprovideDelay = DefaultMaxReprovideDelay
+	cfg.offlineDelay = DefaultOfflineDelay
 	cfg.connectivityCheckOnlineInterval = DefaultConnectivityCheckOnlineInterval
-	cfg.connectivityCheckOfflineInterval = DefaultConnectivityCheckOfflineInterval
 
 	cfg.clock = clock.New()
 
@@ -167,15 +166,6 @@ func WithOfflineDelay(d time.Duration) Option {
 func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.connectivityCheckOnlineInterval = d
-		return nil
-	}
-}
-
-// WithConnectivityCheckOfflineInterval sets the interval for periodically
-// checking whether the offline node has come online again.
-func WithConnectivityCheckOfflineInterval(d time.Duration) Option {
-	return func(cfg *config) error {
-		cfg.connectivityCheckOfflineInterval = d
 		return nil
 	}
 }

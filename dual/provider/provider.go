@@ -59,7 +59,6 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
 			provider.WithOfflineDelay(cfg.offlineDelay[i]),
 			provider.WithConnectivityCheckOnlineInterval(cfg.connectivityCheckOnlineInterval[i]),
-			provider.WithConnectivityCheckOfflineInterval(cfg.connectivityCheckOfflineInterval[i]),
 			provider.WithMaxWorkers(cfg.maxWorkers[i]),
 			provider.WithDedicatedPeriodicWorkers(cfg.dedicatedPeriodicWorkers[i]),
 			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
@@ -102,8 +101,14 @@ func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider) error) e
 // ProvideOnce sends provider records for the specified keys to both DHT swarms
 // only once. It does not automatically reprovide those keys afterward.
 //
-// Add the supplied multihashes to the provide queue, and return immediately.
+// Add the supplied multihashes to the provide queues, and return right after.
 // The provide operation happens asynchronously.
+//
+// Returns an error if the keys couldn't be added to the provide queue. This
+// can happen if the provider is closed or if the node is currently Offline
+// (either never bootstrapped, or disconnected since more than `OfflineDelay`).
+// The schedule and provide queue depend on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 	return s.runOnBoth(func(p *provider.SweepingProvider) error {
 		return p.ProvideOnce(keys...)
@@ -121,6 +126,12 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 //
 // This operation is asynchronous, it returns as soon as the `keys` are added
 // to the provide queue, and provides happens asynchronously.
+//
+// Returns an error if the keys couldn't be added to the provide queue. This
+// can happen if the provider is closed or if the node is currently Offline
+// (either never bootstrapped, or disconnected since more than `OfflineDelay`).
+// The schedule and provide queue depend on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) error {
 	ctx := context.Background()
 	newKeys, err := s.keyStore.Put(ctx, keys...)
@@ -173,6 +184,11 @@ func (s *SweepingProvider) Clear() int {
 // This function doesn't remove prefixes that have no keys from the schedule.
 // This is done automatically during the reprovide operation if a region has no
 // keys.
+//
+// Returns an error if the provider is closed or if the node is currently
+// Offline (either never bootstrapped, or disconnected since more than
+// `OfflineDelay`). The schedule depends on the network size, hence recent
+// network connectivity is essential.
 func (s *SweepingProvider) RefreshSchedule() error {
 	return s.runOnBoth(func(p *provider.SweepingProvider) error {
 		return p.RefreshSchedule()

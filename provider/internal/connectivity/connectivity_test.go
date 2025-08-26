@@ -36,9 +36,6 @@ func TestConnectivityChecker_New(t *testing.T) {
 		eventually(t, func() bool { return !checker.IsOnline() }, 20*time.Millisecond, "checker should be offline")
 
 		assert.False(t, checker.IsOnline())
-		checker.stateMutex.Lock()
-		assert.Equal(t, Offline, checker.state)
-		checker.stateMutex.Unlock()
 	})
 
 	t.Run("starts online when checkFunc returns true", func(t *testing.T) {
@@ -52,9 +49,7 @@ func TestConnectivityChecker_New(t *testing.T) {
 		// Give some time for initialization
 		eventually(t, checker.IsOnline, 20*time.Millisecond, "checker should be online")
 
-		checker.stateMutex.Lock()
-		assert.Equal(t, Online, checker.state)
-		checker.stateMutex.Unlock()
+		require.True(t, checker.IsOnline())
 	})
 
 	t.Run("with custom options", func(t *testing.T) {
@@ -200,17 +195,14 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 
 		// Should be in Disconnected state
-		checker.stateMutex.Lock()
-		assert.Equal(t, Disconnected, checker.state)
-		checker.stateMutex.Unlock()
+		require.False(t, checker.IsOnline())
+		assert.Equal(t, offlineCallCount.Load(), int32(0))
 
 		// Wait for offline delay to pass
 		time.Sleep(150 * time.Millisecond)
 
 		// Should be offline and callback should be called
-		checker.stateMutex.Lock()
-		assert.Equal(t, Offline, checker.state)
-		checker.stateMutex.Unlock()
+		require.False(t, checker.IsOnline())
 		assert.Greater(t, offlineCallCount.Load(), int32(0))
 	})
 
@@ -366,9 +358,6 @@ func TestConnectivityChecker_StateTransitions(t *testing.T) {
 
 		// Wait for initialization - should be Online
 		time.Sleep(30 * time.Millisecond)
-		checker.stateMutex.Lock()
-		assert.Equal(t, Online, checker.state)
-		checker.stateMutex.Unlock()
 		assert.True(t, checker.IsOnline())
 
 		// Make offline and trigger check - should be Disconnected
@@ -379,16 +368,10 @@ func TestConnectivityChecker_StateTransitions(t *testing.T) {
 		checker.TriggerCheck()
 		time.Sleep(30 * time.Millisecond)
 
-		checker.stateMutex.Lock()
-		assert.Equal(t, Disconnected, checker.state)
-		checker.stateMutex.Unlock()
 		assert.False(t, checker.IsOnline())
 
 		// Wait beyond offline delay - should be Offline
 		time.Sleep(150 * time.Millisecond)
-		checker.stateMutex.Lock()
-		assert.Equal(t, Offline, checker.state)
-		checker.stateMutex.Unlock()
 		assert.False(t, checker.IsOnline())
 	})
 }
@@ -615,18 +598,14 @@ func TestConnectivityChecker_Options(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 
 		// Should be disconnected, not offline yet
-		checker.stateMutex.Lock()
-		assert.Equal(t, Disconnected, checker.state)
-		checker.stateMutex.Unlock()
+		require.False(t, checker.IsOnline())
 		assert.Equal(t, int32(0), offlineCallCount.Load())
 
 		// Wait for offline delay to pass
 		time.Sleep(150 * time.Millisecond)
 
 		// Now offline
-		checker.stateMutex.Lock()
-		assert.Equal(t, Offline, checker.state)
-		checker.stateMutex.Unlock()
+		require.False(t, checker.IsOnline())
 		assert.Greater(t, offlineCallCount.Load(), int32(0))
 	})
 
@@ -668,9 +647,7 @@ func TestConnectivityChecker_Options(t *testing.T) {
 		// With zero delay, should quickly transition to Offline
 		time.Sleep(50 * time.Millisecond)
 
-		checker.stateMutex.Lock()
-		assert.Equal(t, Offline, checker.state)
-		checker.stateMutex.Unlock()
+		assert.False(t, checker.IsOnline())
 		assert.Greater(t, offlineCallCount.Load(), int32(0))
 	})
 }

@@ -2,17 +2,10 @@ package connectivity
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/filecoin-project/go-clock"
-)
-
-type ConnectivityState uint8
-
-const (
-	Online ConnectivityState = iota
-	Offline
-	Disconnected
 )
 
 // ConnectivityChecker provides a thread-safe way to verify the connectivity of
@@ -34,8 +27,7 @@ type ConnectivityChecker struct {
 	closeOnce sync.Once
 	mutex     sync.Mutex
 
-	state      ConnectivityState
-	stateMutex sync.RWMutex
+	online atomic.Bool
 
 	clock                clock.Clock
 	lastCheck            time.Time
@@ -59,7 +51,6 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 	c := &ConnectivityChecker{
 		done:                 make(chan struct{}),
 		checkFunc:            checkFunc,
-		state:                Offline,
 		clock:                cfg.clock,
 		onlineCheckInterval:  cfg.onlineCheckInterval,
 		offlineCheckInterval: cfg.offlineCheckInterval,
@@ -110,9 +101,7 @@ func (c *ConnectivityChecker) Close() error {
 
 // IsOnline returns true if the node is currently online, false otherwise.
 func (c *ConnectivityChecker) IsOnline() bool {
-	c.stateMutex.RLock()
-	defer c.stateMutex.RUnlock()
-	return c.state == Online
+	return c.online.Load()
 }
 
 // TriggerCheck triggers an asynchronous connectivity check.
@@ -132,13 +121,10 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		c.mutex.Unlock()
 		return
 	}
-	c.stateMutex.RLock()
-	if c.state == Online && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
-		c.stateMutex.RUnlock()
+	if c.online.Load() && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
 		c.mutex.Unlock()
 		return // last check was too recent
 	}
-	c.stateMutex.RUnlock()
 
 	go func() {
 		defer c.mutex.Unlock()
@@ -148,10 +134,8 @@ func (c *ConnectivityChecker) TriggerCheck() {
 			return
 		}
 
-		// Node is offline, start periodic checks
-		c.stateMutex.Lock()
-		c.state = Disconnected
-		c.stateMutex.Unlock()
+		// Node is disconnected, start periodic checks
+		c.online.Store(false)
 
 		c.probeLoop(false)
 	}()
@@ -178,10 +162,6 @@ func (c *ConnectivityChecker) probeLoop(init bool) {
 			}
 		case <-offlineC:
 			// Node is now offline
-			c.stateMutex.Lock()
-			c.state = Offline
-			c.stateMutex.Unlock()
-
 			if c.onOffline != nil {
 				c.onOffline()
 			}
@@ -195,9 +175,7 @@ func (c *ConnectivityChecker) probe() bool {
 		case <-c.done:
 		default:
 			// Node is back online.
-			c.stateMutex.Lock()
-			c.state = Online
-			c.stateMutex.Unlock()
+			c.online.Store(true)
 
 			c.lastCheck = c.clock.Now()
 			if c.onOnline != nil {

@@ -115,18 +115,6 @@ func (c *ConnectivityChecker) IsOnline() bool {
 	return c.state == Online
 }
 
-func (c *ConnectivityChecker) IsOffline() bool {
-	c.stateMutex.RLock()
-	defer c.stateMutex.RUnlock()
-	return c.state == Offline
-}
-
-func (c *ConnectivityChecker) State() ConnectivityState {
-	c.stateMutex.RLock()
-	defer c.stateMutex.RUnlock()
-	return c.state
-}
-
 // TriggerCheck triggers an asynchronous connectivity check.
 //
 // * If a check is already running, does nothing.

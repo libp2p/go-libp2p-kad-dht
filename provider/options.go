@@ -32,9 +32,11 @@ const (
 )
 
 type config struct {
-	replicationFactor                int
-	reprovideInterval                time.Duration
-	maxReprovideDelay                time.Duration
+	replicationFactor int
+	reprovideInterval time.Duration
+	maxReprovideDelay time.Duration
+
+	offlineDelay                     time.Duration
 	connectivityCheckOnlineInterval  time.Duration
 	connectivityCheckOfflineInterval time.Duration
 
@@ -140,6 +142,20 @@ func WithMaxReprovideDelay(d time.Duration) Option {
 			return errors.New("reprovider config: max reprovide delay must be greater than 0")
 		}
 		cfg.maxReprovideDelay = d
+		return nil
+	}
+}
+
+// WithOfflineDelay sets the delay after which a disconnected node is
+// considered as offline. When a node cannot connect to peers, it is set to
+// `Disconnected`, and after `OfflineDelay` it still cannot connect to peers,
+// its state changes to `Offline`.
+func WithOfflineDelay(d time.Duration) Option {
+	return func(cfg *config) error {
+		if d < 0 {
+			return errors.New("reprovider config: offline delay must be non-negative")
+		}
+		cfg.offlineDelay = d
 		return nil
 	}
 }

@@ -44,6 +44,7 @@ func TestConnectivityChecker_New(t *testing.T) {
 
 		checker, err := New(checkFunc)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Give some time for initialization
@@ -140,6 +141,7 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 			WithOnlineCheckInterval(1*time.Minute),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initial check
@@ -181,6 +183,7 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 			WithOnOffline(offlineNotify),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization - should be online
@@ -224,6 +227,7 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 			WithOnOnline(onlineNotify),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization
@@ -308,6 +312,7 @@ func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
 			WithOnOnline(onlineNotify),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization
@@ -351,6 +356,7 @@ func TestConnectivityChecker_StateTransitions(t *testing.T) {
 			WithOfflineCheckInterval(20*time.Millisecond),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization - should be Online
@@ -402,6 +408,7 @@ func TestConnectivityChecker_Callbacks(t *testing.T) {
 			WithOnOffline(offlineNotify),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization - should be online
@@ -485,6 +492,7 @@ func TestConnectivityChecker_EdgeCases(t *testing.T) {
 			WithOfflineCheckInterval(10*time.Millisecond),
 		)
 		require.NoError(t, err)
+		checker.Start()
 
 		// Let it run for a bit
 		time.Sleep(50 * time.Millisecond)
@@ -539,6 +547,7 @@ func TestConnectivityChecker_EdgeCases(t *testing.T) {
 			WithOnlineCheckInterval(100*time.Millisecond),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Rapid state checks should work
@@ -585,6 +594,7 @@ func TestConnectivityChecker_Options(t *testing.T) {
 			WithOnOffline(offlineNotify),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization - should be online
@@ -629,6 +639,7 @@ func TestConnectivityChecker_Options(t *testing.T) {
 			WithOnOffline(offlineNotify),
 		)
 		require.NoError(t, err)
+		checker.Start()
 		defer checker.Close()
 
 		// Wait for initialization to complete - should be online

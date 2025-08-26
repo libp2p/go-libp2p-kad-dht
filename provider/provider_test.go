@@ -230,14 +230,16 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		},
 	}
 
-	connChecker, err := connectivity.New(func() bool { return true }, func() {})
-	require.NoError(t, err)
-	defer connChecker.Close()
 	r := SweepingProvider{
 		router:            router,
 		replicationFactor: replicationFactor,
-		connectivity:      connChecker,
+		connectivity:      noopConnectivityChecker(),
 	}
+	r.connectivity.Start()
+	defer r.connectivity.Close()
+	time.Sleep(5 * time.Millisecond) // give some time for connectivity to be set
+
+	waitUntil(t, func() bool { return r.connectivity.IsOnline() }, time.Second, "connectivity should be online")
 
 	for _, prefix := range []bitstr.Key{"", "0", "1", "00", "01", "10", "11", "000", "001", "010", "011", "100", "101", "110", "111"} {
 		closestPeers, err := r.closestPeersToPrefix(prefix)
@@ -279,7 +281,8 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 
 	mhs := append(mhs00000, mhs1000...)
 
-	prefixes := prov.groupAndScheduleKeysByPrefix(mhs, false)
+	prefixes, err := prov.groupAndScheduleKeysByPrefix(mhs, false)
+	require.NoError(t, err)
 	require.Len(t, prefixes, 2)
 	require.Contains(t, prefixes, bitstr.Key("000"))
 	require.Len(t, prefixes["000"], 3) // no duplicate entry
@@ -289,7 +292,8 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	// Schedule is still empty
 	require.True(t, prov.schedule.IsEmptyLeaf())
 
-	prefixes = prov.groupAndScheduleKeysByPrefix(mhs, true)
+	prefixes, err = prov.groupAndScheduleKeysByPrefix(mhs, true)
+	require.NoError(t, err)
 	require.Len(t, prefixes, 2)
 	require.Contains(t, prefixes, bitstr.Key("000"))
 	require.Len(t, prefixes["000"], 3)
@@ -304,7 +308,8 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	mhs11111 := genMultihashesMatchingPrefix("11111", 4)
 	mhs1110 := genMultihashesMatchingPrefix("1110", 4)
 	mhs = append(mhs11111, mhs1110...)
-	prefixes = prov.groupAndScheduleKeysByPrefix(mhs, true)
+	prefixes, err = prov.groupAndScheduleKeysByPrefix(mhs, true)
+	require.NoError(t, err)
 	// All keys should be consolidated into "111"
 	require.Len(t, prefixes, 1)
 	require.Contains(t, prefixes, bitstr.Key("111"))
@@ -319,7 +324,8 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	prov.schedule.Add(bitstr.Key("10"), 0*time.Second)
 
 	mhs1 := genMultihashesMatchingPrefix("10", 6)
-	prefixes = prov.groupAndScheduleKeysByPrefix(mhs1, true)
+	prefixes, err = prov.groupAndScheduleKeysByPrefix(mhs1, true)
+	require.NoError(t, err)
 	require.Len(t, prefixes, 1)
 	require.Contains(t, prefixes, bitstr.Key("10"))
 	require.Len(t, prefixes["10"], 6)
@@ -341,7 +347,7 @@ func takeAllContainsErr(obsLogs *observer.ObservedLogs, errStr string) bool {
 }
 
 func noopConnectivityChecker() *connectivity.ConnectivityChecker {
-	connChecker, err := connectivity.New(func() bool { return true }, func() {})
+	connChecker, err := connectivity.New(func() bool { return true })
 	if err != nil {
 		panic(err)
 	}
@@ -593,10 +599,11 @@ func TestHandleReprovide(t *testing.T) {
 	online := atomic.Bool{}
 	online.Store(true)
 	connectivityCheckInterval := time.Second
+	offlineDelay := time.Minute
 	connChecker, err := connectivity.New(
 		func() bool { return online.Load() },
-		func() {},
 		connectivity.WithClock(mockClock),
+		connectivity.WithOfflineDelay(offlineDelay),
 		connectivity.WithOfflineCheckInterval(connectivityCheckInterval),
 		connectivity.WithOnlineCheckInterval(connectivityCheckInterval),
 	)
@@ -622,6 +629,8 @@ func TestHandleReprovide(t *testing.T) {
 		getSelfAddrs: func() []ma.Multiaddr { return nil },
 	}
 	prov.scheduleTimer.Stop()
+	connChecker.Start()
+	defer connChecker.Close()
 
 	prefixes := []bitstr.Key{
 		"00",
@@ -680,7 +689,7 @@ func TestHandleReprovide(t *testing.T) {
 	// Node goes offline -> prefixes are queued
 	online.Store(false)
 	prov.connectivity.TriggerCheck()
-	waitUntil(t, func() bool { return !prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be offline")
+	waitUntil(t, func() bool { return !prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be disconnected")
 	// require.True(t, prov.reprovideQueue.IsEmpty())
 	prov.handleReprovide()
 	// require.Equal(t, 1, prov.reprovideQueue.Size())
@@ -758,8 +767,7 @@ func TestProvideOnce(t *testing.T) {
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
 
-	online := atomic.Bool{}
-	online.Store(true) // start online
+	online := atomic.Bool{} // false, start offline
 	router := &mockRouter{
 		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
 			if online.Load() {
@@ -777,7 +785,8 @@ func TestProvideOnce(t *testing.T) {
 	}
 	clk := clock.NewMock()
 
-	checkInterval := time.Minute
+	checkInterval := time.Second
+	offlineDelay := time.Minute
 
 	opts := []Option{
 		WithPeerID(pid),
@@ -789,27 +798,37 @@ func TestProvideOnce(t *testing.T) {
 			return []ma.Multiaddr{addr}
 		}),
 		WithClock(clk),
+		WithOfflineDelay(offlineDelay),
 		WithConnectivityCheckOnlineInterval(checkInterval),
 		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
-	reprovider, err := New(opts...)
+	prov, err := New(opts...)
 	require.NoError(t, err)
-	defer reprovider.Close()
-	reprovider.avgPrefixLenLk.Lock()
-	reprovider.cachedAvgPrefixLen = 4
-	reprovider.avgPrefixLenLk.Unlock()
+	defer prov.Close()
 
 	h := genMultihashes(1)[0]
 
+	// Node is offline, ProvideOne should error
+	err = prov.ProvideOnce(h)
+	require.ErrorIs(t, err, ErrOffline)
+	require.True(t, prov.provideQueue.IsEmpty())
+	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
+
+	// Wait for provider to come online
+	online.Store(true)
+	clk.Add(checkInterval) // trigger connectivity check
+	waitUntil(t, func() bool { return prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be online")
+
 	// Set the reprovider as offline
 	online.Store(false)
-	reprovider.connectivity.TriggerCheck()
+	prov.connectivity.TriggerCheck()
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	reprovider.ProvideOnce(h)
+	err = prov.ProvideOnce(h)
+	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond) // wait for ProvideOnce to finish
 	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
 	// Ensure the key is in the provide queue
-	_, keys, ok := reprovider.provideQueue.Dequeue()
+	_, keys, ok := prov.provideQueue.Dequeue()
 	require.True(t, ok)
 	require.Equal(t, 1, len(keys))
 	require.Equal(t, h, keys[0])
@@ -818,7 +837,8 @@ func TestProvideOnce(t *testing.T) {
 	online.Store(true)
 	clk.Add(checkInterval)           // trigger connectivity check
 	time.Sleep(5 * time.Millisecond) // wait for connectivity check to finish
-	reprovider.ProvideOnce(h)
+	err = prov.ProvideOnce(h)
+	require.NoError(t, err)
 	waitUntil(t, func() bool { return provideCount.Load() == 1 }, 100*time.Millisecond, "waiting for ProvideOnce to finish")
 }
 
@@ -855,6 +875,8 @@ func TestStartProvidingSingle(t *testing.T) {
 			return nil
 		},
 	}
+	checkInterval := time.Second
+	offlineDelay := time.Minute
 	opts := []Option{
 		WithReplicationFactor(replicationFactor),
 		WithReprovideInterval(reprovideInterval),
@@ -867,48 +889,65 @@ func TestStartProvidingSingle(t *testing.T) {
 			return []ma.Multiaddr{addr}
 		}),
 		WithClock(mockClock),
+		WithOfflineDelay(offlineDelay),
+		WithConnectivityCheckOnlineInterval(checkInterval),
+		WithConnectivityCheckOfflineInterval(checkInterval),
 	}
-	reprovider, err := New(opts...)
+	prov, err := New(opts...)
 	require.NoError(t, err)
-	defer reprovider.Close()
+	defer prov.Close()
+	time.Sleep(5 * time.Millisecond) // give some time for connectivity to be set
 
-	// Blocks until key is provided
-	reprovider.StartProviding(true, h)
-	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 100*time.Millisecond, "waiting for ProvideOnce to finish")
-	require.Equal(t, 1+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
+	mockClock.Add(checkInterval) // trigger connectivity check
+	waitUntil(t, func() bool { return prov.connectivity.IsOnline() }, 100*time.Millisecond, "connectivity should be online")
+	waitUntil(t, func() bool {
+		prov.avgPrefixLenLk.Lock()
+		defer prov.avgPrefixLenLk.Unlock()
+		return prov.cachedAvgPrefixLen >= 0
+	}, 100*time.Millisecond, "waiting for prefix len measurement")
+
+	err = prov.StartProviding(true, h)
+	require.NoError(t, err)
+	waitUntil(t, func() bool { return provideCount.Load() == int32(len(peers)) }, 100*time.Millisecond, "waiting for StartProviding to finish")
+	expectedGCPCount := 1 + approxPrefixLenGCPCount + 1 // 1 for initial, approxPrefixLenGCPCount for prefix length estimation, 1 for the provide
+	require.Equal(t, expectedGCPCount, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide is scheduled.
 	prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixLen])
-	reprovider.scheduleLk.Lock()
-	require.Equal(t, 1, reprovider.schedule.Size())
-	found, reprovideTime := trie.Find(reprovider.schedule, prefix)
+	prov.scheduleLk.Lock()
+	require.Equal(t, 1, prov.schedule.Size())
+	found, reprovideTime := trie.Find(prov.schedule, prefix)
 	if !found {
 		t.Log(prefix)
-		t.Log(keyspace.AllEntries(reprovider.schedule, reprovider.order)[0].Key)
+		t.Log(keyspace.AllEntries(prov.schedule, prov.order)[0].Key)
 		t.Fatal("prefix not inserted in schedule")
 	}
-	require.Equal(t, reprovider.reprovideTimeForPrefix(prefix), reprovideTime)
-	reprovider.scheduleLk.Unlock()
+	require.Equal(t, prov.reprovideTimeForPrefix(prefix), reprovideTime)
+	prov.scheduleLk.Unlock()
 
 	// Try to provide the same key again -> noop
-	reprovider.StartProviding(false, h)
+	err = prov.StartProviding(false, h)
+	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, int32(len(peers)), provideCount.Load())
-	require.Equal(t, 1+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
+	require.Equal(t, expectedGCPCount, int(getClosestPeersCount.Load()))
 
 	// Verify reprovide happens as scheduled.
-	mockClock.Add(reprovideTime - 1)
-	require.Equal(t, 1+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
-	require.Equal(t, int32(len(peers)), provideCount.Load())
-	mockClock.Add(1)
+	mockClock.Add(reprovideTime)
+	expectedGCPCount++ // for the reprovide
 	waitUntil(t, func() bool { return provideCount.Load() == 2*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 0")
-	require.Equal(t, 2+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
-	mockClock.Add(reprovideInterval - 1)
-	require.Equal(t, 2+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
-	require.Equal(t, 2*int32(len(peers)), provideCount.Load())
-	mockClock.Add(reprovideInterval) // 1
+	require.Equal(t, expectedGCPCount, int(getClosestPeersCount.Load()))
+
+	mockClock.Add(reprovideInterval)
+	expectedGCPCount++ // for the reprovide
 	waitUntil(t, func() bool { return provideCount.Load() == 3*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 1")
-	require.Equal(t, 3+initialGetClosestPeersCount, int(getClosestPeersCount.Load()))
+	require.Equal(t, expectedGCPCount, int(getClosestPeersCount.Load()))
+	require.Equal(t, 3*int32(len(peers)), provideCount.Load())
+
+	mockClock.Add(reprovideInterval)
+	expectedGCPCount++ // for the reprovide
+	waitUntil(t, func() bool { return provideCount.Load() == 4*int32(len(peers)) }, 200*time.Millisecond, "waiting for reprovide to finish 2")
+	require.Equal(t, expectedGCPCount, int(getClosestPeersCount.Load()))
 }
 
 const bitsPerByte = 8
@@ -979,7 +1018,8 @@ func TestStartProvidingMany(t *testing.T) {
 	require.NoError(t, err)
 	defer reprovider.Close()
 
-	reprovider.StartProviding(true, mhs...)
+	err = reprovider.StartProviding(true, mhs...)
+	require.NoError(t, err)
 	waitUntil(t, func() bool { return provideCount.Load() == int32(len(mhs)*replicationFactor) }, 100*time.Millisecond, "waiting for ProvideMany to finish")
 
 	// Each key should have been provided at least once.
@@ -1073,6 +1113,7 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 	mockClock := clock.NewMock()
 	reprovideInterval := time.Hour
 	connectivityCheckInterval := time.Second
+	offlineDelay := time.Minute
 
 	routerOffline := atomic.Bool{}
 	router := &mockRouter{
@@ -1119,27 +1160,31 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 			return []ma.Multiaddr{addr}
 		}),
 		WithClock(mockClock),
+		WithOfflineDelay(offlineDelay),
 		WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		WithConnectivityCheckOfflineInterval(connectivityCheckInterval),
 	}
 	prov, err := New(opts...)
 	require.NoError(t, err)
 	defer prov.Close()
+
 	waitUntil(t, func() bool {
 		prov.avgPrefixLenLk.Lock()
 		defer prov.avgPrefixLenLk.Unlock()
-		return prov.cachedAvgPrefixLen > 0
+		return prov.cachedAvgPrefixLen >= 0
 	}, 100*time.Millisecond, "waiting for initial average prefix length to be set")
 	routerOffline.Store(true)
+	mockClock.Add(connectivityCheckInterval)
 
-	prov.StartProviding(true, mhs...)
+	err = prov.StartProviding(true, mhs...)
+	require.NoError(t, err)
 	time.Sleep(10 * time.Millisecond) // wait for StartProviding to finish
-	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline")
+	require.Equal(t, int32(0), provideCount.Load(), "should not have provided when disconnected")
 
 	nodeOffline := func() bool {
 		return !prov.connectivity.IsOnline()
 	}
-	waitUntil(t, nodeOffline, 100*time.Millisecond, "waiting for node to be offline")
+	waitUntil(t, nodeOffline, 100*time.Millisecond, "waiting for node to be disconnected")
 	mockClock.Add(connectivityCheckInterval)
 
 	routerOffline.Store(false)

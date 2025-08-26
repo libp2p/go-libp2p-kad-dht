@@ -67,9 +67,24 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 		onOnline:             cfg.onOnline,
 		offlineDelay:         cfg.offlineDelay,
 	}
+	return c, nil
+}
 
-	// Start probing until the node comes online
+// SetCallbacks sets the onOnline and onOffline callbacks after construction.
+// This allows breaking circular dependencies during initialization.
+func (c *ConnectivityChecker) SetCallbacks(onOnline, onOffline func()) {
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.closed {
+		return
+	}
+	c.onOnline = onOnline
+	c.onOffline = onOffline
+}
+
+func (c *ConnectivityChecker) Start() {
+	c.mutex.Lock()
+	// Start probing until the node comes online
 	go func() {
 		defer c.mutex.Unlock()
 
@@ -80,8 +95,6 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 		// Wait for node to come online
 		c.probeLoop(true)
 	}()
-
-	return c, nil
 }
 
 // Close stops any running connectivity checks and prevents future ones.
@@ -157,9 +170,11 @@ func (c *ConnectivityChecker) TriggerCheck() {
 }
 
 func (c *ConnectivityChecker) probeLoop(init bool) {
-	offlineTimer := c.clock.Timer(c.offlineDelay)
-	if init {
-		offlineTimer.Stop()
+	var offlineC <-chan time.Time
+	if !init {
+		offlineTimer := c.clock.Timer(c.offlineDelay)
+		defer offlineTimer.Stop()
+		offlineC = offlineTimer.C
 	}
 
 	ticker := c.clock.Ticker(c.offlineCheckInterval)
@@ -173,7 +188,7 @@ func (c *ConnectivityChecker) probeLoop(init bool) {
 			if c.probe() {
 				return
 			}
-		case <-offlineTimer.C:
+		case <-offlineC:
 			// Node is now offline
 			c.stateMutex.Lock()
 			c.state = Offline

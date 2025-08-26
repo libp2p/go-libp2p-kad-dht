@@ -24,6 +24,7 @@ type config struct {
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
 
+	offlineDelay                     [2]time.Duration
 	connectivityCheckOnlineInterval  [2]time.Duration
 	connectivityCheckOfflineInterval [2]time.Duration
 
@@ -142,6 +143,30 @@ func WithMaxReprovideDelayLAN(maxReprovideDelay time.Duration) Option {
 
 func WithMaxReprovideDelayWAN(maxReprovideDelay time.Duration) Option {
 	return withMaxReprovideDelay(maxReprovideDelay, wanID)
+}
+
+func withOfflineDelay(offlineDelay time.Duration, dhts ...uint8) Option {
+	return func(cfg *config) error {
+		if offlineDelay < 0 {
+			return fmt.Errorf("invalid offline delay %s", offlineDelay)
+		}
+		for _, dht := range dhts {
+			cfg.offlineDelay[dht] = offlineDelay
+		}
+		return nil
+	}
+}
+
+func WithOfflineDelay(offlineDelay time.Duration) Option {
+	return withOfflineDelay(offlineDelay, lanID, wanID)
+}
+
+func WithOfflineDelayLAN(offlineDelay time.Duration) Option {
+	return withOfflineDelay(offlineDelay, lanID)
+}
+
+func WithOfflineDelayWAN(offlineDelay time.Duration) Option {
+	return withOfflineDelay(offlineDelay, wanID)
 }
 
 func withConnectivityCheckOnlineInterval(onlineInterval time.Duration, dhts ...uint8) Option {

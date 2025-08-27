@@ -139,12 +139,9 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) erro
 		return fmt.Errorf("failed to store multihashes: %w", err)
 	}
 
-	err = s.runOnBoth(func(p *provider.SweepingProvider) error {
+	s.runOnBoth(func(p *provider.SweepingProvider) error {
 		return p.AddToSchedule(newKeys...)
 	})
-	if err != nil {
-		return err
-	}
 
 	if !force {
 		keys = newKeys

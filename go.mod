@@ -1,9 +1,8 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
-go 1.23.10
+go 1.24
 
 require (
-	github.com/filecoin-project/go-clock v0.1.0
 	github.com/gammazero/deque v1.0.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
@@ -48,6 +47,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
+	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect

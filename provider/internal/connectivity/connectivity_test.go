@@ -1,676 +1,409 @@
+//go:build go1.25
+// +build go1.25
+
 package connectivity
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	"github.com/filecoin-project/go-clock"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func eventually(t *testing.T, condition func() bool, maxDelay time.Duration, args ...any) {
-	step := time.Millisecond
-	for range maxDelay / step {
-		if condition() {
-			return
-		}
-		time.Sleep(step)
-	}
-	t.Fatal(args...)
-}
+var (
+	onlineCheckFunc  = func() bool { return true }
+	offlineCheckFunc = func() bool { return false }
+)
 
-func TestConnectivityChecker_New(t *testing.T) {
-	t.Parallel()
-
-	t.Run("starts offline when checkFunc returns false", func(t *testing.T) {
-		checkFunc := func() bool { return false }
-
-		checker, err := New(checkFunc)
+func TestNewConnectiviyChecker(t *testing.T) {
+	t.Run("initial state is offline", func(t *testing.T) {
+		connChecker, err := New(onlineCheckFunc)
 		require.NoError(t, err)
-		defer checker.Close()
+		defer connChecker.Close()
 
-		// Give some time for initialization
-		eventually(t, func() bool { return !checker.IsOnline() }, 20*time.Millisecond, "checker should be offline")
-
-		assert.False(t, checker.IsOnline())
+		require.False(t, connChecker.IsOnline())
 	})
 
-	t.Run("starts online when checkFunc returns true", func(t *testing.T) {
-		checkFunc := func() bool { return true }
+	t.Run("start online", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			onlineChan := make(chan struct{})
+			onOnline := func() { close(onlineChan) }
 
-		checker, err := New(checkFunc)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
+			connChecker, err := New(onlineCheckFunc,
+				WithOnOnline(onOnline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
 
-		// Give some time for initialization
-		eventually(t, checker.IsOnline, 20*time.Millisecond, "checker should be online")
+			require.False(t, connChecker.IsOnline())
 
-		require.True(t, checker.IsOnline())
+			connChecker.Start()
+
+			<-onlineChan // wait for onOnline to be run
+			synctest.Wait()
+
+			require.True(t, connChecker.IsOnline())
+		})
 	})
 
-	t.Run("with custom options", func(t *testing.T) {
-		mockClock := clock.NewMock()
-		checkFunc := func() bool { return true }
+	t.Run("start offline", func(t *testing.T) {
+		onlineCount, offlineCount := atomic.Int32{}, atomic.Int32{}
+		onOnline := func() { onlineCount.Add(1) }
+		onOffline := func() { offlineCount.Add(1) }
 
-		checker, err := New(checkFunc,
-			WithClock(mockClock),
-			WithOnlineCheckInterval(30*time.Second),
+		connChecker, err := New(offlineCheckFunc,
+			WithOnOnline(onOnline),
+			WithOnOffline(onOffline),
 		)
 		require.NoError(t, err)
-		defer checker.Close()
+		defer connChecker.Close()
 
-		assert.NotNil(t, checker)
-	})
+		require.False(t, connChecker.IsOnline())
 
-	t.Run("with invalid options", func(t *testing.T) {
-		checkFunc := func() bool { return true }
+		connChecker.Start()
 
-		_, err := New(checkFunc,
-			WithOnlineCheckInterval(-1*time.Second),
-		)
-		assert.Error(t, err)
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
 
-		_, err = New(checkFunc,
-			WithOfflineDelay(-1*time.Second),
-		)
-		assert.Error(t, err)
+		require.False(t, connChecker.IsOnline())
+		require.Equal(t, int32(0), onlineCount.Load())
+		require.Equal(t, int32(0), offlineCount.Load())
 	})
 }
 
-func TestConnectivityChecker_Close(t *testing.T) {
-	t.Parallel()
+func TestStateTransitions(t *testing.T) {
+	t.Run("offline to online", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			checkInterval := time.Second
+			offlineDelay := time.Minute
 
-	t.Run("close stops all operations", func(t *testing.T) {
-		checkFunc := func() bool { return false }
+			online := atomic.Bool{} // start offline
+			checkFunc := func() bool { return online.Load() }
 
-		checker, err := New(checkFunc)
-		require.NoError(t, err)
+			onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+			onOnline := func() { close(onlineChan) }
+			onOffline := func() { close(offlineChan) }
 
-		err = checker.Close()
-		assert.NoError(t, err)
+			connChecker, err := New(checkFunc,
+				WithOfflineDelay(offlineDelay),
+				WithOnlineCheckInterval(checkInterval),
+				WithOnOnline(onOnline),
+				WithOnOffline(onOffline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
 
-		// Multiple closes should not panic
-		err = checker.Close()
-		assert.NoError(t, err)
+			require.False(t, connChecker.IsOnline())
+			connChecker.Start()
+
+			time.Sleep(initialBackoffDelay)
+
+			online.Store(true)
+
+			<-onlineChan // wait for onOnline to be run
+			require.True(t, connChecker.IsOnline())
+			select {
+			case <-offlineChan:
+				require.FailNow(t, "onOffline shouldn't have been called")
+			default:
+			}
+		})
 	})
 
-	t.Run("operations after close are ignored", func(t *testing.T) {
-		checkFunc := func() bool { return true }
+	t.Run("online to disconnected to offline", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			checkInterval := time.Second
+			offlineDelay := time.Minute
 
-		checker, err := New(checkFunc)
-		require.NoError(t, err)
+			online := atomic.Bool{}
+			online.Store(true)
+			checkFunc := func() bool { return online.Load() }
 
-		checker.Close()
+			onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+			onOnline := func() { close(onlineChan) }
+			onOffline := func() { close(offlineChan) }
 
-		// TriggerCheck should be ignored after close
-		checker.TriggerCheck()
+			connChecker, err := New(checkFunc,
+				WithOfflineDelay(offlineDelay),
+				WithOnlineCheckInterval(checkInterval),
+				WithOnOnline(onOnline),
+				WithOnOffline(onOffline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
 
-		// State should still be accessible
-		_ = checker.IsOnline()
-	})
-}
+			require.False(t, connChecker.IsOnline())
+			connChecker.Start()
 
-func TestConnectivityChecker_TriggerCheck_WithMockClock(t *testing.T) {
-	t.Parallel()
+			<-onlineChan // wait for onOnline to be run
+			require.True(t, connChecker.IsOnline())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 
-	t.Run("ignores check when interval not passed", func(t *testing.T) {
-		mockClock := clock.NewMock()
-		var checkCount atomic.Int32
+			online.Store(false)
+			// Cannot trigger check yet
+			connChecker.TriggerCheck()
+			require.True(t, connChecker.mutex.TryLock()) // node still online
+			connChecker.mutex.Unlock()
 
-		checkFunc := func() bool {
-			checkCount.Add(1)
-			return true
-		}
+			time.Sleep(checkInterval - time.Millisecond)
+			connChecker.TriggerCheck()
+			require.True(t, connChecker.mutex.TryLock()) // node still online
+			connChecker.mutex.Unlock()
 
-		checker, err := New(checkFunc,
-			WithClock(mockClock),
-			WithOnlineCheckInterval(1*time.Minute),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
+			time.Sleep(time.Millisecond)
+			connChecker.TriggerCheck()
+			require.False(t, connChecker.mutex.TryLock())
 
-		// Wait for initial check
-		time.Sleep(10 * time.Millisecond)
+			synctest.Wait()
 
-		initialCount := checkCount.Load()
+			require.False(t, connChecker.IsOnline())
+			select {
+			case <-offlineChan:
+				require.FailNow(t, "onOffline shouldn't have been called")
+			default: // Disconnected but not Offline
+			}
 
-		// Trigger check immediately - should be ignored
-		checker.TriggerCheck()
-		time.Sleep(10 * time.Millisecond)
+			connChecker.TriggerCheck() // noop since Disconnected
+			require.False(t, connChecker.mutex.TryLock())
 
-		assert.Equal(t, initialCount, checkCount.Load())
+			time.Sleep(offlineDelay)
 
-		// Advance clock and trigger check - should work
-		mockClock.Add(2 * time.Minute)
-		checker.TriggerCheck()
-		time.Sleep(10 * time.Millisecond)
+			require.False(t, connChecker.IsOnline())
+			<-offlineChan // wait for callback to be run
 
-		assert.Greater(t, checkCount.Load(), initialCount)
-	})
-
-	t.Run("transitions from online to offline", func(t *testing.T) {
-		var isOnline atomic.Bool
-		isOnline.Store(true)
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		var onlineCallCount, offlineCallCount atomic.Int32
-		onlineNotify := func() { onlineCallCount.Add(1) }
-		offlineNotify := func() { offlineCallCount.Add(1) }
-
-		checker, err := New(checkFunc,
-			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
-			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
-			WithOnOnline(onlineNotify),
-			WithOnOffline(offlineNotify),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
-
-		// Wait for initialization - should be online
-		time.Sleep(30 * time.Millisecond)
-		assert.True(t, checker.IsOnline())
-
-		// Make checkFunc return false and trigger check
-		isOnline.Store(false)
-
-		// Wait for online check interval to pass before triggering
-		time.Sleep(20 * time.Millisecond)
-		checker.TriggerCheck()
-		time.Sleep(30 * time.Millisecond)
-
-		// Should be in Disconnected state
-		require.False(t, checker.IsOnline())
-		assert.Equal(t, offlineCallCount.Load(), int32(0))
-
-		// Wait for offline delay to pass
-		time.Sleep(150 * time.Millisecond)
-
-		// Should be offline and callback should be called
-		require.False(t, checker.IsOnline())
-		assert.Greater(t, offlineCallCount.Load(), int32(0))
+			connChecker.TriggerCheck() // noop since Offline
+			require.False(t, connChecker.mutex.TryLock())
+		})
 	})
 
-	t.Run("transitions from offline to online", func(t *testing.T) {
-		mockClock := clock.NewMock()
-		var isOnline atomic.Bool
-		isOnline.Store(false)
+	t.Run("remain online", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			checkInterval := time.Second
+			offlineDelay := time.Minute
 
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
+			online := atomic.Bool{}
+			online.Store(true)
+			checkCount := atomic.Int32{}
+			checkFunc := func() bool { checkCount.Add(1); return online.Load() }
 
-		var onlineCallCount atomic.Int32
-		onlineNotify := func() { onlineCallCount.Add(1) }
+			onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+			onOnline := func() { close(onlineChan) }
+			onOffline := func() { close(offlineChan) }
 
-		checker, err := New(checkFunc,
-			WithClock(mockClock),
-			WithOnOnline(onlineNotify),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
+			connChecker, err := New(checkFunc,
+				WithOfflineDelay(offlineDelay),
+				WithOnlineCheckInterval(checkInterval),
+				WithOnOnline(onOnline),
+				WithOnOffline(onOffline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
 
-		// Wait for initialization
-		time.Sleep(10 * time.Millisecond)
-		assert.False(t, checker.IsOnline())
+			require.False(t, connChecker.IsOnline())
+			connChecker.Start()
 
-		// Make checkFunc return true
-		isOnline.Store(true)
+			<-onlineChan
 
-		// Advance clock to trigger offline check
-		mockClock.Add(1 * time.Minute)
-		time.Sleep(50 * time.Millisecond)
+			require.True(t, connChecker.IsOnline())
+			require.Equal(t, int32(1), checkCount.Load())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 
-		// Should be online and callback should be called
-		assert.True(t, checker.IsOnline())
-		assert.Greater(t, onlineCallCount.Load(), int32(0))
-	})
+			connChecker.TriggerCheck() // recent check, should be no-op
+			synctest.Wait()
+			require.Equal(t, int32(1), checkCount.Load())
 
-	t.Run("concurrent trigger checks", func(t *testing.T) {
-		mockClock := clock.NewMock()
-		var checkCount atomic.Int32
+			time.Sleep(checkInterval - 1)
+			connChecker.TriggerCheck() // recent check, should be no-op
+			synctest.Wait()
+			require.Equal(t, int32(1), checkCount.Load())
 
-		checkFunc := func() bool {
-			checkCount.Add(1)
-			time.Sleep(50 * time.Millisecond) // Simulate slow check
-			return true
-		}
+			time.Sleep(1)
+			connChecker.TriggerCheck() // checkInterval has passed, new check is run
+			synctest.Wait()
+			require.Equal(t, int32(2), checkCount.Load())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 
-		checker, err := New(checkFunc,
-			WithClock(mockClock),
-			WithOnlineCheckInterval(1*time.Minute),
-		)
-		require.NoError(t, err)
-		defer checker.Close()
-
-		// Wait for initialization to complete
-		time.Sleep(100 * time.Millisecond) // Longer wait to ensure initialization goroutine completes
-		initialCount := checkCount.Load()
-
-		// Advance clock
-		mockClock.Add(2 * time.Minute)
-
-		// Launch multiple concurrent checks
-		var wg sync.WaitGroup
-		for range 10 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				checker.TriggerCheck()
-			}()
-		}
-		wg.Wait()
-
-		// Wait for any ongoing checks to complete
-		time.Sleep(100 * time.Millisecond)
-
-		finalCount := checkCount.Load()
-
-		// Only one additional check should have been performed (due to mutex)
-		// The mutex should prevent concurrent checks, so we should see exactly initialCount+1 or maybe +2 due to timing
-		assert.GreaterOrEqual(t, finalCount, initialCount+1)
-		assert.LessOrEqual(t, finalCount, initialCount+2) // Allow for slight timing variations
-	})
-
-	t.Run("probe loop with periodic checks", func(t *testing.T) {
-		mockClock := clock.NewMock()
-		var isOnline atomic.Bool
-		var checkCount atomic.Int32
-		isOnline.Store(false)
-
-		checkFunc := func() bool {
-			checkCount.Add(1)
-			return isOnline.Load()
-		}
-
-		var onlineCallCount atomic.Int32
-		onlineNotify := func() { onlineCallCount.Add(1) }
-
-		checker, err := New(checkFunc,
-			WithClock(mockClock),
-			WithOnOnline(onlineNotify),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
-
-		// Wait for initialization
-		time.Sleep(10 * time.Millisecond)
-		initialCheckCount := checkCount.Load()
-
-		// Advance clock multiple times to trigger periodic checks
-		for range 3 {
-			mockClock.Add(31 * time.Second)
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		// Multiple checks should have been performed
-		assert.Greater(t, checkCount.Load(), initialCheckCount)
-
-		// Now make it go online
-		isOnline.Store(true)
-		mockClock.Add(31 * time.Second)
-		time.Sleep(50 * time.Millisecond)
-
-		// Should be online and callback called
-		assert.True(t, checker.IsOnline())
-		assert.Greater(t, onlineCallCount.Load(), int32(0))
-	})
-}
-
-func TestConnectivityChecker_StateTransitions(t *testing.T) {
-	t.Parallel()
-
-	t.Run("all state values", func(t *testing.T) {
-		var isOnline atomic.Bool
-		isOnline.Store(true)
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		checker, err := New(checkFunc,
-			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval to allow quick trigger
-			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
-
-		// Wait for initialization - should be Online
-		time.Sleep(30 * time.Millisecond)
-		assert.True(t, checker.IsOnline())
-
-		// Make offline and trigger check - should be Disconnected
-		isOnline.Store(false)
-
-		// Wait for online check interval to pass before triggering
-		time.Sleep(20 * time.Millisecond)
-		checker.TriggerCheck()
-		time.Sleep(30 * time.Millisecond)
-
-		assert.False(t, checker.IsOnline())
-
-		// Wait beyond offline delay - should be Offline
-		time.Sleep(150 * time.Millisecond)
-		assert.False(t, checker.IsOnline())
-	})
-}
-
-func TestConnectivityChecker_Callbacks(t *testing.T) {
-	t.Parallel()
-
-	t.Run("callbacks are called appropriately", func(t *testing.T) {
-		var isOnline atomic.Bool
-		isOnline.Store(true) // Start online first
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		var onlineCallCount, offlineCallCount atomic.Int32
-		onlineNotify := func() { onlineCallCount.Add(1) }
-		offlineNotify := func() { offlineCallCount.Add(1) }
-
-		checker, err := New(checkFunc,
-			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
-			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
-			WithOnOnline(onlineNotify),
-			WithOnOffline(offlineNotify),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
-
-		// Wait for initialization - should be online
-		time.Sleep(30 * time.Millisecond)
-		assert.True(t, checker.IsOnline())
-
-		// Go offline and trigger a check to start the offline transition
-		isOnline.Store(false)
-
-		// Wait for online check interval to pass before triggering
-		time.Sleep(20 * time.Millisecond)
-		checker.TriggerCheck()
-
-		// Wait for offline delay to pass and offline callback to be called
-		time.Sleep(150 * time.Millisecond)
-
-		// Should have called offline callback
-		assert.Greater(t, offlineCallCount.Load(), int32(0))
-
-		// Go online
-		isOnline.Store(true)
-		time.Sleep(50 * time.Millisecond)
-
-		// Should have called online callback
-		assert.Greater(t, onlineCallCount.Load(), int32(0))
-	})
-
-	t.Run("panic in callback doesn't break checker", func(t *testing.T) {
-		var isOnline atomic.Bool
-		isOnline.Store(false)
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		safeCallback := func() {
-			defer func() {
-				if r := recover(); r != nil {
-					// Expected panic, recover and continue
-				}
-			}()
-			panic("test panic")
-		}
-
-		// This should not panic during construction or operation
-		checker, err := New(checkFunc,
-			WithOnOnline(safeCallback),
-			WithOnOffline(safeCallback),
-			WithOfflineDelay(50*time.Millisecond),
-		)
-		require.NoError(t, err)
-		defer checker.Close()
-
-		// Wait for potential panics during initialization
-		time.Sleep(100 * time.Millisecond)
-
-		// Go online - should not panic the test
-		isOnline.Store(true)
-		time.Sleep(100 * time.Millisecond)
-
-		// Checker should still be functional
-		assert.NotPanics(t, func() {
-			checker.IsOnline()
+			time.Sleep(checkInterval)
+			connChecker.TriggerCheck() // checkInterval has passed, new check is run
+			synctest.Wait()
+			require.Equal(t, int32(3), checkCount.Load())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 		})
 	})
 }
 
-func TestConnectivityChecker_EdgeCases(t *testing.T) {
-	t.Parallel()
+func TestSetCallbacks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Callbacks MUST be set before calling Start()
+		oldOnlineCount, oldOfflineCount, newOnlineCount, newOfflineCount := atomic.Int32{}, atomic.Int32{}, atomic.Int32{}, atomic.Int32{}
+		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+		oldOnOnline := func() { oldOnlineCount.Add(1); close(onlineChan) }
+		oldOnOffline := func() { oldOfflineCount.Add(1); close(offlineChan) }
+		newOnOnline := func() { newOnlineCount.Add(1); close(onlineChan) }
+		newOnOffline := func() { newOfflineCount.Add(1); close(offlineChan) }
 
-	t.Run("close during probe loop", func(t *testing.T) {
-		var checkCount atomic.Int32
-		checkFunc := func() bool {
-			checkCount.Add(1)
-			return false
-		}
+		checkInterval := time.Second
+		online := atomic.Bool{}
+		online.Store(true)
+		checkFunc := func() bool { return online.Load() }
 
-		checker, err := New(checkFunc)
-		require.NoError(t, err)
-		checker.Start()
-
-		// Let it run for a bit
-		time.Sleep(50 * time.Millisecond)
-		initialCount := checkCount.Load()
-
-		// Close and verify no more checks happen
-		checker.Close()
-		time.Sleep(50 * time.Millisecond)
-
-		// Should have stopped checking
-		finalCount := checkCount.Load()
-		time.Sleep(50 * time.Millisecond)
-		laterCount := checkCount.Load()
-
-		assert.Greater(t, initialCount, int32(0))
-		assert.Equal(t, finalCount, laterCount) // No new checks after close
-	})
-
-	t.Run("trigger check after close", func(t *testing.T) {
-		var checkCount atomic.Int32
-		checkFunc := func() bool {
-			checkCount.Add(1)
-			return true
-		}
-
-		checker, err := New(checkFunc)
-		require.NoError(t, err)
-
-		time.Sleep(10 * time.Millisecond)
-		checker.Close()
-
-		initialCount := checkCount.Load()
-
-		// Should be ignored
-		checker.TriggerCheck()
-		time.Sleep(10 * time.Millisecond)
-
-		assert.Equal(t, initialCount, checkCount.Load())
-	})
-
-	t.Run("high frequency operations", func(t *testing.T) {
-		mockClock := clock.NewMock()
-		var isOnline atomic.Bool
-		isOnline.Store(true)
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		checker, err := New(checkFunc,
-			WithClock(mockClock),
-			WithOnlineCheckInterval(100*time.Millisecond),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
-
-		// Rapid state checks should work
-		for range 100 {
-			go func() {
-				checker.IsOnline()
-			}()
-		}
-
-		// Rapid trigger checks with clock advancement
-		for range 10 {
-			mockClock.Add(200 * time.Millisecond)
-			checker.TriggerCheck()
-		}
-
-		time.Sleep(100 * time.Millisecond)
-
-		// Should still be functional
-		assert.True(t, checker.IsOnline())
-	})
-}
-
-func TestConnectivityChecker_Options(t *testing.T) {
-	t.Parallel()
-
-	t.Run("WithOfflineDelay", func(t *testing.T) {
-		// Use real time for this test since mock clock with timers is complex
-		var isOnline atomic.Bool
-		isOnline.Store(true)
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		var offlineCallCount atomic.Int32
-		offlineNotify := func() { offlineCallCount.Add(1) }
-
-		checker, err := New(checkFunc,
-			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
-			WithOfflineDelay(100*time.Millisecond),       // Short delay for testing
-			WithOnOffline(offlineNotify),
-		)
-		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
-
-		// Wait for initialization - should be online
-		time.Sleep(30 * time.Millisecond)
-		assert.True(t, checker.IsOnline())
-
-		// Go offline and trigger check
-		isOnline.Store(false)
-
-		// Wait for online check interval to pass before triggering
-		time.Sleep(20 * time.Millisecond)
-		checker.TriggerCheck()
-		time.Sleep(30 * time.Millisecond)
-
-		// Should be disconnected, not offline yet
-		require.False(t, checker.IsOnline())
-		assert.Equal(t, int32(0), offlineCallCount.Load())
-
-		// Wait for offline delay to pass
-		time.Sleep(150 * time.Millisecond)
-
-		// Now offline
-		require.False(t, checker.IsOnline())
-		assert.Greater(t, offlineCallCount.Load(), int32(0))
-	})
-
-	t.Run("zero offline delay", func(t *testing.T) {
-		var isOnline atomic.Bool
-		isOnline.Store(true)
-
-		checkFunc := func() bool {
-			return isOnline.Load()
-		}
-
-		var offlineCallCount atomic.Int32
-		offlineNotify := func() { offlineCallCount.Add(1) }
-
-		checker, err := New(checkFunc,
-			WithOnlineCheckInterval(10*time.Millisecond), // Very short interval
+		connChecker, err := New(checkFunc,
+			WithOnOnline(oldOnOnline),
+			WithOnOffline(oldOnOffline),
 			WithOfflineDelay(0),
-			WithOnOffline(offlineNotify),
+			WithOnlineCheckInterval(checkInterval),
 		)
 		require.NoError(t, err)
-		checker.Start()
-		defer checker.Close()
+		defer connChecker.Close()
 
-		// Wait for initialization to complete - should be online
-		time.Sleep(20 * time.Millisecond)
-		assert.True(t, checker.IsOnline())
+		connChecker.SetCallbacks(newOnOnline, newOnOffline)
 
-		// Go offline and trigger check
-		isOnline.Store(false)
+		connChecker.Start()
 
-		// Wait for online check interval to pass before triggering
-		time.Sleep(20 * time.Millisecond)
-		checker.TriggerCheck()
+		<-onlineChan // wait for newOnOnline to be called
+		require.True(t, connChecker.IsOnline())
+		require.Equal(t, int32(0), oldOnlineCount.Load())
+		require.Equal(t, int32(1), newOnlineCount.Load())
 
-		// Give time for state to change to Disconnected first
-		time.Sleep(20 * time.Millisecond)
+		// Wait until we can perform a new check
+		time.Sleep(checkInterval)
 
-		// With zero delay, should quickly transition to Offline
-		time.Sleep(50 * time.Millisecond)
+		// Go offline
+		online.Store(false)
+		connChecker.TriggerCheck()
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
 
-		assert.False(t, checker.IsOnline())
-		assert.Greater(t, offlineCallCount.Load(), int32(0))
+		<-offlineChan // wait for newOnOffline to be called
+		require.False(t, connChecker.IsOnline())
+		require.Equal(t, int32(0), oldOfflineCount.Load())
+		require.Equal(t, int32(1), newOfflineCount.Load())
 	})
 }
 
-// Benchmark tests to ensure performance
-func BenchmarkConnectivityChecker_StateAccess(b *testing.B) {
-	checkFunc := func() bool { return true }
+func TestExponentialBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		checkCount := atomic.Int32{}
+		checkFunc := func() bool { checkCount.Add(1); return false }
+		connChecker, err := New(checkFunc)
+		require.NoError(t, err)
+		defer connChecker.Close()
 
-	checker, err := New(checkFunc)
-	require.NoError(b, err)
-	defer checker.Close()
+		connChecker.Start()
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
+		require.False(t, connChecker.IsOnline())
 
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			checker.IsOnline()
+		// Exponential backoff increase
+		expectedWait := initialBackoffDelay
+		expectedChecks := int32(1) // initial check
+		for expectedWait < maxBackoffDelay {
+			synctest.Wait()
+			require.Equal(t, expectedChecks, checkCount.Load())
+			time.Sleep(expectedWait)
+			expectedChecks++
+			expectedWait *= 2
 		}
+
+		// Reached max backoff delay
+		synctest.Wait()
+		require.Equal(t, expectedChecks, checkCount.Load())
+
+		time.Sleep(maxBackoffDelay)
+		expectedChecks++
+		synctest.Wait()
+		require.Equal(t, expectedChecks, checkCount.Load())
+
+		time.Sleep(3 * maxBackoffDelay)
+		expectedChecks += 3
+		synctest.Wait()
+		require.Equal(t, expectedChecks, checkCount.Load())
 	})
 }
 
-func BenchmarkConnectivityChecker_TriggerCheck(b *testing.B) {
-	mockClock := clock.NewMock()
-	var checkCount atomic.Int32
+func TestInvalidOptions(t *testing.T) {
+	t.Run("negative online check interval", func(t *testing.T) {
+		_, err := New(onlineCheckFunc, WithOnlineCheckInterval(-1))
+		require.Error(t, err)
+	})
 
-	checkFunc := func() bool {
-		checkCount.Add(1)
-		return true
-	}
+	t.Run("negative offline delay", func(t *testing.T) {
+		_, err := New(onlineCheckFunc, WithOfflineDelay(-1*time.Hour))
+		require.Error(t, err)
+	})
+}
 
-	checker, err := New(checkFunc,
-		WithClock(mockClock),
-		WithOnlineCheckInterval(1*time.Nanosecond), // Allow rapid checks
-	)
-	require.NoError(b, err)
-	defer checker.Close()
+func TestClose(t *testing.T) {
+	t.Run("close while offline", func(t *testing.T) {
+		connChecker, err := New(offlineCheckFunc)
+		require.NoError(t, err)
+		defer connChecker.Close()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		mockClock.Add(1 * time.Nanosecond)
-		checker.TriggerCheck()
-	}
+		connChecker.Start()
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
+		require.False(t, connChecker.IsOnline())
+
+		err = connChecker.Close()
+		require.NoError(t, err)
+
+		require.True(t, connChecker.mutex.TryLock())
+		connChecker.mutex.Unlock()
+	})
+
+	t.Run("close while online", func(t *testing.T) {
+		onlineChan := make(chan struct{})
+		onOnline := func() { close(onlineChan) }
+		connChecker, err := New(onlineCheckFunc,
+			WithOnOnline(onOnline),
+		)
+		require.NoError(t, err)
+		defer connChecker.Close()
+
+		connChecker.Start()
+		<-onlineChan
+		require.True(t, connChecker.IsOnline())
+
+		connChecker.Close()
+	})
+
+	t.Run("SetCallbacks after Close", func(t *testing.T) {
+		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+		onOnline := func() { close(onlineChan) }
+		onOffline := func() { close(offlineChan) }
+
+		connChecker, err := New(offlineCheckFunc)
+		require.NoError(t, err)
+		defer connChecker.Close()
+
+		require.Nil(t, connChecker.onOffline)
+		require.Nil(t, connChecker.onOnline)
+
+		connChecker.Close()
+		connChecker.SetCallbacks(onOnline, onOffline)
+
+		// Assert that callbacks were NOT set
+		require.Nil(t, connChecker.onOffline)
+		require.Nil(t, connChecker.onOnline)
+	})
+
+	t.Run("TriggerCheck after Close", func(t *testing.T) {
+		connChecker, err := New(offlineCheckFunc)
+		require.NoError(t, err)
+		defer connChecker.Close()
+
+		connChecker.Start()
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
+		require.False(t, connChecker.IsOnline())
+
+		err = connChecker.Close()
+		require.NoError(t, err)
+
+		require.True(t, connChecker.mutex.TryLock())
+		connChecker.mutex.Unlock()
+
+		connChecker.TriggerCheck() // noop since closed
+
+		require.True(t, connChecker.mutex.TryLock())
+		connChecker.mutex.Unlock()
+		require.False(t, connChecker.IsOnline())
+	})
 }

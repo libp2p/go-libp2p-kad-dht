@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/filecoin-project/go-clock"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
@@ -47,8 +46,6 @@ type config struct {
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
 	addLocalRecord func(mh.Multihash) error
-
-	clock clock.Clock
 
 	maxWorkers               int
 	dedicatedPeriodicWorkers int
@@ -92,8 +89,6 @@ var DefaultConfig = func(cfg *config) error {
 	cfg.maxReprovideDelay = DefaultMaxReprovideDelay
 	cfg.offlineDelay = DefaultOfflineDelay
 	cfg.connectivityCheckOnlineInterval = DefaultConnectivityCheckOnlineInterval
-
-	cfg.clock = clock.New()
 
 	cfg.maxWorkers = 4
 	cfg.dedicatedPeriodicWorkers = 2
@@ -212,15 +207,6 @@ func WithAddLocalRecord(f func(mh.Multihash) error) Option {
 			return errors.New("reprovider config: add local record function cannot be nil")
 		}
 		cfg.addLocalRecord = f
-		return nil
-	}
-}
-
-// WithClock sets the clock used by the provider. This is useful for testing
-// purposes, allowing to control time in tests.
-func WithClock(c clock.Clock) Option {
-	return func(cfg *config) error {
-		cfg.clock = c
 		return nil
 	}
 }

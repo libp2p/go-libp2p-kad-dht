@@ -295,6 +295,9 @@ func (s *SweepingProvider) Close() error {
 		close(s.done)
 		s.cancelCtx()
 		s.wg.Wait()
+		s.approxPrefixLenRunning.Lock()
+		_ = struct{}{} // cannot have empty critical section
+		s.approxPrefixLenRunning.Unlock()
 
 		s.scheduleTimer.Stop()
 		err = cleanup(s.cleanupFuncs)
@@ -487,7 +490,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 					logger.Infof("GetClosestPeers failed during prefix len approximation measurement: %s", err)
 				} else {
 					if len(peers) < 2 {
-						return // Ignore result if only 2 other peers in DHT.
+						return // Ignore result if less than 2 other peers in DHT.
 					}
 					cpl := keyspace.KeyLen
 					firstPeerKey := keyspace.PeerIDToBit256(peers[0])
@@ -988,15 +991,25 @@ func (s *SweepingProvider) onOffline() {
 }
 
 func (s *SweepingProvider) onOnline() {
-	if s.closed() || !s.approxPrefixLenRunning.TryLock() {
+	if s.closed() {
 		return
 	}
-	s.wg.Add(1)
-	s.approxPrefixLen()
-	s.wg.Done()
-	s.approxPrefixLenRunning.Unlock()
 
-	s.RefreshSchedule()
+	s.avgPrefixLenLk.Lock()
+	cachedAvgPrefixLen := s.cachedAvgPrefixLen
+	s.avgPrefixLenLk.Unlock()
+
+	if cachedAvgPrefixLen == -1 {
+		// Provider was previously Offline (not Disconnected).
+		// Run prefix length measurement, and refresh schedule afterwards.
+		if !s.approxPrefixLenRunning.TryLock() {
+			return
+		}
+		s.approxPrefixLen()
+		s.approxPrefixLenRunning.Unlock()
+
+		s.RefreshSchedule()
+	}
 
 	s.catchupPendingWork()
 }

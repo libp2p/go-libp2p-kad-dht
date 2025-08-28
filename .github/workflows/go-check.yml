@@ -13,9 +13,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
-env:
-  GOEXPERIMENT: synctest
-
 jobs:
   go-check:
     uses: ipdxco/unified-github-workflows/.github/workflows/go-check.yml@v1.0

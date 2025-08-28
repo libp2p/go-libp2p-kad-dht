@@ -1,3 +1,6 @@
+//go:build go1.25
+// +build go1.25
+
 package connectivity
 
 import (
@@ -197,7 +200,7 @@ func TestStateTransition(t *testing.T) {
 			require.False(t, connChecker.mutex.TryLock())
 		})
 		t.Run("synctest", func(t *testing.T) {
-			synctest.Run(func() {
+			synctest.Test(t, func(t *testing.T) {
 				checkInterval := time.Second
 				offlineDelay := time.Minute
 

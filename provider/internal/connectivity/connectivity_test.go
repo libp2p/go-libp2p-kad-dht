@@ -4,13 +4,11 @@
 package connectivity
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
-	"github.com/coder/quartz"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,30 +21,31 @@ func TestNewConnectiviyChecker(t *testing.T) {
 	t.Run("initial state is offline", func(t *testing.T) {
 		connChecker, err := New(onlineCheckFunc)
 		require.NoError(t, err)
+		defer connChecker.Close()
 
 		require.False(t, connChecker.IsOnline())
 	})
 
 	t.Run("start online", func(t *testing.T) {
-		onlineChan := make(chan struct{})
-		onOnline := func() { close(onlineChan) }
+		synctest.Test(t, func(t *testing.T) {
+			onlineChan := make(chan struct{})
+			onOnline := func() { close(onlineChan) }
 
-		clk := quartz.NewMock(t)
-		connChecker, err := New(onlineCheckFunc,
-			WithMockClock(clk),
-			WithOnOnline(onOnline),
-		)
-		require.NoError(t, err)
+			connChecker, err := New(onlineCheckFunc,
+				WithOnOnline(onOnline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
 
-		require.False(t, connChecker.IsOnline())
+			require.False(t, connChecker.IsOnline())
 
-		connChecker.Start()
+			connChecker.Start()
 
-		<-onlineChan // wait for onOnline to be run
-		_, ok := clk.Peek()
-		require.False(t, ok)
+			<-onlineChan // wait for onOnline to be run
+			synctest.Wait()
 
-		require.True(t, connChecker.IsOnline())
+			require.True(t, connChecker.IsOnline())
+		})
 	})
 
 	t.Run("start offline", func(t *testing.T) {
@@ -54,13 +53,12 @@ func TestNewConnectiviyChecker(t *testing.T) {
 		onOnline := func() { onlineCount.Add(1) }
 		onOffline := func() { offlineCount.Add(1) }
 
-		clk := quartz.NewMock(t)
 		connChecker, err := New(offlineCheckFunc,
-			WithMockClock(clk),
 			WithOnOnline(onOnline),
 			WithOnOffline(onOffline),
 		)
 		require.NoError(t, err)
+		defer connChecker.Close()
 
 		require.False(t, connChecker.IsOnline())
 
@@ -74,62 +72,49 @@ func TestNewConnectiviyChecker(t *testing.T) {
 	})
 }
 
-func TestStateTransition(t *testing.T) {
+func TestStateTransitions(t *testing.T) {
 	t.Run("offline to online", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		checkInterval := time.Second
-		offlineDelay := time.Minute
-
-		clk := quartz.NewMock(t)
-
-		online := atomic.Bool{} // start offline
-		checkFunc := func() bool { return online.Load() }
-
-		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
-		onOnline := func() { close(onlineChan) }
-		onOffline := func() { close(offlineChan) }
-
-		trap := clk.Trap().NewTimer("periodicProbe")
-		defer trap.Close()
-
-		connChecker, err := New(checkFunc,
-			WithMockClock(clk),
-			WithOfflineDelay(offlineDelay),
-			WithOnlineCheckInterval(checkInterval),
-			WithOnOnline(onOnline),
-			WithOnOffline(onOffline),
-		)
-		require.NoError(t, err)
-
-		require.False(t, connChecker.IsOnline())
-		connChecker.Start()
-
-		trap.MustWait(context.Background()).MustRelease(context.Background())
-
-		online.Store(true)
-		_, w := clk.AdvanceNext()
-		w.MustWait(ctx)
-
-		<-onlineChan // wait for onOnline to be run
-		require.True(t, connChecker.IsOnline())
-		select {
-		case <-offlineChan:
-			require.FailNow(t, "onOffline shouldn't have been called")
-		default:
-		}
-	})
-
-	t.Run("online to disconnected to offline", func(t *testing.T) {
-		t.Run("quartz", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
+		synctest.Test(t, func(t *testing.T) {
 			checkInterval := time.Second
 			offlineDelay := time.Minute
 
-			clk := quartz.NewMock(t)
+			online := atomic.Bool{} // start offline
+			checkFunc := func() bool { return online.Load() }
+
+			onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+			onOnline := func() { close(onlineChan) }
+			onOffline := func() { close(offlineChan) }
+
+			connChecker, err := New(checkFunc,
+				WithOfflineDelay(offlineDelay),
+				WithOnlineCheckInterval(checkInterval),
+				WithOnOnline(onOnline),
+				WithOnOffline(onOffline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
+
+			require.False(t, connChecker.IsOnline())
+			connChecker.Start()
+
+			time.Sleep(initialBackoffDelay)
+
+			online.Store(true)
+
+			<-onlineChan // wait for onOnline to be run
+			require.True(t, connChecker.IsOnline())
+			select {
+			case <-offlineChan:
+				require.FailNow(t, "onOffline shouldn't have been called")
+			default:
+			}
+		})
+	})
+
+	t.Run("online to disconnected to offline", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			checkInterval := time.Second
+			offlineDelay := time.Minute
 
 			online := atomic.Bool{}
 			online.Store(true)
@@ -139,24 +124,21 @@ func TestStateTransition(t *testing.T) {
 			onOnline := func() { close(onlineChan) }
 			onOffline := func() { close(offlineChan) }
 
-			trap := clk.Trap().NewTimer("periodicProbe")
-			defer trap.Close()
-
 			connChecker, err := New(checkFunc,
-				WithMockClock(clk),
 				WithOfflineDelay(offlineDelay),
 				WithOnlineCheckInterval(checkInterval),
 				WithOnOnline(onOnline),
 				WithOnOffline(onOffline),
 			)
 			require.NoError(t, err)
+			defer connChecker.Close()
 
 			require.False(t, connChecker.IsOnline())
 			connChecker.Start()
 
 			<-onlineChan // wait for onOnline to be run
 			require.True(t, connChecker.IsOnline())
-			require.Equal(t, clk.Now(), connChecker.lastCheck)
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 
 			online.Store(false)
 			// Cannot trigger check yet
@@ -164,16 +146,17 @@ func TestStateTransition(t *testing.T) {
 			require.True(t, connChecker.mutex.TryLock()) // node still online
 			connChecker.mutex.Unlock()
 
-			clk.Advance(checkInterval - 1)
+			time.Sleep(checkInterval - time.Millisecond)
 			connChecker.TriggerCheck()
 			require.True(t, connChecker.mutex.TryLock()) // node still online
 			connChecker.mutex.Unlock()
 
-			clk.Advance(1)
+			time.Sleep(time.Millisecond)
 			connChecker.TriggerCheck()
 			require.False(t, connChecker.mutex.TryLock())
 
-			trap.MustWait(context.Background()).MustRelease(context.Background())
+			synctest.Wait()
+
 			require.False(t, connChecker.IsOnline())
 			select {
 			case <-offlineChan:
@@ -184,238 +167,157 @@ func TestStateTransition(t *testing.T) {
 			connChecker.TriggerCheck() // noop since Disconnected
 			require.False(t, connChecker.mutex.TryLock())
 
-			// Wait for offlineDelay to elapse
-			advanced := checkInterval
-			for advanced < offlineDelay {
-				d, w := clk.AdvanceNext()
-				w.MustWait(ctx)
-				advanced += d
-			}
+			time.Sleep(offlineDelay)
 
-			// Now Offline
 			require.False(t, connChecker.IsOnline())
 			<-offlineChan // wait for callback to be run
 
 			connChecker.TriggerCheck() // noop since Offline
 			require.False(t, connChecker.mutex.TryLock())
 		})
-		t.Run("synctest", func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				checkInterval := time.Second
-				offlineDelay := time.Minute
-
-				online := atomic.Bool{}
-				online.Store(true)
-				checkFunc := func() bool { return online.Load() }
-
-				onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
-				onOnline := func() { close(onlineChan) }
-				onOffline := func() { close(offlineChan) }
-
-				connChecker, err := New(checkFunc,
-					WithOfflineDelay(offlineDelay),
-					WithOnlineCheckInterval(checkInterval),
-					WithOnOnline(onOnline),
-					WithOnOffline(onOffline),
-				)
-				require.NoError(t, err)
-				defer connChecker.Close()
-
-				require.False(t, connChecker.IsOnline())
-				connChecker.Start()
-
-				<-onlineChan // wait for onOnline to be run
-				require.True(t, connChecker.IsOnline())
-				require.Equal(t, time.Now(), connChecker.lastCheck)
-
-				online.Store(false)
-				// Cannot trigger check yet
-				connChecker.TriggerCheck()
-				require.True(t, connChecker.mutex.TryLock()) // node still online
-				connChecker.mutex.Unlock()
-
-				time.Sleep(checkInterval - time.Millisecond)
-				connChecker.TriggerCheck()
-				require.True(t, connChecker.mutex.TryLock()) // node still online
-				connChecker.mutex.Unlock()
-
-				time.Sleep(time.Millisecond)
-				connChecker.TriggerCheck()
-				require.False(t, connChecker.mutex.TryLock())
-
-				synctest.Wait()
-
-				require.False(t, connChecker.IsOnline())
-				select {
-				case <-offlineChan:
-					require.FailNow(t, "onOffline shouldn't have been called")
-				default: // Disconnected but not Offline
-				}
-
-				connChecker.TriggerCheck() // noop since Disconnected
-				require.False(t, connChecker.mutex.TryLock())
-
-				time.Sleep(offlineDelay)
-
-				require.False(t, connChecker.IsOnline())
-				<-offlineChan // wait for callback to be run
-
-				connChecker.TriggerCheck() // noop since Offline
-				require.False(t, connChecker.mutex.TryLock())
-			})
-		})
 	})
 
 	t.Run("remain online", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		synctest.Test(t, func(t *testing.T) {
+			checkInterval := time.Second
+			offlineDelay := time.Minute
 
-		checkInterval := time.Second
-		offlineDelay := time.Minute
+			online := atomic.Bool{}
+			online.Store(true)
+			checkCount := atomic.Int32{}
+			checkFunc := func() bool { checkCount.Add(1); return online.Load() }
 
-		clk := quartz.NewMock(t)
+			onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+			onOnline := func() { close(onlineChan) }
+			onOffline := func() { close(offlineChan) }
 
-		online := atomic.Bool{}
-		online.Store(true)
-		checkCount := atomic.Int32{}
-		checkFunc := func() bool { checkCount.Add(1); return online.Load() }
+			connChecker, err := New(checkFunc,
+				WithOfflineDelay(offlineDelay),
+				WithOnlineCheckInterval(checkInterval),
+				WithOnOnline(onOnline),
+				WithOnOffline(onOffline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
 
-		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
-		onOnline := func() { close(onlineChan) }
-		onOffline := func() { close(offlineChan) }
+			require.False(t, connChecker.IsOnline())
+			connChecker.Start()
 
-		startTime := clk.Now()
+			<-onlineChan
 
-		trap := clk.Trap().Now()
-		defer trap.Close()
+			require.True(t, connChecker.IsOnline())
+			require.Equal(t, int32(1), checkCount.Load())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 
-		connChecker, err := New(checkFunc,
-			WithMockClock(clk),
-			WithOfflineDelay(offlineDelay),
-			WithOnlineCheckInterval(checkInterval),
-			WithOnOnline(onOnline),
-			WithOnOffline(onOffline),
-		)
-		require.NoError(t, err)
+			connChecker.TriggerCheck() // recent check, should be no-op
+			synctest.Wait()
+			require.Equal(t, int32(1), checkCount.Load())
 
-		require.False(t, connChecker.IsOnline())
-		connChecker.Start()
+			time.Sleep(checkInterval - 1)
+			connChecker.TriggerCheck() // recent check, should be no-op
+			synctest.Wait()
+			require.Equal(t, int32(1), checkCount.Load())
 
-		trap.MustWait(ctx).MustRelease(ctx)
-		<-onlineChan
+			time.Sleep(1)
+			connChecker.TriggerCheck() // checkInterval has passed, new check is run
+			synctest.Wait()
+			require.Equal(t, int32(2), checkCount.Load())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
 
-		require.True(t, connChecker.IsOnline())
-		require.Equal(t, int32(1), checkCount.Load())
-		require.Equal(t, startTime, connChecker.lastCheck)
-
-		connChecker.TriggerCheck() // recent check, should be no-op
-		require.Equal(t, int32(1), checkCount.Load())
-
-		clk.Advance(checkInterval - 1).MustWait(ctx)
-		connChecker.TriggerCheck() // recent check, should be no-op
-		require.Equal(t, int32(1), checkCount.Load())
-
-		clk.Advance(1).MustWait(ctx)
-		connChecker.TriggerCheck() // checkInterval has passed, new check is run
-		trap.MustWait(ctx).MustRelease(ctx)
-		require.Equal(t, int32(2), checkCount.Load())
-
-		clk.Advance(checkInterval).MustWait(ctx)
-		connChecker.TriggerCheck() // checkInterval has passed, new check is run
-		trap.MustWait(ctx).MustRelease(ctx)
-		require.Equal(t, int32(3), checkCount.Load())
+			time.Sleep(checkInterval)
+			connChecker.TriggerCheck() // checkInterval has passed, new check is run
+			synctest.Wait()
+			require.Equal(t, int32(3), checkCount.Load())
+			require.Equal(t, time.Now(), connChecker.lastCheck)
+		})
 	})
 }
 
 func TestSetCallbacks(t *testing.T) {
-	// Callbacks MUST be set before calling Start()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		// Callbacks MUST be set before calling Start()
+		oldOnlineCount, oldOfflineCount, newOnlineCount, newOfflineCount := atomic.Int32{}, atomic.Int32{}, atomic.Int32{}, atomic.Int32{}
+		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+		oldOnOnline := func() { oldOnlineCount.Add(1); close(onlineChan) }
+		oldOnOffline := func() { oldOfflineCount.Add(1); close(offlineChan) }
+		newOnOnline := func() { newOnlineCount.Add(1); close(onlineChan) }
+		newOnOffline := func() { newOfflineCount.Add(1); close(offlineChan) }
 
-	oldOnlineCount, oldOfflineCount, newOnlineCount, newOfflineCount := atomic.Int32{}, atomic.Int32{}, atomic.Int32{}, atomic.Int32{}
-	onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
-	oldOnOnline := func() { oldOnlineCount.Add(1); close(onlineChan) }
-	oldOnOffline := func() { oldOfflineCount.Add(1); close(offlineChan) }
-	newOnOnline := func() { newOnlineCount.Add(1); close(onlineChan) }
-	newOnOffline := func() { newOfflineCount.Add(1); close(offlineChan) }
+		checkInterval := time.Second
+		online := atomic.Bool{}
+		online.Store(true)
+		checkFunc := func() bool { return online.Load() }
 
-	checkInterval := time.Second
-	online := atomic.Bool{}
-	online.Store(true)
-	checkFunc := func() bool { return online.Load() }
-	clk := quartz.NewMock(t)
+		connChecker, err := New(checkFunc,
+			WithOnOnline(oldOnOnline),
+			WithOnOffline(oldOnOffline),
+			WithOfflineDelay(0),
+			WithOnlineCheckInterval(checkInterval),
+		)
+		require.NoError(t, err)
+		defer connChecker.Close()
 
-	connChecker, err := New(checkFunc,
-		WithMockClock(clk),
-		WithOnOnline(oldOnOnline),
-		WithOnOffline(oldOnOffline),
-		WithOfflineDelay(0),
-		WithOnlineCheckInterval(checkInterval),
-	)
-	require.NoError(t, err)
+		connChecker.SetCallbacks(newOnOnline, newOnOffline)
 
-	connChecker.SetCallbacks(newOnOnline, newOnOffline)
+		connChecker.Start()
 
-	connChecker.Start()
+		<-onlineChan // wait for newOnOnline to be called
+		require.True(t, connChecker.IsOnline())
+		require.Equal(t, int32(0), oldOnlineCount.Load())
+		require.Equal(t, int32(1), newOnlineCount.Load())
 
-	<-onlineChan // wait for newOnOnline to be called
-	require.True(t, connChecker.IsOnline())
-	require.Equal(t, int32(0), oldOnlineCount.Load())
-	require.Equal(t, int32(1), newOnlineCount.Load())
+		// Wait until we can perform a new check
+		time.Sleep(checkInterval)
 
-	// Wait until we can perform a new check
-	clk.Advance(checkInterval).MustWait(ctx)
+		// Go offline
+		online.Store(false)
+		connChecker.TriggerCheck()
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
 
-	// Go offline
-	online.Store(false)
-	connChecker.TriggerCheck()
-	require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
-
-	<-offlineChan // wait for newOnOffline to be called
-	require.False(t, connChecker.IsOnline())
-	require.Equal(t, int32(0), oldOfflineCount.Load())
-	require.Equal(t, int32(1), newOfflineCount.Load())
+		<-offlineChan // wait for newOnOffline to be called
+		require.False(t, connChecker.IsOnline())
+		require.Equal(t, int32(0), oldOfflineCount.Load())
+		require.Equal(t, int32(1), newOfflineCount.Load())
+	})
 }
 
 func TestExponentialBackoff(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		checkCount := atomic.Int32{}
+		checkFunc := func() bool { checkCount.Add(1); return false }
+		connChecker, err := New(checkFunc)
+		require.NoError(t, err)
+		defer connChecker.Close()
 
-	clk := quartz.NewMock(t)
-	initTrap := clk.Trap().NewTimer("periodicProbe")
-	resetTrap := clk.Trap().TimerReset()
-	defer func() {
-		initTrap.Close()
-		resetTrap.Close()
-	}()
+		connChecker.Start()
+		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
+		require.False(t, connChecker.IsOnline())
 
-	connChecker, err := New(offlineCheckFunc,
-		WithMockClock(clk),
-	)
-	require.NoError(t, err)
+		// Exponential backoff increase
+		expectedWait := initialBackoffDelay
+		expectedChecks := int32(1) // initial check
+		for expectedWait < maxBackoffDelay {
+			synctest.Wait()
+			require.Equal(t, expectedChecks, checkCount.Load())
+			time.Sleep(expectedWait)
+			expectedChecks++
+			expectedWait *= 2
+		}
 
-	connChecker.Start()
-	require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
-	require.False(t, connChecker.IsOnline())
+		// Reached max backoff delay
+		synctest.Wait()
+		require.Equal(t, expectedChecks, checkCount.Load())
 
-	initTrap.MustWait(ctx).MustRelease(ctx)
+		time.Sleep(maxBackoffDelay)
+		expectedChecks++
+		synctest.Wait()
+		require.Equal(t, expectedChecks, checkCount.Load())
 
-	expectedWait := initialBackoffDelay
-	for expectedWait < maxBackoffDelay {
-		d, w := clk.AdvanceNext()
-		w.MustWait(ctx)
-		require.Equal(t, expectedWait, d)
-		resetTrap.MustWait(ctx).MustRelease(ctx)
-		expectedWait *= 2
-	}
-	d, w := clk.AdvanceNext()
-	w.MustWait(ctx)
-	require.Equal(t, maxBackoffDelay, d)
-	resetTrap.MustWait(ctx).MustRelease(ctx)
-
-	d, w = clk.AdvanceNext()
-	w.MustWait(ctx)
-	require.Equal(t, maxBackoffDelay, d)
+		time.Sleep(3 * maxBackoffDelay)
+		expectedChecks += 3
+		synctest.Wait()
+		require.Equal(t, expectedChecks, checkCount.Load())
+	})
 }
 
 func TestInvalidOptions(t *testing.T) {
@@ -434,6 +336,7 @@ func TestClose(t *testing.T) {
 	t.Run("close while offline", func(t *testing.T) {
 		connChecker, err := New(offlineCheckFunc)
 		require.NoError(t, err)
+		defer connChecker.Close()
 
 		connChecker.Start()
 		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
@@ -453,6 +356,7 @@ func TestClose(t *testing.T) {
 			WithOnOnline(onOnline),
 		)
 		require.NoError(t, err)
+		defer connChecker.Close()
 
 		connChecker.Start()
 		<-onlineChan
@@ -468,6 +372,7 @@ func TestClose(t *testing.T) {
 
 		connChecker, err := New(offlineCheckFunc)
 		require.NoError(t, err)
+		defer connChecker.Close()
 
 		require.Nil(t, connChecker.onOffline)
 		require.Nil(t, connChecker.onOnline)
@@ -483,6 +388,7 @@ func TestClose(t *testing.T) {
 	t.Run("TriggerCheck after Close", func(t *testing.T) {
 		connChecker, err := New(offlineCheckFunc)
 		require.NoError(t, err)
+		defer connChecker.Close()
 
 		connChecker.Start()
 		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online

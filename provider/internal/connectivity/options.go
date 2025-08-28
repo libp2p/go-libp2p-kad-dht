@@ -3,12 +3,9 @@ package connectivity
 import (
 	"fmt"
 	"time"
-
-	"github.com/coder/quartz"
 )
 
 type config struct {
-	clock               quartz.Clock
 	onlineCheckInterval time.Duration // minimum check interval when online
 
 	offlineDelay time.Duration
@@ -29,17 +26,9 @@ func (cfg *config) apply(opts ...Option) error {
 type Option func(opt *config) error
 
 var DefaultConfig = func(cfg *config) error {
-	cfg.clock = quartz.NewReal()
 	cfg.onlineCheckInterval = 1 * time.Minute
+	cfg.offlineDelay = 2 * time.Hour
 	return nil
-}
-
-// WithClock sets the clock used by the connectivity checker.
-func WithMockClock(c *quartz.Mock) Option {
-	return func(cfg *config) error {
-		cfg.clock = c
-		return nil
-	}
 }
 
 // WithOnlineCheckInterval sets the minimum interval between online checks.

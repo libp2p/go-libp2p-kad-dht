@@ -3,7 +3,6 @@ module github.com/libp2p/go-libp2p-kad-dht
 go 1.24
 
 require (
-	github.com/coder/quartz v0.2.1
 	github.com/filecoin-project/go-clock v0.1.0
 	github.com/gammazero/deque v1.0.0
 	github.com/google/gopacket v1.1.19

@@ -4,8 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/coder/quartz"
 )
 
 const (
@@ -43,7 +41,6 @@ type ConnectivityChecker struct {
 
 	online atomic.Bool
 
-	clock               quartz.Clock
 	lastCheck           time.Time
 	onlineCheckInterval time.Duration // minimum check interval when online
 
@@ -64,7 +61,6 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 	c := &ConnectivityChecker{
 		done:                make(chan struct{}),
 		checkFunc:           checkFunc,
-		clock:               cfg.clock,
 		onlineCheckInterval: cfg.onlineCheckInterval,
 		onOffline:           cfg.onOffline,
 		onOnline:            cfg.onOnline,
@@ -139,7 +135,7 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		c.mutex.Unlock()
 		return
 	}
-	if c.online.Load() && c.clock.Since(c.lastCheck) < c.onlineCheckInterval {
+	if c.online.Load() && time.Since(c.lastCheck) < c.onlineCheckInterval {
 		c.mutex.Unlock()
 		return // last check was too recent
 	}
@@ -148,7 +144,7 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		defer c.mutex.Unlock()
 
 		if c.checkFunc() {
-			c.lastCheck = c.clock.Now()
+			c.lastCheck = time.Now()
 			return
 		}
 
@@ -171,14 +167,14 @@ func (c *ConnectivityChecker) probeLoop(init bool) {
 				c.onOffline()
 			}
 		} else {
-			offlineTimer := c.clock.NewTimer(c.offlineDelay)
+			offlineTimer := time.NewTimer(c.offlineDelay)
 			defer offlineTimer.Stop()
 			offlineC = offlineTimer.C
 		}
 	}
 
 	delay := initialBackoffDelay
-	timer := c.clock.NewTimer(delay, "periodicProbe")
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
 		select {
@@ -209,7 +205,7 @@ func (c *ConnectivityChecker) probe() bool {
 			// Node is back Online.
 			c.online.Store(true)
 
-			c.lastCheck = c.clock.Now()
+			c.lastCheck = time.Now()
 			if c.onOnline != nil {
 				c.onOnline()
 			}

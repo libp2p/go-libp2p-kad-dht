@@ -24,8 +24,8 @@ func TestNewConnectiviyChecker(t *testing.T) {
 	})
 
 	t.Run("start online", func(t *testing.T) {
-		onlineCount := atomic.Int32{}
-		onOnline := func() { onlineCount.Add(1) }
+		onlineChan := make(chan struct{})
+		onOnline := func() { close(onlineChan) }
 
 		clk := quartz.NewMock(t)
 		connChecker, err := New(onlineCheckFunc,
@@ -38,13 +38,11 @@ func TestNewConnectiviyChecker(t *testing.T) {
 
 		connChecker.Start()
 
-		connChecker.mutex.Lock() // wait for node to come online
+		<-onlineChan // wait for onOnline to be run
 		_, ok := clk.Peek()
-		connChecker.mutex.Unlock()
 		require.False(t, ok)
 
 		require.True(t, connChecker.IsOnline())
-		require.Equal(t, int32(1), onlineCount.Load())
 	})
 
 	t.Run("start offline", func(t *testing.T) {

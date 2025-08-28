@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/filecoin-project/go-clock"
 	pool "github.com/guillaumemichel/reservedpool"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -130,7 +129,6 @@ type SweepingProvider struct {
 	workerPool               *pool.Pool[workerType]
 	maxProvideConnsPerWorker int
 
-	clock             clock.Clock
 	cycleStart        time.Time
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
@@ -138,7 +136,7 @@ type SweepingProvider struct {
 	schedule               *trie.Trie[bitstr.Key, time.Duration]
 	scheduleLk             sync.Mutex
 	scheduleCursor         bitstr.Key
-	scheduleTimer          *clock.Timer
+	scheduleTimer          *time.Timer
 	scheduleTimerStartedAt time.Time
 
 	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
@@ -231,8 +229,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		avgPrefixLenValidity: defaultPrefixLenValidity,
 		cachedAvgPrefixLen:   -1,
 
-		clock:      cfg.clock,
-		cycleStart: cfg.clock.Now(),
+		cycleStart: time.Now(),
 
 		msgSender:      cfg.msgSender,
 		getSelfAddrs:   cfg.selfAddrs,
@@ -241,7 +238,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		keyStore: cfg.keyStore,
 
 		schedule:      trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer: cfg.clock.Timer(time.Hour),
+		scheduleTimer: time.NewTimer(time.Hour),
 
 		provideQueue:   queue.NewProvideQueue(),
 		reprovideQueue: queue.NewReprovideQueue(),
@@ -330,7 +327,7 @@ func (s *SweepingProvider) closed() bool {
 func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
 	s.scheduleCursor = prefix
 	s.scheduleTimer.Reset(timeUntilReprovide)
-	s.scheduleTimerStartedAt = s.clock.Now()
+	s.scheduleTimerStartedAt = time.Now()
 }
 
 func (s *SweepingProvider) reschedulePrefix(prefix bitstr.Key) {
@@ -407,7 +404,7 @@ func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 
 // currentTimeOffset returns the current time offset in the reprovide cycle.
 func (s *SweepingProvider) currentTimeOffset() time.Duration {
-	return s.timeOffset(s.clock.Now())
+	return s.timeOffset(time.Now())
 }
 
 // timeOffset returns the time offset in the reprovide cycle for the given
@@ -502,7 +499,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 				}
 
 				s.connectivity.TriggerCheck()
-				s.clock.Sleep(time.Second) // retry every second until success
+				time.Sleep(time.Second) // retry every second until success
 			}
 		}()
 	}
@@ -518,7 +515,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 		s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
 	}
 	logger.Debugf("prefix len approximation is %d", s.cachedAvgPrefixLen)
-	s.lastAvgPrefixLen = s.clock.Now()
+	s.lastAvgPrefixLen = time.Now()
 }
 
 // getAvgPrefixLenNoLock returns the average prefix length of all scheduled
@@ -534,7 +531,7 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
 		return -1, ErrOffline
 	}
 
-	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(s.clock.Now()) {
+	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(time.Now()) {
 		// Return cached value if it is still valid.
 		return s.cachedAvgPrefixLen, nil
 	}
@@ -546,7 +543,7 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
 			prefixLenSum += len(entry.Key)
 		}
 		s.cachedAvgPrefixLen = prefixLenSum / len(scheduleEntries)
-		s.lastAvgPrefixLen = s.clock.Now()
+		s.lastAvgPrefixLen = time.Now()
 	}
 	return s.cachedAvgPrefixLen, nil
 }
@@ -708,7 +705,7 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	if nPeers == 0 {
 		return nil
 	}
-	startTime := s.clock.Now()
+	startTime := time.Now()
 	errCount := atomic.Uint32{}
 	nWorkers := s.maxProvideConnsPerWorker
 	jobChan := make(chan provideJob, nWorkers)
@@ -735,7 +732,7 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	wg.Wait()
 
 	errCountLoaded := int(errCount.Load())
-	logger.Infof("sent provider records to peers in %s, errors %d/%d", s.clock.Since(startTime), errCountLoaded, len(keysAllocations))
+	logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
 
 	if errCountLoaded == nPeers || errCountLoaded > int(float32(nPeers)*(1-minimalRegionReachablePeersRatio)) {
 		return fmt.Errorf("unable to provide to enough peers (%d/%d)", nPeers-errCountLoaded, nPeers)
@@ -813,7 +810,7 @@ func (s *SweepingProvider) handleReprovide() {
 		timeSinceTimerRunning := s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), currentTimeOffset)
 		timeSinceTimerUntilNext := s.timeBetween(s.timeOffset(s.scheduleTimerStartedAt), next.Data)
 
-		if s.scheduleTimerStartedAt.Add(s.reprovideInterval).Before(s.clock.Now()) {
+		if s.scheduleTimerStartedAt.Add(s.reprovideInterval).Before(time.Now()) {
 			// Alarm was programmed more than reprovideInterval ago, which means that
 			// no regions has been reprovided since. Add all regions to the reprovide
 			// queue. This only happens if the main thread gets blocked for more than

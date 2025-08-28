@@ -602,7 +602,6 @@ func TestHandleReprovide(t *testing.T) {
 	offlineDelay := time.Minute
 	connChecker, err := connectivity.New(
 		func() bool { return online.Load() },
-		connectivity.WithClock(mockClock),
 		connectivity.WithOfflineDelay(offlineDelay),
 		connectivity.WithOnlineCheckInterval(connectivityCheckInterval),
 	)

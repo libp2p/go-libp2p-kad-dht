@@ -196,7 +196,6 @@ func New(opts ...Option) (*SweepingProvider, error) {
 			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 			return err == nil && len(peers) > 0
 		},
-		connectivity.WithClock(cfg.clock),
 		connectivity.WithOfflineDelay(cfg.offlineDelay),
 		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
 	)

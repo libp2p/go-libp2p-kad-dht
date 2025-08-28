@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/filecoin-project/go-clock"
+	"github.com/coder/quartz"
 )
 
 type config struct {
-	clock               clock.Clock
+	clock               quartz.Clock
 	onlineCheckInterval time.Duration // minimum check interval when online
 
 	offlineDelay time.Duration
@@ -29,13 +29,13 @@ func (cfg *config) apply(opts ...Option) error {
 type Option func(opt *config) error
 
 var DefaultConfig = func(cfg *config) error {
-	cfg.clock = clock.New()
+	cfg.clock = quartz.NewReal()
 	cfg.onlineCheckInterval = 1 * time.Minute
 	return nil
 }
 
 // WithClock sets the clock used by the connectivity checker.
-func WithClock(c clock.Clock) Option {
+func WithMockClock(c *quartz.Mock) Option {
 	return func(cfg *config) error {
 		cfg.clock = c
 		return nil

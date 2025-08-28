@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/filecoin-project/go-clock"
+	"github.com/coder/quartz"
 )
 
 const (
@@ -43,7 +43,7 @@ type ConnectivityChecker struct {
 
 	online atomic.Bool
 
-	clock               clock.Clock
+	clock               quartz.Clock
 	lastCheck           time.Time
 	onlineCheckInterval time.Duration // minimum check interval when online
 
@@ -139,7 +139,7 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		c.mutex.Unlock()
 		return
 	}
-	if c.online.Load() && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
+	if c.online.Load() && c.clock.Since(c.lastCheck) < c.onlineCheckInterval {
 		c.mutex.Unlock()
 		return // last check was too recent
 	}
@@ -165,13 +165,20 @@ func (c *ConnectivityChecker) TriggerCheck() {
 func (c *ConnectivityChecker) probeLoop(init bool) {
 	var offlineC <-chan time.Time
 	if !init {
-		offlineTimer := c.clock.Timer(c.offlineDelay)
-		defer offlineTimer.Stop()
-		offlineC = offlineTimer.C
+		if c.offlineDelay == 0 {
+			if c.onOffline != nil {
+				// Online -> Offline
+				c.onOffline()
+			}
+		} else {
+			offlineTimer := c.clock.NewTimer(c.offlineDelay)
+			defer offlineTimer.Stop()
+			offlineC = offlineTimer.C
+		}
 	}
 
 	delay := initialBackoffDelay
-	timer := c.clock.Timer(delay)
+	timer := c.clock.NewTimer(delay, "periodicProbe")
 	defer timer.Stop()
 	for {
 		select {

@@ -67,7 +67,7 @@ type KeyStoreOption func(*keyStoreCfg) error
 
 const (
 	DefaultKeyStorePrefixBits  = 10
-	DefaultKeyStoreBasePrefix  = "/reprovider/mhs"
+	DefaultKeyStoreBasePrefix  = "/reprovider/keystore"
 	DefaultKeyStoreGCInterval  = 2 * amino.DefaultReprovideInterval
 	DefaultKeyStoreGCBatchSize = 1 << 14
 )

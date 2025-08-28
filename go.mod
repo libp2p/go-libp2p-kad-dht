@@ -1,6 +1,6 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
-go 1.23.10
+go 1.24
 
 require (
 	github.com/coder/quartz v0.2.1

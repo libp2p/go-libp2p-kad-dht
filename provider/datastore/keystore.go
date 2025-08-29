@@ -19,7 +19,7 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
-var logger = logging.Logger("dht/SweepingReprovider/KeyStore")
+var logger = logging.Logger("dht/provider/keystore")
 
 type KeyChanFunc = func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
 
@@ -67,7 +67,7 @@ type KeyStoreOption func(*keyStoreCfg) error
 
 const (
 	DefaultKeyStorePrefixBits  = 10
-	DefaultKeyStoreBasePrefix  = "/reprovider/keystore"
+	DefaultKeyStoreBasePrefix  = "/provider/keystore"
 	DefaultKeyStoreGCInterval  = 2 * amino.DefaultReprovideInterval
 	DefaultKeyStoreGCBatchSize = 1 << 14
 )

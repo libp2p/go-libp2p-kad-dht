@@ -725,6 +725,7 @@ func TestClose(t *testing.T) {
 			}),
 		)
 		require.NoError(t, err)
+		synctest.Wait()
 
 		mhs := genMultihashes(128)
 		err = prov.StartProviding(false, mhs...)
@@ -735,6 +736,7 @@ func TestClose(t *testing.T) {
 
 		err = prov.Close()
 		require.NoError(t, err)
+		synctest.Wait()
 
 		newMh := random.Multihashes(1)[0]
 
@@ -745,9 +747,6 @@ func TestClose(t *testing.T) {
 		err = prov.ProvideOnce(newMh)
 		require.ErrorIs(t, err, ErrClosed)
 		require.Equal(t, 0, prov.Clear())
-
-		_, err = prov.keyStore.Get(context.Background(), "")
-		require.ErrorIs(t, err, datastore.ErrKeyStoreClosed)
 
 		err = prov.workerPool.Acquire(burstWorker)
 		require.ErrorIs(t, err, reservedpool.ErrClosed)

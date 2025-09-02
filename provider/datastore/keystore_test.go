@@ -17,7 +17,9 @@ import (
 )
 
 func TestKeyStoreStoreAndGet(t *testing.T) {
-	store, err := NewKeyStore(ds.NewMapDatastore())
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+	store, err := NewKeyStore(ds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 	}
 
 	for _, h := range mhs {
-		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultKeyStorePrefixBits])
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -65,8 +67,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 		}
 	}
 
-	short := DefaultKeyStorePrefixBits / 2
-	p := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:short])
+	p := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:3])
 	res, err := store.Get(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -102,14 +103,16 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 
 func TestKeyStoreContainsPrefix(t *testing.T) {
 	ctx := context.Background()
-	store, err := NewKeyStore(ds.NewMapDatastore())
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+	store, err := NewKeyStore(ds)
 	require.NoError(t, err)
 
 	ok, err := store.ContainsPrefix(ctx, bitstr.Key("0000"))
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	generated := genMultihashesMatchingPrefix(bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixBits+4)), 1)
+	generated := genMultihashesMatchingPrefix(bitstr.Key(strings.Repeat("0", 10)), 1)
 	require.True(t, keyspace.IsPrefix(bitstr.Key("0000"), keyspace.MhToBit256(generated[0])))
 	store.Put(ctx, generated...)
 
@@ -121,11 +124,11 @@ func TestKeyStoreContainsPrefix(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixBits)))
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", 6)))
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixBits+4)))
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", 10)))
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -137,13 +140,16 @@ func TestKeyStoreContainsPrefix(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", DefaultKeyStorePrefixBits+2)+"1"))
+	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", 8)+"1"))
 	require.NoError(t, err)
 	require.False(t, ok)
 }
 
 func TestKeyStoreReset(t *testing.T) {
-	store, err := NewKeyStore(ds.NewMapDatastore())
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+
+	store, err := NewKeyStore(ds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +185,7 @@ func TestKeyStoreReset(t *testing.T) {
 
 	// old hashes should not be present
 	for _, h := range first {
-		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultKeyStorePrefixBits])
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -193,7 +199,7 @@ func TestKeyStoreReset(t *testing.T) {
 
 	// new hashes should be retrievable
 	for _, h := range second {
-		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultKeyStorePrefixBits])
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
 		got, err := store.Get(context.Background(), prefix)
 		if err != nil {
 			t.Fatal(err)
@@ -212,12 +218,15 @@ func TestKeyStoreReset(t *testing.T) {
 }
 
 func TestKeyStoreDelete(t *testing.T) {
-	store, err := NewKeyStore(ds.NewMapDatastore())
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+
+	store, err := NewKeyStore(ds)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	mhs := make([]mh.Multihash, 3)
+	mhs := random.Multihashes(3)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
 		if err != nil {
@@ -229,7 +238,7 @@ func TestKeyStoreDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	delPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:DefaultKeyStorePrefixBits])
+	delPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:6])
 	if err := store.Delete(context.Background(), mhs[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +254,7 @@ func TestKeyStoreDelete(t *testing.T) {
 	}
 
 	// other hashes should still be retrievable
-	otherPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[1]))[:DefaultKeyStorePrefixBits])
+	otherPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[1]))[:6])
 	res, err = store.Get(context.Background(), otherPrefix)
 	if err != nil {
 		t.Fatal(err)
@@ -253,4 +262,26 @@ func TestKeyStoreDelete(t *testing.T) {
 	if len(res) == 0 {
 		t.Fatalf("expected remaining hashes for other prefix")
 	}
+}
+
+func TestKeyStoreSize(t *testing.T) {
+	ctx := context.Background()
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+	store, err := NewKeyStore(ds)
+	require.NoError(t, err)
+
+	mhs0 := random.Multihashes(128)
+	store.Put(ctx, mhs0...)
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(mhs0), size)
+
+	mhs1 := random.Multihashes(102400)
+	store.Put(ctx, mhs1...)
+
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(mhs0)+len(mhs1), size)
 }

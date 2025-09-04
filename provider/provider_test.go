@@ -234,7 +234,6 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 				return sortedPeers[:min(replicationFactor, len(peers))], nil
 			},
 		}
-
 		r := SweepingProvider{
 			router:            router,
 			replicationFactor: replicationFactor,
@@ -610,7 +609,7 @@ func TestHandleReprovide(t *testing.T) {
 
 			reprovideInterval: time.Minute,
 			maxReprovideDelay: 5 * time.Second,
-
+      
 			getSelfAddrs: func() []ma.Multiaddr { return nil },
 		}
 		prov.scheduleTimer.Stop()

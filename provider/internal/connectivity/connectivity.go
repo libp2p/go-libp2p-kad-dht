@@ -11,6 +11,11 @@ const (
 	maxBackoffDelay     = time.Minute
 )
 
+const (
+	initialBackoffDelay = 100 * time.Millisecond
+	maxBackoffDelay     = time.Minute
+)
+
 // ConnectivityChecker provides a thread-safe way to verify the connectivity of
 // a node, and triggers wake-up callbacks when the node changes connectivity
 // state. The `checkFunc` callback used to verify network connectivity is user

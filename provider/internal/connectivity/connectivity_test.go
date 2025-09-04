@@ -4,6 +4,7 @@
 package connectivity
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"

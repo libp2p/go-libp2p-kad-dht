@@ -3,18 +3,15 @@ package provider
 import (
 	"context"
 	"errors"
-	"sync/atomic"
+	"fmt"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/libp2p/go-libp2p-kad-dht/provider"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	mh "github.com/multiformats/go-multihash"
 )
-
-var logger = logging.Logger(provider.LoggerName)
 
 // SweepingProvider manages provides and reprovides for both DHT swarms (LAN
 // and WAN) in the dual DHT setup.
@@ -60,8 +57,8 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithMessageSender(cfg.msgSenders[i]),
 			provider.WithReprovideInterval(cfg.reprovideInterval[i]),
 			provider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
+			provider.WithOfflineDelay(cfg.offlineDelay[i]),
 			provider.WithConnectivityCheckOnlineInterval(cfg.connectivityCheckOnlineInterval[i]),
-			provider.WithConnectivityCheckOfflineInterval(cfg.connectivityCheckOfflineInterval[i]),
 			provider.WithMaxWorkers(cfg.maxWorkers[i]),
 			provider.WithDedicatedPeriodicWorkers(cfg.dedicatedPeriodicWorkers[i]),
 			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
@@ -83,29 +80,38 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 
 // runOnBoth runs the provided function on both the LAN and WAN providers in
 // parallel and waits for both to complete.
-func (s *SweepingProvider) runOnBoth(wait bool, f func(*provider.SweepingProvider)) {
-	if wait {
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			f(s.LAN)
-		}()
-		f(s.WAN)
-		<-done
-		return
+func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider) error) error {
+	var errs [2]error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err := f(s.LAN)
+		if err != nil {
+			errs[0] = fmt.Errorf("LAN provider: %w", err)
+		}
+	}()
+	err := f(s.WAN)
+	if err != nil {
+		errs[1] = fmt.Errorf("WAN provider: %w", err)
 	}
-	go f(s.LAN)
-	go f(s.WAN)
+	<-done
+	return errors.Join(errs[:]...)
 }
 
 // ProvideOnce sends provider records for the specified keys to both DHT swarms
 // only once. It does not automatically reprovide those keys afterward.
 //
-// Add the supplied multihashes to the provide queue, and return immediately.
+// Add the supplied multihashes to the provide queues, and return right after.
 // The provide operation happens asynchronously.
-func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
-	s.runOnBoth(false, func(p *provider.SweepingProvider) {
-		p.ProvideOnce(keys...)
+//
+// Returns an error if the keys couldn't be added to the provide queue. This
+// can happen if the provider is closed or if the node is currently Offline
+// (either never bootstrapped, or disconnected since more than `OfflineDelay`).
+// The schedule and provide queue depend on the network size, hence recent
+// network connectivity is essential.
+func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
+	return s.runOnBoth(func(p *provider.SweepingProvider) error {
+		return p.ProvideOnce(keys...)
 	})
 }
 
@@ -120,23 +126,28 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
 //
 // This operation is asynchronous, it returns as soon as the `keys` are added
 // to the provide queue, and provides happens asynchronously.
-func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
+//
+// Returns an error if the keys couldn't be added to the provide queue. This
+// can happen if the provider is closed or if the node is currently Offline
+// (either never bootstrapped, or disconnected since more than `OfflineDelay`).
+// The schedule and provide queue depend on the network size, hence recent
+// network connectivity is essential.
+func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) error {
 	ctx := context.Background()
 	newKeys, err := s.keyStore.Put(ctx, keys...)
 	if err != nil {
-		logger.Warnf("failed to store multihashes: %v", err)
-		return
+		return fmt.Errorf("failed to store multihashes: %w", err)
 	}
 
-	s.runOnBoth(false, func(p *provider.SweepingProvider) {
-		p.AddToSchedule(newKeys...)
+	s.runOnBoth(func(p *provider.SweepingProvider) error {
+		return p.AddToSchedule(newKeys...)
 	})
 
 	if !force {
 		keys = newKeys
 	}
 
-	s.ProvideOnce(keys...)
+	return s.ProvideOnce(keys...)
 }
 
 // StopProviding stops reproviding the given keys to both DHT swarms. The node
@@ -146,11 +157,12 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
 // Remove the `keys` from the schedule and return immediately. Valid records
 // can remain in the DHT swarms up to the provider record TTL after calling
 // `StopProviding`.
-func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
+func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
 	err := s.keyStore.Delete(context.Background(), keys...)
 	if err != nil {
-		logger.Warnf("failed to stop providing keys: %s", err)
+		return fmt.Errorf("failed to stop providing keys: %w", err)
 	}
+	return nil
 }
 
 // Clear clears the all the keys from the provide queues of both DHTs and
@@ -159,11 +171,7 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 // The keys are not deleted from the keystore, so they will continue to be
 // reprovided as scheduled.
 func (s *SweepingProvider) Clear() int {
-	var total atomic.Int32
-	s.runOnBoth(true, func(p *provider.SweepingProvider) {
-		total.Add(int32(p.Clear()))
-	})
-	return int(total.Load())
+	return s.LAN.Clear() + s.WAN.Clear()
 }
 
 // RefreshSchedule scans the KeyStore for any keys that are not currently
@@ -173,9 +181,14 @@ func (s *SweepingProvider) Clear() int {
 // This function doesn't remove prefixes that have no keys from the schedule.
 // This is done automatically during the reprovide operation if a region has no
 // keys.
-func (s *SweepingProvider) RefreshSchedule() {
-	go s.runOnBoth(false, func(p *provider.SweepingProvider) {
-		p.RefreshSchedule()
+//
+// Returns an error if the provider is closed or if the node is currently
+// Offline (either never bootstrapped, or disconnected since more than
+// `OfflineDelay`). The schedule depends on the network size, hence recent
+// network connectivity is essential.
+func (s *SweepingProvider) RefreshSchedule() error {
+	return s.runOnBoth(func(p *provider.SweepingProvider) error {
+		return p.RefreshSchedule()
 	})
 }
 
@@ -187,9 +200,9 @@ var (
 // dhtProvider is the interface to ensure that SweepingProvider and
 // provider.SweepingProvider share the same interface.
 type dhtProvider interface {
-	StartProviding(force bool, keys ...mh.Multihash)
-	StopProviding(keys ...mh.Multihash)
-	ProvideOnce(keys ...mh.Multihash)
+	StartProviding(force bool, keys ...mh.Multihash) error
+	StopProviding(keys ...mh.Multihash) error
+	ProvideOnce(keys ...mh.Multihash) error
 	Clear() int
-	RefreshSchedule()
+	RefreshSchedule() error
 }

@@ -4,8 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/filecoin-project/go-clock"
 )
 
 const (
@@ -43,7 +41,6 @@ type ConnectivityChecker struct {
 
 	online atomic.Bool
 
-	clock               clock.Clock
 	lastCheck           time.Time
 	onlineCheckInterval time.Duration // minimum check interval when online
 
@@ -64,7 +61,6 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 	c := &ConnectivityChecker{
 		done:                make(chan struct{}),
 		checkFunc:           checkFunc,
-		clock:               cfg.clock,
 		onlineCheckInterval: cfg.onlineCheckInterval,
 		onOffline:           cfg.onOffline,
 		onOnline:            cfg.onOnline,
@@ -139,7 +135,7 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		c.mutex.Unlock()
 		return
 	}
-	if c.online.Load() && c.clock.Now().Sub(c.lastCheck) < c.onlineCheckInterval {
+	if c.online.Load() && time.Since(c.lastCheck) < c.onlineCheckInterval {
 		c.mutex.Unlock()
 		return // last check was too recent
 	}
@@ -148,7 +144,7 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		defer c.mutex.Unlock()
 
 		if c.checkFunc() {
-			c.lastCheck = c.clock.Now()
+			c.lastCheck = time.Now()
 			return
 		}
 
@@ -165,13 +161,20 @@ func (c *ConnectivityChecker) TriggerCheck() {
 func (c *ConnectivityChecker) probeLoop(init bool) {
 	var offlineC <-chan time.Time
 	if !init {
-		offlineTimer := c.clock.Timer(c.offlineDelay)
-		defer offlineTimer.Stop()
-		offlineC = offlineTimer.C
+		if c.offlineDelay == 0 {
+			if c.onOffline != nil {
+				// Online -> Offline
+				c.onOffline()
+			}
+		} else {
+			offlineTimer := time.NewTimer(c.offlineDelay)
+			defer offlineTimer.Stop()
+			offlineC = offlineTimer.C
+		}
 	}
 
 	delay := initialBackoffDelay
-	timer := c.clock.Timer(delay)
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
 		select {
@@ -202,7 +205,7 @@ func (c *ConnectivityChecker) probe() bool {
 			// Node is back Online.
 			c.online.Store(true)
 
-			c.lastCheck = c.clock.Now()
+			c.lastCheck = time.Now()
 			if c.onOnline != nil {
 				c.onOnline()
 			}

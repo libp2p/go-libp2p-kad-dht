@@ -748,9 +748,6 @@ func TestClose(t *testing.T) {
 		require.ErrorIs(t, err, ErrClosed)
 		require.Equal(t, 0, prov.Clear())
 
-		_, err = prov.keyStore.Get(context.Background(), "")
-		require.ErrorIs(t, err, datastore.ErrKeyStoreClosed)
-
 		err = prov.workerPool.Acquire(burstWorker)
 		require.ErrorIs(t, err, reservedpool.ErrClosed)
 	})

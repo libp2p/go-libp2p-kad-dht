@@ -1530,3 +1530,108 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	s.scheduleLk.Unlock()
 	return nil
 }
+
+// Stats returns comprehensive statistics about the provider's current state.
+// The returned data is JSON-serializable and includes metrics such as queue
+// sizes, provide rates, connectivity status, and operational counters.
+//
+// This method is thread-safe and can be called concurrently. The returned
+// map uses string keys for metric names and values of any type that can be
+// JSON-marshaled (numbers, strings, booleans, nested maps, slices).
+//
+// Example metrics included:
+//   - "queue_sizes": {"provide": 42, "reprovide": 3}
+//   - "connectivity": {"online": true, "last_check": "2024-01-01T12:00:00Z"}
+//   - "schedule": {"entries": 15, "next_reprovide_in": "5m30s"}
+//   - "workers": {"active": 2, "max": 10}
+//   - "counters": {"total_provides": 1234, "failed_provides": 5}
+func (s *SweepingProvider) Stats() map[string]any {
+	if s.closed() {
+		return map[string]any{
+			"status": "closed",
+		}
+	}
+
+	stats := make(map[string]any)
+
+	// Queue metrics
+	stats["queues"] = map[string]any{
+		"pending_key_provides":      0, // TODO:
+		"pending_region_provides":   s.provideQueue.Size(),
+		"pending_region_reprovides": s.reprovideQueue.Size(),
+	}
+	stats[""] = s.provideQueue.Size()
+	stats["pending_region_reprovides"] = s.reprovideQueue.Size()
+
+	// Connectivity status
+	stats["connectivity"] = map[string]any{
+		"status": "", // TODO:
+		"since":  "", // TODO:
+	}
+
+	// Schedule information
+	s.scheduleLk.Lock()
+	scheduleSize := s.schedule.Size()
+	nextPrefix := s.scheduleCursor
+	_, nextReprovideAt := trie.Find(s.schedule, nextPrefix)
+	s.scheduleLk.Unlock()
+
+	keys, _ := s.keyStore.Size(context.Background())
+	s.avgPrefixLenLk.Lock()
+	avgPrefixLen := s.cachedAvgPrefixLen
+	s.avgPrefixLenLk.Unlock()
+	stats["schedule"] = map[string]any{
+		"keys":                  keys,
+		"regions":               scheduleSize,
+		"avg_prefix_length":     avgPrefixLen,
+		"next_reprovide_at":     nextReprovideAt, // TODO: this is the offset, not actual time
+		"next_reprovide_prefix": key.BitString(s.scheduleCursor),
+	}
+
+	// Worker pool status
+	stats["workers"] = map[string]any{
+		"active":                       0, // TODO:
+		"max":                          0, // TODO:
+		"active_periodic":              0, // TODO:
+		"dedicated_periodic":           0, // TODO:
+		"active_burst":                 0, // TODO:
+		"dedicated_burst":              0, // TODO:
+		"queued_periodic":              0, // TODO:
+		"queued_burst":                 0, // TODO:
+		"max_provide_conns_per_worker": s.maxProvideConnsPerWorker,
+	}
+
+	// Timing information
+	stats["timing"] = map[string]any{
+		"uptime":                      time.Since(s.cycleStart).String(),
+		"reprovide_interval":          s.reprovideInterval.String(),
+		"cycle_start":                 s.cycleStart, // TODO: when current cycle started
+		"current_time_offset":         s.currentTimeOffset(),
+		"cycle_completion_percentage": .1, // TODO: % of cycle completion
+		"max_reprovide_delay":         s.maxReprovideDelay,
+	}
+
+	stats["ongoing_operations"] = map[string]any{
+		"region_reprovides": 0, // TODO:
+		"region_provides":   0, // TODO:
+		"key_provides":      0, // TODO:
+	}
+
+	stats["past_operations"] = map[string]any{
+		"failures": 0, // TODO: define what a failure is
+		"provided": 0, // TODO: number of keys provided so far (incl. reprovides)
+
+		"provides/sec":           0.0, // TODO: compute number, in last reprovide cycle
+		"reprovide_duration":     0,   // TODO: in the last reprovide cycle
+		"avg_keys_per_reprovide": 0,   // TODO: in the last reprovide cycle
+	}
+
+	stats["network"] = map[string]any{
+		"peers":              0, // TODO: in the last reprovide cycle
+		"reachable":          0, // TODO: in the last reprovide cycle
+		"avg_holders":        0, // TODO: in the last reprovide cycle
+		"replication_factor": s.replicationFactor,
+	}
+
+	return stats
+}

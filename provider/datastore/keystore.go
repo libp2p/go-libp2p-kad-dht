@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,25 +13,25 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
-	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
-
-type KeyChanFunc = func(context.Context) (<-chan cid.Cid, error) // TODO: update to get mh.Multihash instead of cid.Cid
 
 // KeyStore indexes multihashes by their kademlia identifier.
 type KeyStore struct {
 	lk sync.Mutex
 
-	ds        ds.Batching
-	base      ds.Key
-	batchSize int
+	ds         ds.Batching
+	base       ds.Key
+	prefixBits int
+	batchSize  int
 }
 
 type keyStoreCfg struct {
-	base      string
-	batchSize int
+	base       string
+	prefixBits int
+	batchSize  int
 }
 
 // KeyStoreOption configures KeyStore behaviour.
@@ -39,10 +40,12 @@ type KeyStoreOption func(*keyStoreCfg) error
 const (
 	DefaultKeyStoreBasePrefix = "/provider/keystore"
 	DefaultKeyStoreBatchSize  = 1 << 14
+	DefaultPrefixBits         = 16
 )
 
 var KeyStoreDefaultCfg = func(cfg *keyStoreCfg) error {
 	cfg.base = DefaultKeyStoreBasePrefix
+	cfg.prefixBits = DefaultPrefixBits
 	cfg.batchSize = DefaultKeyStoreBatchSize
 	return nil
 }
@@ -55,6 +58,22 @@ func WithDatastorePrefix(base string) KeyStoreOption {
 			return fmt.Errorf("datastore prefix cannot be empty")
 		}
 		cfg.base = base
+		return nil
+	}
+}
+
+// WithPrefixBits sets how many bits from binary keys become individual path
+// components in datastore keys. Higher values create deeper hierarchies but
+// enable more granular prefix queries.
+//
+// Must be a multiple of 8 between 0 and 256 (inclusive) to align with byte
+// boundaries.
+func WithPrefixBits(prefixBits int) KeyStoreOption {
+	return func(cfg *keyStoreCfg) error {
+		if prefixBits < 0 || prefixBits > 256 || prefixBits%8 != 0 {
+			return fmt.Errorf("invalid prefix bits %d, must be a non-negative multiple of 8 less or equal to 256", prefixBits)
+		}
+		cfg.prefixBits = prefixBits
 		return nil
 	}
 }
@@ -81,9 +100,10 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (*KeyStore, error) {
 		}
 	}
 	return &KeyStore{
-		ds:        d,
-		base:      ds.NewKey(cfg.base),
-		batchSize: cfg.batchSize,
+		ds:         d,
+		base:       ds.NewKey(cfg.base),
+		prefixBits: cfg.prefixBits,
+		batchSize:  cfg.batchSize,
 	}, nil
 }
 
@@ -115,37 +135,66 @@ func (s *KeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error
 	return nil
 }
 
-// fullDsKey turns a full key (256 bit) into the corresponding datastore key
-// under supplied base key.
+// dsKey returns the datastore key for the provided binary key.
 //
-// Example:
-// * Input: k="11110000...", base="/provider/keystore"
-// * Output: "/provider/keystore/f/0/..."
-func (s *KeyStore) fullDsKey(k bit256.Key) ds.Key {
+// The function creates a hierarchical datastore key by expanding bits into
+// path components, starting with the supplied `base` prefix, followed by
+// individual bits (`0` or `1`) separated by `/`, and optionally a
+// base64URL-encoded suffix.
+//
+// Full keys (256-bit):
+// The first `prefixBits` bits become individual path components, and the
+// remaining bytes (after prefixBits/8) are base64URL encoded as the final
+// component. Example: "/base/prefix/0/0/0/0/1/1/1/1/AAAA...A=="
+//
+// Prefix keys (<256-bit):
+// If the key is shorter than 256-bits, only the available bits (up to
+// `prefixBits`) become path components. No base64URL suffix is added. This
+// creates a prefix that can be used in datastore queries to find all matching
+// full keys.
+//
+// If the prefix is longer than `prefixBits`, only the first `prefixBits` bits
+// are used, allowing the returned key to serve as a query prefix for the
+// datastore.
+func dsKey[K kad.Key[K]](k K, prefixBits int, base ds.Key) ds.Key {
 	b := strings.Builder{}
-	for _, r := range key.HexString(k) {
+	l := k.BitLen()
+	for i := range min(prefixBits, l) {
+		b.WriteRune(rune('0' + k.Bit(i)))
 		b.WriteRune('/')
-		b.WriteRune(r)
 	}
-	return s.base.ChildString(b.String())
+	if l == keyspace.KeyLen {
+		b.WriteString(base64.URLEncoding.EncodeToString(keyspace.KeyToBytes(k)[prefixBits/8:]))
+	}
+	return base.ChildString(b.String())
 }
 
-// fullDsKey turns a bitstring key prefix into the corresponding datastore key
-// under supplied base key.
-func (s *KeyStore) prefixDsKey(k bitstr.Key) ds.Key {
-	b := strings.Builder{}
-	for _, r := range key.HexString(k[:len(k)-len(k)%4]) {
-		b.WriteRune('/')
-		b.WriteRune(r)
+// decodeKey reconstructs a 256-bit binary key from a hierarchical datastore key string.
+//
+// This function reverses the process of dsKey, converting a datastore key back into
+// its original binary representation by parsing the individual bit components and
+// base64URL-encoded suffix.
+//
+// The input datastore key format is expected to be:
+// "base/bit0/bit1/.../bitN/base64url_suffix"
+//
+// Returns the reconstructed 256-bit key or an error if base64URL decoding fails.
+func (s *KeyStore) decodeKey(dsk string) (bit256.Key, error) {
+	dsk = dsk[len(s.base.String()):] // remove leading prefix
+	bs := make([]byte, 32)
+	// Extract individual bits from odd positions (skip '/' separators)
+	for i := range s.prefixBits {
+		if dsk[2*i+1] == '1' {
+			bs[i/8] |= byte(1) << (7 - i%8)
+		}
 	}
-	return s.base.ChildString(b.String())
-}
-
-var hexToBits = map[rune]bitstr.Key{
-	'0': "0000", '1': "0001", '2': "0010", '3': "0011",
-	'4': "0100", '5': "0101", '6': "0110", '7': "0111",
-	'8': "1000", '9': "1001", 'a': "1010", 'b': "1011",
-	'c': "1100", 'd': "1101", 'e': "1110", 'f': "1111",
+	// Decode base64URL suffix and append to remaining bytes
+	decoded, err := base64.URLEncoding.DecodeString(dsk[2*(s.prefixBits)+1:])
+	if err != nil {
+		return bit256.Key{}, err
+	}
+	copy(bs[s.prefixBits/8:], decoded)
+	return bit256.NewKey(bs), nil
 }
 
 type pair struct {
@@ -165,13 +214,13 @@ func (s *KeyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Mu
 			continue
 		}
 		seen[k] = struct{}{}
-		dsKey := s.fullDsKey(k)
-		ok, err := s.ds.Has(ctx, dsKey)
+		dsk := dsKey(k, s.prefixBits, s.base)
+		ok, err := s.ds.Has(ctx, dsk)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			toPut = append(toPut, pair{k: dsKey, h: h})
+			toPut = append(toPut, pair{k: dsk, h: h})
 		}
 	}
 	clear(seen)
@@ -219,26 +268,26 @@ func (s *KeyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
-	dsKey := s.prefixDsKey(prefix).String()
-	res, err := s.ds.Query(ctx, query.Query{Prefix: dsKey})
+	dsk := dsKey(prefix, s.prefixBits, s.base).String()
+	res, err := s.ds.Query(ctx, query.Query{Prefix: dsk})
 	if err != nil {
 		return nil, err
 	}
 	defer res.Close()
 
-	mod := len(prefix) % 4
+	longPrefix := prefix.BitLen() > s.prefixBits
 	out := make([]mh.Multihash, 0)
 	for r := range res.Next() {
 		if r.Error != nil {
 			return nil, r.Error
 		}
 		// Depending on prefix length, filter out non matching keys
-		if mod != 0 {
-			c := rune(r.Key[len(dsKey)+1]) // skip the '/'
-			b := hexToBits[c][:mod]
-			target := prefix[len(prefix)-mod:]
-			if b != target {
-				// Last character from the result doesn't match the latest prefix bits
+		if longPrefix {
+			k, err := s.decodeKey(r.Key)
+			if err != nil {
+				return nil, err
+			}
+			if !keyspace.IsPrefix(prefix, k) {
 				continue
 			}
 		}
@@ -255,10 +304,10 @@ func (s *KeyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
-	dsKey := s.prefixDsKey(prefix).String()
-	mod := len(prefix) % 4
-	q := query.Query{Prefix: dsKey}
-	if mod == 0 {
+	dsk := dsKey(prefix, s.prefixBits, s.base).String()
+	longPrefix := prefix.BitLen() > s.prefixBits
+	q := query.Query{Prefix: dsk, KeysOnly: true}
+	if !longPrefix {
 		// Exact match on hex character, only one possible match
 		q.Limit = 1
 	}
@@ -272,14 +321,14 @@ func (s *KeyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 		if r.Error != nil {
 			return false, r.Error
 		}
-		if mod == 0 {
+		if !longPrefix {
 			return true, nil
 		}
-		c := rune(r.Key[len(dsKey)+1]) // skip the '/'
-		b := hexToBits[c][:mod]
-		target := prefix[len(prefix)-mod:]
-		if b == target {
-			// Last character from the result matches the latest prefix bits
+		k, err := s.decodeKey(r.Key)
+		if err != nil {
+			return false, err
+		}
+		if keyspace.IsPrefix(prefix, k) {
 			return true, nil
 		}
 	}
@@ -347,8 +396,8 @@ func (s *KeyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 		return err
 	}
 	for _, h := range keys {
-		dsKey := s.fullDsKey(keyspace.MhToBit256(h))
-		err := b.Delete(ctx, dsKey)
+		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits, s.base)
+		err := b.Delete(ctx, dsk)
 		if err != nil {
 			return err
 		}

@@ -75,7 +75,8 @@ type keystore interface {
 
 // Benchmark KeyStore Put operations
 func BenchmarkKeyStorePut(b *testing.B) {
-	testSizes := []int{100000}
+	testSizes := []int{1000}
+	nPuts := 100
 
 	for _, size := range testSizes {
 		// b.Run(fmt.Sprintf("Map_%d_keys", size), func(b *testing.B) {
@@ -83,23 +84,23 @@ func BenchmarkKeyStorePut(b *testing.B) {
 		// 	defer cleanup()
 		// 	benchmarkKeyStorePut(b, s, size)
 		// })
-		//
-		// b.Run(fmt.Sprintf("Badger_%d_keys", size), func(b *testing.B) {
-		// 	s, cleanup := createBadgerDatastore(b)
-		// 	defer cleanup()
-		// 	benchmarkKeyStorePut(b, s, size)
-		// })
 
-		b.Run(fmt.Sprintf("LevelDB_%d_keys", size), func(b *testing.B) {
-			s, cleanup := createLevelDBDatastore(b)
+		b.Run(fmt.Sprintf("Badger_%d_keys_%dx", size, nPuts), func(b *testing.B) {
+			s, cleanup := createBadgerDatastore(b)
 			defer cleanup()
-			benchmarkKeyStorePut(b, s, size)
+			benchmarkKeyStorePut(b, s, size, nPuts)
 		})
 
-		b.Run(fmt.Sprintf("Pebble_%d_keys", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("LevelDB_%d_keys_%dx", size, nPuts), func(b *testing.B) {
+			s, cleanup := createLevelDBDatastore(b)
+			defer cleanup()
+			benchmarkKeyStorePut(b, s, size, nPuts)
+		})
+
+		b.Run(fmt.Sprintf("Pebble_%d_keys_%dx", size, nPuts), func(b *testing.B) {
 			s, cleanup := createPebbleDatastore(b)
 			defer cleanup()
-			benchmarkKeyStorePut(b, s, size)
+			benchmarkKeyStorePut(b, s, size, nPuts)
 		})
 	}
 }
@@ -117,14 +118,19 @@ func getKeyStores(s ds.Batching) map[string]keystore {
 	if err != nil {
 		panic("Failed to create KeyStore3")
 	}
+	ks4, err := NewKeyStore3(s, WithPrefixBits(16))
+	if err != nil {
+		panic("Failed to create KeyStore4")
+	}
 	return map[string]keystore{
 		"KeyStore":  ks1,
 		"KeyStore2": ks2,
 		"KeyStore3": ks3,
+		"KeyStore4": ks4,
 	}
 }
 
-func benchmarkKeyStorePut(b *testing.B, ds ds.Batching, keyCount int) {
+func benchmarkKeyStorePut(b *testing.B, ds ds.Batching, keyCount, nPuts int) {
 	keystores := getKeyStores(ds)
 	defer func() {
 		for _, ks := range keystores {
@@ -132,7 +138,6 @@ func benchmarkKeyStorePut(b *testing.B, ds ds.Batching, keyCount int) {
 		}
 	}()
 
-	nPuts := 1
 	randomKeys := random.Multihashes(keyCount * nPuts)
 
 	for str, ks := range keystores {

@@ -19,7 +19,7 @@ const (
 )
 
 type config struct {
-	keyStore *datastore.KeyStore
+	keyStore datastore.KeyStore
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
@@ -87,7 +87,7 @@ var DefaultConfig = func(cfg *config) error {
 	return nil
 }
 
-func WithKeyStore(keyStore *datastore.KeyStore) Option {
+func WithKeyStore(keyStore datastore.KeyStore) Option {
 	return func(cfg *config) error {
 		if keyStore == nil {
 			return errors.New("provider config: keyStore cannot be nil")

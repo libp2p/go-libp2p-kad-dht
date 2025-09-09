@@ -42,9 +42,11 @@ func TestNewConnectiviyChecker(t *testing.T) {
 			connChecker.Start()
 
 			<-onlineChan // wait for onOnline to be run
+			now := time.Now()
 			synctest.Wait()
 
 			require.True(t, connChecker.IsOnline())
+			require.Equal(t, now, connChecker.LastStateChange())
 		})
 	})
 
@@ -139,6 +141,7 @@ func TestStateTransitions(t *testing.T) {
 			<-onlineChan // wait for onOnline to be run
 			require.True(t, connChecker.IsOnline())
 			require.Equal(t, time.Now(), connChecker.lastCheck)
+			require.Equal(t, time.Now(), connChecker.LastStateChange())
 
 			online.Store(false)
 			// Cannot trigger check yet
@@ -150,6 +153,7 @@ func TestStateTransitions(t *testing.T) {
 			connChecker.TriggerCheck()
 			require.True(t, connChecker.mutex.TryLock()) // node still online
 			connChecker.mutex.Unlock()
+			require.NotEqual(t, time.Now(), connChecker.LastStateChange())
 
 			time.Sleep(time.Millisecond)
 			connChecker.TriggerCheck()
@@ -171,6 +175,7 @@ func TestStateTransitions(t *testing.T) {
 
 			require.False(t, connChecker.IsOnline())
 			<-offlineChan // wait for callback to be run
+			require.Equal(t, time.Now(), connChecker.LastStateChange())
 
 			connChecker.TriggerCheck() // noop since Offline
 			require.False(t, connChecker.mutex.TryLock())
@@ -205,9 +210,11 @@ func TestStateTransitions(t *testing.T) {
 
 			<-onlineChan
 
+			onlineSince := time.Now()
 			require.True(t, connChecker.IsOnline())
 			require.Equal(t, int32(1), checkCount.Load())
-			require.Equal(t, time.Now(), connChecker.lastCheck)
+			require.Equal(t, onlineSince, connChecker.lastCheck)
+			require.Equal(t, onlineSince, connChecker.LastStateChange())
 
 			connChecker.TriggerCheck() // recent check, should be no-op
 			synctest.Wait()
@@ -229,6 +236,7 @@ func TestStateTransitions(t *testing.T) {
 			synctest.Wait()
 			require.Equal(t, int32(3), checkCount.Load())
 			require.Equal(t, time.Now(), connChecker.lastCheck)
+			require.Equal(t, onlineSince, connChecker.LastStateChange())
 		})
 	})
 }

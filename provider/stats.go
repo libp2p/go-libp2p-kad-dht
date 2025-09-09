@@ -97,11 +97,12 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	}
 
 	pastOps := stats.PastOperations{
-		RecordsProvided: 0, // TODO:
-		KeysProvided:    0, // TODO:
-		KeysFailed:      0, // TODO:
+		RecordsProvided: int(s.opStats.recordsProvided.Load()),
+		KeysProvided:    int(s.opStats.keysProvided.Load()),
+		KeysFailed:      int(s.opStats.keysFailed.Load()),
 
-		KeyProvidesPerMinute:    0, // TODO:
+		KeysProvidedPerMinute:   0, // TODO:
+		KeysRerovidedPerMinute:  0, // TODO:
 		RegionReprovideDuration: 0, // TODO:
 		AvgKeysPerReprovide:     0, // TODO:
 	}
@@ -122,6 +123,10 @@ func (s *SweepingProvider) Stats() stats.Stats {
 }
 
 type operationStats struct {
+	recordsProvided atomic.Int32
+	keysProvided    atomic.Int32
+	keysFailed      atomic.Int32
+
 	ongoingProvides   ongoingOpStats
 	ongoingReprovides ongoingOpStats
 }
@@ -143,4 +148,13 @@ func (s *ongoingOpStats) addKeys(keyCount int) {
 func (s *ongoingOpStats) finish(keyCount int) {
 	s.opCount.Add(-1)
 	s.keyCount.Add(-int32(keyCount))
+}
+
+func (s *operationStats) providedRecords(count int) {
+	s.recordsProvided.Add(int32(count))
+}
+
+func (s *operationStats) providedKeys(successes, failures int) {
+	s.keysProvided.Add(int32(successes))
+	s.keysFailed.Add(int32(failures))
 }

@@ -73,15 +73,16 @@ type PastOperations struct {
 	KeysProvided    int `json:"key_provided"`     // since provided is running
 	KeysFailed      int `json:"keys_failed"`      // since provided is running
 
-	KeysProvidedPerMinute   float32       `json:"keys_provided_per_minute"`   // last cycle
-	KeysRerovidedPerMinute  float32       `json:"keys_reprovided_per_minute"` // last cycle
+	KeysProvidedPerMinute   float64       `json:"keys_provided_per_minute"`   // last cycle
+	KeysReprovidedPerMinute float64       `json:"keys_reprovided_per_minute"` // last cycle
 	RegionReprovideDuration time.Duration `json:"reprovide_duration"`         // last cycle
-	AvgKeysPerReprovide     float32       `json:"avg_keys_per_reprovide"`     // last cycle
+	AvgKeysPerReprovide     float64       `json:"avg_keys_per_reprovide"`     // last cycle
 }
 
 type Network struct { // TODO: more fields?
-	Peers             int `json:"peers"`
-	Reachable         int `json:"reachable"`
-	AvgHolders        int `json:"avg_holders"`
-	ReplicationFactor int `json:"replication_factor"`
+	Peers                    int     `json:"peers"` // reprovide only
+	CompleteKeyspaceCoverage bool    `json:"complete_keyspace_coverage"`
+	Reachable                int     `json:"reachable"` // reprovide only
+	AvgHolders               float64 `json:"avg_holders"`
+	ReplicationFactor        int     `json:"replication_factor"`
 }

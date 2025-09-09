@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/gammazero/deque"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/stats"
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
@@ -102,7 +104,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		KeysFailed:      int(s.opStats.keysFailed.Load()),
 
 		KeysProvidedPerMinute:   0, // TODO:
-		KeysRerovidedPerMinute:  0, // TODO:
+		KeysReprovidedPerMinute: 0, // TODO:
 		RegionReprovideDuration: 0, // TODO:
 		AvgKeysPerReprovide:     0, // TODO:
 	}
@@ -112,11 +114,12 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		Past:    pastOps,
 	}
 
-	snapshot.Network = stats.Network{
-		Peers:             0, // TODO: in the last reprovide cycle
-		Reachable:         0, // TODO: in the last reprovide cycle
-		AvgHolders:        0, // TODO: in the last reprovide cycle
-		ReplicationFactor: s.replicationFactor,
+	snapshot.Network = stats.Network{ // in the last reprovide cycle
+		Peers:                    0,     // TODO:
+		CompleteKeyspaceCoverage: false, // TODO:
+		Reachable:                0,     // TODO:
+		AvgHolders:               s.opStats.avgHolders.avg(),
+		ReplicationFactor:        s.replicationFactor,
 	}
 
 	return snapshot
@@ -129,6 +132,19 @@ type operationStats struct {
 
 	ongoingProvides   ongoingOpStats
 	ongoingReprovides ongoingOpStats
+
+	// peers      intTimeSeries
+	// reachable  intTimeSeries
+	avgHolders floatTimeSeries
+}
+
+func (s *operationStats) providedRecords(count int) {
+	s.recordsProvided.Add(int32(count))
+}
+
+func (s *operationStats) providedKeys(successes, failures int) {
+	s.keysProvided.Add(int32(successes))
+	s.keysFailed.Add(int32(failures))
 }
 
 type ongoingOpStats struct {
@@ -150,11 +166,117 @@ func (s *ongoingOpStats) finish(keyCount int) {
 	s.keyCount.Add(-int32(keyCount))
 }
 
-func (s *operationStats) providedRecords(count int) {
-	s.recordsProvided.Add(int32(count))
+type intTimeEntry struct {
+	timestamp time.Time
+	value     int
 }
 
-func (s *operationStats) providedKeys(successes, failures int) {
-	s.keysProvided.Add(int32(successes))
-	s.keysFailed.Add(int32(failures))
+type intTimeSeries struct {
+	mutex     sync.Mutex
+	data      deque.Deque[intTimeEntry]
+	retention time.Duration
+}
+
+func (t *intTimeSeries) add(value int) {
+	now := time.Now()
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.data.PushBack(intTimeEntry{timestamp: now, value: value})
+	t.gc(now)
+}
+
+func (t *intTimeSeries) sum() (sum int) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	t.gc(time.Now())
+
+	for i := 0; i < t.data.Len(); i++ {
+		sum += t.data.At(i).value
+	}
+	return
+}
+
+func (t *intTimeSeries) avg() float64 {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	t.gc(time.Now())
+
+	l := t.data.Len()
+	if l == 0 {
+		return 0
+	}
+	return float64(t.sum()) / float64(l)
+}
+
+// mutex should be held
+func (t *intTimeSeries) gc(now time.Time) {
+	cutoff := now.Add(-t.retention)
+	for t.data.Len() > 0 {
+		if t.data.Front().timestamp.Before(cutoff) {
+			t.data.PopFront()
+		} else {
+			break
+		}
+	}
+}
+
+type floatTimeEntry struct {
+	timestamp time.Time
+	value     float64
+	weight    int
+}
+
+type floatTimeSeries struct {
+	mutex     sync.Mutex
+	data      deque.Deque[floatTimeEntry]
+	retention time.Duration
+}
+
+func (t *floatTimeSeries) add(value float64, weight int) {
+	now := time.Now()
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.data.PushBack(floatTimeEntry{timestamp: now, value: value, weight: weight})
+	t.gc(now)
+}
+
+func (t *floatTimeSeries) sum() float64 {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	t.gc(time.Now())
+
+	var sum float64
+	for i := 0; i < t.data.Len(); i++ {
+		e := t.data.At(i)
+		sum += e.value * float64(e.weight)
+	}
+	return sum
+}
+
+func (t *floatTimeSeries) avg() float64 {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	t.gc(time.Now())
+
+	l := t.data.Len()
+	if l == 0 {
+		return 0
+	}
+	return t.sum() / float64(l)
+}
+
+// mutex should be held
+func (t *floatTimeSeries) gc(now time.Time) {
+	cutoff := now.Add(-t.retention)
+	for t.data.Len() > 0 {
+		if t.data.Front().timestamp.Before(cutoff) {
+			t.data.PopFront()
+		} else {
+			break
+		}
+	}
 }

@@ -744,7 +744,9 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	wg.Wait()
 
 	var failedKeys int
+	holdersSum := s.replicationFactor * nKeys
 	for _, c := range failedKeysCount {
+		holdersSum -= c
 		if c == s.replicationFactor {
 			failedKeys++
 		}

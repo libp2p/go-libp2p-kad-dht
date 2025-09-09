@@ -69,13 +69,14 @@ type OngoingOperations struct {
 }
 
 type PastOperations struct {
-	RecordsProvided int `json:"records_provided"`
-	KeysProvided    int `json:"key_provided"`
-	KeysFailed      int `json:"keys_failed"`
+	RecordsProvided int `json:"records_provided"` // since provided is running
+	KeysProvided    int `json:"key_provided"`     // since provided is running
+	KeysFailed      int `json:"keys_failed"`      // since provided is running
 
-	KeyProvidesPerMinute    float32       `json:"key_provides_per_minute"`
-	RegionReprovideDuration time.Duration `json:"reprovide_duration"`
-	AvgKeysPerReprovide     float32       `json:"avg_keys_per_reprovide"`
+	KeysProvidedPerMinute   float32       `json:"keys_provided_per_minute"`   // last cycle
+	KeysRerovidedPerMinute  float32       `json:"keys_reprovided_per_minute"` // last cycle
+	RegionReprovideDuration time.Duration `json:"reprovide_duration"`         // last cycle
+	AvgKeysPerReprovide     float32       `json:"avg_keys_per_reprovide"`     // last cycle
 }
 
 type Network struct { // TODO: more fields?

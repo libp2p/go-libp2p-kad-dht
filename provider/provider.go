@@ -153,6 +153,7 @@ type SweepingProvider struct {
 	addLocalRecord func(mh.Multihash) error
 
 	provideCounter metric.Int64Counter
+	opStats        operationStats
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
@@ -1111,7 +1112,8 @@ func (s *SweepingProvider) reprovideLateRegions() {
 }
 
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
-	if len(keys) == 0 {
+	keyCount := len(keys)
+	if keyCount == 0 {
 		return
 	}
 	addrInfo, ok := s.selfAddrInfo()
@@ -1120,6 +1122,12 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 		// provider record.
 		return
 	}
+
+	s.opStats.ongoingProvides.start(keyCount)
+	defer func() {
+		s.opStats.ongoingProvides.finish(keyCount)
+	}()
+
 	if len(keys) <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
@@ -1138,6 +1146,8 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	// current provide batch.
 	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
 	keys = append(keys, extraKeys...)
+	keyCount += len(extraKeys)
+	s.opStats.ongoingProvides.addKeys(len(extraKeys))
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
@@ -1162,10 +1172,17 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 		}
 		return
 	}
-	if len(keys) == 0 {
+	keyCount := len(keys)
+	if keyCount == 0 {
 		logger.Infof("No keys to reprovide for prefix %s", prefix)
 		return
 	}
+
+	s.opStats.ongoingProvides.start(keyCount)
+	defer func() {
+		s.opStats.ongoingProvides.finish(keyCount)
+	}()
+
 	if len(keys) <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
@@ -1209,6 +1226,8 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 				s.reschedulePrefix(prefix)
 			}
 		}
+		s.opStats.ongoingProvides.addKeys(len(keys) - keyCount)
+		keyCount = len(keys)
 	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 

@@ -19,8 +19,8 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Queue metrics
 	snapshot.Queues = stats.Queues{
-		PendingKeyProvides:      0, // TODO:
-		PendingRegionProvides:   s.provideQueue.Size(),
+		PendingKeyProvides:      s.provideQueue.Size(),
+		PendingRegionProvides:   s.provideQueue.NumRegions(),
 		PendingRegionReprovides: s.reprovideQueue.Size(),
 	}
 

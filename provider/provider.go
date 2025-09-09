@@ -117,7 +117,7 @@ type SweepingProvider struct {
 
 	connectivity *connectivity.ConnectivityChecker
 
-	keyStore *datastore.KeyStore
+	keyStore datastore.KeyStore
 
 	replicationFactor int
 

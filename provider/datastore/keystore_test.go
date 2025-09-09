@@ -151,7 +151,7 @@ func TestKeyStoreReset(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewKeyStore(ds)
+	store, err := NewResettableKeyStore(ds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestKeyStoreSize(t *testing.T) {
 }
 
 func TestDsKey(t *testing.T) {
-	s := KeyStore{
+	s := keyStore{
 		base:       ds.NewKey("/base/prefix"),
 		prefixBits: 8,
 	}

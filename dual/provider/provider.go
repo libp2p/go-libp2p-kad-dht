@@ -19,7 +19,7 @@ type SweepingProvider struct {
 	dht      *dual.DHT
 	LAN      *provider.SweepingProvider
 	WAN      *provider.SweepingProvider
-	keyStore *datastore.KeyStore
+	keyStore datastore.KeyStore
 }
 
 // New creates a new SweepingProvider that manages provides and reprovides for

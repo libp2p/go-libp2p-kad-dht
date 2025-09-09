@@ -153,6 +153,7 @@ type SweepingProvider struct {
 	addLocalRecord func(mh.Multihash) error
 
 	provideCounter metric.Int64Counter
+	opStats        operationStats
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
@@ -565,7 +566,7 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 	for _, p := range peers {
 		keysAllocations[p] = []mh.Multihash{k}
 	}
-	return coveredPrefix, s.sendProviderRecords(keysAllocations, addrInfo)
+	return coveredPrefix, s.sendProviderRecords(keysAllocations, addrInfo, 1)
 }
 
 // exploreSwarm finds all peers whose kademlia identifier matches `prefix` in
@@ -699,7 +700,7 @@ type provideJob struct {
 // peers. In this case, the region reprovide is considered failed and the
 // caller is responsible for trying again. This allows detecting if we are
 // offline.
-func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo) error {
+func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) error {
 	nPeers := len(keysAllocations)
 	if nPeers == 0 {
 		return nil
@@ -708,6 +709,9 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	errCount := atomic.Uint32{}
 	nWorkers := s.maxProvideConnsPerWorker
 	jobChan := make(chan provideJob, nWorkers)
+
+	failedKeysCount := make(map[string]int) // count the number of failures for each key
+	failedKeysCountLk := sync.Mutex{}
 
 	wg := sync.WaitGroup{}
 	wg.Add(nWorkers)
@@ -719,6 +723,11 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 				err := s.provideKeysToPeer(job.pid, job.keys, pmes)
 				if err != nil {
 					errCount.Add(1)
+					failedKeysCountLk.Lock()
+					for _, k := range job.keys {
+						failedKeysCount[string(k)]++
+					}
+					failedKeysCountLk.Unlock()
 				}
 			}
 		}()
@@ -729,6 +738,18 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	}
 	close(jobChan)
 	wg.Wait()
+
+	var failedKeys int
+	holdersSum := s.replicationFactor * nKeys
+	for _, c := range failedKeysCount {
+		holdersSum -= c
+		if c == s.replicationFactor {
+			failedKeys++
+		}
+	}
+	successfulKeys := nKeys - failedKeys
+	s.opStats.providedKeys(successfulKeys, failedKeys)
+	s.provideCounter.Add(s.ctx, int64(successfulKeys))
 
 	errCountLoaded := int(errCount.Load())
 	logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
@@ -751,21 +772,24 @@ func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 // provideKeysToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given keys.
 func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
-	errCount := 0
-	for _, mh := range keys {
+	var errCount, errStreak int
+	for i, mh := range keys {
 		pmes.Key = mh
 		err := s.msgSender.SendMessage(s.ctx, p, pmes)
 		if err != nil {
+			errStreak++
 			errCount++
 
-			if errCount == len(keys) || errCount > maxConsecutiveProvideFailuresAllowed {
+			if errStreak == len(keys) || errStreak > maxConsecutiveProvideFailuresAllowed {
+				s.opStats.providedRecords(i + 1 - errCount)
 				return fmt.Errorf("failed to provide to %s: %s", p, err.Error())
 			}
-		} else if errCount > 0 {
+		} else if errStreak > 0 {
 			// Reset error count
-			errCount = 0
+			errStreak = 0
 		}
 	}
+	s.opStats.providedRecords(len(keys) - errCount)
 	return nil
 }
 
@@ -1111,7 +1135,8 @@ func (s *SweepingProvider) reprovideLateRegions() {
 }
 
 func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) {
-	if len(keys) == 0 {
+	keyCount := len(keys)
+	if keyCount == 0 {
 		return
 	}
 	addrInfo, ok := s.selfAddrInfo()
@@ -1120,6 +1145,12 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 		// provider record.
 		return
 	}
+
+	s.opStats.ongoingProvides.start(keyCount)
+	defer func() {
+		s.opStats.ongoingProvides.finish(keyCount)
+	}()
+
 	if len(keys) <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
@@ -1138,6 +1169,8 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	// current provide batch.
 	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
 	keys = append(keys, extraKeys...)
+	keyCount += len(extraKeys)
+	s.opStats.ongoingProvides.addKeys(len(extraKeys))
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
@@ -1162,10 +1195,17 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 		}
 		return
 	}
-	if len(keys) == 0 {
+	keyCount := len(keys)
+	if keyCount == 0 {
 		logger.Infof("No keys to reprovide for prefix %s", prefix)
 		return
 	}
+
+	s.opStats.ongoingProvides.start(keyCount)
+	defer func() {
+		s.opStats.ongoingProvides.finish(keyCount)
+	}()
+
 	if len(keys) <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
@@ -1209,6 +1249,8 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 				s.reschedulePrefix(prefix)
 			}
 		}
+		s.opStats.ongoingProvides.addKeys(len(keys) - keyCount)
+		keyCount = len(keys)
 	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
@@ -1259,9 +1301,7 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 	var provideErr error
 	if len(keys) == 1 {
 		coveredPrefix, err := s.vanillaProvide(keys[0])
-		if err == nil {
-			s.provideCounter.Add(s.ctx, 1)
-		} else if !reprovide {
+		if err != nil && !reprovide {
 			// Put the key back in the provide queue.
 			s.failedProvide(prefix, keys, fmt.Errorf("individual provide failed for prefix '%s', %w", prefix, err))
 		}
@@ -1281,7 +1321,6 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 				defer wg.Done()
 				_, err := s.vanillaProvide(key)
 				if err == nil {
-					s.provideCounter.Add(s.ctx, 1)
 					success.Store(true)
 				} else if !reprovide {
 					// Individual provide failed, put key back in provide queue.
@@ -1311,7 +1350,8 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 	errCount := 0
 	for _, r := range regions {
 		allKeys := keyspace.AllValues(r.Keys, s.order)
-		if len(allKeys) == 0 {
+		nKeys := len(allKeys)
+		if nKeys == 0 {
 			if reprovide {
 				s.releaseRegionReprovide(r.Prefix)
 			}
@@ -1322,7 +1362,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			s.addLocalRecord(h)
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
-		err := s.sendProviderRecords(keysAllocations, addrInfo)
+		err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
 		if reprovide {
 			s.releaseRegionReprovide(r.Prefix)
 			if periodicReprovide {
@@ -1339,7 +1379,6 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			}
 			continue
 		}
-		s.provideCounter.Add(s.ctx, int64(len(allKeys)))
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

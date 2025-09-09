@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/provider/stats"
@@ -89,9 +90,10 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	}
 
 	ongoingOps := stats.OngoingOperations{
-		RegionProvides:   0, // TODO:
-		KeyProvides:      0, // TODO:
-		RegionReprovides: 0, // TODO:
+		RegionProvides:   int(s.opStats.ongoingProvides.opCount.Load()),
+		KeyProvides:      int(s.opStats.ongoingProvides.keyCount.Load()),
+		RegionReprovides: int(s.opStats.ongoingReprovides.opCount.Load()),
+		KeyReprovides:    int(s.opStats.ongoingReprovides.keyCount.Load()),
 	}
 
 	pastOps := stats.PastOperations{
@@ -117,4 +119,28 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	}
 
 	return snapshot
+}
+
+type operationStats struct {
+	ongoingProvides   ongoingOpStats
+	ongoingReprovides ongoingOpStats
+}
+
+type ongoingOpStats struct {
+	opCount  atomic.Int32
+	keyCount atomic.Int32
+}
+
+func (s *ongoingOpStats) start(keyCount int) {
+	s.opCount.Add(1)
+	s.keyCount.Add(int32(keyCount))
+}
+
+func (s *ongoingOpStats) addKeys(keyCount int) {
+	s.keyCount.Add(int32(keyCount))
+}
+
+func (s *ongoingOpStats) finish(keyCount int) {
+	s.opCount.Add(-1)
+	s.keyCount.Add(-int32(keyCount))
 }

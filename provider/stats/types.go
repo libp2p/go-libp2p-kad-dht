@@ -65,6 +65,7 @@ type OngoingOperations struct {
 	RegionProvides   int `json:"region_provides"`
 	KeyProvides      int `json:"key_provides"`
 	RegionReprovides int `json:"region_reprovides"`
+	KeyReprovides    int `json:"key_reprovides"`
 }
 
 type PastOperations struct {

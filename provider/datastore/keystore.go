@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
-	"sync/atomic"
 
-	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	query "github.com/ipfs/go-datastore/query"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
@@ -20,6 +17,8 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
+var ErrKeyStoreClosed = errors.New("keystore is closed")
+
 // KeyStore provides thread-safe storage and retrieval of multihashes, indexed
 // by their kademlia 256-bit identifier.
 type KeyStore interface {
@@ -29,16 +28,50 @@ type KeyStore interface {
 	Delete(context.Context, ...mh.Multihash) error
 	Empty(context.Context) error
 	Size(context.Context) (int, error)
+	Close() error
+}
+
+// operation types for the worker goroutine
+type opType uint8
+
+const (
+	opPut opType = iota
+	opGet
+	opContainsPrefix
+	opDelete
+	opEmpty
+	opSize
+	lastOp
+)
+
+// operation request sent to worker goroutine
+type operation struct {
+	op       opType
+	ctx      context.Context
+	keys     []mh.Multihash
+	prefix   bitstr.Key
+	response chan<- operationResponse
+}
+
+// response from worker goroutine
+type operationResponse struct {
+	multihashes []mh.Multihash
+	found       bool
+	size        int
+	err         error
 }
 
 // keyStore indexes multihashes by their kademlia identifier.
 type keyStore struct {
-	lk sync.Mutex
-
 	ds         ds.Batching
 	base       ds.Key
 	prefixBits int
 	batchSize  int
+
+	// worker goroutine communication
+	requests chan operation
+	close    chan struct{}
+	done     chan struct{}
 }
 
 type keyStoreCfg struct {
@@ -112,12 +145,21 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
 			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
 		}
 	}
-	return &keyStore{
+
+	ks := &keyStore{
 		ds:         d,
 		base:       ds.NewKey(cfg.base),
 		prefixBits: cfg.prefixBits,
 		batchSize:  cfg.batchSize,
-	}, nil
+		requests:   make(chan operation),
+		close:      make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+
+	// start worker goroutine
+	go ks.worker()
+
+	return ks, nil
 }
 
 // dsKey returns the datastore key for the provided binary key.
@@ -187,9 +229,50 @@ type pair struct {
 	h mh.Multihash
 }
 
-// putLocked stores the provided keys while assuming s.lk is already held, and
+// worker processes operations sequentially in a single goroutine
+func (s *keyStore) worker() {
+	defer close(s.done)
+
+	for {
+		select {
+		case <-s.close:
+			return
+		case op := <-s.requests:
+			switch op.op {
+			case opPut:
+				newKeys, err := s.put(op.ctx, op.keys)
+				op.response <- operationResponse{multihashes: newKeys, err: err}
+
+			case opGet:
+				keys, err := s.get(op.ctx, op.prefix)
+				op.response <- operationResponse{multihashes: keys, err: err}
+
+			case opContainsPrefix:
+				found, err := s.containsPrefix(op.ctx, op.prefix)
+				op.response <- operationResponse{found: found, err: err}
+
+			case opDelete:
+				err := s.delete(op.ctx, op.keys)
+				op.response <- operationResponse{err: err}
+
+			case opEmpty:
+				err := empty(op.ctx, s.ds, s.base, s.batchSize)
+				op.response <- operationResponse{err: err}
+
+			case opSize:
+				size, err := s.size(op.ctx)
+				op.response <- operationResponse{size: size, err: err}
+
+			default:
+				op.response <- operationResponse{err: fmt.Errorf("unknown operation %d", op.op)}
+			}
+		}
+	}
+}
+
+// put stores the provided keys while assuming s.lk is already held, and
 // returns the keys that weren't present already in the keystore.
-func (s *keyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
+func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
 	seen := make(map[bit256.Key]struct{}, len(keys))
 	toPut := make([]pair, 0, len(keys))
 
@@ -234,25 +317,9 @@ func (s *keyStore) putLocked(ctx context.Context, keys ...mh.Multihash) ([]mh.Mu
 	return newKeys, nil
 }
 
-// Put stores the provided keys in the underlying datastore, grouping them by
-// the first prefixLen bits. It returns only the keys that were not previously
-// persisted in the datastore (i.e., newly added keys).
-func (s *keyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
-	if len(keys) == 0 {
-		return nil, nil
-	}
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
-	return s.putLocked(ctx, keys...)
-}
-
-// Get returns all keys whose bit256 representation matches the provided
+// get returns all keys whose bit256 representation matches the provided
 // prefix.
-func (s *keyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
+func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
 	dsk := dsKey(prefix, s.prefixBits, s.base).String()
 	res, err := s.ds.Query(ctx, query.Query{Prefix: dsk})
 	if err != nil {
@@ -282,13 +349,10 @@ func (s *keyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 	return out, nil
 }
 
-// ContainsPrefix reports whether the KeyStore currently holds at least one
+// containsPrefix reports whether the KeyStore currently holds at least one
 // multihash whose kademlia identifier (bit256.Key) starts with the provided
 // bit-prefix.
-func (s *keyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
+func (s *keyStore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
 	dsk := dsKey(prefix, s.prefixBits, s.base).String()
 	longPrefix := prefix.BitLen() > s.prefixBits
 	q := query.Query{Prefix: dsk, KeysOnly: true}
@@ -320,9 +384,9 @@ func (s *keyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 	return false, nil
 }
 
-// emptyLocked deletes all entries under the datastore prefix, assuming s.lk is
+// empty deletes all entries under the datastore prefix, assuming s.lk is
 // already held.
-func emptyLocked(ctx context.Context, d ds.Batching, base ds.Key, batchSize int) error {
+func empty(ctx context.Context, d ds.Batching, base ds.Key, batchSize int) error {
 	res, err := d.Query(ctx, query.Query{Prefix: base.String(), KeysOnly: true})
 	if err != nil {
 		return err
@@ -360,22 +424,8 @@ func emptyLocked(ctx context.Context, d ds.Batching, base ds.Key, batchSize int)
 	return delBatch(keys) // delete remaining keys
 }
 
-// Empty deletes all entries under the datastore prefix.
-func (s *keyStore) Empty(ctx context.Context) error {
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
-	return emptyLocked(ctx, s.ds, s.base, s.batchSize)
-}
-
-// Delete removes the given keys from datastore.
-func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
+// delete removes the given keys from datastore.
+func (s *keyStore) delete(ctx context.Context, keys []mh.Multihash) error {
 	b, err := s.ds.Batch(ctx)
 	if err != nil {
 		return err
@@ -390,14 +440,8 @@ func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 	return b.Commit(ctx)
 }
 
-// Size returns the number of keys currently stored in the KeyStore.
-//
-// The size is obtained by iterating over all keys in the underlying
-// datastore, so it may be expensive for large stores.
-func (s *keyStore) Size(ctx context.Context) (size int, err error) {
-	s.lk.Lock()
-	defer s.lk.Unlock()
-
+// size returns the number of keys currently stored in the KeyStore.
+func (s *keyStore) size(ctx context.Context) (size int, err error) {
 	q := query.Query{Prefix: s.base.String(), KeysOnly: true}
 	res, err := s.ds.Query(ctx, q)
 	if err != nil {
@@ -415,157 +459,171 @@ func (s *keyStore) Size(ctx context.Context) (size int, err error) {
 	return
 }
 
-var ErrResetInProgress = errors.New("reset already in progress")
+// Put stores the provided keys in the underlying datastore, grouping them by
+// the first prefixLen bits. It returns only the keys that were not previously
+// persisted in the datastore (i.e., newly added keys).
+func (s *keyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       opPut,
+		ctx:      ctx,
+		keys:     keys,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.close:
+		return nil, ErrKeyStoreClosed
+	}
 
-const (
-	ready uint32 = iota
-	inProgress
-	cleanup
-)
-
-// ResettableKeyStore is a KeyStore implementation that supports atomic reset
-// operations. It maintains two alternate bases in the underlying datastore and
-// can swap between them to provide atomic replacement of all stored keys.
-//
-// The reset operation allows replacing all stored multihashes with a new set
-// without interrupting concurrent read/write operations. During a reset, new
-// writes are duplicated to both the current and alternate storage bases to
-// maintain consistency.
-type ResettableKeyStore struct {
-	keyStore
-
-	altBase ds.Key
-	// resetInProgress tracks the state of the reset operation:
-	//   - 0: no reset in progress, ready for new reset
-	//   - 1: reset in progress, writing to alternate base
-	//   - 2: post reset cleanup
-	resetState atomic.Uint32
+	select {
+	case resp := <-response:
+		return resp.multihashes, resp.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
-var _ KeyStore = (*ResettableKeyStore)(nil)
-
-// NewResettableKeyStore creates a new ResettableKeyStore backed by the
-// provided datastore. It automatically adds "/0" and "/1" suffixes to the
-// configured base prefix to create two alternate storage locations for atomic
-// reset operations.
-func NewResettableKeyStore(d ds.Batching, opts ...KeyStoreOption) (*ResettableKeyStore, error) {
-	var cfg keyStoreCfg
-	opts = append([]KeyStoreOption{KeyStoreDefaultCfg}, opts...)
-	for i, o := range opts {
-		if err := o(&cfg); err != nil {
-			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
-		}
+// Get returns all keys whose bit256 representation matches the provided
+// prefix.
+func (s *keyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       opGet,
+		ctx:      ctx,
+		prefix:   prefix,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.close:
+		return nil, ErrKeyStoreClosed
 	}
-	return &ResettableKeyStore{
-		keyStore: keyStore{
-			ds:         d,
-			base:       ds.NewKey(cfg.base).ChildString("0"),
-			prefixBits: cfg.prefixBits,
-			batchSize:  cfg.batchSize,
-		},
-		altBase: ds.NewKey(cfg.base).ChildString("1"),
-	}, nil
+
+	select {
+	case resp := <-response:
+		return resp.multihashes, resp.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
-func batchPut(ctx context.Context, d ds.Batching, base ds.Key, prefixBits int, keys []mh.Multihash) error {
-	b, err := d.Batch(ctx)
-	if err != nil {
-		return err
+// ContainsPrefix reports whether the KeyStore currently holds at least one
+// multihash whose kademlia identifier (bit256.Key) starts with the provided
+// bit-prefix.
+func (s *keyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       opContainsPrefix,
+		ctx:      ctx,
+		prefix:   prefix,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-s.close:
+		return false, ErrKeyStoreClosed
 	}
-	for _, h := range keys {
-		dsk := dsKey(keyspace.MhToBit256(h), prefixBits, base)
-		if err := b.Put(ctx, dsk, h); err != nil {
-			return err
-		}
+
+	select {
+	case resp := <-response:
+		return resp.found, resp.err
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
-	return b.Commit(ctx)
 }
 
-// ResetCids atomically replaces all stored keys with the CIDs received from
-// keysChan. The operation is thread-safe and non-blocking for concurrent reads
-// and writes.
+// Empty deletes all entries under the datastore prefix.
+func (s *keyStore) Empty(ctx context.Context) error {
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       opEmpty,
+		ctx:      ctx,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.close:
+		return ErrKeyStoreClosed
+	}
+
+	select {
+	case resp := <-response:
+		return resp.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Delete removes the given keys from datastore.
+func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       opDelete,
+		ctx:      ctx,
+		keys:     keys,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.close:
+		return ErrKeyStoreClosed
+	}
+
+	select {
+	case resp := <-response:
+		return resp.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Size returns the number of keys currently stored in the KeyStore.
 //
-// During the reset:
-//   - New keys from keysChan are written to an alternate storage location
-//   - Concurrent Put operations are duplicated to both current and alternate
-//     locations
-//   - Once all keys are processed, storage locations are atomically swapped
-//   - The old storage location is cleaned up
-//
-// Returns ErrResetInProgress if another reset operation is already running.
-// The operation can be cancelled via context, which will clean up partial
-// state.
-func (s *ResettableKeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
-	if !s.resetState.CompareAndSwap(ready, inProgress) {
-		return ErrResetInProgress
-	}
-	defer s.resetState.Store(ready)
-
-	// Make sure the alternate base is empty
-	if err := emptyLocked(ctx, s.ds, s.altBase, s.batchSize); err != nil {
-		return fmt.Errorf("ResettableKeyStore empty failed during reset: %w", err)
+// The size is obtained by iterating over all keys in the underlying
+// datastore, so it may be expensive for large stores.
+func (s *keyStore) Size(ctx context.Context) (int, error) {
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       opSize,
+		ctx:      ctx,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	case <-s.close:
+		return 0, ErrKeyStoreClosed
 	}
 
-	// Read all the keys from the channel and put them in batch at the alternate
-	// base
-	keys := make([]mh.Multihash, 0, s.batchSize)
-loop:
-	for {
-		select {
-		case <-ctx.Done():
-			// Context cancelled, abort reset and clean up alternate base
-			s.resetState.Store(cleanup)
-			if err := emptyLocked(ctx, s.ds, s.altBase, s.batchSize); err != nil {
-				return fmt.Errorf("ResettableKeyStore empty failed during reset: %w", err)
-			}
-			return nil
-		case c, ok := <-keysChan:
-			if !ok {
-				break loop
-			}
-			keys = append(keys, c.Hash())
-			if len(keys) == cap(keys) {
-				if err := batchPut(ctx, s.ds, s.altBase, s.prefixBits, keys); err != nil {
-					return fmt.Errorf("ResettableKeyStore put failed during reset: %w", err)
-				}
-				keys = keys[:0]
-			}
-		}
+	select {
+	case resp := <-response:
+		return resp.size, resp.err
+	case <-ctx.Done():
+		return 0, ctx.Err()
 	}
-	// Put final batch
-	if err := batchPut(ctx, s.ds, s.altBase, s.prefixBits, keys); err != nil {
-		return fmt.Errorf("ResettableKeyStore put failed during reset: %w", err)
+}
+
+// Close shuts down the worker goroutine and releases resources.
+func (s *keyStore) Close() error {
+	select {
+	case <-s.close:
+		// Already closed
+		return nil
+	default:
+		close(s.close)
+		<-s.done
 	}
-
-	// Swap the bases. The base in use is now the one to which we just wrote.
-	s.lk.Lock()
-	oldBase := s.base
-	s.base = s.altBase
-	s.resetState.Store(cleanup)
-	s.lk.Unlock()
-	s.altBase = oldBase
-
-	// Clean up the old base
-	if err := emptyLocked(ctx, s.ds, oldBase, s.batchSize); err != nil {
-		return fmt.Errorf("ResettableKeyStore empty failed during reset: %w", err)
-	}
-
 	return nil
-}
-
-// Put stores the provided keys in the underlying datastore, with special
-// handling during reset operations. When a reset is in progress, keys are
-// written to both the current storage location and the alternate location
-// being prepared for the reset.
-//
-// This ensures that keys written during a reset operation remain available
-// after the reset completes. Returns only the keys that were not previously
-// persisted.
-func (s *ResettableKeyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
-	if s.resetState.Load() == inProgress {
-		// Reset is in progress, write to alternate base in addition to current
-		// base.
-		batchPut(ctx, s.ds, s.altBase, s.prefixBits, keys)
-	}
-	return s.keyStore.Put(ctx, keys...)
 }

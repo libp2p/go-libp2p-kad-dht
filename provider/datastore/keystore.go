@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	ds "github.com/ipfs/go-datastore"
-	query "github.com/ipfs/go-datastore/query"
+	"github.com/ipfs/go-datastore/namespace"
+	"github.com/ipfs/go-datastore/query"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
@@ -64,7 +65,6 @@ type operationResponse struct {
 // keyStore indexes multihashes by their kademlia identifier.
 type keyStore struct {
 	ds         ds.Batching
-	base       ds.Key
 	prefixBits int
 	batchSize  int
 
@@ -147,8 +147,7 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
 	}
 
 	ks := &keyStore{
-		ds:         d,
-		base:       ds.NewKey(cfg.base),
+		ds:         namespace.Wrap(d, ds.NewKey(cfg.base)),
 		prefixBits: cfg.prefixBits,
 		batchSize:  cfg.batchSize,
 		requests:   make(chan operation),
@@ -183,7 +182,7 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
 // If the prefix is longer than `prefixBits`, only the first `prefixBits` bits
 // are used, allowing the returned key to serve as a query prefix for the
 // datastore.
-func dsKey[K kad.Key[K]](k K, prefixBits int, base ds.Key) ds.Key {
+func dsKey[K kad.Key[K]](k K, prefixBits int) ds.Key {
 	b := strings.Builder{}
 	l := k.BitLen()
 	for i := range min(prefixBits, l) {
@@ -193,7 +192,7 @@ func dsKey[K kad.Key[K]](k K, prefixBits int, base ds.Key) ds.Key {
 	if l == keyspace.KeyLen {
 		b.WriteString(base64.URLEncoding.EncodeToString(keyspace.KeyToBytes(k)[prefixBits/8:]))
 	}
-	return base.ChildString(b.String())
+	return ds.NewKey(b.String())
 }
 
 // decodeKey reconstructs a 256-bit binary key from a hierarchical datastore key string.
@@ -207,7 +206,6 @@ func dsKey[K kad.Key[K]](k K, prefixBits int, base ds.Key) ds.Key {
 //
 // Returns the reconstructed 256-bit key or an error if base64URL decoding fails.
 func (s *keyStore) decodeKey(dsk string) (bit256.Key, error) {
-	dsk = dsk[len(s.base.String()):] // remove leading prefix
 	bs := make([]byte, 32)
 	// Extract individual bits from odd positions (skip '/' separators)
 	for i := range s.prefixBits {
@@ -256,7 +254,7 @@ func (s *keyStore) worker() {
 				op.response <- operationResponse{err: err}
 
 			case opEmpty:
-				err := empty(op.ctx, s.ds, s.base, s.batchSize)
+				err := empty(op.ctx, s.ds, s.batchSize)
 				op.response <- operationResponse{err: err}
 
 			case opSize:
@@ -282,7 +280,7 @@ func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 			continue
 		}
 		seen[k] = struct{}{}
-		dsk := dsKey(k, s.prefixBits, s.base)
+		dsk := dsKey(k, s.prefixBits)
 		ok, err := s.ds.Has(ctx, dsk)
 		if err != nil {
 			return nil, err
@@ -320,7 +318,7 @@ func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 // get returns all keys whose bit256 representation matches the provided
 // prefix.
 func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
-	dsk := dsKey(prefix, s.prefixBits, s.base).String()
+	dsk := dsKey(prefix, s.prefixBits).String()
 	res, err := s.ds.Query(ctx, query.Query{Prefix: dsk})
 	if err != nil {
 		return nil, err
@@ -353,7 +351,7 @@ func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 // multihash whose kademlia identifier (bit256.Key) starts with the provided
 // bit-prefix.
 func (s *keyStore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
-	dsk := dsKey(prefix, s.prefixBits, s.base).String()
+	dsk := dsKey(prefix, s.prefixBits).String()
 	longPrefix := prefix.BitLen() > s.prefixBits
 	q := query.Query{Prefix: dsk, KeysOnly: true}
 	if !longPrefix {
@@ -386,8 +384,8 @@ func (s *keyStore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 
 // empty deletes all entries under the datastore prefix, assuming s.lk is
 // already held.
-func empty(ctx context.Context, d ds.Batching, base ds.Key, batchSize int) error {
-	res, err := d.Query(ctx, query.Query{Prefix: base.String(), KeysOnly: true})
+func empty(ctx context.Context, d ds.Batching, batchSize int) error {
+	res, err := d.Query(ctx, query.Query{KeysOnly: true})
 	if err != nil {
 		return err
 	}
@@ -431,7 +429,7 @@ func (s *keyStore) delete(ctx context.Context, keys []mh.Multihash) error {
 		return err
 	}
 	for _, h := range keys {
-		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits, s.base)
+		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits)
 		err := b.Delete(ctx, dsk)
 		if err != nil {
 			return err
@@ -442,7 +440,7 @@ func (s *keyStore) delete(ctx context.Context, keys []mh.Multihash) error {
 
 // size returns the number of keys currently stored in the KeyStore.
 func (s *keyStore) size(ctx context.Context) (size int, err error) {
-	q := query.Query{Prefix: s.base.String(), KeysOnly: true}
+	q := query.Query{KeysOnly: true}
 	res, err := s.ds.Query(ctx, q)
 	if err != nil {
 		return

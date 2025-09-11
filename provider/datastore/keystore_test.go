@@ -259,13 +259,12 @@ func testKeyStoreSizeImpl(t *testing.T, store KeyStore) {
 
 func TestDsKey(t *testing.T) {
 	s := keyStore{
-		base:       ds.NewKey("/base/prefix"),
 		prefixBits: 8,
 	}
 
 	k := bit256.ZeroKey()
-	dsk := dsKey(k, s.prefixBits, s.base)
-	expectedPrefix := "/base/prefix/0/0/0/0/0/0/0/0/"
+	dsk := dsKey(k, s.prefixBits)
+	expectedPrefix := "/0/0/0/0/0/0/0/0/"
 	require.Equal(t, expectedPrefix, dsk.String()[:len(expectedPrefix)])
 
 	s.prefixBits = 16
@@ -276,8 +275,8 @@ func TestDsKey(t *testing.T) {
 		require.NoError(t, err)
 		k := bit256.NewKey(b[:])
 
-		sdk := dsKey(k, s.prefixBits, s.base)
-		require.Equal(t, strings.Count(s.base.String(), "/")+s.prefixBits+1, strings.Count(sdk.String(), "/"))
+		sdk := dsKey(k, s.prefixBits)
+		require.Equal(t, s.prefixBits+1, strings.Count(sdk.String(), "/"))
 		decoded, err := s.decodeKey(sdk.String())
 		require.NoError(t, err)
 		require.Equal(t, k, decoded)

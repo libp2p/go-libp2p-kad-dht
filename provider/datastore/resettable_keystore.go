@@ -7,6 +7,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 )
@@ -26,17 +27,35 @@ type resetOp struct {
 }
 
 // ResettableKeyStore is a KeyStore implementation that supports atomic reset
-// operations. It maintains two alternate bases in the underlying datastore and
-// can swap between them to provide atomic replacement of all stored keys.
+// operations using a dual-datastore architecture. It maintains two separate
+// datastores (primary and alternate) where only one is active at any time,
+// enabling atomic replacement of all stored keys without interrupting
+// concurrent operations.
 //
-// The reset operation allows replacing all stored multihashes with a new set
-// without interrupting concurrent read/write operations. During a reset, new
-// writes are duplicated to both the current and alternate storage bases to
-// maintain consistency.
+// Architecture:
+//   - Primary datastore: Currently active storage for all read/write operations
+//   - Alternate datastore: Standby storage used during reset operations
+//   - The datastores use "/0" and "/1" namespace suffixes and can be swapped
+//
+// Reset Operation Flow:
+//  1. New keys from reset are written to the alternate (inactive) datastore
+//  2. Concurrent Put operations are automatically duplicated to both datastores
+//     to maintain consistency during the transition
+//  3. Once all reset keys are written, the datastores are atomically swapped
+//  4. The old datastore (now alternate) is cleaned up
+//
+// Thread Safety:
+//   - All operations are processed sequentially by a single worker goroutine
+//   - Reset operations are non-blocking for concurrent reads and writes
+//   - Only one reset operation can be active at a time
+//
+// The reset operation allows complete replacement of stored multihashes
+// without data loss or service interruption, making it suitable for
+// scenarios requiring periodic full dataset updates.
 type ResettableKeyStore struct {
 	keyStore
 
-	altBase         ds.Key
+	altDs           ds.Batching
 	resetInProgress bool
 	resetSync       chan []mh.Multihash // passes keys from worker to reset go routine
 	resetOps        chan resetOp        // reset operations that must be run in main go routine
@@ -59,15 +78,14 @@ func NewResettableKeyStore(d ds.Batching, opts ...KeyStoreOption) (*ResettableKe
 
 	rks := &ResettableKeyStore{
 		keyStore: keyStore{
-			ds:         d,
-			base:       ds.NewKey(cfg.base).ChildString("0"),
+			ds:         namespace.Wrap(d, ds.NewKey(cfg.base+"/0")),
 			prefixBits: cfg.prefixBits,
 			batchSize:  cfg.batchSize,
 			requests:   make(chan operation),
 			close:      make(chan struct{}),
 			done:       make(chan struct{}),
 		},
-		altBase:   ds.NewKey(cfg.base).ChildString("1"),
+		altDs:     namespace.Wrap(d, ds.NewKey(cfg.base+"/1")),
 		resetOps:  make(chan resetOp),
 		resetSync: make(chan []mh.Multihash, 128), // buffered to avoid blocking
 	}
@@ -105,7 +123,7 @@ func (s *ResettableKeyStore) worker() {
 				op.response <- operationResponse{err: err}
 
 			case opEmpty:
-				err := empty(op.ctx, s.ds, s.base, s.batchSize)
+				err := empty(op.ctx, s.ds, s.batchSize)
 				op.response <- operationResponse{err: err}
 
 			case opSize:
@@ -127,20 +145,21 @@ func (s *ResettableKeyStore) worker() {
 // handling during reset operations.
 func (s *ResettableKeyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
 	if s.resetInProgress {
-		// Reset is in progress, write to alternate base in addition to current base
+		// Reset is in progress, write to alternate datastore in addition to
+		// current datastore
 		s.resetSync <- keys
 	}
 	return s.keyStore.put(ctx, keys)
 }
 
-// altPut writes the given multihashes to the alternate base in the datastore.
+// altPut writes the given multihashes to the alternate datastore.
 func (s *ResettableKeyStore) altPut(ctx context.Context, keys []mh.Multihash) error {
-	b, err := s.ds.Batch(ctx)
+	b, err := s.altDs.Batch(ctx)
 	if err != nil {
 		return err
 	}
 	for _, h := range keys {
-		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits, s.altBase)
+		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits)
 		if err := b.Put(ctx, dsk, h); err != nil {
 			return err
 		}
@@ -155,7 +174,7 @@ func (s *ResettableKeyStore) handleResetOp(op resetOp) {
 			op.response <- ErrResetInProgress
 			return
 		}
-		if err := empty(context.Background(), s.ds, s.altBase, s.batchSize); err != nil {
+		if err := empty(context.Background(), s.altDs, s.batchSize); err != nil {
 			op.response <- err
 			return
 		}
@@ -166,10 +185,10 @@ func (s *ResettableKeyStore) handleResetOp(op resetOp) {
 
 	// Cleanup operation
 	if op.success {
-		// Swap the keystore prefix bases.
-		oldBase := s.base
-		s.base = s.altBase
-		s.altBase = oldBase
+		// Swap the active datastore.
+		oldDs := s.ds
+		s.ds = s.altDs
+		s.altDs = oldDs
 	}
 	// Drain resetSync
 drain:
@@ -180,9 +199,9 @@ drain:
 			break drain
 		}
 	}
-	// Empty the unused base prefix
+	// Empty the unused datastore.
 	s.resetInProgress = false
-	op.response <- empty(context.Background(), s.ds, s.altBase, s.batchSize)
+	op.response <- empty(context.Background(), s.altDs, s.batchSize)
 }
 
 // ResetCids atomically replaces all stored keys with the CIDs received from
@@ -231,7 +250,7 @@ func (s *ResettableKeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.
 		case <-s.done:
 			// Safe not to go through the worker since we are done, and we need to
 			// cleanup
-			empty(context.Background(), s.ds, s.altBase, s.batchSize)
+			empty(context.Background(), s.altDs, s.batchSize)
 		}
 	}()
 
@@ -260,7 +279,7 @@ func (s *ResettableKeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.
 		return nil
 	}
 
-	// Read all the keys from the channel and put them in batch at the alternate base
+	// Read all the keys from the channel and write them to the altDs
 loop:
 	for {
 		select {

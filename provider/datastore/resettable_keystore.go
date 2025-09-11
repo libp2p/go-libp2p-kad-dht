@@ -15,9 +15,8 @@ import (
 var ErrResetInProgress = errors.New("reset already in progress")
 
 const (
-	opStart opType = iota + lastOp + 1
+	opStart opType = iota
 	opCleanup
-	opAltPut
 )
 
 type resetOp struct {
@@ -57,8 +56,7 @@ type ResettableKeyStore struct {
 
 	altDs           ds.Batching
 	resetInProgress bool
-	resetSync       chan []mh.Multihash // passes keys from worker to reset go routine
-	resetOps        chan resetOp        // reset operations that must be run in main go routine
+	resetOps        chan resetOp // reset operations that must be run in main go routine
 }
 
 var _ KeyStore = (*ResettableKeyStore)(nil)
@@ -85,9 +83,8 @@ func NewResettableKeyStore(d ds.Batching, opts ...KeyStoreOption) (*ResettableKe
 			close:      make(chan struct{}),
 			done:       make(chan struct{}),
 		},
-		altDs:     namespace.Wrap(d, ds.NewKey(cfg.base+"/1")),
-		resetOps:  make(chan resetOp),
-		resetSync: make(chan []mh.Multihash, 128), // buffered to avoid blocking
+		altDs:    namespace.Wrap(d, ds.NewKey(cfg.base+"/1")),
+		resetOps: make(chan resetOp),
 	}
 
 	// start worker goroutine
@@ -129,11 +126,6 @@ func (s *ResettableKeyStore) worker() {
 			case opSize:
 				size, err := s.size(op.ctx)
 				op.response <- operationResponse{size: size, err: err}
-
-			case opAltPut:
-				err := s.altPut(op.ctx, op.keys)
-				op.response <- operationResponse{err: err}
-
 			}
 		case op := <-s.resetOps:
 			s.handleResetOp(op)
@@ -147,7 +139,7 @@ func (s *ResettableKeyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 	if s.resetInProgress {
 		// Reset is in progress, write to alternate datastore in addition to
 		// current datastore
-		s.resetSync <- keys
+		s.altPut(ctx, keys)
 	}
 	return s.keyStore.put(ctx, keys)
 }
@@ -189,15 +181,6 @@ func (s *ResettableKeyStore) handleResetOp(op resetOp) {
 		oldDs := s.ds
 		s.ds = s.altDs
 		s.altDs = oldDs
-	}
-	// Drain resetSync
-drain:
-	for {
-		select {
-		case <-s.resetSync:
-		default:
-			break drain
-		}
 	}
 	// Empty the unused datastore.
 	s.resetInProgress = false
@@ -254,30 +237,7 @@ func (s *ResettableKeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.
 		}
 	}()
 
-	rsp := make(chan operationResponse)
-	batchPut := func(ctx context.Context, keys []mh.Multihash) error {
-		select {
-		case <-s.done:
-			return ErrKeyStoreClosed
-		case <-ctx.Done():
-			return ctx.Err()
-		case s.requests <- operation{op: opAltPut, ctx: ctx, keys: keys, response: rsp}:
-			return (<-rsp).err
-		}
-	}
-
 	keys := make([]mh.Multihash, 0)
-
-	processNewKeys := func(newKeys ...mh.Multihash) error {
-		keys = append(keys, newKeys...)
-		if len(keys) >= s.batchSize {
-			if err := batchPut(ctx, keys); err != nil {
-				return err
-			}
-			keys = keys[:0]
-		}
-		return nil
-	}
 
 	// Read all the keys from the channel and write them to the altDs
 loop:
@@ -287,21 +247,21 @@ loop:
 			return ctx.Err()
 		case <-s.done:
 			return ErrKeyStoreClosed
-		case mhs := <-s.resetSync:
-			if err := processNewKeys(mhs...); err != nil {
-				return err
-			}
 		case c, ok := <-keysChan:
 			if !ok {
 				break loop
 			}
-			if err := processNewKeys(c.Hash()); err != nil {
-				return err
+			keys = append(keys, c.Hash())
+			if len(keys) >= s.batchSize {
+				if err := s.altPut(ctx, keys); err != nil {
+					return err
+				}
+				keys = keys[:0]
 			}
 		}
 	}
 	// Put final batch
-	if err := batchPut(ctx, keys); err != nil {
+	if err := s.altPut(ctx, keys); err != nil {
 		return err
 	}
 	success = true

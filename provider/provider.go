@@ -25,6 +25,7 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 
+	"github.com/libp2p/go-libp2p-kad-dht/internal/batch"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
@@ -117,10 +118,12 @@ type SweepingProvider struct {
 
 	connectivity *connectivity.ConnectivityChecker
 
-	keyStore datastore.KeyStore
+	keyStoreQueue *batch.Processor
+	keyStore      datastore.KeyStore
 
 	replicationFactor int
 
+	provideEntryQueue    *batch.Processor
 	provideQueue         *queue.ProvideQueue
 	provideRunning       sync.Mutex
 	reprovideQueue       *queue.ReprovideQueue
@@ -255,7 +258,54 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	// Don't need to start schedule timer yet
 	prov.scheduleTimer.Stop()
 
-	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close)
+	prov.provideEntryQueue = batch.NewProcessor(func(keys []mh.Multihash, skipScheduling bool) {
+		if prov.closed() {
+			return
+		}
+		// TODO: allow retention for 10 seconds at the start?
+		prefixes, err := prov.groupAndScheduleKeysByPrefix(keys, !skipScheduling)
+		if err != nil {
+			logger.Errorf("failed to group and schedule keys: %v", err)
+			return
+		}
+		if len(prefixes) == 0 {
+			return
+		}
+		// Sort prefixes by number of keys.
+		sortedPrefixesAndKeys := keyspace.SortPrefixesBySize(prefixes)
+		// Add keys to the provide queue.
+		for _, prefixAndKeys := range sortedPrefixesAndKeys {
+			prov.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
+		}
+
+		prov.wg.Add(1)
+		go prov.provideLoop()
+	})
+
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, prov.provideEntryQueue.Close)
+
+	if true { // TODO: add option to enable the keyStoreQueue
+		prov.keyStoreQueue = batch.NewProcessor(func(keys []mh.Multihash, force bool) {
+			if prov.closed() {
+				return
+			}
+			newKeys, err := prov.keyStore.Put(prov.ctx, keys...)
+			if err != nil {
+				logger.Errorf("failed to store multihashes: %v", err)
+				return
+			}
+			if !force {
+				if len(newKeys) == 0 {
+					return
+				}
+				keys = newKeys
+			}
+
+			// Add to schedule and to provide queue
+			prov.provideEntryQueue.Enqueue(false, keys...)
+		})
+		prov.cleanupFuncs = append(prov.cleanupFuncs, prov.keyStoreQueue.Close)
+	}
 
 	prov.wg.Add(1)
 	go prov.run()
@@ -877,46 +927,6 @@ func (s *SweepingProvider) handleReprovide() {
 	}()
 }
 
-// handleProvide provides supplied keys to the network if needed and schedules
-// the keys to be reprovided if needed.
-func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	if reprovide {
-		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
-		// newly added keys.
-		newKeys, err := s.keyStore.Put(s.ctx, keys...)
-		if err != nil {
-			return fmt.Errorf("couldn't add keys to keystore: %w", err)
-		}
-		if !force {
-			keys = newKeys
-		}
-	}
-
-	if s.isOffline() {
-		return ErrOffline
-	}
-	prefixes, err := s.groupAndScheduleKeysByPrefix(keys, reprovide)
-	if err != nil {
-		return err
-	}
-	if len(prefixes) == 0 {
-		return nil
-	}
-	// Sort prefixes by number of keys.
-	sortedPrefixesAndKeys := keyspace.SortPrefixesBySize(prefixes)
-	// Add keys to the provide queue.
-	for _, prefixAndKeys := range sortedPrefixesAndKeys {
-		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
-	}
-
-	s.wg.Add(1)
-	go s.provideLoop()
-	return nil
-}
-
 // groupAndScheduleKeysByPrefix groups the supplied keys by their prefixes as
 // present in the schedule, and if `schedule` is set to true, add these
 // prefixes to the schedule to be reprovided.
@@ -970,12 +980,6 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 		prefixes[prefix] = mhs
 	}
 	return prefixes, nil
-}
-
-func (s *SweepingProvider) isOffline() bool {
-	s.avgPrefixLenLk.Lock()
-	defer s.avgPrefixLenLk.Unlock()
-	return s.cachedAvgPrefixLen == -1
 }
 
 func (s *SweepingProvider) onOffline() {
@@ -1381,11 +1385,10 @@ func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 // (either never bootstrapped, or disconnected since more than `OfflineDelay`).
 // The schedule and provide queue depend on the network size, hence recent
 // network connectivity is essential.
-func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
-	if s.closed() {
-		return ErrClosed
+func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) {
+	if err := s.provideEntryQueue.Enqueue(true, keys...); err != nil {
+		logger.Errorf("failed to provide keys once: %w", err)
 	}
-	return s.handleProvide(true, false, keys...)
 }
 
 // StartProviding provides the given keys to the DHT swarm unless they were
@@ -1398,26 +1401,21 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 // (either never bootstrapped, or disconnected since more than `OfflineDelay`).
 // The schedule and provide queue depend on the network size, hence recent
 // network connectivity is essential.
-func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) error {
-	if s.closed() {
-		return ErrClosed
+func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) {
+	if err := s.keyStoreQueue.Enqueue(force, keys...); err != nil {
+		logger.Errorf("failed to start providing keys: %w", err)
 	}
-	return s.handleProvide(force, true, keys...)
 }
 
 // StopProviding stops reproviding the given keys to the DHT swarm. The node
 // stops being referred as a provider when the provider records in the DHT
 // swarm expire.
-func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
-	if s.closed() {
-		return ErrClosed
-	}
+func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) {
 	err := s.keyStore.Delete(s.ctx, keys...)
 	if err != nil {
-		err = fmt.Errorf("failed to stop providing keys: %w", err)
+		logger.Errorf("failed to stop providing keys: %w", err)
 	}
 	s.provideQueue.Remove(keys...)
-	return err
 }
 
 // Clear clears the all the keys from the provide queue and returns the number
@@ -1458,15 +1456,10 @@ func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, 
 // Offline (either never bootstrapped, or disconnected since more than
 // `OfflineDelay`). The schedule depends on the network size, hence recent
 // network connectivity is essential.
-func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
-	if s.closed() {
-		return ErrClosed
+func (s *SweepingProvider) AddToScheduleAndProvide(keys ...mh.Multihash) {
+	if err := s.provideEntryQueue.Enqueue(false, keys...); err != nil {
+		logger.Errorf("failed to add to schedule: %w", err)
 	}
-	if s.isOffline() {
-		return ErrOffline
-	}
-	_, err := s.groupAndScheduleKeysByPrefix(keys, true)
-	return err
 }
 
 // RefreshSchedule scans the KeyStore for any keys that are not currently
@@ -1481,16 +1474,17 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 // Offline (either never bootstrapped, or disconnected since more than
 // `OfflineDelay`). The schedule depends on the network size, hence recent
 // network connectivity is essential.
-func (s *SweepingProvider) RefreshSchedule() error {
+func (s *SweepingProvider) RefreshSchedule() {
 	if s.closed() {
-		return ErrClosed
+		return
 	}
 	// Look for prefixes not included in the schedule
 	s.scheduleLk.Lock()
 	prefixLen, err := s.getAvgPrefixLenNoLock()
 	if err != nil {
 		s.scheduleLk.Unlock()
-		return err
+		logger.Errorf("failed to refresh schedule: %s", err)
+		return
 	}
 	gaps := keyspace.TrieGaps(s.schedule)
 	s.scheduleLk.Unlock()
@@ -1516,7 +1510,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		}
 	}
 	if len(toInsert) == 0 {
-		return nil
+		return
 	}
 
 	// Insert prefixes into the schedule
@@ -1525,5 +1519,4 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		s.schedulePrefixNoLock(p, false)
 	}
 	s.scheduleLk.Unlock()
-	return nil
 }

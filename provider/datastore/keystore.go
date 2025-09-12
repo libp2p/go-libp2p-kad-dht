@@ -439,6 +439,33 @@ func (s *keyStore) size(ctx context.Context) (size int, err error) {
 	return
 }
 
+// executeOperation sends an operation request to the worker goroutine and
+// waits for the response. It handles the communication protocol and returns
+// the results based on the operation type.
+func (s *keyStore) executeOperation(op opType, ctx context.Context, keys []mh.Multihash, prefix bitstr.Key) ([]mh.Multihash, int, bool, error) {
+	response := make(chan operationResponse, 1)
+	select {
+	case s.requests <- operation{
+		op:       op,
+		ctx:      ctx,
+		keys:     keys,
+		prefix:   prefix,
+		response: response,
+	}:
+	case <-ctx.Done():
+		return nil, 0, false, ctx.Err()
+	case <-s.close:
+		return nil, 0, false, ErrKeyStoreClosed
+	}
+
+	select {
+	case resp := <-response:
+		return resp.multihashes, resp.size, resp.found, resp.err
+	case <-ctx.Done():
+		return nil, 0, false, ctx.Err()
+	}
+}
+
 // Put stores the provided keys in the underlying datastore, grouping them by
 // the first prefixLen bits. It returns only the keys that were not previously
 // persisted in the datastore (i.e., newly added keys).
@@ -446,100 +473,29 @@ func (s *keyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihas
 	if len(keys) == 0 {
 		return nil, nil
 	}
-	response := make(chan operationResponse, 1)
-	select {
-	case s.requests <- operation{
-		op:       opPut,
-		ctx:      ctx,
-		keys:     keys,
-		response: response,
-	}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.close:
-		return nil, ErrKeyStoreClosed
-	}
-
-	select {
-	case resp := <-response:
-		return resp.multihashes, resp.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	newKeys, _, _, err := s.executeOperation(opPut, ctx, keys, "")
+	return newKeys, err
 }
 
 // Get returns all keys whose bit256 representation matches the provided
 // prefix.
 func (s *keyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
-	response := make(chan operationResponse, 1)
-	select {
-	case s.requests <- operation{
-		op:       opGet,
-		ctx:      ctx,
-		prefix:   prefix,
-		response: response,
-	}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.close:
-		return nil, ErrKeyStoreClosed
-	}
-
-	select {
-	case resp := <-response:
-		return resp.multihashes, resp.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	keys, _, _, err := s.executeOperation(opGet, ctx, nil, prefix)
+	return keys, err
 }
 
 // ContainsPrefix reports whether the KeyStore currently holds at least one
 // multihash whose kademlia identifier (bit256.Key) starts with the provided
 // bit-prefix.
 func (s *keyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
-	response := make(chan operationResponse, 1)
-	select {
-	case s.requests <- operation{
-		op:       opContainsPrefix,
-		ctx:      ctx,
-		prefix:   prefix,
-		response: response,
-	}:
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case <-s.close:
-		return false, ErrKeyStoreClosed
-	}
-
-	select {
-	case resp := <-response:
-		return resp.found, resp.err
-	case <-ctx.Done():
-		return false, ctx.Err()
-	}
+	_, _, found, err := s.executeOperation(opContainsPrefix, ctx, nil, prefix)
+	return found, err
 }
 
 // Empty deletes all entries under the datastore prefix.
 func (s *keyStore) Empty(ctx context.Context) error {
-	response := make(chan operationResponse, 1)
-	select {
-	case s.requests <- operation{
-		op:       opEmpty,
-		ctx:      ctx,
-		response: response,
-	}:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.close:
-		return ErrKeyStoreClosed
-	}
-
-	select {
-	case resp := <-response:
-		return resp.err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	_, _, _, err := s.executeOperation(opEmpty, ctx, nil, "")
+	return err
 }
 
 // Delete removes the given keys from datastore.
@@ -547,26 +503,8 @@ func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	response := make(chan operationResponse, 1)
-	select {
-	case s.requests <- operation{
-		op:       opDelete,
-		ctx:      ctx,
-		keys:     keys,
-		response: response,
-	}:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.close:
-		return ErrKeyStoreClosed
-	}
-
-	select {
-	case resp := <-response:
-		return resp.err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	_, _, _, err := s.executeOperation(opDelete, ctx, keys, "")
+	return err
 }
 
 // Size returns the number of keys currently stored in the KeyStore.
@@ -574,25 +512,8 @@ func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 // The size is obtained by iterating over all keys in the underlying
 // datastore, so it may be expensive for large stores.
 func (s *keyStore) Size(ctx context.Context) (int, error) {
-	response := make(chan operationResponse, 1)
-	select {
-	case s.requests <- operation{
-		op:       opSize,
-		ctx:      ctx,
-		response: response,
-	}:
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	case <-s.close:
-		return 0, ErrKeyStoreClosed
-	}
-
-	select {
-	case resp := <-response:
-		return resp.size, resp.err
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	}
+	_, size, _, err := s.executeOperation(opSize, ctx, nil, "")
+	return size, err
 }
 
 // Close shuts down the worker goroutine and releases resources.

@@ -222,11 +222,6 @@ func (s *keyStore) decodeKey(dsk string) (bit256.Key, error) {
 	return bit256.NewKey(bs), nil
 }
 
-type pair struct {
-	k ds.Key
-	h mh.Multihash
-}
-
 // worker processes operations sequentially in a single goroutine
 func (s *keyStore) worker() {
 	defer close(s.done)
@@ -272,7 +267,11 @@ func (s *keyStore) worker() {
 // returns the keys that weren't present already in the keystore.
 func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
 	seen := make(map[bit256.Key]struct{}, len(keys))
-	toPut := make([]pair, 0, len(keys))
+	b, err := s.ds.Batch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	newKeys := make([]mh.Multihash, 0, len(keys))
 
 	for _, h := range keys {
 		k := keyspace.MhToBit256(h)
@@ -286,31 +285,14 @@ func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 			return nil, err
 		}
 		if !ok {
-			toPut = append(toPut, pair{k: dsk, h: h})
-		}
-	}
-	clear(seen)
-	if len(toPut) == 0 {
-		// Nothing to do
-		return nil, nil
-	}
-
-	b, err := s.ds.Batch(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range toPut {
-		if err := b.Put(ctx, p.k, p.h); err != nil {
-			return nil, err
+			if err := b.Put(ctx, dsk, h); err != nil {
+				return nil, err
+			}
+			newKeys = append(newKeys, h)
 		}
 	}
 	if err := b.Commit(ctx); err != nil {
 		return nil, err
-	}
-
-	newKeys := make([]mh.Multihash, len(toPut))
-	for i, p := range toPut {
-		newKeys[i] = p.h
 	}
 	return newKeys, nil
 }

@@ -174,6 +174,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 			return nil, err
 		}
 	}
+	cleanupFuncs = append(cleanupFuncs, cfg.keyStore.Close)
 	if err := cfg.validate(); err != nil {
 		cleanup(cleanupFuncs)
 		return nil, err

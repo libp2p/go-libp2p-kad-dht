@@ -247,12 +247,7 @@ func TestSortPrefixesBySize(t *testing.T) {
 	for _, h := range genMultihashes(1 << 10) {
 		k := MhToBit256(h)
 		prefix := bitstr.Key(key.BitString(k)[:prefixLen])
-		keys, ok := allocations[prefix]
-		if !ok {
-			allocations[prefix] = []mh.Multihash{h}
-		} else {
-			allocations[prefix] = append(keys, h)
-		}
+		allocations[prefix] = append(allocations[prefix], h)
 	}
 
 	sorted := SortPrefixesBySize(allocations)

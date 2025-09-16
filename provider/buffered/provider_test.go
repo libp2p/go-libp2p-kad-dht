@@ -258,16 +258,7 @@ func TestBatchProcessing(t *testing.T) {
 		if err := provider.StartProviding(false, keys[2]); err != nil {
 			t.Fatalf("StartProviding failed: %v", err)
 		}
-
-		// Wait for batch to be triggered (should process all 3 operations in one batch)
-		// Expect 2 signals: 1 for ProvideOnce (with 2 keys), 1 for StartProviding (with 1 key)
-		for i := 0; i < 2; i++ {
-			select {
-			case <-fake.processed:
-			case <-time.After(time.Second):
-				t.Fatalf("Timeout waiting for operation %d to be processed", i+1)
-			}
-		}
+		synctest.Wait()
 
 		// Close to ensure all operations are flushed
 		provider.Close()

@@ -117,6 +117,17 @@ func getOperations(dequeued [][]byte) ([][]mh.Multihash, error) {
 	return ops[:], nil
 }
 
+// executeOperation executes a provider operation on the underlying provider
+// with the given multihashes, logging any errors encountered.
+func executeOperation(f func(...mh.Multihash) error, keys []mh.Multihash) {
+	if len(keys) == 0 {
+		return
+	}
+	if err := f(keys...); err != nil {
+		logger.Warn(err)
+	}
+}
+
 // worker processes operations from the queue in batches.
 // It runs in a separate goroutine and continues until the provider is closed.
 func (s *SweepingProvider) worker() {
@@ -142,26 +153,14 @@ func (s *SweepingProvider) worker() {
 		// Process `StartProviding` (force=true) ops first, so that if
 		// `StartProviding` (force=false) is called after, there is no need to
 		// enqueue the multihash a second time to the provide queue.
-		err = s.provider.StartProviding(true, ops[forceStartProvidingOp]...)
-		if err != nil {
-			logger.Warnf("BufferedSweepingProvider unable to start providing (force): %v", err)
-		}
-		err = s.provider.StartProviding(false, ops[startProvidingOp]...)
-		if err != nil {
-			logger.Warnf("BufferedSweepingProvider unable to start providing: %v", err)
-		}
-		err = s.provider.ProvideOnce(ops[provideOnceOp]...)
-		if err != nil {
-			logger.Warnf("BufferedSweepingProvider unable to provide once: %v", err)
-		}
+		executeOperation(func(keys ...mh.Multihash) error { return s.provider.StartProviding(true, keys...) }, ops[forceStartProvidingOp])
+		executeOperation(func(keys ...mh.Multihash) error { return s.provider.StartProviding(false, keys...) }, ops[startProvidingOp])
+		executeOperation(s.provider.ProvideOnce, ops[provideOnceOp])
 		// Process `StopProviding` last, so that multihashes that should have been
 		// provided, and then stopped provided in the same batch are provided only
 		// once. Don't `StopProviding` multihashes, for which `StartProviding` has
 		// been called after `StopProviding`.
-		err = s.provider.StopProviding(ops[stopProvidingOp]...)
-		if err != nil {
-			logger.Warnf("BufferedSweepingProvider unable to stop providing: %v", err)
-		}
+		executeOperation(s.provider.StopProviding, ops[stopProvidingOp])
 	}
 }
 

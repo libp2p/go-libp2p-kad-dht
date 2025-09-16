@@ -1,4 +1,4 @@
-package datastore
+package keystore
 
 import (
 	"context"
@@ -18,21 +18,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestKeyStorePutAndGet(t *testing.T) {
-	t.Run("KeyStore", func(t *testing.T) {
+func TestKeystorePutAndGet(t *testing.T) {
+	t.Run("Keystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewKeyStore(ds)
+		store, err := NewKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
 		testKeyStorePutAndGetImpl(t, store)
 	})
 
-	t.Run("ResettableKeyStore", func(t *testing.T) {
+	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeyStore(ds)
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -40,7 +40,7 @@ func TestKeyStorePutAndGet(t *testing.T) {
 	})
 }
 
-func testKeyStorePutAndGetImpl(t *testing.T, store KeyStore) {
+func testKeyStorePutAndGetImpl(t *testing.T, store Keystore) {
 	mhs := make([]mh.Multihash, 6)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
@@ -101,28 +101,28 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 }
 
 func TestKeyStoreContainsPrefix(t *testing.T) {
-	t.Run("KeyStore", func(t *testing.T) {
+	t.Run("Keystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewKeyStore(ds)
+		store, err := NewKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
-		testKeyStoreContainsPrefixImpl(t, store)
+		testKeystoreContainsPrefixImpl(t, store)
 	})
 
-	t.Run("ResettableKeyStore", func(t *testing.T) {
+	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeyStore(ds)
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
-		testKeyStoreContainsPrefixImpl(t, store)
+		testKeystoreContainsPrefixImpl(t, store)
 	})
 }
 
-func testKeyStoreContainsPrefixImpl(t *testing.T, store KeyStore) {
+func testKeystoreContainsPrefixImpl(t *testing.T, store Keystore) {
 	ctx := context.Background()
 
 	ok, err := store.ContainsPrefix(ctx, bitstr.Key("0000"))
@@ -162,29 +162,29 @@ func testKeyStoreContainsPrefixImpl(t *testing.T, store KeyStore) {
 	require.False(t, ok)
 }
 
-func TestKeyStoreDelete(t *testing.T) {
-	t.Run("KeyStore", func(t *testing.T) {
+func TestKeystoreDelete(t *testing.T) {
+	t.Run("Keystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewKeyStore(ds)
+		store, err := NewKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
-		testKeyStoreDeleteImpl(t, store)
+		testKeystoreDeleteImpl(t, store)
 	})
 
-	t.Run("ResettableKeyStore", func(t *testing.T) {
+	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeyStore(ds)
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
-		testKeyStoreDeleteImpl(t, store)
+		testKeystoreDeleteImpl(t, store)
 	})
 }
 
-func testKeyStoreDeleteImpl(t *testing.T, store KeyStore) {
+func testKeystoreDeleteImpl(t *testing.T, store Keystore) {
 	mhs := random.Multihashes(3)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
@@ -211,29 +211,29 @@ func testKeyStoreDeleteImpl(t *testing.T, store KeyStore) {
 	require.NotEmpty(t, res, "expected remaining hashes for other prefix")
 }
 
-func TestKeyStoreSize(t *testing.T) {
-	t.Run("KeyStore", func(t *testing.T) {
+func TestKeystoreSize(t *testing.T) {
+	t.Run("Keystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewKeyStore(ds)
+		store, err := NewKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
-		testKeyStoreSizeImpl(t, store)
+		testKeystoreSizeImpl(t, store)
 	})
 
-	t.Run("ResettableKeyStore", func(t *testing.T) {
+	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeyStore(ds)
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
-		testKeyStoreSizeImpl(t, store)
+		testKeystoreSizeImpl(t, store)
 	})
 }
 
-func testKeyStoreSizeImpl(t *testing.T, store KeyStore) {
+func testKeystoreSizeImpl(t *testing.T, store Keystore) {
 	ctx := context.Background()
 
 	mhs0 := random.Multihashes(128)
@@ -258,7 +258,7 @@ func testKeyStoreSizeImpl(t *testing.T, store KeyStore) {
 }
 
 func TestDsKey(t *testing.T) {
-	s := keyStore{
+	s := keystore{
 		prefixBits: 8,
 	}
 

@@ -9,8 +9,8 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/libp2p/go-libp2p-kad-dht/provider"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 	mh "github.com/multiformats/go-multihash"
 )
 
@@ -22,7 +22,7 @@ type SweepingProvider struct {
 	dht      *dual.DHT
 	LAN      *provider.SweepingProvider
 	WAN      *provider.SweepingProvider
-	keyStore datastore.KeyStore
+	keystore keystore.Keystore
 }
 
 // New creates a new SweepingProvider that manages provides and reprovides for
@@ -56,7 +56,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithAddLocalRecord(func(h mh.Multihash) error {
 				return dht.Provide(dht.Context(), cid.NewCidV1(cid.Raw, h), false)
 			}),
-			provider.WithKeyStore(cfg.keyStore),
+			provider.WithKeystore(cfg.keystore),
 			provider.WithMessageSender(cfg.msgSenders[i]),
 			provider.WithReprovideInterval(cfg.reprovideInterval[i]),
 			provider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
@@ -77,7 +77,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 		dht:      d,
 		LAN:      sweepingProviders[0],
 		WAN:      sweepingProviders[1],
-		keyStore: cfg.keyStore,
+		keystore: cfg.keystore,
 	}, nil
 }
 
@@ -144,7 +144,7 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 // network connectivity is essential.
 func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) error {
 	ctx := context.Background()
-	newKeys, err := s.keyStore.Put(ctx, keys...)
+	newKeys, err := s.keystore.Put(ctx, keys...)
 	if err != nil {
 		return fmt.Errorf("failed to store multihashes: %w", err)
 	}
@@ -168,7 +168,7 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) erro
 // can remain in the DHT swarms up to the provider record TTL after calling
 // `StopProviding`.
 func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
-	err := s.keyStore.Delete(context.Background(), keys...)
+	err := s.keystore.Delete(context.Background(), keys...)
 	if err != nil {
 		return fmt.Errorf("failed to stop providing keys: %w", err)
 	}
@@ -184,7 +184,7 @@ func (s *SweepingProvider) Clear() int {
 	return s.LAN.Clear() + s.WAN.Clear()
 }
 
-// RefreshSchedule scans the KeyStore for any keys that are not currently
+// RefreshSchedule scans the Keystore for any keys that are not currently
 // scheduled for reproviding. If such keys are found, it schedules their
 // associated keyspace region to be reprovided for both DHT providers.
 //

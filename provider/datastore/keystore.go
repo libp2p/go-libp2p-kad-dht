@@ -145,7 +145,6 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
 			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
 		}
 	}
-
 	ks := &keyStore{
 		ds:         namespace.Wrap(d, ds.NewKey(cfg.base)),
 		prefixBits: cfg.prefixBits,
@@ -154,8 +153,6 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
 		close:      make(chan struct{}),
 		done:       make(chan struct{}),
 	}
-
-	// start worker goroutine
 	go ks.worker()
 
 	return ks, nil

@@ -3,7 +3,6 @@ package datastore
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -63,27 +62,24 @@ var _ KeyStore = (*ResettableKeyStore)(nil)
 
 // NewResettableKeyStore creates a new ResettableKeyStore backed by the
 // provided datastore. It automatically adds "/0" and "/1" suffixes to the
-// configured base prefix to create two alternate storage locations for atomic
-// reset operations.
+// configured datastore path to create two alternate storage locations for
+// atomic reset operations.
 func NewResettableKeyStore(d ds.Batching, opts ...KeyStoreOption) (*ResettableKeyStore, error) {
-	var cfg keyStoreCfg
-	opts = append([]KeyStoreOption{KeyStoreDefaultCfg}, opts...)
-	for i, o := range opts {
-		if err := o(&cfg); err != nil {
-			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
-		}
+	cfg, err := getOpts(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	rks := &ResettableKeyStore{
 		keyStore: keyStore{
-			ds:         namespace.Wrap(d, ds.NewKey(cfg.base+"/0")),
+			ds:         namespace.Wrap(d, ds.NewKey(cfg.path+"/0")),
 			prefixBits: cfg.prefixBits,
 			batchSize:  cfg.batchSize,
 			requests:   make(chan operation),
 			close:      make(chan struct{}),
 			done:       make(chan struct{}),
 		},
-		altDs:    namespace.Wrap(d, ds.NewKey(cfg.base+"/1")),
+		altDs:    namespace.Wrap(d, ds.NewKey(cfg.path+"/1")),
 		resetOps: make(chan resetOp),
 	}
 

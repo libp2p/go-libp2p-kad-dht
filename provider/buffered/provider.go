@@ -36,6 +36,8 @@ type SweepingProvider struct {
 	closeOnce sync.Once
 	done      chan struct{}
 	closed    chan struct{}
+
+	newItems  chan struct{}
 	provider  internal.Provider
 	queue     *dsqueue.DSQueue
 	batchSize int
@@ -50,6 +52,7 @@ func New(prov internal.Provider, ds datastore.Batching, opts ...Option) *Sweepin
 		done:   make(chan struct{}),
 		closed: make(chan struct{}),
 
+		newItems: make(chan struct{}, 1),
 		provider: prov,
 		queue: dsqueue.New(ds, cfg.dsName,
 			dsqueue.WithDedupCacheSize(0), // disable deduplication
@@ -133,17 +136,32 @@ func executeOperation(f func(...mh.Multihash) error, keys []mh.Multihash) {
 // It runs in a separate goroutine and continues until the provider is closed.
 func (s *SweepingProvider) worker() {
 	defer close(s.done)
+	var emptyQueue bool
 	for {
-		select {
-		case <-s.closed:
-			return
-		default:
+		if emptyQueue {
+			select {
+			case <-s.closed:
+				return
+			case <-s.newItems:
+			}
+			emptyQueue = false
+		} else {
+			select {
+			case <-s.closed:
+				return
+			case <-s.newItems:
+			default:
+			}
 		}
 
 		res, err := s.queue.GetN(s.batchSize)
 		if err != nil {
 			logger.Warnf("BufferedSweepingProvider unable to dequeue: %v", err)
 			continue
+		}
+		if len(res) < s.batchSize {
+			// Queue was fully drained.
+			emptyQueue = true
 		}
 		ops, err := getOperations(res)
 		if err != nil {
@@ -173,6 +191,10 @@ func (s *SweepingProvider) enqueue(op byte, keys ...mh.Multihash) error {
 		if err := s.queue.Put(toBytes(op, h)); err != nil {
 			return err
 		}
+	}
+	select {
+	case s.newItems <- struct{}{}:
+	default:
 	}
 	return nil
 }

@@ -1,4 +1,4 @@
-package provider
+package dual
 
 import (
 	"context"
@@ -10,8 +10,11 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/libp2p/go-libp2p-kad-dht/provider"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
 	mh "github.com/multiformats/go-multihash"
 )
+
+var _ internal.Provider = (*SweepingProvider)(nil)
 
 // SweepingProvider manages provides and reprovides for both DHT swarms (LAN
 // and WAN) in the dual DHT setup.
@@ -96,6 +99,13 @@ func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider) error) e
 	}
 	<-done
 	return errors.Join(errs[:]...)
+}
+
+// Close stops both DHT providers and releases associated resources.
+func (s *SweepingProvider) Close() error {
+	return s.runOnBoth(func(p *provider.SweepingProvider) error {
+		return p.Close()
+	})
 }
 
 // ProvideOnce sends provider records for the specified keys to both DHT swarms
@@ -190,19 +200,4 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	return s.runOnBoth(func(p *provider.SweepingProvider) error {
 		return p.RefreshSchedule()
 	})
-}
-
-var (
-	_ dhtProvider = (*SweepingProvider)(nil)
-	_ dhtProvider = (*provider.SweepingProvider)(nil)
-)
-
-// dhtProvider is the interface to ensure that SweepingProvider and
-// provider.SweepingProvider share the same interface.
-type dhtProvider interface {
-	StartProviding(force bool, keys ...mh.Multihash) error
-	StopProviding(keys ...mh.Multihash) error
-	ProvideOnce(keys ...mh.Multihash) error
-	Clear() int
-	RefreshSchedule() error
 }

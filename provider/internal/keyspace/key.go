@@ -1,8 +1,9 @@
 package keyspace
 
 import (
+	"cmp"
 	"crypto/sha256"
-	"sort"
+	"slices"
 
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -183,8 +184,8 @@ func SortPrefixesBySize(prefixes map[bitstr.Key][]mh.Multihash) []PrefixAndKeys 
 			out = append(out, PrefixAndKeys{Prefix: prefix, Keys: keys})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return len(out[i].Keys) > len(out[j].Keys)
+	slices.SortFunc(out, func(a, b PrefixAndKeys) int {
+		return cmp.Compare(len(b.Keys), len(a.Keys))
 	})
 	return out
 }

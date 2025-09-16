@@ -75,7 +75,7 @@ type keyStore struct {
 }
 
 type keyStoreCfg struct {
-	base       string
+	path       string
 	prefixBits int
 	batchSize  int
 }
@@ -84,26 +84,35 @@ type keyStoreCfg struct {
 type KeyStoreOption func(*keyStoreCfg) error
 
 const (
-	DefaultKeyStoreBasePrefix = "/provider/keystore"
-	DefaultKeyStoreBatchSize  = 1 << 14
-	DefaultPrefixBits         = 16
+	DefaultKeyStorePath      = "/provider/keystore"
+	DefaultKeyStoreBatchSize = 1 << 14
+	DefaultPrefixBits        = 16
 )
 
-var KeyStoreDefaultCfg = func(cfg *keyStoreCfg) error {
-	cfg.base = DefaultKeyStoreBasePrefix
-	cfg.prefixBits = DefaultPrefixBits
-	cfg.batchSize = DefaultKeyStoreBatchSize
-	return nil
+// getOpts creates a config and applies Options to it.
+func getOpts(opts []KeyStoreOption) (keyStoreCfg, error) {
+	cfg := keyStoreCfg{
+		path:       DefaultKeyStorePath,
+		prefixBits: DefaultPrefixBits,
+		batchSize:  DefaultKeyStoreBatchSize,
+	}
+
+	for i, opt := range opts {
+		if err := opt(&cfg); err != nil {
+			return keyStoreCfg{}, fmt.Errorf("option %d error: %s", i, err)
+		}
+	}
+	return cfg, nil
 }
 
-// WithDatastorePrefix sets the datastore prefix under which multihashes are
+// WithDatastorePath sets the datastore prefix under which multihashes are
 // stored.
-func WithDatastorePrefix(base string) KeyStoreOption {
+func WithDatastorePath(path string) KeyStoreOption {
 	return func(cfg *keyStoreCfg) error {
-		if base == "" {
-			return fmt.Errorf("datastore prefix cannot be empty")
+		if path == "" {
+			return fmt.Errorf("datastore name cannot be empty")
 		}
-		cfg.base = base
+		cfg.path = path
 		return nil
 	}
 }
@@ -138,16 +147,13 @@ func WithBatchSize(size int) KeyStoreOption {
 
 // NewKeyStore creates a new KeyStore backed by the provided datastore.
 func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
-	var cfg keyStoreCfg
-	opts = append([]KeyStoreOption{KeyStoreDefaultCfg}, opts...)
-	for i, o := range opts {
-		if err := o(&cfg); err != nil {
-			return nil, fmt.Errorf("KeyStore option %d failed: %w", i, err)
-		}
+	cfg, err := getOpts(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	ks := &keyStore{
-		ds:         namespace.Wrap(d, ds.NewKey(cfg.base)),
+		ds:         namespace.Wrap(d, ds.NewKey(cfg.path)),
 		prefixBits: cfg.prefixBits,
 		batchSize:  cfg.batchSize,
 		requests:   make(chan operation),
@@ -164,14 +170,13 @@ func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
 // dsKey returns the datastore key for the provided binary key.
 //
 // The function creates a hierarchical datastore key by expanding bits into
-// path components, starting with the supplied `base` prefix, followed by
-// individual bits (`0` or `1`) separated by `/`, and optionally a
+// path components (`0` or `1`) separated by `/`, and optionally a
 // base64URL-encoded suffix.
 //
 // Full keys (256-bit):
 // The first `prefixBits` bits become individual path components, and the
 // remaining bytes (after prefixBits/8) are base64URL encoded as the final
-// component. Example: "/base/prefix/0/0/0/0/1/1/1/1/AAAA...A=="
+// component. Example: "/0/0/0/0/1/1/1/1/AAAA...A=="
 //
 // Prefix keys (<256-bit):
 // If the key is shorter than 256-bits, only the available bits (up to
@@ -202,7 +207,7 @@ func dsKey[K kad.Key[K]](k K, prefixBits int) ds.Key {
 // base64URL-encoded suffix.
 //
 // The input datastore key format is expected to be:
-// "base/bit0/bit1/.../bitN/base64url_suffix"
+// "/bit0/bit1/.../bitN/base64url_suffix"
 //
 // Returns the reconstructed 256-bit key or an error if base64URL decoding fails.
 func (s *keyStore) decodeKey(dsk string) (bit256.Key, error) {
@@ -300,18 +305,14 @@ func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 // get returns all keys whose bit256 representation matches the provided
 // prefix.
 func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
-	dsk := dsKey(prefix, s.prefixBits).String()
-	res, err := s.ds.Query(ctx, query.Query{Prefix: dsk})
-	if err != nil {
-		return nil, err
-	}
-	defer res.Close()
-
-	longPrefix := prefix.BitLen() > s.prefixBits
 	out := make([]mh.Multihash, 0)
-	for r := range res.Next() {
-		if r.Error != nil {
-			return nil, r.Error
+	longPrefix := prefix.BitLen() > s.prefixBits
+
+	dsk := dsKey(prefix, s.prefixBits).String()
+	q := query.Query{Prefix: dsk}
+	for r, err := range ds.QueryIter(ctx, s.ds, q) {
+		if err != nil {
+			return nil, err
 		}
 		// Depending on prefix length, filter out non matching keys
 		if longPrefix {
@@ -334,21 +335,15 @@ func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 // bit-prefix.
 func (s *keyStore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
 	dsk := dsKey(prefix, s.prefixBits).String()
-	longPrefix := prefix.BitLen() > s.prefixBits
 	q := query.Query{Prefix: dsk, KeysOnly: true}
+	longPrefix := prefix.BitLen() > s.prefixBits
 	if !longPrefix {
 		// Exact match on hex character, only one possible match
 		q.Limit = 1
 	}
-	res, err := s.ds.Query(ctx, q)
-	if err != nil {
-		return false, err
-	}
-	defer res.Close()
-
-	for r := range res.Next() {
-		if r.Error != nil {
-			return false, r.Error
+	for r, err := range ds.QueryIter(ctx, s.ds, q) {
+		if err != nil {
+			return false, err
 		}
 		if !longPrefix {
 			return true, nil
@@ -367,41 +362,37 @@ func (s *keyStore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 // empty deletes all entries under the datastore prefix, assuming s.lk is
 // already held.
 func empty(ctx context.Context, d ds.Batching, batchSize int) error {
-	res, err := d.Query(ctx, query.Query{KeysOnly: true})
+	batch, err := d.Batch(ctx)
 	if err != nil {
 		return err
 	}
-	defer res.Close()
-
-	delBatch := func(keys []ds.Key) error {
-		if len(keys) == 0 {
-			return nil
+	var writeCount int
+	q := query.Query{KeysOnly: true}
+	for res, err := range ds.QueryIter(ctx, d, q) {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		b, err := d.Batch(ctx)
+		if writeCount >= batchSize {
+			writeCount = 0
+			if err = batch.Commit(ctx); err != nil {
+				return fmt.Errorf("cannot commit keystore updates: %w", err)
+			}
+		}
 		if err != nil {
-			return nil
+			return fmt.Errorf("cannot read query result from keystore: %w", err)
 		}
-		for _, k := range keys {
-			if err := b.Delete(ctx, k); err != nil {
-				return err
-			}
+		if err = batch.Delete(ctx, ds.NewKey(res.Key)); err != nil {
+			return fmt.Errorf("cannot delete key from keystore: %w", err)
 		}
-		return b.Commit(ctx)
+		writeCount++
 	}
-	keys := make([]ds.Key, 0, batchSize)
-	for r := range res.Next() {
-		if r.Error != nil {
-			return r.Error
-		}
-		keys = append(keys, ds.NewKey(r.Key))
-		if len(keys) == cap(keys) {
-			if err := delBatch(keys); err != nil {
-				return err
-			}
-			keys = keys[:0]
-		}
+	if err = batch.Commit(ctx); err != nil {
+		return fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
-	return delBatch(keys) // delete remaining keys
+	if err = d.Sync(ctx, ds.NewKey("")); err != nil {
+		return fmt.Errorf("cannot sync datastore: %w", err)
+	}
+	return nil
 }
 
 // delete removes the given keys from datastore.
@@ -423,15 +414,8 @@ func (s *keyStore) delete(ctx context.Context, keys []mh.Multihash) error {
 // size returns the number of keys currently stored in the KeyStore.
 func (s *keyStore) size(ctx context.Context) (size int, err error) {
 	q := query.Query{KeysOnly: true}
-	res, err := s.ds.Query(ctx, q)
-	if err != nil {
-		return
-	}
-	defer res.Close()
-
-	for r := range res.Next() {
-		if r.Error != nil {
-			err = r.Error
+	for _, err = range ds.QueryIter(ctx, s.ds, q) {
+		if err != nil {
 			return
 		}
 		size++

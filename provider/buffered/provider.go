@@ -29,8 +29,9 @@ const (
 
 var _ internal.Provider = (*SweepingProvider)(nil)
 
-// SweepingProvider implements a buffered provider that queues operations and
-// processes them asynchronously in batches.
+// buffered.SweepingProvider is a wrapper around a SweepingProvider buffering
+// requests, to allow core operations to return instantly. Operations are
+// queued and processed asynchronously in batches for improved performance.
 type SweepingProvider struct {
 	closeOnce sync.Once
 	done      chan struct{}
@@ -149,6 +150,8 @@ func (s *SweepingProvider) worker() {
 			logger.Warnf("BufferedSweepingProvider unable to parse dequeued item: %v", err)
 			continue
 		}
+		// Execute the 4 kinds of queued provider operations on the underlying
+		// provider.
 
 		// Process `StartProviding` (force=true) ops first, so that if
 		// `StartProviding` (force=false) is called after, there is no need to

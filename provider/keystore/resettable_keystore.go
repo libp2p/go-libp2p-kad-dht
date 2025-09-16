@@ -1,4 +1,4 @@
-package datastore
+package keystore
 
 import (
 	"context"
@@ -24,7 +24,7 @@ type resetOp struct {
 	response chan<- error
 }
 
-// ResettableKeyStore is a KeyStore implementation that supports atomic reset
+// ResettableKeystore is a Keystore implementation that supports atomic reset
 // operations using a dual-datastore architecture. It maintains two separate
 // datastores (primary and alternate) where only one is active at any time,
 // enabling atomic replacement of all stored keys without interrupting
@@ -50,28 +50,28 @@ type resetOp struct {
 // The reset operation allows complete replacement of stored multihashes
 // without data loss or service interruption, making it suitable for
 // scenarios requiring periodic full dataset updates.
-type ResettableKeyStore struct {
-	keyStore
+type ResettableKeystore struct {
+	keystore
 
 	altDs           ds.Batching
 	resetInProgress bool
 	resetOps        chan resetOp // reset operations that must be run in main go routine
 }
 
-var _ KeyStore = (*ResettableKeyStore)(nil)
+var _ Keystore = (*ResettableKeystore)(nil)
 
-// NewResettableKeyStore creates a new ResettableKeyStore backed by the
+// NewResettableKeystore creates a new ResettableKeystore backed by the
 // provided datastore. It automatically adds "/0" and "/1" suffixes to the
 // configured datastore path to create two alternate storage locations for
 // atomic reset operations.
-func NewResettableKeyStore(d ds.Batching, opts ...KeyStoreOption) (*ResettableKeyStore, error) {
+func NewResettableKeystore(d ds.Batching, opts ...Option) (*ResettableKeystore, error) {
 	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	rks := &ResettableKeyStore{
-		keyStore: keyStore{
+	rks := &ResettableKeystore{
+		keystore: keystore{
 			ds:         namespace.Wrap(d, ds.NewKey(cfg.path+"/0")),
 			prefixBits: cfg.prefixBits,
 			batchSize:  cfg.batchSize,
@@ -89,8 +89,8 @@ func NewResettableKeyStore(d ds.Batching, opts ...KeyStoreOption) (*ResettableKe
 	return rks, nil
 }
 
-// worker processes operations sequentially in a single goroutine for ResettableKeyStore
-func (s *ResettableKeyStore) worker() {
+// worker processes operations sequentially in a single goroutine for ResettableKeystore
+func (s *ResettableKeystore) worker() {
 	defer close(s.done)
 
 	for {
@@ -129,19 +129,19 @@ func (s *ResettableKeyStore) worker() {
 	}
 }
 
-// resettablePutLocked handles put operations for ResettableKeyStore, with special
+// resettablePutLocked handles put operations for ResettableKeystore, with special
 // handling during reset operations.
-func (s *ResettableKeyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
+func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
 	if s.resetInProgress {
 		// Reset is in progress, write to alternate datastore in addition to
 		// current datastore
 		s.altPut(ctx, keys)
 	}
-	return s.keyStore.put(ctx, keys)
+	return s.keystore.put(ctx, keys)
 }
 
 // altPut writes the given multihashes to the alternate datastore.
-func (s *ResettableKeyStore) altPut(ctx context.Context, keys []mh.Multihash) error {
+func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) error {
 	b, err := s.altDs.Batch(ctx)
 	if err != nil {
 		return err
@@ -156,7 +156,7 @@ func (s *ResettableKeyStore) altPut(ctx context.Context, keys []mh.Multihash) er
 }
 
 // handleResetOp processes reset operations that need to happen synchronously.
-func (s *ResettableKeyStore) handleResetOp(op resetOp) {
+func (s *ResettableKeystore) handleResetOp(op resetOp) {
 	if op.op == opStart {
 		if s.resetInProgress {
 			op.response <- ErrResetInProgress
@@ -197,7 +197,7 @@ func (s *ResettableKeyStore) handleResetOp(op resetOp) {
 // Returns ErrResetInProgress if another reset operation is already running.
 // The operation can be cancelled via context, which will clean up partial
 // state.
-func (s *ResettableKeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
+func (s *ResettableKeystore) ResetCids(ctx context.Context, keysChan <-chan cid.Cid) error {
 	if keysChan == nil {
 		return nil
 	}
@@ -207,7 +207,7 @@ func (s *ResettableKeyStore) ResetCids(ctx context.Context, keysChan <-chan cid.
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-s.done:
-		return ErrKeyStoreClosed
+		return ErrClosed
 	case s.resetOps <- resetOp{op: opStart, response: opsChan}:
 		select {
 		case err := <-opsChan:
@@ -242,7 +242,7 @@ loop:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-s.done:
-			return ErrKeyStoreClosed
+			return ErrClosed
 		case c, ok := <-keysChan:
 			if !ok {
 				break loop

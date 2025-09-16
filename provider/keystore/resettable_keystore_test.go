@@ -1,4 +1,4 @@
-package datastore
+package keystore
 
 import (
 	"context"
@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestKeyStoreReset(t *testing.T) {
+func TestKeystoreReset(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewResettableKeyStore(ds)
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store.Close()
 

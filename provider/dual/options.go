@@ -10,7 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 )
 
 const (
@@ -19,7 +19,7 @@ const (
 )
 
 type config struct {
-	keyStore datastore.KeyStore
+	keystore keystore.Keystore
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
@@ -68,7 +68,7 @@ func (c *config) validate() error {
 
 var DefaultConfig = func(cfg *config) error {
 	var err error
-	cfg.keyStore, err = datastore.NewKeyStore(ds.NewMapDatastore())
+	cfg.keystore, err = keystore.NewKeystore(ds.NewMapDatastore())
 	if err != nil {
 		return err
 	}
@@ -87,12 +87,12 @@ var DefaultConfig = func(cfg *config) error {
 	return nil
 }
 
-func WithKeyStore(keyStore datastore.KeyStore) Option {
+func WithKeystore(ks keystore.Keystore) Option {
 	return func(cfg *config) error {
-		if keyStore == nil {
-			return errors.New("provider config: keyStore cannot be nil")
+		if ks == nil {
+			return errors.New("provider config: keystore cannot be nil")
 		}
-		cfg.keyStore = keyStore
+		cfg.keystore = ks
 		return nil
 	}
 }

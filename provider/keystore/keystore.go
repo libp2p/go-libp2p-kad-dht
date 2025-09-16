@@ -1,4 +1,4 @@
-package datastore
+package keystore
 
 import (
 	"context"
@@ -18,11 +18,11 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
-var ErrKeyStoreClosed = errors.New("keystore is closed")
+var ErrClosed = errors.New("keystore is closed")
 
-// KeyStore provides thread-safe storage and retrieval of multihashes, indexed
+// Keystore provides thread-safe storage and retrieval of multihashes, indexed
 // by their kademlia 256-bit identifier.
-type KeyStore interface {
+type Keystore interface {
 	Put(context.Context, ...mh.Multihash) ([]mh.Multihash, error)
 	Get(context.Context, bitstr.Key) ([]mh.Multihash, error)
 	ContainsPrefix(context.Context, bitstr.Key) (bool, error)
@@ -62,8 +62,8 @@ type operationResponse struct {
 	err         error
 }
 
-// keyStore indexes multihashes by their kademlia identifier.
-type keyStore struct {
+// keystore indexes multihashes by their kademlia identifier.
+type keystore struct {
 	ds         ds.Batching
 	prefixBits int
 	batchSize  int
@@ -74,84 +74,13 @@ type keyStore struct {
 	done     chan struct{}
 }
 
-type keyStoreCfg struct {
-	path       string
-	prefixBits int
-	batchSize  int
-}
-
-// KeyStoreOption configures KeyStore behaviour.
-type KeyStoreOption func(*keyStoreCfg) error
-
-const (
-	DefaultKeyStorePath      = "/provider/keystore"
-	DefaultKeyStoreBatchSize = 1 << 14
-	DefaultPrefixBits        = 16
-)
-
-// getOpts creates a config and applies Options to it.
-func getOpts(opts []KeyStoreOption) (keyStoreCfg, error) {
-	cfg := keyStoreCfg{
-		path:       DefaultKeyStorePath,
-		prefixBits: DefaultPrefixBits,
-		batchSize:  DefaultKeyStoreBatchSize,
-	}
-
-	for i, opt := range opts {
-		if err := opt(&cfg); err != nil {
-			return keyStoreCfg{}, fmt.Errorf("option %d error: %s", i, err)
-		}
-	}
-	return cfg, nil
-}
-
-// WithDatastorePath sets the datastore prefix under which multihashes are
-// stored.
-func WithDatastorePath(path string) KeyStoreOption {
-	return func(cfg *keyStoreCfg) error {
-		if path == "" {
-			return fmt.Errorf("datastore name cannot be empty")
-		}
-		cfg.path = path
-		return nil
-	}
-}
-
-// WithPrefixBits sets how many bits from binary keys become individual path
-// components in datastore keys. Higher values create deeper hierarchies but
-// enable more granular prefix queries.
-//
-// Must be a multiple of 8 between 0 and 256 (inclusive) to align with byte
-// boundaries.
-func WithPrefixBits(prefixBits int) KeyStoreOption {
-	return func(cfg *keyStoreCfg) error {
-		if prefixBits < 0 || prefixBits > 256 || prefixBits%8 != 0 {
-			return fmt.Errorf("invalid prefix bits %d, must be a non-negative multiple of 8 less or equal to 256", prefixBits)
-		}
-		cfg.prefixBits = prefixBits
-		return nil
-	}
-}
-
-// WithBatchSize defines the maximal number of keys per batch when reading or
-// writing to the datastore. It is typically used in Empty() and ResetCids().
-func WithBatchSize(size int) KeyStoreOption {
-	return func(cfg *keyStoreCfg) error {
-		if size <= 0 {
-			return fmt.Errorf("invalid batch size %d", size)
-		}
-		cfg.batchSize = size
-		return nil
-	}
-}
-
-// NewKeyStore creates a new KeyStore backed by the provided datastore.
-func NewKeyStore(d ds.Batching, opts ...KeyStoreOption) (KeyStore, error) {
+// NewKeystore creates a new Keystore backed by the provided datastore.
+func NewKeystore(d ds.Batching, opts ...Option) (Keystore, error) {
 	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}
-	ks := &keyStore{
+	ks := &keystore{
 		ds:         namespace.Wrap(d, ds.NewKey(cfg.path)),
 		prefixBits: cfg.prefixBits,
 		batchSize:  cfg.batchSize,
@@ -207,7 +136,7 @@ func dsKey[K kad.Key[K]](k K, prefixBits int) ds.Key {
 // "/bit0/bit1/.../bitN/base64url_suffix"
 //
 // Returns the reconstructed 256-bit key or an error if base64URL decoding fails.
-func (s *keyStore) decodeKey(dsk string) (bit256.Key, error) {
+func (s *keystore) decodeKey(dsk string) (bit256.Key, error) {
 	bs := make([]byte, 32)
 	// Extract individual bits from odd positions (skip '/' separators)
 	for i := range s.prefixBits {
@@ -225,7 +154,7 @@ func (s *keyStore) decodeKey(dsk string) (bit256.Key, error) {
 }
 
 // worker processes operations sequentially in a single goroutine
-func (s *keyStore) worker() {
+func (s *keystore) worker() {
 	defer close(s.done)
 
 	for {
@@ -267,7 +196,7 @@ func (s *keyStore) worker() {
 
 // put stores the provided keys while assuming s.lk is already held, and
 // returns the keys that weren't present already in the keystore.
-func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
+func (s *keystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
 	seen := make(map[bit256.Key]struct{}, len(keys))
 	b, err := s.ds.Batch(ctx)
 	if err != nil {
@@ -301,7 +230,7 @@ func (s *keyStore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 
 // get returns all keys whose bit256 representation matches the provided
 // prefix.
-func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
+func (s *keystore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
 	out := make([]mh.Multihash, 0)
 	longPrefix := prefix.BitLen() > s.prefixBits
 
@@ -327,10 +256,10 @@ func (s *keyStore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 	return out, nil
 }
 
-// containsPrefix reports whether the KeyStore currently holds at least one
+// containsPrefix reports whether the Keystore currently holds at least one
 // multihash whose kademlia identifier (bit256.Key) starts with the provided
 // bit-prefix.
-func (s *keyStore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
+func (s *keystore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
 	dsk := dsKey(prefix, s.prefixBits).String()
 	q := query.Query{Prefix: dsk, KeysOnly: true}
 	longPrefix := prefix.BitLen() > s.prefixBits
@@ -393,7 +322,7 @@ func empty(ctx context.Context, d ds.Batching, batchSize int) error {
 }
 
 // delete removes the given keys from datastore.
-func (s *keyStore) delete(ctx context.Context, keys []mh.Multihash) error {
+func (s *keystore) delete(ctx context.Context, keys []mh.Multihash) error {
 	b, err := s.ds.Batch(ctx)
 	if err != nil {
 		return err
@@ -408,8 +337,8 @@ func (s *keyStore) delete(ctx context.Context, keys []mh.Multihash) error {
 	return b.Commit(ctx)
 }
 
-// size returns the number of keys currently stored in the KeyStore.
-func (s *keyStore) size(ctx context.Context) (size int, err error) {
+// size returns the number of keys currently stored in the Keystore.
+func (s *keystore) size(ctx context.Context) (size int, err error) {
 	q := query.Query{KeysOnly: true}
 	for _, err = range ds.QueryIter(ctx, s.ds, q) {
 		if err != nil {
@@ -423,7 +352,7 @@ func (s *keyStore) size(ctx context.Context) (size int, err error) {
 // executeOperation sends an operation request to the worker goroutine and
 // waits for the response. It handles the communication protocol and returns
 // the results based on the operation type.
-func (s *keyStore) executeOperation(op opType, ctx context.Context, keys []mh.Multihash, prefix bitstr.Key) ([]mh.Multihash, int, bool, error) {
+func (s *keystore) executeOperation(op opType, ctx context.Context, keys []mh.Multihash, prefix bitstr.Key) ([]mh.Multihash, int, bool, error) {
 	response := make(chan operationResponse, 1)
 	select {
 	case s.requests <- operation{
@@ -436,7 +365,7 @@ func (s *keyStore) executeOperation(op opType, ctx context.Context, keys []mh.Mu
 	case <-ctx.Done():
 		return nil, 0, false, ctx.Err()
 	case <-s.close:
-		return nil, 0, false, ErrKeyStoreClosed
+		return nil, 0, false, ErrClosed
 	}
 
 	select {
@@ -450,7 +379,7 @@ func (s *keyStore) executeOperation(op opType, ctx context.Context, keys []mh.Mu
 // Put stores the provided keys in the underlying datastore, grouping them by
 // the first prefixLen bits. It returns only the keys that were not previously
 // persisted in the datastore (i.e., newly added keys).
-func (s *keyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
+func (s *keystore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihash, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
@@ -460,27 +389,27 @@ func (s *keyStore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihas
 
 // Get returns all keys whose bit256 representation matches the provided
 // prefix.
-func (s *keyStore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
+func (s *keystore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
 	keys, _, _, err := s.executeOperation(opGet, ctx, nil, prefix)
 	return keys, err
 }
 
-// ContainsPrefix reports whether the KeyStore currently holds at least one
+// ContainsPrefix reports whether the Keystore currently holds at least one
 // multihash whose kademlia identifier (bit256.Key) starts with the provided
 // bit-prefix.
-func (s *keyStore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
+func (s *keystore) ContainsPrefix(ctx context.Context, prefix bitstr.Key) (bool, error) {
 	_, _, found, err := s.executeOperation(opContainsPrefix, ctx, nil, prefix)
 	return found, err
 }
 
 // Empty deletes all entries under the datastore prefix.
-func (s *keyStore) Empty(ctx context.Context) error {
+func (s *keystore) Empty(ctx context.Context) error {
 	_, _, _, err := s.executeOperation(opEmpty, ctx, nil, "")
 	return err
 }
 
 // Delete removes the given keys from datastore.
-func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
+func (s *keystore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -488,17 +417,17 @@ func (s *keyStore) Delete(ctx context.Context, keys ...mh.Multihash) error {
 	return err
 }
 
-// Size returns the number of keys currently stored in the KeyStore.
+// Size returns the number of keys currently stored in the Keystore.
 //
 // The size is obtained by iterating over all keys in the underlying
 // datastore, so it may be expensive for large stores.
-func (s *keyStore) Size(ctx context.Context) (int, error) {
+func (s *keystore) Size(ctx context.Context) (int, error) {
 	_, size, _, err := s.executeOperation(opSize, ctx, nil, "")
 	return size, err
 }
 
 // Close shuts down the worker goroutine and releases resources.
-func (s *keyStore) Close() error {
+func (s *keystore) Close() error {
 	select {
 	case <-s.close:
 		// Already closed

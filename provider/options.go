@@ -7,7 +7,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
@@ -41,7 +41,7 @@ type config struct {
 	peerid peer.ID
 	router KadClosestPeersRouter
 
-	keyStore datastore.KeyStore
+	keystore keystore.Keystore
 
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
@@ -270,14 +270,14 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 	}
 }
 
-// WithKeyStore defines the KeyStore used to keep track of the keys that need
+// WithKeystore defines the Keystore used to keep track of the keys that need
 // to be reprovided.
-func WithKeyStore(keyStore datastore.KeyStore) Option {
+func WithKeystore(ks keystore.Keystore) Option {
 	return func(cfg *config) error {
-		if keyStore == nil {
+		if ks == nil {
 			return errors.New("reprovider config: multihash store cannot be nil")
 		}
-		cfg.keyStore = keyStore
+		cfg.keystore = ks
 		return nil
 	}
 }

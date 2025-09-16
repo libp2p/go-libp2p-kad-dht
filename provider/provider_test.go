@@ -1248,6 +1248,7 @@ func TestRefreshSchedule(t *testing.T) {
 	require.NoError(t, err)
 
 	prov := SweepingProvider{
+		ctx:      ctx,
 		keyStore: keyStore,
 
 		reprovideInterval: time.Hour,

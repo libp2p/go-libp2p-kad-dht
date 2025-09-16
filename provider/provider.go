@@ -26,11 +26,11 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 )
 
@@ -120,7 +120,7 @@ type SweepingProvider struct {
 
 	connectivity *connectivity.ConnectivityChecker
 
-	keyStore datastore.KeyStore
+	keystore keystore.Keystore
 
 	replicationFactor int
 
@@ -167,17 +167,17 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	cleanupFuncs := []func() error{}
 
-	if cfg.keyStore == nil {
+	if cfg.keystore == nil {
 		// Setup KeyStore if missing
 		mapDs := ds.NewMapDatastore()
 		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
-		cfg.keyStore, err = datastore.NewKeyStore(mapDs)
+		cfg.keystore, err = keystore.NewKeystore(mapDs)
 		if err != nil {
 			cleanup(cleanupFuncs)
 			return nil, err
 		}
 	}
-	cleanupFuncs = append(cleanupFuncs, cfg.keyStore.Close)
+	cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close)
 	if err := cfg.validate(); err != nil {
 		cleanup(cleanupFuncs)
 		return nil, err
@@ -238,7 +238,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		getSelfAddrs:   cfg.selfAddrs,
 		addLocalRecord: cfg.addLocalRecord,
 
-		keyStore: cfg.keyStore,
+		keystore: cfg.keystore,
 
 		schedule:      trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer: time.NewTimer(time.Hour),
@@ -889,7 +889,7 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 	if reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
-		newKeys, err := s.keyStore.Put(s.ctx, keys...)
+		newKeys, err := s.keystore.Put(s.ctx, keys...)
 		if err != nil {
 			return fmt.Errorf("couldn't add keys to keystore: %w", err)
 		}
@@ -1158,7 +1158,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	}
 
 	// Load keys matching prefix from the keystore.
-	keys, err := s.keyStore.Get(s.ctx, prefix)
+	keys, err := s.keystore.Get(s.ctx, prefix)
 	if err != nil {
 		s.failedReprovide(prefix, fmt.Errorf("couldn't reprovide, error when loading keys: %s", err))
 		if periodicReprovide {
@@ -1205,7 +1205,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	if len(coveredPrefix) < len(prefix) {
 		// Covered prefix is shorter than the requested one, load all the keys
 		// matching the covered prefix from the keystore.
-		keys, err = s.keyStore.Get(s.ctx, coveredPrefix)
+		keys, err = s.keystore.Get(s.ctx, coveredPrefix)
 		if err != nil {
 			err = fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 			s.failedReprovide(prefix, err)
@@ -1415,7 +1415,7 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
 	}
-	err := s.keyStore.Delete(s.ctx, keys...)
+	err := s.keystore.Delete(s.ctx, keys...)
 	if err != nil {
 		err = fmt.Errorf("failed to stop providing keys: %w", err)
 	}
@@ -1510,7 +1510,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	// Only keep the missing prefixes for which there are keys in the KeyStore.
 	toInsert := make([]bitstr.Key, 0)
 	for _, p := range missing {
-		ok, err := s.keyStore.ContainsPrefix(s.ctx, p)
+		ok, err := s.keystore.ContainsPrefix(s.ctx, p)
 		if err != nil {
 			logger.Warnf("couldn't refresh schedule for prefix %s: %s", p, err)
 		}

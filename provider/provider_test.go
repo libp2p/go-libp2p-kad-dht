@@ -36,10 +36,10 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
 	"github.com/stretchr/testify/require"
@@ -1244,12 +1244,12 @@ func TestRefreshSchedule(t *testing.T) {
 	ctx := context.Background()
 	mapDs := ds.NewMapDatastore()
 	defer mapDs.Close()
-	keyStore, err := datastore.NewKeyStore(mapDs)
+	ks, err := keystore.NewKeystore(mapDs)
 	require.NoError(t, err)
 
 	prov := SweepingProvider{
 		ctx:      ctx,
-		keyStore: keyStore,
+		keystore: ks,
 
 		reprovideInterval: time.Hour,
 		schedule:          trie.New[bitstr.Key, time.Duration](),
@@ -1267,7 +1267,7 @@ func TestRefreshSchedule(t *testing.T) {
 
 	// Add key to keystore
 	k := genMultihashesMatchingPrefix("00000", 1)[0]
-	keyStore.Put(ctx, k)
+	ks.Put(ctx, k)
 
 	// Refresh schedule should add the key to the schedule
 	require.Equal(t, 0, prov.schedule.Size())
@@ -1278,7 +1278,7 @@ func TestRefreshSchedule(t *testing.T) {
 
 	// Add another key starting with same prefix to keystore
 	k = genMultihashesMatchingPrefix("00001", 1)[0]
-	keyStore.Put(ctx, k)
+	ks.Put(ctx, k)
 	prov.RefreshSchedule()
 	require.Equal(t, 1, prov.schedule.Size())
 	ok, _ = trie.Find(prov.schedule, bitstr.Key("0000"))
@@ -1290,7 +1290,7 @@ func TestRefreshSchedule(t *testing.T) {
 	for _, p := range newPrefixes {
 		keys = append(keys, genMultihashesMatchingPrefix(p, 1)...)
 	}
-	keyStore.Put(ctx, keys...)
+	ks.Put(ctx, keys...)
 	prov.RefreshSchedule()
 	// Assert that only the prefixes containing matching keys in the KeyStore
 	// have been added to the schedule.

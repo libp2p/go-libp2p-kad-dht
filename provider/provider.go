@@ -27,6 +27,7 @@ import (
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/datastore"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/queue"
@@ -102,6 +103,8 @@ const (
 	periodicWorker workerType = iota
 	burstWorker
 )
+
+var _ internal.Provider = (*SweepingProvider)(nil)
 
 type SweepingProvider struct {
 	done         chan struct{}

@@ -6,50 +6,55 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
-	"github.com/stretchr/testify/require"
 
 	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+
+	"github.com/ipfs/go-test/random"
+	"github.com/stretchr/testify/require"
 )
 
-func TestKeyStoreStoreAndGet(t *testing.T) {
-	ds := ds.NewMapDatastore()
-	defer ds.Close()
-	store, err := NewKeyStore(ds)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestKeyStorePutAndGet(t *testing.T) {
+	t.Run("KeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
 
+		testKeyStorePutAndGetImpl(t, store)
+	})
+
+	t.Run("ResettableKeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewResettableKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeyStorePutAndGetImpl(t, store)
+	})
+}
+
+func testKeyStorePutAndGetImpl(t *testing.T, store KeyStore) {
 	mhs := make([]mh.Multihash, 6)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		mhs[i] = h
 	}
 
 	added, err := store.Put(context.Background(), mhs...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(added) != len(mhs) {
-		t.Fatalf("expected %d new hashes, got %d", len(mhs), len(added))
-	}
+	require.NoError(t, err)
+	require.Len(t, added, len(mhs))
 
 	added, err = store.Put(context.Background(), mhs...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(added) != 0 {
-		t.Fatalf("expected no new hashes on second put, got %d", len(added))
-	}
+	require.NoError(t, err)
+	require.Empty(t, added)
 
 	for _, h := range mhs {
 		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
@@ -64,19 +69,13 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 				break
 			}
 		}
-		if !found {
-			t.Fatalf("expected to find multihash %v for prefix %s", h, prefix)
-		}
+		require.True(t, found, "expected to find multihash %v for prefix %s", h, prefix)
 	}
 
 	p := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:3])
 	res, err := store.Get(context.Background(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res) == 0 {
-		t.Fatalf("expected results for prefix %s", p)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, res, "expected results for prefix %s", p)
 
 	longPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:15])
 	res, err = store.Get(context.Background(), longPrefix)
@@ -85,9 +84,7 @@ func TestKeyStoreStoreAndGet(t *testing.T) {
 	}
 	for _, h := range res {
 		bs := bitstr.Key(key.BitString(keyspace.MhToBit256(h)))
-		if bs[:15] != longPrefix {
-			t.Fatalf("returned hash does not match long prefix")
-		}
+		require.True(t, keyspace.IsPrefix(longPrefix, bs), "returned hash does not match long prefix")
 	}
 }
 
@@ -104,11 +101,29 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 }
 
 func TestKeyStoreContainsPrefix(t *testing.T) {
+	t.Run("KeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeyStoreContainsPrefixImpl(t, store)
+	})
+
+	t.Run("ResettableKeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewResettableKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeyStoreContainsPrefixImpl(t, store)
+	})
+}
+
+func testKeyStoreContainsPrefixImpl(t *testing.T, store KeyStore) {
 	ctx := context.Background()
-	ds := ds.NewMapDatastore()
-	defer ds.Close()
-	store, err := NewKeyStore(ds)
-	require.NoError(t, err)
 
 	ok, err := store.ContainsPrefix(ctx, bitstr.Key("0000"))
 	require.NoError(t, err)
@@ -147,156 +162,109 @@ func TestKeyStoreContainsPrefix(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestKeyStoreReset(t *testing.T) {
-	ds := ds.NewMapDatastore()
-	defer ds.Close()
+func TestKeyStoreDelete(t *testing.T) {
+	t.Run("KeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
 
-	store, err := NewResettableKeyStore(ds)
-	if err != nil {
-		t.Fatal(err)
-	}
+		testKeyStoreDeleteImpl(t, store)
+	})
 
-	first := make([]mh.Multihash, 2)
-	for i := range first {
-		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		first[i] = h
-	}
-	if _, err := store.Put(context.Background(), first...); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("ResettableKeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewResettableKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
 
-	secondChan := make(chan cid.Cid, 2)
-	second := make([]mh.Multihash, 2)
-	for i := range 2 {
-		h, err := mh.Sum([]byte{byte(i + 10)}, mh.SHA2_256, -1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		second[i] = h
-		secondChan <- cid.NewCidV1(cid.Raw, h)
-	}
-	close(secondChan)
-
-	err = store.ResetCids(context.Background(), secondChan)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// old hashes should not be present
-	for _, h := range first {
-		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
-		got, err := store.Get(context.Background(), prefix)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, m := range got {
-			if string(m) == string(h) {
-				t.Fatalf("expected old hash %v to be removed", h)
-			}
-		}
-	}
-
-	// new hashes should be retrievable
-	for _, h := range second {
-		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
-		got, err := store.Get(context.Background(), prefix)
-		if err != nil {
-			t.Fatal(err)
-		}
-		found := false
-		for _, m := range got {
-			if string(m) == string(h) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("expected hash %v after reset", h)
-		}
-	}
+		testKeyStoreDeleteImpl(t, store)
+	})
 }
 
-func TestKeyStoreDelete(t *testing.T) {
-	ds := ds.NewMapDatastore()
-	defer ds.Close()
-
-	store, err := NewKeyStore(ds)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+func testKeyStoreDeleteImpl(t *testing.T, store KeyStore) {
 	mhs := random.Multihashes(3)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		mhs[i] = h
 	}
-	if _, err := store.Put(context.Background(), mhs...); err != nil {
-		t.Fatal(err)
-	}
+	_, err := store.Put(context.Background(), mhs...)
+	require.NoError(t, err)
 
 	delPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:6])
-	if err := store.Delete(context.Background(), mhs[0]); err != nil {
-		t.Fatal(err)
-	}
+	err = store.Delete(context.Background(), mhs[0])
+	require.NoError(t, err)
 
 	res, err := store.Get(context.Background(), delPrefix)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for _, h := range res {
-		if string(h) == string(mhs[0]) {
-			t.Fatalf("expected no hashes for prefix after delete")
-		}
+		require.NotEqual(t, string(h), string(mhs[0]), "expected deleted hash to be gone")
 	}
 
 	// other hashes should still be retrievable
 	otherPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[1]))[:6])
 	res, err = store.Get(context.Background(), otherPrefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res) == 0 {
-		t.Fatalf("expected remaining hashes for other prefix")
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, res, "expected remaining hashes for other prefix")
 }
 
 func TestKeyStoreSize(t *testing.T) {
+	t.Run("KeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeyStoreSizeImpl(t, store)
+	})
+
+	t.Run("ResettableKeyStore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewResettableKeyStore(ds)
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeyStoreSizeImpl(t, store)
+	})
+}
+
+func testKeyStoreSizeImpl(t *testing.T, store KeyStore) {
 	ctx := context.Background()
-	ds := ds.NewMapDatastore()
-	defer ds.Close()
-	store, err := NewKeyStore(ds)
-	require.NoError(t, err)
 
 	mhs0 := random.Multihashes(128)
-	store.Put(ctx, mhs0...)
+	_, err := store.Put(ctx, mhs0...)
+	require.NoError(t, err)
 
 	size, err := store.Size(ctx)
 	require.NoError(t, err)
 	require.Equal(t, len(mhs0), size)
 
-	mhs1 := random.Multihashes(102400)
-	store.Put(ctx, mhs1...)
+	nKeys := 1 << 12
+	batches := 1 << 6
+	for range batches {
+		mhs1 := random.Multihashes(nKeys / batches)
+		_, err = store.Put(ctx, mhs1...)
+		require.NoError(t, err)
+	}
 
 	size, err = store.Size(ctx)
 	require.NoError(t, err)
-	require.Equal(t, len(mhs0)+len(mhs1), size)
+	require.Equal(t, len(mhs0)+nKeys, size)
 }
 
 func TestDsKey(t *testing.T) {
 	s := keyStore{
-		base:       ds.NewKey("/base/prefix"),
 		prefixBits: 8,
 	}
 
 	k := bit256.ZeroKey()
-	dsk := dsKey(k, s.prefixBits, s.base)
-	expectedPrefix := "/base/prefix/0/0/0/0/0/0/0/0/"
+	dsk := dsKey(k, s.prefixBits)
+	expectedPrefix := "/0/0/0/0/0/0/0/0/"
 	require.Equal(t, expectedPrefix, dsk.String()[:len(expectedPrefix)])
 
 	s.prefixBits = 16
@@ -307,8 +275,8 @@ func TestDsKey(t *testing.T) {
 		require.NoError(t, err)
 		k := bit256.NewKey(b[:])
 
-		sdk := dsKey(k, s.prefixBits, s.base)
-		require.Equal(t, strings.Count(s.base.String(), "/")+s.prefixBits+1, strings.Count(sdk.String(), "/"))
+		sdk := dsKey(k, s.prefixBits)
+		require.Equal(t, s.prefixBits+1, strings.Count(sdk.String(), "/"))
 		decoded, err := s.decodeKey(sdk.String())
 		require.NoError(t, err)
 		require.Equal(t, k, decoded)

@@ -1,9 +1,9 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
-go 1.24
+go 1.24.0
 
 require (
-	github.com/gammazero/deque v1.0.0
+	github.com/gammazero/deque v1.1.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/guillaumemichel/reservedpool v0.2.0
@@ -12,7 +12,8 @@ require (
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-datastore v0.8.4
 	github.com/ipfs/go-detect-race v0.0.1
-	github.com/ipfs/go-log/v2 v2.8.0
+	github.com/ipfs/go-dsqueue v0.0.4
+	github.com/ipfs/go-log/v2 v2.8.1
 	github.com/ipfs/go-test v0.2.3
 	github.com/libp2p/go-libp2p v0.43.0
 	github.com/libp2p/go-libp2p-kbucket v0.8.0
@@ -53,6 +54,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/ipfs/go-block-format v0.2.2 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect

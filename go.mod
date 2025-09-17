@@ -12,7 +12,7 @@ require (
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-datastore v0.8.4
 	github.com/ipfs/go-detect-race v0.0.1
-	github.com/ipfs/go-dsqueue v0.0.4
+	github.com/ipfs/go-dsqueue v0.0.5
 	github.com/ipfs/go-log/v2 v2.8.1
 	github.com/ipfs/go-test v0.2.3
 	github.com/libp2p/go-libp2p v0.43.0

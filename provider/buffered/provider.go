@@ -97,8 +97,8 @@ func fromBytes(data []byte) (byte, mh.Multihash, error) {
 // It discards multihashes from the `StopProviding` operation if
 // `StartProviding` was called after `StopProviding` for the same multihash.
 func getOperations(dequeued [][]byte) ([][]mh.Multihash, error) {
-	ops := [lastOp][]mh.Multihash{}
 	stopProv := make(map[string]struct{})
+	ops := [lastOp - 1][]mh.Multihash{} // don't store stop ops
 
 	for _, bs := range dequeued {
 		op, h, err := fromBytes(bs)
@@ -115,10 +115,11 @@ func getOperations(dequeued [][]byte) ([][]mh.Multihash, error) {
 			stopProv[string(h)] = struct{}{}
 		}
 	}
+	stopOps := make([]mh.Multihash, 0, len(stopProv))
 	for hstr := range stopProv {
-		ops[stopProvidingOp] = append(ops[stopProvidingOp], mh.Multihash(hstr))
+		stopOps = append(stopOps, mh.Multihash(hstr))
 	}
-	return ops[:], nil
+	return append(ops[:], stopOps), nil
 }
 
 // executeOperation executes a provider operation on the underlying provider

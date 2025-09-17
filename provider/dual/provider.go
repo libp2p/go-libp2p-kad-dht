@@ -28,7 +28,7 @@ type SweepingProvider struct {
 // New creates a new SweepingProvider that manages provides and reprovides for
 // both DHT swarms (LAN and WAN) in a dual DHT setup.
 func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
-	if d == nil || (d.LAN == nil || d.WAN == nil) {
+	if d == nil || d.LAN == nil || d.WAN == nil {
 		return nil, errors.New("cannot create sweeping provider for nil dual DHT")
 	}
 
@@ -84,21 +84,20 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 // runOnBoth runs the provided function on both the LAN and WAN providers in
 // parallel and waits for both to complete.
 func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider) error) error {
-	var errs [2]error
-	done := make(chan struct{})
+	errCh := make(chan error, 1)
 	go func() {
-		defer close(done)
 		err := f(s.LAN)
 		if err != nil {
-			errs[0] = fmt.Errorf("LAN provider: %w", err)
+			err = fmt.Errorf("LAN provider: %w", err)
 		}
+		errCh <- err
 	}()
 	err := f(s.WAN)
 	if err != nil {
-		errs[1] = fmt.Errorf("WAN provider: %w", err)
+		err = fmt.Errorf("WAN provider: %w", err)
 	}
-	<-done
-	return errors.Join(errs[:]...)
+	lanErr := <-errCh
+	return errors.Join(lanErr, err)
 }
 
 // Close stops both DHT providers and releases associated resources.

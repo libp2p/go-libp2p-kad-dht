@@ -805,3 +805,108 @@ func TestAssignKeysToRegions(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyspaceCovered(t *testing.T) {
+	t.Run("empty trie", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		require.False(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("single key covers entire keyspace", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key(""), struct{}{})
+		require.True(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("two complementary keys cover keyspace", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("0"), struct{}{})
+		tr.Add(bitstr.Key("1"), struct{}{})
+		require.True(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("missing one key from full coverage", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("0"), struct{}{})
+		// Missing "1" prefix
+		require.False(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("four keys at depth 2 covering keyspace", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("00"), struct{}{})
+		tr.Add(bitstr.Key("01"), struct{}{})
+		tr.Add(bitstr.Key("10"), struct{}{})
+		tr.Add(bitstr.Key("11"), struct{}{})
+		require.True(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("mixed depth coverage", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("0"), struct{}{})  // covers all of 0xxx
+		tr.Add(bitstr.Key("10"), struct{}{}) // covers 10xx
+		tr.Add(bitstr.Key("11"), struct{}{}) // covers 11xx
+		require.True(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("gaps in coverage", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("00"), struct{}{})
+		tr.Add(bitstr.Key("01"), struct{}{})
+		tr.Add(bitstr.Key("10"), struct{}{})
+		// Missing "11" prefix
+		require.False(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("complex coverage pattern", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("000"), struct{}{})
+		tr.Add(bitstr.Key("001"), struct{}{})
+		tr.Add(bitstr.Key("01"), struct{}{})
+		tr.Add(bitstr.Key("1"), struct{}{})
+		require.True(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("deep unbalanced tree coverage", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("0000"), struct{}{})
+		tr.Add(bitstr.Key("0001"), struct{}{})
+		tr.Add(bitstr.Key("001"), struct{}{})
+		tr.Add(bitstr.Key("01"), struct{}{})
+		tr.Add(bitstr.Key("1"), struct{}{})
+		require.True(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("shallow gap in deep tree", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("0000"), struct{}{})
+		tr.Add(bitstr.Key("0001"), struct{}{})
+		tr.Add(bitstr.Key("001"), struct{}{})
+		tr.Add(bitstr.Key("01"), struct{}{})
+		// Missing "1" prefix
+		require.False(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("deep gap in deep tree", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("0001"), struct{}{})
+		tr.Add(bitstr.Key("001"), struct{}{})
+		tr.Add(bitstr.Key("01"), struct{}{})
+		tr.Add(bitstr.Key("1"), struct{}{})
+		// Missing "0000" prefix
+		require.False(t, KeyspaceCovered(tr))
+	})
+
+	t.Run("edge case: single bit differences", func(t *testing.T) {
+		tr := trie.New[bitstr.Key, struct{}]()
+		tr.Add(bitstr.Key("000"), struct{}{})
+		tr.Add(bitstr.Key("001"), struct{}{})
+		tr.Add(bitstr.Key("010"), struct{}{})
+		tr.Add(bitstr.Key("011"), struct{}{})
+		tr.Add(bitstr.Key("100"), struct{}{})
+		tr.Add(bitstr.Key("101"), struct{}{})
+		tr.Add(bitstr.Key("110"), struct{}{})
+		tr.Add(bitstr.Key("111"), struct{}{})
+		require.True(t, KeyspaceCovered(tr))
+	})
+}

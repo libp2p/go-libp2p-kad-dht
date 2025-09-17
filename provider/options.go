@@ -62,20 +62,20 @@ func (cfg *config) apply(opts ...Option) error {
 	return nil
 }
 
-func (c *config) validate() error {
-	if len(c.peerid) == 0 {
+func (cfg *config) validate() error {
+	if len(cfg.peerid) == 0 {
 		return errors.New("reprovider config: peer id is required")
 	}
-	if c.router == nil {
+	if cfg.router == nil {
 		return errors.New("reprovider config: router is required")
 	}
-	if c.msgSender == nil {
+	if cfg.msgSender == nil {
 		return errors.New("reprovider config: message sender is required")
 	}
-	if c.selfAddrs == nil {
+	if cfg.selfAddrs == nil {
 		return errors.New("reprovider config: self addrs func is required")
 	}
-	if c.dedicatedPeriodicWorkers+c.dedicatedBurstWorkers > c.maxWorkers {
+	if cfg.dedicatedPeriodicWorkers+cfg.dedicatedBurstWorkers > cfg.maxWorkers {
 		return errors.New("reprovider config: total dedicated workers exceed max workers")
 	}
 	return nil

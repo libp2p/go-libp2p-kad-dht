@@ -250,6 +250,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
 
 		provideCounter: providerCounter,
+		opStats:        newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
 	}
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
@@ -556,7 +557,7 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
 // optimization. It should be used for providing a small number of keys
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of keys.
-func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
+func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitstr.Key, error) {
 	// Add provider record to local provider store.
 	s.addLocalRecord(k)
 	// Get peers to which the record will be allocated.
@@ -570,7 +571,19 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 	for _, p := range peers {
 		keysAllocations[p] = []mh.Multihash{k}
 	}
-	return coveredPrefix, s.sendProviderRecords(keysAllocations, addrInfo, 1)
+	reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, 1)
+
+	s.opStats.cycleStatsLk.Lock()
+	if reprovide {
+		s.opStats.peers.add(coveredPrefix, int64(len(keysAllocations)))
+		s.opStats.reachable.add(coveredPrefix, int64(reachablePeers))
+		s.opStats.keysPerReprovide.add(coveredPrefix, 1)
+	} else {
+		s.opStats.keysPerProvide.add(1)
+	}
+	s.opStats.cycleStatsLk.Unlock()
+
+	return coveredPrefix, err
 }
 
 // exploreSwarm finds all peers whose kademlia identifier matches `prefix` in
@@ -700,14 +713,14 @@ type provideJob struct {
 // keys. Upon failure to reprovide a key, or to connect to a peer, it will NOT
 // retry.
 //
-// Returns an error if we were unable to reprovide keys to a given threshold of
-// peers. In this case, the region reprovide is considered failed and the
-// caller is responsible for trying again. This allows detecting if we are
-// offline.
-func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) error {
+// Returns the number of reachable peers and an error if we were unable to
+// reprovide keys to a given threshold of peers. In this case, the region
+// reprovide is considered failed and the caller is responsible for trying
+// again. This allows detecting if we are offline.
+func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) (reachablePeers int, err error) {
 	nPeers := len(keysAllocations)
 	if nPeers == 0 {
-		return nil
+		return reachablePeers, err
 	}
 	startTime := time.Now()
 	errCount := atomic.Uint32{}
@@ -757,11 +770,12 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 
 	errCountLoaded := int(errCount.Load())
 	logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
+	reachablePeers = nPeers - errCountLoaded
 
 	if errCountLoaded == nPeers || errCountLoaded > int(float32(nPeers)*(1-minimalRegionReachablePeersRatio)) {
-		return fmt.Errorf("unable to provide to enough peers (%d/%d)", nPeers-errCountLoaded, nPeers)
+		err = fmt.Errorf("unable to provide to enough peers (%d/%d)", reachablePeers, nPeers)
 	}
-	return nil
+	return reachablePeers, err
 }
 
 // genProvideMessage generates a new provide message with the supplied
@@ -1150,9 +1164,11 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 		return
 	}
 
+	startTime := time.Now()
 	s.opStats.ongoingProvides.start(keyCount)
 	defer func() {
 		s.opStats.ongoingProvides.finish(keyCount)
+		s.opStats.provideDuration.add(int64(time.Since(startTime)))
 	}()
 
 	if len(keys) <= individualProvideThreshold {
@@ -1205,9 +1221,11 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 		return
 	}
 
+	startTime := time.Now()
 	s.opStats.ongoingProvides.start(keyCount)
 	defer func() {
 		s.opStats.ongoingProvides.finish(keyCount)
+		s.opStats.reprovideDuration.add(prefix, int64(time.Since(startTime)))
 	}()
 
 	if len(keys) <= individualProvideThreshold {
@@ -1304,7 +1322,7 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 
 	var provideErr error
 	if len(keys) == 1 {
-		coveredPrefix, err := s.vanillaProvide(keys[0])
+		coveredPrefix, err := s.vanillaProvide(keys[0], reprovide)
 		if err != nil && !reprovide {
 			// Put the key back in the provide queue.
 			s.failedProvide(prefix, keys, fmt.Errorf("individual provide failed for prefix '%s', %w", prefix, err))
@@ -1323,7 +1341,7 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, err := s.vanillaProvide(key)
+				_, err := s.vanillaProvide(key, reprovide)
 				if err == nil {
 					success.Store(true)
 				} else if !reprovide {
@@ -1366,12 +1384,23 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			s.addLocalRecord(h)
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
-		err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
+		reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
+
+		s.opStats.cycleStatsLk.Lock()
 		if reprovide {
+			// reprovide stats
+			s.opStats.peers.add(r.Prefix, int64(len(keysAllocations)))
+			s.opStats.reachable.add(r.Prefix, int64(reachablePeers))
+			s.opStats.keysPerReprovide.add(r.Prefix, int64(nKeys))
+			s.opStats.cycleStatsLk.Unlock()
+
 			s.releaseRegionReprovide(r.Prefix)
 			if periodicReprovide {
 				s.reschedulePrefix(r.Prefix)
 			}
+		} else {
+			s.opStats.keysPerProvide.add(int64(nKeys))
+			s.opStats.cycleStatsLk.Unlock()
 		}
 		if err != nil {
 			errCount++

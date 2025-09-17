@@ -6,15 +6,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gammazero/deque"
-	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/timeseries"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/stats"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
 func (s *SweepingProvider) Stats() stats.Stats {
+	now := time.Now()
 	snapshot := stats.Stats{
 		Closed: s.closed(),
 	}
@@ -57,13 +55,16 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	_, nextReprovideAt := trie.Find(s.schedule, nextPrefix)
 	s.scheduleLk.Unlock()
 
-	keys, _ := s.keyStore.Size(context.Background())
+	keys := -1 // Default value if keyStore.Size() fails
+	if keyCount, err := s.keystore.Size(context.Background()); err == nil {
+		keys = keyCount
+	}
 	currentOffset := s.currentTimeOffset()
 	snapshot.Schedule = stats.Schedule{
 		Keys:                keys,
 		Regions:             scheduleSize,
 		AvgPrefixLength:     avgPrefixLen,
-		NextReprovideAt:     time.Now().Add(nextReprovideAt - currentOffset),
+		NextReprovideAt:     now.Add(nextReprovideAt - currentOffset),
 		NextReprovidePrefix: nextPrefix,
 	}
 
@@ -89,34 +90,49 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	snapshot.Timing = stats.Timing{
 		Uptime:             time.Since(s.cycleStart),
 		ReprovidesInterval: s.reprovideInterval,
-		CycleStart:         time.Now().Add(-currentOffset),
+		CycleStart:         now.Add(-currentOffset),
 		CurrentTimeOffset:  currentOffset,
 		MaxReprovideDelay:  s.maxReprovideDelay,
 	}
 
 	ongoingOps := stats.OngoingOperations{
-		RegionProvides:   int(s.opStats.ongoingProvides.opCount.Load()),
-		KeyProvides:      int(s.opStats.ongoingProvides.keyCount.Load()),
-		RegionReprovides: int(s.opStats.ongoingReprovides.opCount.Load()),
-		KeyReprovides:    int(s.opStats.ongoingReprovides.keyCount.Load()),
+		RegionProvides:   int(s.stats.ongoingProvides.opCount.Load()),
+		KeyProvides:      int(s.stats.ongoingProvides.keyCount.Load()),
+		RegionReprovides: int(s.stats.ongoingReprovides.opCount.Load()),
+		KeyReprovides:    int(s.stats.ongoingReprovides.keyCount.Load()),
 	}
 
-	s.opStats.cycleStatsLk.Lock()
-	s.opStats.keysPerReprovide.cleanup()
-	s.opStats.reprovideDuration.cleanup()
-	s.opStats.peers.cleanup()
-	s.opStats.reachable.cleanup()
+	// Take snapshots of cycle stats data while holding the lock
+	s.stats.cycleStatsLk.Lock()
+	s.stats.keysPerReprovide.Cleanup()
+	s.stats.reprovideDuration.Cleanup()
+	s.stats.peers.Cleanup()
+	s.stats.reachable.Cleanup()
+
+	// Capture data for calculations outside the lock
+	keysPerProvideSum := s.stats.keysPerProvide.Sum()
+	provideDurationSum := s.stats.provideDuration.Sum()
+	keysPerReprovideSum := s.stats.keysPerReprovide.Sum()
+	reprovideDurationSum := s.stats.reprovideDuration.Sum()
+	reprovideDurationAvg := s.stats.reprovideDuration.Avg()
+	keysPerReprovideAvg := s.stats.keysPerReprovide.Avg()
+	reprovideDurationCount := s.stats.reprovideDuration.Count()
+	peersSum := s.stats.peers.Sum()
+	peersFullyCovered := s.stats.peers.FullyCovered()
+	reachableSum := s.stats.reachable.Sum()
+	avgHoldersAvg := s.stats.avgHolders.Avg()
+	s.stats.cycleStatsLk.Unlock()
 
 	pastOps := stats.PastOperations{
-		RecordsProvided: int(s.opStats.recordsProvided.Load()),
-		KeysProvided:    int(s.opStats.keysProvided.Load()),
-		KeysFailed:      int(s.opStats.keysFailed.Load()),
+		RecordsProvided: int(s.stats.recordsProvided.Load()),
+		KeysProvided:    int(s.stats.keysProvided.Load()),
+		KeysFailed:      int(s.stats.keysFailed.Load()),
 
-		KeysProvidedPerMinute:     float64(s.opStats.keysPerProvide.sum()) / time.Duration(s.opStats.provideDuration.sum()).Minutes(),
-		KeysReprovidedPerMinute:   float64(s.opStats.keysPerReprovide.sum()) / time.Duration(s.opStats.reprovideDuration.sum()).Minutes(),
-		RegionReprovideDuration:   time.Duration(s.opStats.reprovideDuration.avg()),
-		AvgKeysPerReprovide:       s.opStats.keysPerReprovide.avg(),
-		RegionReprovidedLastCycle: int(s.opStats.reprovideDuration.len()),
+		KeysProvidedPerMinute:     float64(keysPerProvideSum) / time.Duration(provideDurationSum).Minutes(),
+		KeysReprovidedPerMinute:   float64(keysPerReprovideSum) / time.Duration(reprovideDurationSum).Minutes(),
+		RegionReprovideDuration:   time.Duration(reprovideDurationAvg),
+		AvgKeysPerReprovide:       keysPerReprovideAvg,
+		RegionReprovidedLastCycle: reprovideDurationCount,
 	}
 
 	snapshot.Operations = stats.Operations{
@@ -125,307 +141,86 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	}
 
 	snapshot.Network = stats.Network{ // in the last reprovide cycle
-		Peers:                    int(s.opStats.peers.sum()),
-		CompleteKeyspaceCoverage: s.opStats.peers.fullyCovered(),
-		Reachable:                int(s.opStats.reachable.sum()),
-		AvgHolders:               s.opStats.avgHolders.avg(),
+		Peers:                    int(peersSum),
+		CompleteKeyspaceCoverage: peersFullyCovered,
+		Reachable:                int(reachableSum),
+		AvgHolders:               avgHoldersAvg,
 		ReplicationFactor:        s.replicationFactor,
 	}
-	s.opStats.cycleStatsLk.Unlock()
 
 	return snapshot
 }
 
+// operationStats tracks provider operation metrics over time windows.
 type operationStats struct {
-	recordsProvided atomic.Int32
-	keysProvided    atomic.Int32
-	keysFailed      atomic.Int32
+	// Cumulative counters since provider started
+	recordsProvided atomic.Int32 // total provider records sent
+	keysProvided    atomic.Int32 // total keys successfully provided
+	keysFailed      atomic.Int32 // total keys that failed to provide
 
-	ongoingProvides   ongoingOpStats
-	ongoingReprovides ongoingOpStats
+	// Current ongoing operations
+	ongoingProvides   ongoingOpStats // active provide operations
+	ongoingReprovides ongoingOpStats // active reprovide operations
 
-	keysPerProvide    intTimeSeries
-	provideDuration   intTimeSeries
-	keysPerReprovide  cycleStats
-	reprovideDuration cycleStats
+	// Time-windowed metrics for provide operations
+	keysPerProvide  timeseries.IntTimeSeries // keys provided per operation
+	provideDuration timeseries.IntTimeSeries // duration of provide operations
 
-	peers      cycleStats
-	reachable  cycleStats
-	avgHolders floatTimeSeries
+	// Time-windowed metrics for reprovide operations (by keyspace region)
+	keysPerReprovide  timeseries.CycleStats // keys reprovided per region
+	reprovideDuration timeseries.CycleStats // duration of reprovide operations per region
 
-	cycleStatsLk sync.Mutex
+	// Network topology metrics (by keyspace region)
+	peers      timeseries.CycleStats      // number of peers per region
+	reachable  timeseries.CycleStats      // number of reachable peers per region
+	avgHolders timeseries.FloatTimeSeries // average holders per key (weighted)
+
+	cycleStatsLk sync.Mutex // protects cycle-based statistics
 }
 
 func newOperationStats(reprovideInterval, maxDelay time.Duration) operationStats {
 	return operationStats{
-		keysPerProvide:  newIntTimeSeries(reprovideInterval),
-		provideDuration: newIntTimeSeries(reprovideInterval),
-		avgHolders:      newFloatTimeSeries(reprovideInterval),
+		keysPerProvide:  timeseries.NewIntTimeSeries(reprovideInterval),
+		provideDuration: timeseries.NewIntTimeSeries(reprovideInterval),
+		avgHolders:      timeseries.NewFloatTimeSeries(reprovideInterval),
 
-		keysPerReprovide:  newCycleStats(reprovideInterval, maxDelay),
-		reprovideDuration: newCycleStats(reprovideInterval, maxDelay),
-		peers:             newCycleStats(reprovideInterval, maxDelay),
-		reachable:         newCycleStats(reprovideInterval, maxDelay),
+		keysPerReprovide:  timeseries.NewCycleStats(reprovideInterval, maxDelay),
+		reprovideDuration: timeseries.NewCycleStats(reprovideInterval, maxDelay),
+		peers:             timeseries.NewCycleStats(reprovideInterval, maxDelay),
+		reachable:         timeseries.NewCycleStats(reprovideInterval, maxDelay),
 	}
 }
 
-func (s *operationStats) providedRecords(count int) {
+// addProvidedRecords increments the total count of provider records sent.
+func (s *operationStats) addProvidedRecords(count int) {
 	s.recordsProvided.Add(int32(count))
 }
 
-func (s *operationStats) providedKeys(successes, failures int) {
+// addCompletedKeys updates the counts of successfully provided and failed keys.
+func (s *operationStats) addCompletedKeys(successes, failures int) {
 	s.keysProvided.Add(int32(successes))
 	s.keysFailed.Add(int32(failures))
 }
 
+// ongoingOpStats tracks currently active operations.
 type ongoingOpStats struct {
-	opCount  atomic.Int32
-	keyCount atomic.Int32
+	opCount  atomic.Int32 // number of active operations
+	keyCount atomic.Int32 // total keys being processed in active operations
 }
 
+// start records the beginning of a new operation with the given number of keys.
 func (s *ongoingOpStats) start(keyCount int) {
 	s.opCount.Add(1)
 	s.keyCount.Add(int32(keyCount))
 }
 
+// addKeys adds more keys to the current active operations.
 func (s *ongoingOpStats) addKeys(keyCount int) {
 	s.keyCount.Add(int32(keyCount))
 }
 
+// finish records the completion of an operation and removes its keys from the active count.
 func (s *ongoingOpStats) finish(keyCount int) {
 	s.opCount.Add(-1)
 	s.keyCount.Add(-int32(keyCount))
-}
-
-type intTimeEntry struct {
-	timestamp time.Time
-	value     int64
-}
-
-type intTimeSeries struct {
-	mutex     sync.Mutex
-	data      deque.Deque[intTimeEntry]
-	retention time.Duration
-}
-
-func newIntTimeSeries(retention time.Duration) intTimeSeries {
-	return intTimeSeries{
-		data:      deque.Deque[intTimeEntry]{},
-		retention: retention,
-	}
-}
-
-func (t *intTimeSeries) add(value int64) {
-	now := time.Now()
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	t.data.PushBack(intTimeEntry{timestamp: now, value: value})
-	t.gc(now)
-}
-
-func (t *intTimeSeries) sum() (sum int64) {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
-	t.gc(time.Now())
-
-	for i := 0; i < t.data.Len(); i++ {
-		sum += t.data.At(i).value
-	}
-	return sum
-}
-
-func (t *intTimeSeries) avg() float64 {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
-	t.gc(time.Now())
-
-	l := t.data.Len()
-	if l == 0 {
-		return 0
-	}
-	return float64(t.sum()) / float64(l)
-}
-
-// mutex should be held
-func (t *intTimeSeries) gc(now time.Time) {
-	cutoff := now.Add(-t.retention)
-	for t.data.Len() > 0 {
-		if t.data.Front().timestamp.Before(cutoff) {
-			t.data.PopFront()
-		} else {
-			break
-		}
-	}
-}
-
-type floatTimeEntry struct {
-	timestamp time.Time
-	value     float64
-	weight    int
-}
-
-type floatTimeSeries struct {
-	mutex     sync.Mutex
-	data      deque.Deque[floatTimeEntry]
-	retention time.Duration
-}
-
-func newFloatTimeSeries(retention time.Duration) floatTimeSeries {
-	return floatTimeSeries{
-		data:      deque.Deque[floatTimeEntry]{},
-		retention: retention,
-	}
-}
-
-func (t *floatTimeSeries) add(value float64, weight int) {
-	now := time.Now()
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	t.data.PushBack(floatTimeEntry{timestamp: now, value: value, weight: weight})
-	t.gc(now)
-}
-
-func (t *floatTimeSeries) sum() float64 {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
-	t.gc(time.Now())
-
-	var sum float64
-	for i := 0; i < t.data.Len(); i++ {
-		e := t.data.At(i)
-		sum += e.value * float64(e.weight)
-	}
-	return sum
-}
-
-func (t *floatTimeSeries) avg() float64 {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-
-	t.gc(time.Now())
-
-	l := t.data.Len()
-	if l == 0 {
-		return 0
-	}
-	return t.sum() / float64(l)
-}
-
-// mutex should be held
-func (t *floatTimeSeries) gc(now time.Time) {
-	cutoff := now.Add(-t.retention)
-	for t.data.Len() > 0 {
-		if t.data.Front().timestamp.Before(cutoff) {
-			t.data.PopFront()
-		} else {
-			break
-		}
-	}
-}
-
-type entry struct {
-	time time.Time
-	val  int64
-}
-
-type cycleStats struct {
-	tr *trie.Trie[bitstr.Key, entry]
-
-	queue *trie.Trie[bitstr.Key, entry]
-
-	ttl, maxDelay time.Duration
-}
-
-func newCycleStats(ttl, maxDelay time.Duration) cycleStats {
-	return cycleStats{
-		tr:       trie.New[bitstr.Key, entry](),
-		queue:    trie.New[bitstr.Key, entry](),
-		ttl:      ttl,
-		maxDelay: maxDelay,
-	}
-}
-
-func (s *cycleStats) cleanup() {
-	allEntries := keyspace.AllEntries(s.tr, bit256.ZeroKey())
-	for _, e := range allEntries {
-		if e.Data.time.Add(s.ttl + s.maxDelay).Before(time.Now()) {
-			s.tr.Remove(e.Key)
-			if subtrie, ok := keyspace.FindSubtrie(s.queue, e.Key); ok {
-				for _, qe := range keyspace.AllEntries(subtrie, bit256.ZeroKey()) {
-					s.tr.Add(qe.Key, qe.Data)
-				}
-			}
-		}
-	}
-}
-
-func (s *cycleStats) add(prefix bitstr.Key, val int64) {
-	e := entry{time: time.Now(), val: val}
-	if _, ok := keyspace.FindSubtrie(s.tr, prefix); ok {
-		// shorter prefix
-		keyspace.PruneSubtrie(s.tr, prefix)
-		s.tr.Add(prefix, e)
-		return
-	}
-	// longer prefix, group with complements before replacing
-	target, ok := keyspace.FindPrefixOfKey(s.tr, prefix)
-	if !ok {
-		// No keys in s.tr is a prefix of `prefix`
-		s.tr.Add(prefix, e)
-		return
-	}
-
-	if queuePrefix, ok := keyspace.FindPrefixOfKey(s.queue, prefix); ok {
-		_, entry := trie.Find(s.queue, queuePrefix)
-		if time.Since(entry.time) < s.maxDelay {
-			// A recent entry is a superset of the current one, skip.
-			return
-		}
-		// Remove old entry
-		keyspace.PruneSubtrie(s.queue, queuePrefix)
-	} else {
-		// Remove (older) superstrings from queue
-		keyspace.PruneSubtrie(s.queue, prefix)
-	}
-	// Add prefix to queue
-	s.queue.Add(prefix, e)
-
-	subtrie, ok := keyspace.FindSubtrie(s.queue, target)
-	if !ok || !keyspace.KeyspaceCovered(subtrie) {
-		// Subtrie not complete
-		return
-	}
-	// Target keyspace is fully covered by queue entries. Replace target with
-	// queue entries.
-	keyspace.PruneSubtrie(s.tr, target)
-	for _, e := range keyspace.AllEntries(subtrie, bit256.ZeroKey()) {
-		s.tr.Add(e.Key, e.Data)
-	}
-}
-
-func (s *cycleStats) sum() (sum int64) {
-	for _, v := range keyspace.AllValues(s.tr, bit256.ZeroKey()) {
-		sum += v.val
-	}
-	return sum
-}
-
-func (s *cycleStats) avg() float64 {
-	allValues := keyspace.AllValues(s.tr, bit256.ZeroKey())
-	var sum int64
-	for _, v := range allValues {
-		sum += v.val
-	}
-	return float64(sum) / float64(len(allValues))
-}
-
-func (s *cycleStats) len() int {
-	return s.tr.Size()
-}
-
-func (s *cycleStats) fullyCovered() bool {
-	return keyspace.KeyspaceCovered(s.tr)
 }

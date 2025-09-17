@@ -497,7 +497,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		getSelfAddrs:             func() []ma.Multiaddr { return nil },
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
 		provideCounter:           provideCounter(),
-		opStats:                  newOperationStats(reprovideInterval, maxDelay),
+		stats:                    newOperationStats(reprovideInterval, maxDelay),
 	}
 
 	assertAdvertisementCount := func(n int) {

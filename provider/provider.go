@@ -1,3 +1,20 @@
+// Package provider implements a content provider for the libp2p Kademlia DHT.
+//
+// The core component is SweepingProvider, which efficiently announces content
+// availability to the DHT network through a region-based approach. Instead of
+// providing each key individually, it divides the keyspace into regions and
+// provides all keys within a region together, reducing network overhead.
+//
+// Key features:
+//   - Batched providing: Groups keys by keyspace regions for efficient batch operations
+//   - Automatic reproviding: Continuously reprovides content at configurable intervals
+//   - Adaptive scheduling: Balances load across time using keyspace-aware scheduling
+//   - Network resilience: Handles connectivity issues and peer churn gracefully
+//   - Performance monitoring: Comprehensive statistics collection and reporting
+//   - Worker pool management: Configurable parallelism for provide operations
+//
+// The provider tracks performance metrics including operation counts, timing
+// information, and network statistics over configurable time windows.
 package provider
 
 import (
@@ -136,18 +153,21 @@ type SweepingProvider struct {
 	reprovideInterval time.Duration
 	maxReprovideDelay time.Duration
 
-	schedule               *trie.Trie[bitstr.Key, time.Duration]
+	// Schedule state - grouped for better organization
 	scheduleLk             sync.Mutex
+	schedule               *trie.Trie[bitstr.Key, time.Duration]
 	scheduleCursor         bitstr.Key
 	scheduleTimer          *time.Timer
 	scheduleTimerStartedAt time.Time
 
-	ongoingReprovides   *trie.Trie[bitstr.Key, struct{}]
-	ongoingReprovidesLk sync.Mutex
+	// Active reprovides tracking
+	activeReprovidesLk sync.Mutex
+	activeReprovides   *trie.Trie[bitstr.Key, struct{}]
 
-	cachedAvgPrefixLen     int
+	// Prefix length estimation state
 	avgPrefixLenLk         sync.Mutex
 	approxPrefixLenRunning sync.Mutex
+	cachedAvgPrefixLen     int
 	lastAvgPrefixLen       time.Time
 	avgPrefixLenValidity   time.Duration
 
@@ -156,7 +176,7 @@ type SweepingProvider struct {
 	addLocalRecord func(mh.Multihash) error
 
 	provideCounter metric.Int64Counter
-	opStats        operationStats
+	stats          operationStats
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
@@ -247,10 +267,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		provideQueue:   queue.NewProvideQueue(),
 		reprovideQueue: queue.NewReprovideQueue(),
 
-		ongoingReprovides: trie.New[bitstr.Key, struct{}](),
+		activeReprovides: trie.New[bitstr.Key, struct{}](),
 
 		provideCounter: providerCounter,
-		opStats:        newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
+		stats:          newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
 	}
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
@@ -573,15 +593,15 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitst
 	}
 	reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, 1)
 
-	s.opStats.cycleStatsLk.Lock()
+	s.stats.cycleStatsLk.Lock()
 	if reprovide {
-		s.opStats.peers.add(coveredPrefix, int64(len(keysAllocations)))
-		s.opStats.reachable.add(coveredPrefix, int64(reachablePeers))
-		s.opStats.keysPerReprovide.add(coveredPrefix, 1)
+		s.stats.peers.Add(coveredPrefix, int64(len(keysAllocations)))
+		s.stats.reachable.Add(coveredPrefix, int64(reachablePeers))
+		s.stats.keysPerReprovide.Add(coveredPrefix, 1)
 	} else {
-		s.opStats.keysPerProvide.add(1)
+		s.stats.keysPerProvide.Add(1)
 	}
-	s.opStats.cycleStatsLk.Unlock()
+	s.stats.cycleStatsLk.Unlock()
 
 	return coveredPrefix, err
 }
@@ -765,7 +785,8 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 		}
 	}
 	successfulKeys := nKeys - failedKeys
-	s.opStats.providedKeys(successfulKeys, failedKeys)
+	s.stats.avgHolders.AddWeighted(float64(holdersSum)/float64(nKeys), nKeys)
+	s.stats.addCompletedKeys(successfulKeys, failedKeys)
 	s.provideCounter.Add(s.ctx, int64(successfulKeys))
 
 	errCountLoaded := int(errCount.Load())
@@ -799,7 +820,7 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pme
 			errCount++
 
 			if errStreak == len(keys) || errStreak > maxConsecutiveProvideFailuresAllowed {
-				s.opStats.providedRecords(i + 1 - errCount)
+				s.stats.addProvidedRecords(i + 1 - errCount)
 				return fmt.Errorf("failed to provide to %s: %s", p, err.Error())
 			}
 		} else if errStreak > 0 {
@@ -807,7 +828,7 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pme
 			errStreak = 0
 		}
 	}
-	s.opStats.providedRecords(len(keys) - errCount)
+	s.stats.addProvidedRecords(len(keys) - errCount)
 	return nil
 }
 
@@ -1165,10 +1186,10 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	}
 
 	startTime := time.Now()
-	s.opStats.ongoingProvides.start(keyCount)
+	s.stats.ongoingProvides.start(keyCount)
 	defer func() {
-		s.opStats.ongoingProvides.finish(keyCount)
-		s.opStats.provideDuration.add(int64(time.Since(startTime)))
+		s.stats.ongoingProvides.finish(keyCount)
+		s.stats.provideDuration.Add(int64(time.Since(startTime)))
 	}()
 
 	if len(keys) <= individualProvideThreshold {
@@ -1190,7 +1211,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
 	keys = append(keys, extraKeys...)
 	keyCount += len(extraKeys)
-	s.opStats.ongoingProvides.addKeys(len(extraKeys))
+	s.stats.ongoingProvides.addKeys(len(extraKeys))
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
@@ -1222,10 +1243,10 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	}
 
 	startTime := time.Now()
-	s.opStats.ongoingProvides.start(keyCount)
+	s.stats.ongoingProvides.start(keyCount)
 	defer func() {
-		s.opStats.ongoingProvides.finish(keyCount)
-		s.opStats.reprovideDuration.add(prefix, int64(time.Since(startTime)))
+		s.stats.ongoingProvides.finish(keyCount)
+		s.stats.reprovideDuration.Add(prefix, int64(time.Since(startTime)))
 	}()
 
 	if len(keys) <= individualProvideThreshold {
@@ -1271,7 +1292,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 				s.reschedulePrefix(prefix)
 			}
 		}
-		s.opStats.ongoingProvides.addKeys(len(keys) - keyCount)
+		s.stats.ongoingProvides.addKeys(len(keys) - keyCount)
 		keyCount = len(keys)
 	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
@@ -1386,21 +1407,21 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
 		reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
 
-		s.opStats.cycleStatsLk.Lock()
+		s.stats.cycleStatsLk.Lock()
 		if reprovide {
 			// reprovide stats
-			s.opStats.peers.add(r.Prefix, int64(len(keysAllocations)))
-			s.opStats.reachable.add(r.Prefix, int64(reachablePeers))
-			s.opStats.keysPerReprovide.add(r.Prefix, int64(nKeys))
-			s.opStats.cycleStatsLk.Unlock()
+			s.stats.peers.Add(r.Prefix, int64(len(keysAllocations)))
+			s.stats.reachable.Add(r.Prefix, int64(reachablePeers))
+			s.stats.keysPerReprovide.Add(r.Prefix, int64(nKeys))
+			s.stats.cycleStatsLk.Unlock()
 
 			s.releaseRegionReprovide(r.Prefix)
 			if periodicReprovide {
 				s.reschedulePrefix(r.Prefix)
 			}
 		} else {
-			s.opStats.keysPerProvide.add(int64(nKeys))
-			s.opStats.cycleStatsLk.Unlock()
+			s.stats.keysPerProvide.Add(int64(nKeys))
+			s.stats.cycleStatsLk.Unlock()
 		}
 		if err != nil {
 			errCount++
@@ -1421,17 +1442,17 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 // another thread. If not it marks the region as being currently reprovided.
 func (s *SweepingProvider) claimRegionReprovide(regions []keyspace.Region) []keyspace.Region {
 	out := regions[:0]
-	s.ongoingReprovidesLk.Lock()
-	defer s.ongoingReprovidesLk.Unlock()
+	s.activeReprovidesLk.Lock()
+	defer s.activeReprovidesLk.Unlock()
 	for _, r := range regions {
 		if r.Peers.IsEmptyLeaf() {
 			continue
 		}
-		if _, ok := keyspace.FindPrefixOfKey(s.ongoingReprovides, r.Prefix); !ok {
+		if _, ok := keyspace.FindPrefixOfKey(s.activeReprovides, r.Prefix); !ok {
 			// Prune superstrings of r.Prefix if any
-			keyspace.PruneSubtrie(s.ongoingReprovides, r.Prefix)
+			keyspace.PruneSubtrie(s.activeReprovides, r.Prefix)
 			out = append(out, r)
-			s.ongoingReprovides.Add(r.Prefix, struct{}{})
+			s.activeReprovides.Add(r.Prefix, struct{}{})
 		}
 	}
 	return out
@@ -1439,9 +1460,9 @@ func (s *SweepingProvider) claimRegionReprovide(regions []keyspace.Region) []key
 
 // releaseRegionReprovide marks the region as no longer being reprovided.
 func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
-	s.ongoingReprovidesLk.Lock()
-	defer s.ongoingReprovidesLk.Unlock()
-	s.ongoingReprovides.Remove(prefix)
+	s.activeReprovidesLk.Lock()
+	defer s.activeReprovidesLk.Unlock()
+	s.activeReprovides.Remove(prefix)
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

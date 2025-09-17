@@ -1,3 +1,5 @@
+// Package stats defines the data structures for provider performance metrics
+// and statistics exported by the libp2p kademlia DHT provider.
 package stats
 
 import (
@@ -69,21 +71,26 @@ type OngoingOperations struct {
 }
 
 type PastOperations struct {
-	RecordsProvided int `json:"records_provided"` // since provided is running
-	KeysProvided    int `json:"key_provided"`     // since provided is running
-	KeysFailed      int `json:"keys_failed"`      // since provided is running
+	// Cumulative totals since provider started
+	RecordsProvided int `json:"records_provided"` // total provider records sent
+	KeysProvided    int `json:"keys_provided"`    // total keys successfully provided
+	KeysFailed      int `json:"keys_failed"`      // total keys that failed to provide
 
-	KeysProvidedPerMinute     float64       `json:"keys_provided_per_minute"`      // last cycle
-	KeysReprovidedPerMinute   float64       `json:"keys_reprovided_per_minute"`    // last cycle
-	RegionReprovideDuration   time.Duration `json:"reprovide_duration"`            // last cycle
-	AvgKeysPerReprovide       float64       `json:"avg_keys_per_reprovide"`        // last cycle
-	RegionReprovidedLastCycle int           `json:"regions_reprovided_last_cycle"` // last cycle
+	// Performance metrics from last reprovide cycle
+	KeysProvidedPerMinute     float64       `json:"keys_provided_per_minute"`      // provide rate
+	KeysReprovidedPerMinute   float64       `json:"keys_reprovided_per_minute"`    // reprovide rate
+	RegionReprovideDuration   time.Duration `json:"reprovide_duration"`            // avg time per region
+	AvgKeysPerReprovide       float64       `json:"avg_keys_per_reprovide"`        // avg keys per region
+	RegionReprovidedLastCycle int           `json:"regions_reprovided_last_cycle"` // regions processed
 }
 
-type Network struct { // TODO: more fields?
-	Peers                    int     `json:"peers"` // reprovide only
-	CompleteKeyspaceCoverage bool    `json:"complete_keyspace_coverage"`
-	Reachable                int     `json:"reachable"` // reprovide only
-	AvgHolders               float64 `json:"avg_holders"`
-	ReplicationFactor        int     `json:"replication_factor"`
+type Network struct {
+	// Peer counts from last reprovide cycle
+	Peers     int `json:"peers"`     // total peers contacted
+	Reachable int `json:"reachable"` // peers that responded successfully
+
+	// Keyspace coverage analysis
+	CompleteKeyspaceCoverage bool    `json:"complete_keyspace_coverage"` // whether all regions were covered
+	AvgHolders               float64 `json:"avg_holders"`                // average holders per key
+	ReplicationFactor        int     `json:"replication_factor"`         // target replication factor
 }

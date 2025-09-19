@@ -129,7 +129,7 @@ func TestQueueingMechanism(t *testing.T) {
 		}
 
 		// Wait for operations to be processed by expecting 4 signals
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			select {
 			case <-fake.processed:
 			case <-time.After(time.Second):

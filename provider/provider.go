@@ -1243,9 +1243,9 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	}
 
 	startTime := time.Now()
-	s.stats.ongoingProvides.start(keyCount)
+	s.stats.ongoingReprovides.start(keyCount)
 	defer func() {
-		s.stats.ongoingProvides.finish(keyCount)
+		s.stats.ongoingReprovides.finish(keyCount)
 		s.stats.reprovideDuration.Add(prefix, int64(time.Since(startTime)))
 	}()
 

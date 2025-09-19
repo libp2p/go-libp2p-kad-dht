@@ -52,19 +52,24 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	s.scheduleLk.Lock()
 	scheduleSize := s.schedule.Size()
 	nextPrefix := s.scheduleCursor
-	_, nextReprovideAt := trie.Find(s.schedule, nextPrefix)
+	ok, nextReprovideOffset := trie.Find(s.schedule, nextPrefix)
 	s.scheduleLk.Unlock()
+
+	currentOffset := s.currentTimeOffset()
+	nextReprovideAt := time.Time{}
+	if ok {
+		nextReprovideAt = now.Add(s.timeUntil(nextReprovideOffset))
+	}
 
 	keys := -1 // Default value if keyStore.Size() fails
 	if keyCount, err := s.keystore.Size(context.Background()); err == nil {
 		keys = keyCount
 	}
-	currentOffset := s.currentTimeOffset()
 	snapshot.Schedule = stats.Schedule{
 		Keys:                keys,
 		Regions:             scheduleSize,
 		AvgPrefixLength:     avgPrefixLen,
-		NextReprovideAt:     now.Add(nextReprovideAt - currentOffset),
+		NextReprovideAt:     nextReprovideAt,
 		NextReprovidePrefix: nextPrefix,
 	}
 
@@ -79,8 +84,8 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		Active:                   active,
 		ActivePeriodic:           workerStats.Used[periodicWorker],
 		ActiveBurst:              workerStats.Used[burstWorker],
-		DedicatedPeriodic:        workerStats.Used[periodicWorker],
-		DedicatedBurst:           workerStats.Used[burstWorker],
+		DedicatedPeriodic:        workerStats.Reserves[periodicWorker],
+		DedicatedBurst:           workerStats.Reserves[burstWorker],
 		QueuedPeriodic:           workerStats.Queued[periodicWorker],
 		QueuedBurst:              workerStats.Queued[burstWorker],
 		MaxProvideConnsPerWorker: s.maxProvideConnsPerWorker,
@@ -121,6 +126,15 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	peersFullyCovered := s.stats.peers.FullyCovered()
 	reachableSum := s.stats.reachable.Sum()
 	avgHoldersAvg := s.stats.avgHolders.Avg()
+
+	keysProvidedPerMinute := 0.
+	if time.Duration(provideDurationSum) > 0 {
+		keysProvidedPerMinute = float64(keysPerProvideSum) / time.Duration(provideDurationSum).Minutes()
+	}
+	keysReprovidedPerMinute := 0.
+	if time.Duration(reprovideDurationSum) > 0 {
+		keysReprovidedPerMinute = float64(keysPerReprovideSum) / time.Duration(reprovideDurationSum).Minutes()
+	}
 	s.stats.cycleStatsLk.Unlock()
 
 	pastOps := stats.PastOperations{
@@ -128,8 +142,8 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		KeysProvided:    int(s.stats.keysProvided.Load()),
 		KeysFailed:      int(s.stats.keysFailed.Load()),
 
-		KeysProvidedPerMinute:     float64(keysPerProvideSum) / time.Duration(provideDurationSum).Minutes(),
-		KeysReprovidedPerMinute:   float64(keysPerReprovideSum) / time.Duration(reprovideDurationSum).Minutes(),
+		KeysProvidedPerMinute:     keysProvidedPerMinute,
+		KeysReprovidedPerMinute:   keysReprovidedPerMinute,
 		RegionReprovideDuration:   time.Duration(reprovideDurationAvg),
 		AvgKeysPerReprovide:       keysPerReprovideAvg,
 		RegionReprovidedLastCycle: reprovideDurationCount,

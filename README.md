@@ -31,7 +31,7 @@ The following generic components can be used by many DHT implementations.
 
 The components listed below are typically specific to the DHT implementation, and may not be universally applicable.
 
-* **DHT records types**: Each DHT implementation needs to define record types for the data that is being stored in the DHT. The role of `go-libdht` is to help with routing matters, but not with data format. It is however recommended to take inspiration from record types of [existing DHT implementations](#users-of-go-libdht) using `go-libdht`. 
+* **DHT records types**: Each DHT implementation needs to define record types for the data that is being stored in the DHT. The role of `go-libdht` is to help with routing matters, but not with data format. It is however recommended to take inspiration from record types of [existing DHT implementations](#users-of-go-libdht) using `go-libdht`.
 * **Wire formats**: Wire formats are highly dependant on the DHT record types and application needs.
 * **DHT server behavior**: The server behavior outlines how a node reacts to requests from remote peers. This process is often application specific and depends on the request and record types, hence it should not be standardized.
 
@@ -51,7 +51,9 @@ Generic Kademlia interfaces can be found in [`kad.go`](kad/kad.go), and include 
 
 It's enouraged to review other DHT implementations for guidance. Certain components, while not sufficiently generic for inclusion in go-libdht, can be reused from existing DHT solutions.
 
-* [**`zikade`**](https://github.com/probe-lab/zikade): Most recent Go implementation of [libp2p Kademlia DHT specification](https://github.com/libp2p/specs/tree/master/kad-dht)
+* [**`ants-watch`**](https://github.com/probe-lab/ants-watch): Kademlia DHT client monitoring tool.
+* [**`go-libp2p-kad-dht/provider`**](https://github.com/libp2p/go-libp2p-kad-dht/tree/master/provider): Kademlia DHT Sweeping Provider implementation.
+* [**`zikade`**](https://github.com/probe-lab/zikade): Most recent Go implementation of [libp2p Kademlia DHT specification](https://github.com/libp2p/specs/tree/master/kad-dht).
 
 ## Future work
 
@@ -66,3 +68,4 @@ After a component has proven its utility in a DHT implementation and is recogniz
 ## License
 
 [SPDX-License-Identifier: Apache-2.0 OR MIT](./LICENSE.md)
+

@@ -177,10 +177,6 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		}
 	}
 	cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close)
-	if err := cfg.validate(); err != nil {
-		cleanup(cleanupFuncs)
-		return nil, err
-	}
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(
 		"total_provide_count",

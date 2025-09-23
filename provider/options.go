@@ -53,34 +53,6 @@ type config struct {
 	maxProvideConnsPerWorker int
 }
 
-func (cfg *config) apply(opts ...Option) error {
-	for i, o := range opts {
-		if err := o(cfg); err != nil {
-			return fmt.Errorf("reprovider dht option %d failed: %w", i, err)
-		}
-	}
-	return nil
-}
-
-func (c *config) validate() error {
-	if len(c.peerid) == 0 {
-		return errors.New("reprovider config: peer id is required")
-	}
-	if c.router == nil {
-		return errors.New("reprovider config: router is required")
-	}
-	if c.msgSender == nil {
-		return errors.New("reprovider config: message sender is required")
-	}
-	if c.selfAddrs == nil {
-		return errors.New("reprovider config: self addrs func is required")
-	}
-	if c.dedicatedPeriodicWorkers+c.dedicatedBurstWorkers > c.maxWorkers {
-		return errors.New("reprovider config: total dedicated workers exceed max workers")
-	}
-	return nil
-}
-
 type Option func(opt *config) error
 
 // getOpts creates a config and applies Options to it.
@@ -100,10 +72,28 @@ func getOpts(opts []Option) (config, error) {
 		addLocalRecord: func(mh mh.Multihash) error { return nil },
 	}
 
+	// Apply options
 	for i, opt := range opts {
 		if err := opt(&cfg); err != nil {
-			return config{}, fmt.Errorf("option %d error: %s", i, err)
+			return config{}, fmt.Errorf("reprovider dht option %d error: %s", i, err)
 		}
+	}
+
+	// Validate config
+	if len(cfg.peerid) == 0 {
+		return config{}, errors.New("reprovider config: peer id is required")
+	}
+	if cfg.router == nil {
+		return config{}, errors.New("reprovider config: router is required")
+	}
+	if cfg.msgSender == nil {
+		return config{}, errors.New("reprovider config: message sender is required")
+	}
+	if cfg.selfAddrs == nil {
+		return config{}, errors.New("reprovider config: self addrs func is required")
+	}
+	if cfg.dedicatedPeriodicWorkers+cfg.dedicatedBurstWorkers > cfg.maxWorkers {
+		return config{}, errors.New("reprovider config: total dedicated workers exceed max workers")
 	}
 	return cfg, nil
 }

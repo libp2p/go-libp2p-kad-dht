@@ -160,8 +160,7 @@ type SweepingProvider struct {
 
 // New creates a new SweepingProvider instance with the supplied options.
 func New(opts ...Option) (*SweepingProvider, error) {
-	var cfg config
-	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -176,11 +175,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 			cleanup(cleanupFuncs)
 			return nil, err
 		}
-	}
-	cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close)
-	if err := cfg.validate(); err != nil {
-		cleanup(cleanupFuncs)
-		return nil, err
+		cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close, func() error { return cfg.keystore.Empty(context.Background()) })
 	}
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/libp2p/go-libp2p-kad-dht/provider"
@@ -23,6 +24,8 @@ type SweepingProvider struct {
 	LAN      *provider.SweepingProvider
 	WAN      *provider.SweepingProvider
 	keystore keystore.Keystore
+
+	cleanupFuncs []func() error
 }
 
 // New creates a new SweepingProvider that manages provides and reprovides for
@@ -32,15 +35,19 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 		return nil, errors.New("cannot create sweeping provider for nil dual DHT")
 	}
 
-	var cfg config
-	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	cfg, err := getOpts(opts, d)
 	if err != nil {
 		return nil, err
 	}
-	cfg.resolveDefaults(d)
-	err = cfg.validate()
-	if err != nil {
-		return nil, err
+	var cleanupFuncs []func() error
+	if cfg.keystore == nil {
+		ds := datastore.NewMapDatastore()
+		cfg.keystore, err = keystore.NewKeystore(ds)
+		if err != nil {
+			ds.Close()
+			return nil, fmt.Errorf("couldn't create a keystore: %w", err)
+		}
+		cleanupFuncs = []func() error{ds.Close, cfg.keystore.Close, func() error { return cfg.keystore.Empty(context.Background()) }}
 	}
 
 	sweepingProviders := make([]*provider.SweepingProvider, 2)
@@ -74,10 +81,11 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 	}
 
 	return &SweepingProvider{
-		dht:      d,
-		LAN:      sweepingProviders[0],
-		WAN:      sweepingProviders[1],
-		keystore: cfg.keystore,
+		dht:          d,
+		LAN:          sweepingProviders[0],
+		WAN:          sweepingProviders[1],
+		keystore:     cfg.keystore,
+		cleanupFuncs: cleanupFuncs,
 	}, nil
 }
 
@@ -102,9 +110,25 @@ func (s *SweepingProvider) runOnBoth(f func(*provider.SweepingProvider) error) e
 
 // Close stops both DHT providers and releases associated resources.
 func (s *SweepingProvider) Close() error {
-	return s.runOnBoth(func(p *provider.SweepingProvider) error {
+	err := s.runOnBoth(func(p *provider.SweepingProvider) error {
 		return p.Close()
 	})
+
+	if s.cleanupFuncs != nil {
+		// Cleanup keystore and datastore if we created them
+		var errs []error
+		for i := len(s.cleanupFuncs) - 1; i >= 0; i-- { // LIFO: last-added is cleaned up first
+			if f := s.cleanupFuncs[i]; f != nil {
+				if err := f(); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+		if len(errs) > 0 {
+			err = errors.Join(append(errs, err)...)
+		}
+	}
+	return err
 }
 
 // ProvideOnce sends provider records for the specified keys to both DHT swarms

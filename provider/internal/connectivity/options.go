@@ -14,21 +14,21 @@ type config struct {
 	onOnline  func()
 }
 
-func (cfg *config) apply(opts ...Option) error {
-	for i, o := range opts {
-		if err := o(cfg); err != nil {
-			return fmt.Errorf("reprovider dht option %d failed: %w", i, err)
-		}
-	}
-	return nil
-}
-
 type Option func(opt *config) error
 
-var DefaultConfig = func(cfg *config) error {
-	cfg.onlineCheckInterval = 1 * time.Minute
-	cfg.offlineDelay = 2 * time.Hour
-	return nil
+// getOpts creates a config and applies Options to it.
+func getOpts(opts []Option) (config, error) {
+	cfg := config{
+		onlineCheckInterval: 1 * time.Minute,
+		offlineDelay:        2 * time.Hour,
+	}
+
+	for i, opt := range opts {
+		if err := opt(&cfg); err != nil {
+			return config{}, fmt.Errorf("connectivity option %d error: %s", i, err)
+		}
+	}
+	return cfg, nil
 }
 
 // WithOnlineCheckInterval sets the minimum interval between online checks.

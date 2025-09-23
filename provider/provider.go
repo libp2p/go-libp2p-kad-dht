@@ -160,8 +160,7 @@ type SweepingProvider struct {
 
 // New creates a new SweepingProvider instance with the supplied options.
 func New(opts ...Option) (*SweepingProvider, error) {
-	var cfg config
-	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}

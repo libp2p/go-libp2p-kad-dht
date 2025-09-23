@@ -83,21 +83,29 @@ func (c *config) validate() error {
 
 type Option func(opt *config) error
 
-var DefaultConfig = func(cfg *config) error {
-	cfg.replicationFactor = amino.DefaultBucketSize
-	cfg.reprovideInterval = amino.DefaultReprovideInterval
-	cfg.maxReprovideDelay = DefaultMaxReprovideDelay
-	cfg.offlineDelay = DefaultOfflineDelay
-	cfg.connectivityCheckOnlineInterval = DefaultConnectivityCheckOnlineInterval
+// getOpts creates a config and applies Options to it.
+func getOpts(opts []Option) (config, error) {
+	cfg := config{
+		replicationFactor:               amino.DefaultBucketSize,
+		reprovideInterval:               amino.DefaultReprovideInterval,
+		maxReprovideDelay:               DefaultMaxReprovideDelay,
+		offlineDelay:                    DefaultOfflineDelay,
+		connectivityCheckOnlineInterval: DefaultConnectivityCheckOnlineInterval,
 
-	cfg.maxWorkers = 4
-	cfg.dedicatedPeriodicWorkers = 2
-	cfg.dedicatedBurstWorkers = 1
-	cfg.maxProvideConnsPerWorker = 20
+		maxWorkers:               4,
+		dedicatedPeriodicWorkers: 2,
+		dedicatedBurstWorkers:    1,
+		maxProvideConnsPerWorker: 20,
 
-	cfg.addLocalRecord = func(mh mh.Multihash) error { return nil }
+		addLocalRecord: func(mh mh.Multihash) error { return nil },
+	}
 
-	return nil
+	for i, opt := range opts {
+		if err := opt(&cfg); err != nil {
+			return config{}, fmt.Errorf("option %d error: %s", i, err)
+		}
+	}
+	return cfg, nil
 }
 
 // WithReplicationFactor sets the replication factor for provider records. It

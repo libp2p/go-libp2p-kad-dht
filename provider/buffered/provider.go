@@ -29,7 +29,7 @@ const (
 
 var _ internal.Provider = (*SweepingProvider)(nil)
 
-// buffered.SweepingProvider is a wrapper around a SweepingProvider buffering
+// SweepingProvider (buffered) is a wrapper around a SweepingProvider buffering
 // requests, to allow core operations to return instantly. Operations are
 // queued and processed asynchronously in batches for improved performance.
 type SweepingProvider struct {

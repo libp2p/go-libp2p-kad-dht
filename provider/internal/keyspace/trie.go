@@ -1,6 +1,8 @@
 package keyspace
 
 import (
+	"slices"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 	mh "github.com/multiformats/go-multihash"
 
@@ -185,23 +187,37 @@ func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0,
 }
 
 // TrieGaps returns all prefixes that aren't covered by a key (prefix) in the
-// trie. Combining the prefixes included in the trie with the gap prefixes
-// results in a full keyspace coverage.
+// trie, at the `target` location. Combining the prefixes included in the trie
+// with the gap prefixes results in a full keyspace coverage of the `target`
+// subtrie.
 //
-// E.g Trie: ["00", "100"], GapsInTrie: ["01", "101", "11"]
-func TrieGaps[D any](t *trie.Trie[bitstr.Key, D]) []bitstr.Key {
+// Results are sorted according to the provided `order`.
+//
+// Example:
+//   - Trie: ["0000", "0010", "100"]
+//   - Target: "0"
+//   - Order: "0000",
+//   - GapsInTrie: ["0001", "0011", "01"]
+func TrieGaps[K kad.Key[K], D any](t *trie.Trie[bitstr.Key, D], target bitstr.Key, order K) []bitstr.Key {
 	if t.IsLeaf() {
-		if t.HasKey() {
-			return SiblingPrefixes(*t.Key())
+		if k := t.Key(); k != nil && IsBitstrPrefix(target, *k) {
+			siblingPrefixes := SiblingPrefixes(*k)[len(target):]
+			sortBitstrKeysByOrder(siblingPrefixes, order)
+			return siblingPrefixes
 		}
-		return []bitstr.Key{""}
+		return []bitstr.Key{target}
 	}
-	return trieGapsAtDepth(t, 0)
+	return trieGapsAtDepth(t, 0, target, order)
 }
 
-func trieGapsAtDepth[D any](t *trie.Trie[bitstr.Key, D], depth int) []bitstr.Key {
+func trieGapsAtDepth[K kad.Key[K], D any](t *trie.Trie[bitstr.Key, D], depth int, target bitstr.Key, order K) []bitstr.Key {
 	var gaps []bitstr.Key
-	for i := range 2 {
+	insideTarget := depth >= target.BitLen()
+	b := int(order.Bit(depth))
+	for _, i := range []int{b, 1 - b} {
+		if !insideTarget && i != int(target.Bit(depth)) {
+			continue
+		}
 		bstr := bitstr.Key(byte('0' + i))
 		if b := t.Branch(i); b == nil {
 			gaps = append(gaps, bstr)
@@ -209,7 +225,9 @@ func trieGapsAtDepth[D any](t *trie.Trie[bitstr.Key, D], depth int) []bitstr.Key
 			if b.HasKey() {
 				k := *b.Key()
 				if len(k) > depth+1 {
-					for _, siblingPrefix := range SiblingPrefixes(k)[depth+1:] {
+					siblingPrefixes := SiblingPrefixes(k)[depth+1:]
+					sortBitstrKeysByOrder(siblingPrefixes, order)
+					for _, siblingPrefix := range siblingPrefixes {
 						gaps = append(gaps, siblingPrefix[depth:])
 					}
 				}
@@ -217,12 +235,35 @@ func trieGapsAtDepth[D any](t *trie.Trie[bitstr.Key, D], depth int) []bitstr.Key
 				gaps = append(gaps, bstr)
 			}
 		} else {
-			for _, gap := range trieGapsAtDepth(b, depth+1) {
+			for _, gap := range trieGapsAtDepth(b, depth+1, target, order) {
 				gaps = append(gaps, bstr+gap)
 			}
 		}
 	}
 	return gaps
+}
+
+// sortBitstrKeysByOrder sorts the provided bitstr keys according to the
+// provided order.
+func sortBitstrKeysByOrder[K kad.Key[K]](keys []bitstr.Key, order K) {
+	slices.SortFunc(keys, func(a, b bitstr.Key) int {
+		maxLen := min(len(a), len(b), order.BitLen())
+		for i := range maxLen {
+			if a[i] != b[i] {
+				if a.Bit(i) == order.Bit(i) {
+					return -1
+				}
+				return 1
+			}
+		}
+		if len(a) == len(b) || maxLen == order.BitLen() {
+			return 0
+		}
+		if len(a) < len(b) {
+			return 1
+		}
+		return -1
+	})
 }
 
 // mapMerge merges all key-value pairs from the source map into the destination

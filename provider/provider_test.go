@@ -900,7 +900,7 @@ func TestStartProvidingSingle(t *testing.T) {
 		synctest.Wait()
 		require.True(t, prov.connectivity.IsOnline())
 		prov.avgPrefixLenLk.Lock()
-		require.Greater(t, prov.cachedAvgPrefixLen, 0) // TODO: FLAKY
+		require.Greater(t, prov.cachedAvgPrefixLen, 0)
 		prov.avgPrefixLenLk.Unlock()
 
 		err = prov.StartProviding(true, h)

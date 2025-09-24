@@ -608,11 +608,10 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 
 	nextPrefix := prefix
 	startTime := time.Now()
-	coveredPrefixesStack := []bitstr.Key{}
+	coverageTrie := trie.New[bitstr.Key, struct{}]()
 
 	i := 0
 	// Go down the trie to fully cover prefix.
-exploration:
 	for {
 		if i == maxExplorationPrefixSearches {
 			return nil, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
@@ -636,44 +635,34 @@ exploration:
 			allClosestPeers[p] = struct{}{}
 		}
 
-		coveredPrefixLen := len(coveredPrefix)
-		if i == 1 {
-			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) >= s.replicationFactor {
-				// Exit early if the prefix is fully covered at the first request and
-				// we have enough (at least replicationFactor) peers.
-				break exploration
-			}
-		} else {
-			latestPrefix := coveredPrefixesStack[len(coveredPrefixesStack)-1]
-			for coveredPrefixLen <= len(latestPrefix) && coveredPrefix[:coveredPrefixLen-1] == latestPrefix[:coveredPrefixLen-1] {
-				// Pop latest prefix from stack, because current prefix is
-				// complementary.
-				// e.g latestPrefix=0010, currentPrefix=0011. latestPrefix is
-				// replaced by 001, unless 000 was also in the stack, etc.
-				coveredPrefixesStack = coveredPrefixesStack[:len(coveredPrefixesStack)-1]
-				coveredPrefix = coveredPrefix[:len(coveredPrefix)-1]
-				coveredPrefixLen = len(coveredPrefix)
+		// Coverage trie already contains a key covering coveredPrefix.
+		if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); ok {
+			continue
+		}
 
-				if len(coveredPrefixesStack) == 0 {
-					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) >= s.replicationFactor {
-						break exploration
-					}
-					// Not enough peers -> add coveredPrefix to stack and continue.
-					break
-				}
-				if coveredPrefixLen == 0 {
-					logger.Error("coveredPrefixLen==0, coveredPrefixStack ", coveredPrefixesStack)
-					break exploration
-				}
-				latestPrefix = coveredPrefixesStack[len(coveredPrefixesStack)-1]
+		keyspace.PruneSubtrie(coverageTrie, coveredPrefix)
+		coverageTrie.Add(coveredPrefix, struct{}{})
+
+		gaps := keyspace.TrieGaps(coverageTrie, prefix, s.order)
+		if len(gaps) == 0 {
+			if len(allClosestPeers) >= s.replicationFactor {
+				// We have full coverage of `prefix`.
+				break
+			}
+			for len(gaps) == 0 && len(prefix) > 0 {
+				// We don't have enough peers, but we have covered the prefix. Let's
+				// cover the shorter prefix.
+				prefix = prefix[:len(prefix)-1]
+				gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
+			}
+			if len(gaps) == 0 {
+				// We don't have enough peers, but we have covered the whole keyspace.
+				break
 			}
 		}
-		// Push coveredPrefix to stack
-		coveredPrefixesStack = append(coveredPrefixesStack, coveredPrefix)
-		// Flip last bit of last covered prefix
-		nextPrefix = keyspace.FlipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
-	}
 
+		nextPrefix = gaps[0]
+	}
 	peers := make([]peer.ID, 0, len(allClosestPeers))
 	for p := range allClosestPeers {
 		peers = append(peers, p)
@@ -1495,7 +1484,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		s.scheduleLk.Unlock()
 		return err
 	}
-	gaps := keyspace.TrieGaps(s.schedule)
+	gaps := keyspace.TrieGaps(s.schedule, "", s.order)
 	s.scheduleLk.Unlock()
 
 	missing := make([]bitstr.Key, 0, len(gaps))

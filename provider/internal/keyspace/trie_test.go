@@ -444,7 +444,7 @@ func TestTrieGaps(t *testing.T) {
 	t.Run("Gap in empty trie", func(t *testing.T) {
 		keys := []bitstr.Key{}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{""}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{""}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("No gaps in flat trie", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -452,7 +452,7 @@ func TestTrieGaps(t *testing.T) {
 			"1",
 		}
 		tr := initTrie(keys)
-		require.Empty(t, TrieGaps(tr))
+		require.Empty(t, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("No gaps in unbalanced trie", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -462,35 +462,37 @@ func TestTrieGaps(t *testing.T) {
 			"111",
 		}
 		tr := initTrie(keys)
-		require.Empty(t, TrieGaps(tr))
+		require.Empty(t, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("No gaps in trie with empty key", func(t *testing.T) {
 		keys := []bitstr.Key{
 			"",
 		}
 		tr := initTrie(keys)
-		require.Empty(t, TrieGaps(tr))
+		require.Empty(t, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap with single key - 0", func(t *testing.T) {
 		keys := []bitstr.Key{
 			"0",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"1"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"1"}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap with single key - 1", func(t *testing.T) {
 		keys := []bitstr.Key{
 			"1",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"0"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"0"}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap with single key - 11101101", func(t *testing.T) {
 		keys := []bitstr.Key{
 			"11101101",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, SiblingPrefixes(keys[0]), TrieGaps(tr))
+		siblingPrefixes := SiblingPrefixes(keys[0])
+		sortBitstrKeysByOrder(siblingPrefixes, bit256.ZeroKey())
+		require.Equal(t, siblingPrefixes, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap missing single key - 0", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -499,7 +501,7 @@ func TestTrieGaps(t *testing.T) {
 			"110",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap missing single key - 1", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -509,7 +511,7 @@ func TestTrieGaps(t *testing.T) {
 			"1101",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap missing single key - 2", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -521,7 +523,7 @@ func TestTrieGaps(t *testing.T) {
 			"1101",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"111"}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap missing multiple keys - 0", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -532,7 +534,7 @@ func TestTrieGaps(t *testing.T) {
 			"1101",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"001", "111"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"001", "111"}, TrieGaps(tr, "", bit256.ZeroKey()))
 	})
 	t.Run("Gap missing multiple keys - 1", func(t *testing.T) {
 		keys := []bitstr.Key{
@@ -540,7 +542,107 @@ func TestTrieGaps(t *testing.T) {
 			"1101",
 		}
 		tr := initTrie(keys)
-		require.Equal(t, []bitstr.Key{"01", "001", "10", "111", "1100"}, TrieGaps(tr))
+		require.Equal(t, []bitstr.Key{"001", "01", "10", "1100", "111"}, TrieGaps(tr, "", bit256.ZeroKey()))
+	})
+	t.Run("Gap missing multiple keys - 2", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0000",
+			"1000",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"0001", "001", "01", "1001", "101", "11"}, TrieGaps(tr, "", bit256.ZeroKey()))
+	})
+
+	t.Run("Single key inside target", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0000",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"0001", "001"}, TrieGaps(tr, "00", bit256.ZeroKey()))
+	})
+	t.Run("Single key outside target", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0000",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"11"}, TrieGaps(tr, "11", bit256.ZeroKey()))
+	})
+
+	t.Run("Target subset", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0000",
+			"0010",
+			"100",
+			"11",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"0001", "0011", "01"}, TrieGaps(tr, "0", bit256.ZeroKey()))
+	})
+
+	t.Run("Target subset reverse order", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"0000",
+			"0001",
+			"1000",
+		}
+		tr := initTrie(keys)
+		require.Equal(t, []bitstr.Key{"01", "001"}, TrieGaps(tr, "0", bitstr.Key("1111")))
+	})
+}
+
+func TestSortBitstrKeysByOrder(t *testing.T) {
+	t.Run("Empty", func(t *testing.T) {
+		keys := []bitstr.Key{}
+		sortBitstrKeysByOrder(keys, bit256.ZeroKey())
+		require.Equal(t, []bitstr.Key{}, keys)
+	})
+
+	t.Run("Single key", func(t *testing.T) {
+		keys := []bitstr.Key{"0"}
+		sortBitstrKeysByOrder(keys, bit256.ZeroKey())
+		require.Equal(t, []bitstr.Key{"0"}, keys)
+	})
+
+	t.Run("Two sorted keys", func(t *testing.T) {
+		keys := []bitstr.Key{"0", "1"}
+		sortBitstrKeysByOrder(keys, bit256.ZeroKey())
+		require.Equal(t, []bitstr.Key{"0", "1"}, keys)
+	})
+
+	t.Run("Two keys - zero order", func(t *testing.T) {
+		keys := []bitstr.Key{"1", "0"}
+		sortBitstrKeysByOrder(keys, bit256.ZeroKey())
+		require.Equal(t, []bitstr.Key{"0", "1"}, keys)
+	})
+
+	t.Run("Two keys - reverse order", func(t *testing.T) {
+		keys := []bitstr.Key{"0", "1"}
+		sortBitstrKeysByOrder(keys, bitstr.Key("1"))
+		require.Equal(t, []bitstr.Key{"1", "0"}, keys)
+	})
+
+	t.Run("Different key lengths", func(t *testing.T) {
+		keys := []bitstr.Key{"00", "000", "0"}
+		sortBitstrKeysByOrder(keys, bitstr.Key("0000"))
+		require.Equal(t, []bitstr.Key{"000", "00", "0"}, keys)
+	})
+
+	t.Run("Different key lengths", func(t *testing.T) {
+		keys := []bitstr.Key{"01", "1"}
+		sortBitstrKeysByOrder(keys, bitstr.Key("11"))
+		require.Equal(t, []bitstr.Key{"1", "01"}, keys)
+	})
+
+	t.Run("Short order", func(t *testing.T) {
+		keys := []bitstr.Key{"111", "110", "0"}
+		sortBitstrKeysByOrder(keys, bitstr.Key("00"))
+		require.Equal(t, []bitstr.Key{"0", "111", "110"}, keys)
+	})
+
+	t.Run("Identical keys", func(t *testing.T) {
+		keys := []bitstr.Key{"0", "0"}
+		sortBitstrKeysByOrder(keys, bitstr.Key("00"))
+		require.Equal(t, []bitstr.Key{"0", "0"}, keys)
 	})
 }
 

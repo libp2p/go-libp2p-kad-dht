@@ -1339,6 +1339,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			continue
 		}
 		s.provideCounter.Add(s.ctx, int64(len(allKeys)))
+		logger.Debug("sent provider records for ", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)
@@ -1428,25 +1429,6 @@ func (s *SweepingProvider) Clear() int {
 		return 0
 	}
 	return s.provideQueue.Clear()
-}
-
-// ProvideState encodes the current relationship between this node and `key`.
-type ProvideState uint8
-
-const (
-	StateUnknown  ProvideState = iota // we have no record of the key
-	StateQueued                       // key is queued to be provided
-	StateProvided                     // key was provided at least once
-)
-
-// ProvideStatus reports the provider’s view of a key.
-//
-// When `state == StateProvided`, `lastProvide` is the wall‑clock time of the
-// most recent successful provide operation (UTC).
-// For `StateQueued` or `StateUnknown`, `lastProvide` is the zero `time.Time`.
-func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, lastProvide time.Time) {
-	// TODO: implement me
-	return StateUnknown, time.Time{}
 }
 
 // AddToSchedule makes sure the prefixes associated with the supplied keys are

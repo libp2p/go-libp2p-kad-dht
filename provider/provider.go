@@ -632,8 +632,10 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			allClosestPeers[p] = struct{}{}
 		}
 
-		keyspace.PruneSubtrie(coverageTrie, coveredPrefix)
-		coverageTrie.Add(coveredPrefix, struct{}{})
+		if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); !ok {
+			keyspace.PruneSubtrie(coverageTrie, coveredPrefix)
+			coverageTrie.Add(coveredPrefix, struct{}{})
+		}
 
 		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 		if len(gaps) == 0 {

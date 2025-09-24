@@ -610,16 +610,13 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	startTime := time.Now()
 	coverageTrie := trie.New[bitstr.Key, struct{}]()
 
+	var gaps []bitstr.Key
 	i := 0
 	// Go down the trie to fully cover prefix.
-	for {
-		if i == maxExplorationPrefixSearches {
-			return nil, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
-		}
+	for ; i < maxExplorationPrefixSearches; i++ {
 		if !s.connectivity.IsOnline() {
-			return nil, errors.New("provider: node is offline")
+			return nil, ErrOffline
 		}
-		i++
 		fullKey := keyspace.FirstFullKeyWithPrefix(nextPrefix, s.order)
 		closestPeers, err := s.closestPeersToKey(fullKey)
 		if err != nil {
@@ -635,15 +632,10 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			allClosestPeers[p] = struct{}{}
 		}
 
-		// Coverage trie already contains a key covering coveredPrefix.
-		if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); ok {
-			continue
-		}
-
 		keyspace.PruneSubtrie(coverageTrie, coveredPrefix)
 		coverageTrie.Add(coveredPrefix, struct{}{})
 
-		gaps := keyspace.TrieGaps(coverageTrie, prefix, s.order)
+		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 		if len(gaps) == 0 {
 			if len(allClosestPeers) >= s.replicationFactor {
 				// We have full coverage of `prefix`.
@@ -651,7 +643,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			}
 			for len(gaps) == 0 && len(prefix) > 0 {
 				// We don't have enough peers, but we have covered the prefix. Let's
-				// cover the shorter prefix.
+				// cover a shorter prefix.
 				prefix = prefix[:len(prefix)-1]
 				gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 			}
@@ -663,11 +655,14 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 
 		nextPrefix = gaps[0]
 	}
+	if i == maxExplorationPrefixSearches {
+		logger.Warn("closestPeersToPrefix needed more than maxPrefixSearches iterations", "gaps", gaps)
+	}
 	peers := make([]peer.ID, 0, len(allClosestPeers))
 	for p := range allClosestPeers {
 		peers = append(peers, p)
 	}
-	logger.Debugf("Region %s exploration required %d requests to discover %d peers in %s", prefix, i, len(allClosestPeers), time.Since(startTime))
+	logger.Infof("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
 	return peers, nil
 }
 

@@ -47,7 +47,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			ds.Close()
 			return nil, fmt.Errorf("couldn't create a keystore: %w", err)
 		}
-		cleanupFuncs = []func() error{ds.Close, cfg.keystore.Close, func() error { return cfg.keystore.Empty(context.Background()) }}
+		cleanupFuncs = []func() error{ds.Close, cfg.keystore.Close}
 	}
 
 	sweepingProviders := make([]*provider.SweepingProvider, 2)

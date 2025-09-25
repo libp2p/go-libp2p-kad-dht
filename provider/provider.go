@@ -1338,8 +1338,9 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			}
 			continue
 		}
-		s.provideCounter.Add(s.ctx, int64(len(allKeys)))
-		logger.Debug("sent provider records for ", allKeys)
+		keyCount := len(allKeys)
+		s.provideCounter.Add(s.ctx, int64(keyCount))
+		logger.Debugw("sent provider records", "count", keyCount, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

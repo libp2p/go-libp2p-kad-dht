@@ -35,6 +35,7 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 	"github.com/probe-lab/go-libdht/kad/trie"
 
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/connectivity"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
@@ -900,7 +901,7 @@ func TestStartProvidingSingle(t *testing.T) {
 		synctest.Wait()
 		require.True(t, prov.connectivity.IsOnline())
 		prov.avgPrefixLenLk.Lock()
-		require.Greater(t, prov.cachedAvgPrefixLen, 0) // TODO: FLAKY
+		require.Greater(t, prov.cachedAvgPrefixLen, 0)
 		prov.avgPrefixLenLk.Unlock()
 
 		err = prov.StartProviding(true, h)
@@ -1420,5 +1421,68 @@ func TestOperationsOffline(t *testing.T) {
 		require.ErrorIs(t, err, ErrOffline)
 		err = prov.StopProviding(k) // no error for StopProviding
 		require.NoError(t, err)
+	})
+}
+
+// TestClosestPeersToPrefixErrors tests error handling in closestPeersToPrefix
+func TestClosestPeersToPrefixErrors(t *testing.T) {
+	t.Run("OfflineNode", func(t *testing.T) {
+		// Test that closestPeersToPrefix returns error when node is offline
+		callCount := atomic.Int32{}
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				callCount.Add(1)
+				return []peer.ID{"peer1"}, nil
+			},
+		}
+
+		// Create a connectivity checker that reports offline
+		offlineChecker, err := connectivity.New(func() bool { return false })
+		require.NoError(t, err)
+
+		prov := &SweepingProvider{
+			ctx:               context.Background(),
+			router:            router,
+			order:             bit256.ZeroKey(),
+			replicationFactor: amino.DefaultBucketSize,
+			connectivity:      offlineChecker,
+		}
+
+		prefix := bitstr.Key("0101")
+		_, err = prov.closestPeersToPrefix(prefix)
+
+		require.Error(t, err)
+		require.Equal(t, int32(0), callCount.Load(), "router should not be called when offline")
+	})
+
+	t.Run("NetworkError", func(t *testing.T) {
+		// Test error propagation from GetClosestPeers
+		synctest.Test(t, func(t *testing.T) {
+			networkErr := errors.New("network timeout")
+			router := &mockRouter{
+				getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+					return nil, networkErr
+				},
+			}
+
+			prov := &SweepingProvider{
+				ctx:               context.Background(),
+				connectivity:      noopConnectivityChecker(),
+				router:            router,
+				order:             bit256.ZeroKey(),
+				replicationFactor: amino.DefaultBucketSize,
+			}
+			prov.connectivity.Start()
+			defer prov.connectivity.Close()
+
+			synctest.Wait()
+			require.True(t, prov.connectivity.IsOnline())
+
+			prefix := bitstr.Key("0101")
+			_, err := prov.closestPeersToPrefix(prefix)
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "network timeout")
+		})
 	})
 }

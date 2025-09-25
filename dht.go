@@ -746,39 +746,28 @@ func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
 	return peer.AddrInfo{}
 }
 
-// nearestPeersToQuery returns the routing tables closest peers.
-func (dht *IpfsDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
-	closer := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count)
-	return closer
-}
+// closestPeersToQuery returns the closest peers to the target key from the
+// local routing table, filtering out the 'from' peer.ID.
+func (dht *IpfsDHT) closestPeersToQuery(pmes *pb.Message, from peer.ID, count int) []peer.ID {
+	// Get count+1 closest peers to target key, so that we can remove 'from' if
+	// included, and still return 'count' peers.
+	closestPeers := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count+1)
 
-// betterPeersToQuery returns nearestPeersToQuery with some additional filtering
-func (dht *IpfsDHT) betterPeersToQuery(pmes *pb.Message, from peer.ID, count int) []peer.ID {
-	closer := dht.nearestPeersToQuery(pmes, count)
-
-	// no node? nil
-	if closer == nil {
+	if len(closestPeers) == 0 {
 		logger.Infow("no closer peers to send", from)
 		return nil
 	}
 
-	filtered := make([]peer.ID, 0, len(closer))
-	for _, clp := range closer {
-
-		// == to self? thats bad
-		if clp == dht.self {
-			logger.Error("BUG betterPeersToQuery: attempted to return self! this shouldn't happen...")
-			return nil
+	filtered := make([]peer.ID, 0, min(len(closestPeers), count))
+	for _, p := range closestPeers {
+		// Don't include requester in response.
+		if p != from {
+			filtered = append(filtered, p)
+			if len(filtered) >= count {
+				break
+			}
 		}
-		// Dont send a peer back themselves
-		if clp == from {
-			continue
-		}
-
-		filtered = append(filtered, clp)
 	}
-
-	// ok seems like closer nodes
 	return filtered
 }
 

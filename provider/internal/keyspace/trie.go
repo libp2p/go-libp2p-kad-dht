@@ -200,10 +200,17 @@ func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0,
 //   - GapsInTrie: ["0001", "0011", "01"]
 func TrieGaps[K kad.Key[K], D any](t *trie.Trie[bitstr.Key, D], target bitstr.Key, order K) []bitstr.Key {
 	if t.IsLeaf() {
-		if k := t.Key(); k != nil && IsBitstrPrefix(target, *k) {
-			siblingPrefixes := SiblingPrefixes(*k)[len(target):]
-			sortBitstrKeysByOrder(siblingPrefixes, order)
-			return siblingPrefixes
+		if k := t.Key(); k != nil {
+			if IsBitstrPrefix(target, *k) {
+				siblingPrefixes := SiblingPrefixes(*k)[len(target):]
+				sortBitstrKeysByOrder(siblingPrefixes, order)
+				return siblingPrefixes
+			}
+			if IsBitstrPrefix(*k, target) {
+				// The only key in the trie is a prefix of target, meaning the whole
+				// target is covered.
+				return nil
+			}
 		}
 		return []bitstr.Key{target}
 	}

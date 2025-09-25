@@ -654,11 +654,12 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 				break
 			}
 		}
+		logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 
 		nextPrefix = gaps[0]
 	}
 	if i == maxExplorationPrefixSearches {
-		logger.Warn("closestPeersToPrefix needed more than maxPrefixSearches iterations", "gaps", gaps)
+		logger.Warnw("closestPeersToPrefix needed more than maxPrefixSearches iterations", "gaps", gaps)
 	}
 	peers := make([]peer.ID, 0, len(allClosestPeers))
 	for p := range allClosestPeers {

@@ -588,6 +588,24 @@ func TestTrieGaps(t *testing.T) {
 		tr := initTrie(keys)
 		require.Equal(t, []bitstr.Key{"01", "001"}, TrieGaps(tr, "0", bitstr.Key("1111")))
 	})
+
+	t.Run("Target longer than only key in trie", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"00",
+		}
+		tr := initTrie(keys)
+		require.Empty(t, TrieGaps(tr, "000", bit256.ZeroKey()))
+	})
+
+	t.Run("Target is superstring of key in trie", func(t *testing.T) {
+		keys := []bitstr.Key{
+			"00",
+			"01",
+			"101",
+		}
+		tr := initTrie(keys)
+		require.Empty(t, TrieGaps(tr, "000", bit256.ZeroKey()))
+	})
 }
 
 func TestSortBitstrKeysByOrder(t *testing.T) {

@@ -665,7 +665,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	for p := range allClosestPeers {
 		peers = append(peers, p)
 	}
-	logger.Infof("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
+	logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
 	return peers, nil
 }
 

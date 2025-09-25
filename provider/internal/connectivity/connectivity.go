@@ -55,8 +55,7 @@ type ConnectivityChecker struct {
 
 // New creates a new ConnectivityChecker instance.
 func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
-	var cfg config
-	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}

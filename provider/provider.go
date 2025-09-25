@@ -181,8 +181,7 @@ type SweepingProvider struct {
 
 // New creates a new SweepingProvider instance with the supplied options.
 func New(opts ...Option) (*SweepingProvider, error) {
-	var cfg config
-	err := cfg.apply(append([]Option{DefaultConfig}, opts...)...)
+	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -197,11 +196,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 			cleanup(cleanupFuncs)
 			return nil, err
 		}
-	}
-	cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close)
-	if err := cfg.validate(); err != nil {
-		cleanup(cleanupFuncs)
-		return nil, err
+		cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close)
 	}
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(
@@ -642,19 +637,15 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 
 	nextPrefix := prefix
 	startTime := time.Now()
-	coveredPrefixesStack := []bitstr.Key{}
+	coverageTrie := trie.New[bitstr.Key, struct{}]()
 
+	var gaps []bitstr.Key
 	i := 0
 	// Go down the trie to fully cover prefix.
-exploration:
-	for {
-		if i == maxExplorationPrefixSearches {
-			return nil, errors.New("closestPeersToPrefix needed more than maxPrefixSearches iterations")
-		}
+	for ; i < maxExplorationPrefixSearches; i++ {
 		if !s.connectivity.IsOnline() {
-			return nil, errors.New("provider: node is offline")
+			return nil, ErrOffline
 		}
-		i++
 		fullKey := keyspace.FirstFullKeyWithPrefix(nextPrefix, s.order)
 		closestPeers, err := s.closestPeersToKey(fullKey)
 		if err != nil {
@@ -670,49 +661,40 @@ exploration:
 			allClosestPeers[p] = struct{}{}
 		}
 
-		coveredPrefixLen := len(coveredPrefix)
-		if i == 1 {
-			if coveredPrefixLen <= len(prefix) && coveredPrefix == prefix[:coveredPrefixLen] && len(allClosestPeers) >= s.replicationFactor {
-				// Exit early if the prefix is fully covered at the first request and
-				// we have enough (at least replicationFactor) peers.
-				break exploration
-			}
-		} else {
-			latestPrefix := coveredPrefixesStack[len(coveredPrefixesStack)-1]
-			for coveredPrefixLen <= len(latestPrefix) && coveredPrefix[:coveredPrefixLen-1] == latestPrefix[:coveredPrefixLen-1] {
-				// Pop latest prefix from stack, because current prefix is
-				// complementary.
-				// e.g latestPrefix=0010, currentPrefix=0011. latestPrefix is
-				// replaced by 001, unless 000 was also in the stack, etc.
-				coveredPrefixesStack = coveredPrefixesStack[:len(coveredPrefixesStack)-1]
-				coveredPrefix = coveredPrefix[:len(coveredPrefix)-1]
-				coveredPrefixLen = len(coveredPrefix)
+		if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); !ok {
+			keyspace.PruneSubtrie(coverageTrie, coveredPrefix)
+			coverageTrie.Add(coveredPrefix, struct{}{})
+		}
 
-				if len(coveredPrefixesStack) == 0 {
-					if coveredPrefixLen <= len(prefix) && len(allClosestPeers) >= s.replicationFactor {
-						break exploration
-					}
-					// Not enough peers -> add coveredPrefix to stack and continue.
-					break
-				}
-				if coveredPrefixLen == 0 {
-					logger.Error("coveredPrefixLen==0, coveredPrefixStack ", coveredPrefixesStack)
-					break exploration
-				}
-				latestPrefix = coveredPrefixesStack[len(coveredPrefixesStack)-1]
+		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
+		if len(gaps) == 0 {
+			if len(allClosestPeers) >= s.replicationFactor {
+				// We have full coverage of `prefix`.
+				break
+			}
+			for len(gaps) == 0 && len(prefix) > 0 {
+				// We don't have enough peers, but we have covered the prefix. Let's
+				// cover a shorter prefix.
+				prefix = prefix[:len(prefix)-1]
+				gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
+			}
+			if len(gaps) == 0 {
+				// We don't have enough peers, but we have covered the whole keyspace.
+				break
 			}
 		}
-		// Push coveredPrefix to stack
-		coveredPrefixesStack = append(coveredPrefixesStack, coveredPrefix)
-		// Flip last bit of last covered prefix
-		nextPrefix = keyspace.FlipLastBit(coveredPrefixesStack[len(coveredPrefixesStack)-1])
-	}
+		logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 
+		nextPrefix = gaps[0]
+	}
+	if i == maxExplorationPrefixSearches {
+		logger.Warnw("closestPeersToPrefix needed more than maxPrefixSearches iterations", "gaps", gaps)
+	}
 	peers := make([]peer.ID, 0, len(allClosestPeers))
 	for p := range allClosestPeers {
 		peers = append(peers, p)
 	}
-	logger.Debugf("Region %s exploration required %d requests to discover %d peers in %s", prefix, i, len(allClosestPeers), time.Since(startTime))
+	logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
 	return peers, nil
 }
 
@@ -1584,7 +1566,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		s.scheduleLk.Unlock()
 		return err
 	}
-	gaps := keyspace.TrieGaps(s.schedule)
+	gaps := keyspace.TrieGaps(s.schedule, "", s.order)
 	s.scheduleLk.Unlock()
 
 	missing := make([]bitstr.Key, 0, len(gaps))

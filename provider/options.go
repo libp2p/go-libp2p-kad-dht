@@ -53,51 +53,49 @@ type config struct {
 	maxProvideConnsPerWorker int
 }
 
-func (cfg *config) apply(opts ...Option) error {
-	for i, o := range opts {
-		if err := o(cfg); err != nil {
-			return fmt.Errorf("reprovider dht option %d failed: %w", i, err)
-		}
-	}
-	return nil
-}
-
-func (cfg *config) validate() error {
-	if len(cfg.peerid) == 0 {
-		return errors.New("reprovider config: peer id is required")
-	}
-	if cfg.router == nil {
-		return errors.New("reprovider config: router is required")
-	}
-	if cfg.msgSender == nil {
-		return errors.New("reprovider config: message sender is required")
-	}
-	if cfg.selfAddrs == nil {
-		return errors.New("reprovider config: self addrs func is required")
-	}
-	if cfg.dedicatedPeriodicWorkers+cfg.dedicatedBurstWorkers > cfg.maxWorkers {
-		return errors.New("reprovider config: total dedicated workers exceed max workers")
-	}
-	return nil
-}
-
 type Option func(opt *config) error
 
-var DefaultConfig = func(cfg *config) error {
-	cfg.replicationFactor = amino.DefaultBucketSize
-	cfg.reprovideInterval = amino.DefaultReprovideInterval
-	cfg.maxReprovideDelay = DefaultMaxReprovideDelay
-	cfg.offlineDelay = DefaultOfflineDelay
-	cfg.connectivityCheckOnlineInterval = DefaultConnectivityCheckOnlineInterval
+// getOpts creates a config and applies Options to it.
+func getOpts(opts []Option) (config, error) {
+	cfg := config{
+		replicationFactor:               amino.DefaultBucketSize,
+		reprovideInterval:               amino.DefaultReprovideInterval,
+		maxReprovideDelay:               DefaultMaxReprovideDelay,
+		offlineDelay:                    DefaultOfflineDelay,
+		connectivityCheckOnlineInterval: DefaultConnectivityCheckOnlineInterval,
 
-	cfg.maxWorkers = 4
-	cfg.dedicatedPeriodicWorkers = 2
-	cfg.dedicatedBurstWorkers = 1
-	cfg.maxProvideConnsPerWorker = 20
+		maxWorkers:               4,
+		dedicatedPeriodicWorkers: 2,
+		dedicatedBurstWorkers:    1,
+		maxProvideConnsPerWorker: 20,
 
-	cfg.addLocalRecord = func(mh mh.Multihash) error { return nil }
+		addLocalRecord: func(mh mh.Multihash) error { return nil },
+	}
 
-	return nil
+	// Apply options
+	for i, opt := range opts {
+		if err := opt(&cfg); err != nil {
+			return config{}, fmt.Errorf("reprovider dht option %d error: %s", i, err)
+		}
+	}
+
+	// Validate config
+	if len(cfg.peerid) == 0 {
+		return config{}, errors.New("reprovider config: peer id is required")
+	}
+	if cfg.router == nil {
+		return config{}, errors.New("reprovider config: router is required")
+	}
+	if cfg.msgSender == nil {
+		return config{}, errors.New("reprovider config: message sender is required")
+	}
+	if cfg.selfAddrs == nil {
+		return config{}, errors.New("reprovider config: self addrs func is required")
+	}
+	if cfg.dedicatedPeriodicWorkers+cfg.dedicatedBurstWorkers > cfg.maxWorkers {
+		return config{}, errors.New("reprovider config: total dedicated workers exceed max workers")
+	}
+	return cfg, nil
 }
 
 // WithReplicationFactor sets the replication factor for provider records. It

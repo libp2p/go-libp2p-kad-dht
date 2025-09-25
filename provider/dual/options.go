@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -38,53 +37,44 @@ type config struct {
 
 type Option func(opt *config) error
 
-func (cfg *config) apply(opts ...Option) error {
-	for i, o := range opts {
-		if err := o(cfg); err != nil {
-			return fmt.Errorf("dual dht provider option %d failed: %w", i, err)
+// getOpts creates a config and applies Options to it.
+func getOpts(opts []Option, d *dual.DHT) (config, error) {
+	cfg := config{
+		reprovideInterval: [2]time.Duration{amino.DefaultReprovideInterval, amino.DefaultReprovideInterval},
+		maxReprovideDelay: [2]time.Duration{provider.DefaultMaxReprovideDelay, provider.DefaultMaxReprovideDelay},
+
+		offlineDelay:                    [2]time.Duration{provider.DefaultOfflineDelay, provider.DefaultOfflineDelay},
+		connectivityCheckOnlineInterval: [2]time.Duration{provider.DefaultConnectivityCheckOnlineInterval, provider.DefaultConnectivityCheckOnlineInterval},
+
+		maxWorkers:               [2]int{4, 4},
+		dedicatedPeriodicWorkers: [2]int{2, 2},
+		dedicatedBurstWorkers:    [2]int{1, 1},
+		maxProvideConnsPerWorker: [2]int{20, 20},
+	}
+
+	// Apply options
+	for i, opt := range opts {
+		if err := opt(&cfg); err != nil {
+			return config{}, fmt.Errorf("dual dht provider option %d failed: %w", i, err)
 		}
 	}
-	return nil
-}
 
-func (cfg *config) resolveDefaults(d *dual.DHT) {
+	// Resolve defaults
 	if cfg.msgSenders[lanID] == nil {
 		cfg.msgSenders[lanID] = d.LAN.MessageSender()
 	}
 	if cfg.msgSenders[wanID] == nil {
 		cfg.msgSenders[wanID] = d.WAN.MessageSender()
 	}
-}
 
-func (c *config) validate() error {
-	if c.dedicatedPeriodicWorkers[lanID]+c.dedicatedBurstWorkers[lanID] > c.maxWorkers[lanID] {
-		return errors.New("provider config: total dedicated workers exceed max workers")
+	// Validate config
+	if cfg.dedicatedPeriodicWorkers[lanID]+cfg.dedicatedBurstWorkers[lanID] > cfg.maxWorkers[lanID] {
+		return config{}, errors.New("provider config: total dedicated workers exceed max workers")
 	}
-	if c.dedicatedPeriodicWorkers[wanID]+c.dedicatedBurstWorkers[wanID] > c.maxWorkers[wanID] {
-		return errors.New("provider config: total dedicated workers exceed max workers")
+	if cfg.dedicatedPeriodicWorkers[wanID]+cfg.dedicatedBurstWorkers[wanID] > cfg.maxWorkers[wanID] {
+		return config{}, errors.New("provider config: total dedicated workers exceed max workers")
 	}
-	return nil
-}
-
-var DefaultConfig = func(cfg *config) error {
-	var err error
-	cfg.keystore, err = keystore.NewKeystore(ds.NewMapDatastore())
-	if err != nil {
-		return err
-	}
-
-	cfg.reprovideInterval = [2]time.Duration{amino.DefaultReprovideInterval, amino.DefaultReprovideInterval}
-	cfg.maxReprovideDelay = [2]time.Duration{provider.DefaultMaxReprovideDelay, provider.DefaultMaxReprovideDelay}
-
-	cfg.offlineDelay = [2]time.Duration{provider.DefaultOfflineDelay, provider.DefaultOfflineDelay}
-	cfg.connectivityCheckOnlineInterval = [2]time.Duration{provider.DefaultConnectivityCheckOnlineInterval, provider.DefaultConnectivityCheckOnlineInterval}
-
-	cfg.maxWorkers = [2]int{4, 4}
-	cfg.dedicatedPeriodicWorkers = [2]int{2, 2}
-	cfg.dedicatedBurstWorkers = [2]int{1, 1}
-	cfg.maxProvideConnsPerWorker = [2]int{20, 20}
-
-	return nil
+	return cfg, nil
 }
 
 func WithKeystore(ks keystore.Keystore) Option {

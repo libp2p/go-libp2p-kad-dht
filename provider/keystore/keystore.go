@@ -303,6 +303,11 @@ func empty(ctx context.Context, d ds.Batching, batchSize int) error {
 			if err = batch.Commit(ctx); err != nil {
 				return fmt.Errorf("cannot commit keystore updates: %w", err)
 			}
+			// Create a new batch after committing the previous one
+			batch, err = d.Batch(ctx)
+			if err != nil {
+				return err
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("cannot read query result from keystore: %w", err)
@@ -312,8 +317,10 @@ func empty(ctx context.Context, d ds.Batching, batchSize int) error {
 		}
 		writeCount++
 	}
-	if err = batch.Commit(ctx); err != nil {
-		return fmt.Errorf("cannot commit keystore updates: %w", err)
+	if writeCount > 0 {
+		if err = batch.Commit(ctx); err != nil {
+			return fmt.Errorf("cannot commit keystore updates: %w", err)
+		}
 	}
 	if err = d.Sync(ctx, ds.NewKey("")); err != nil {
 		return fmt.Errorf("cannot sync datastore: %w", err)

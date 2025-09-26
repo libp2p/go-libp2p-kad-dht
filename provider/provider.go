@@ -551,6 +551,7 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of keys.
 func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
+	keys := []mh.Multihash{k}
 	// Add provider record to local provider store.
 	s.addLocalRecord(k)
 	// Get peers to which the record will be allocated.
@@ -562,11 +563,11 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
 	keysAllocations := make(map[peer.ID][]mh.Multihash)
 	for _, p := range peers {
-		keysAllocations[p] = []mh.Multihash{k}
+		keysAllocations[p] = keys
 	}
 	err = s.sendProviderRecords(keysAllocations, addrInfo)
 	if err == nil {
-		logger.Debugw("sent provider record", "prefix", coveredPrefix, "count", 1, "keys", []mh.Multihash{k})
+		logger.Debugw("sent provider record", "prefix", coveredPrefix, "count", 1, "keys", keys)
 	}
 	return coveredPrefix, err
 }

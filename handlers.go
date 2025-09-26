@@ -256,16 +256,16 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 		return nil, errors.New("handleFindPeer with empty key")
 	}
 
-	// if looking for self... special case where we send it on CloserPeers.
 	targetPid := peer.ID(pmes.GetKey())
 	closest := dht.closestPeersToQuery(pmes, from, dht.bucketSize)
 
 	// Prepend targetPid to the front of the list if not already present.
-	// targetPid is always in first position (if present), since it is the
-	// closest key to itself.
+	// targetPid is always the closest key to itself.
 	//
-	// Include the targetPid in the response (if present in peerstore) even if it
-	// is: 1) self 2) the requester or 3) not a DHT server.
+	// Per IPFS Kademlia DHT spec: FIND_PEER has a special exception where the
+	// target peer MUST be included in the response (if present in peerstore),
+	// even if it is self, the requester, or not a DHT server. This allows peers
+	// to discover multiaddresses for any peer, not just DHT servers.
 	if len(closest) == 0 || closest[0] != targetPid {
 		closest = append([]peer.ID{targetPid}, closest...)
 	}

@@ -747,10 +747,14 @@ func (dht *IpfsDHT) FindLocal(ctx context.Context, id peer.ID) peer.AddrInfo {
 }
 
 // closestPeersToQuery returns the closest peers to the target key from the
-// local routing table, filtering out the 'from' peer.ID.
+// local routing table, filtering out self and the requester's peer ID.
+//
+// Per the IPFS Kademlia DHT spec, servers SHOULD NOT include themselves or the
+// requester in FIND_NODE responses (except for FIND_PEER when the target is
+// self or the requester, which is handled separately in handleFindPeer).
 func (dht *IpfsDHT) closestPeersToQuery(pmes *pb.Message, from peer.ID, count int) []peer.ID {
-	// Get count+1 closest peers to target key, so that we can remove 'from' if
-	// included, and still return 'count' peers.
+	// Get count+1 closest peers to target key, so that we can filter out 'from'
+	// (and potentially 'self' if it somehow appears) and still return 'count' peers.
 	closestPeers := dht.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count+1)
 
 	if len(closestPeers) == 0 {
@@ -760,12 +764,19 @@ func (dht *IpfsDHT) closestPeersToQuery(pmes *pb.Message, from peer.ID, count in
 
 	filtered := make([]peer.ID, 0, min(len(closestPeers), count))
 	for _, p := range closestPeers {
-		// Don't include requester in response.
-		if p != from {
-			filtered = append(filtered, p)
-			if len(filtered) >= count {
-				break
-			}
+		// Per spec: don't include self in responses. This should never happen since
+		// self should not be in the routing table, but check defensively.
+		if p == dht.self {
+			logger.Debugw("self found in routing table, skipping", "key", string(pmes.GetKey()))
+			continue
+		}
+		// Per spec: don't include requester in responses (exception handled in handleFindPeer).
+		if p == from {
+			continue
+		}
+		filtered = append(filtered, p)
+		if len(filtered) >= count {
+			break
 		}
 	}
 	return filtered

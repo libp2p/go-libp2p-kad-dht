@@ -551,6 +551,7 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
 // (typically 1 or 2), because exploring the keyspace would add too much
 // overhead for a small number of keys.
 func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
+	keys := []mh.Multihash{k}
 	// Add provider record to local provider store.
 	s.addLocalRecord(k)
 	// Get peers to which the record will be allocated.
@@ -562,9 +563,13 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
 	keysAllocations := make(map[peer.ID][]mh.Multihash)
 	for _, p := range peers {
-		keysAllocations[p] = []mh.Multihash{k}
+		keysAllocations[p] = keys
 	}
-	return coveredPrefix, s.sendProviderRecords(keysAllocations, addrInfo)
+	err = s.sendProviderRecords(keysAllocations, addrInfo)
+	if err == nil {
+		logger.Debugw("sent provider record", "prefix", coveredPrefix, "count", 1, "keys", keys)
+	}
+	return coveredPrefix, err
 }
 
 // exploreSwarm finds all peers whose kademlia identifier matches `prefix` in
@@ -1100,6 +1105,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	if len(keys) == 0 {
 		return
 	}
+	logger.Debugw("batchProvide called", "prefix", prefix, "count", len(keys))
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the
@@ -1325,7 +1331,9 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			}
 			continue
 		}
-		s.provideCounter.Add(s.ctx, int64(len(allKeys)))
+		keyCount := len(allKeys)
+		s.provideCounter.Add(s.ctx, int64(keyCount))
+		logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)
@@ -1415,25 +1423,6 @@ func (s *SweepingProvider) Clear() int {
 		return 0
 	}
 	return s.provideQueue.Clear()
-}
-
-// ProvideState encodes the current relationship between this node and `key`.
-type ProvideState uint8
-
-const (
-	StateUnknown  ProvideState = iota // we have no record of the key
-	StateQueued                       // key is queued to be provided
-	StateProvided                     // key was provided at least once
-)
-
-// ProvideStatus reports the provider’s view of a key.
-//
-// When `state == StateProvided`, `lastProvide` is the wall‑clock time of the
-// most recent successful provide operation (UTC).
-// For `StateQueued` or `StateUnknown`, `lastProvide` is the zero `time.Time`.
-func (s *SweepingProvider) ProvideStatus(key mh.Multihash) (state ProvideState, lastProvide time.Time) {
-	// TODO: implement me
-	return StateUnknown, time.Time{}
 }
 
 // AddToSchedule makes sure the prefixes associated with the supplied keys are

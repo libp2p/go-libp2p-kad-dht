@@ -564,7 +564,11 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash) (bitstr.Key, error) {
 	for _, p := range peers {
 		keysAllocations[p] = []mh.Multihash{k}
 	}
-	return coveredPrefix, s.sendProviderRecords(keysAllocations, addrInfo)
+	err = s.sendProviderRecords(keysAllocations, addrInfo)
+	if err == nil {
+		logger.Debugw("sent provider record", "prefix", coveredPrefix, "count", 1, "keys", []mh.Multihash{k})
+	}
+	return coveredPrefix, err
 }
 
 // exploreSwarm finds all peers whose kademlia identifier matches `prefix` in
@@ -1113,6 +1117,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	if len(keys) == 0 {
 		return
 	}
+	logger.Debugw("batchProvide called", "prefix", prefix, "count", len(keys))
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the
@@ -1340,7 +1345,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		}
 		keyCount := len(allKeys)
 		s.provideCounter.Add(s.ctx, int64(keyCount))
-		logger.Debugw("sent provider records", "count", keyCount, "keys", allKeys)
+		logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

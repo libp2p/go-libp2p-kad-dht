@@ -320,18 +320,6 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 	for i := range 2 {
 		// Assign all items from branch i
 
-		matchingItemsBranch := items.Branch(i)
-		matchingItems := AllValues(matchingItemsBranch, bit256.ZeroKey())
-		if len(matchingItems) == 0 {
-			if !items.IsNonEmptyLeaf() || int((*items.Key()).Bit(depth)) != i {
-				// items' current branch is empty, skip it
-				continue
-			}
-			// items' current branch contains a single leaf
-			matchingItems = []V0{items.Data()}
-			matchingItemsBranch = items
-		}
-
 		matchingDestsBranch := dests.Branch(i)
 		otherDestsBranch := dests.Branch(1 - i)
 		matchingDests := AllValues(matchingDestsBranch, bit256.ZeroKey())
@@ -354,7 +342,21 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 			}
 		}
 
+		matchingItemsBranch := items.Branch(i)
+		if matchingItemsBranch == nil || matchingItemsBranch.IsEmptyLeaf() {
+			// No matching items
+			if !items.IsNonEmptyLeaf() || int((*items.Key()).Bit(depth)) != i {
+				// items' current branch is empty, skip it
+				continue
+			}
+			// items' current branch contains a single leaf
+			matchingItemsBranch = items
+		}
 		if nMatchingDests := len(matchingDests); nMatchingDests <= k {
+			matchingItems := AllValues(matchingItemsBranch, bit256.ZeroKey())
+			if len(matchingItems) == 0 {
+				matchingItems = []V0{items.Data()}
+			}
 			// Allocate matching items to the matching dests branch
 			for _, dest := range matchingDests {
 				m[dest] = append(m[dest], matchingItems...)

@@ -408,11 +408,13 @@ func RegionsFromPeers(peers []peer.ID, regionSize int, order bit256.Key) ([]Regi
 	peersTrie := trie.New[bit256.Key, peer.ID]()
 	minCpl := KeyLen
 	firstPeerKey := PeerIDToBit256(peers[0])
-	for _, p := range peers {
+	peerEntries := make([]trie.Entry[bit256.Key, peer.ID], len(peers))
+	for i, p := range peers {
 		k := PeerIDToBit256(p)
-		peersTrie.Add(k, p)
+		peerEntries[i] = trie.Entry[bit256.Key, peer.ID]{Key: k, Data: p}
 		minCpl = min(minCpl, firstPeerKey.CommonPrefixLength(k))
 	}
+	peersTrie.AddMany(peerEntries...)
 	commonPrefix := bitstr.Key(key.BitString(firstPeerKey)[:minCpl])
 	regions := extractMinimalRegions(peersTrie, commonPrefix, regionSize, order)
 	return regions, commonPrefix
@@ -440,14 +442,18 @@ func AssignKeysToRegions(regions []Region, keys []mh.Multihash) []Region {
 	for i := range regions {
 		regions[i].Keys = trie.New[bit256.Key, mh.Multihash]()
 	}
+	keyEntriesByRegion := make(map[bitstr.Key][]trie.Entry[bit256.Key, mh.Multihash], len(regions))
 	for _, k := range keys {
 		h := MhToBit256(k)
-		for i, r := range regions {
+		for _, r := range regions {
 			if IsPrefix(r.Prefix, h) {
-				regions[i].Keys.Add(h, k)
+				keyEntriesByRegion[r.Prefix] = append(keyEntriesByRegion[r.Prefix], trie.Entry[bit256.Key, mh.Multihash]{Key: h, Data: k})
 				break
 			}
 		}
+	}
+	for _, r := range regions {
+		r.Keys.AddMany(keyEntriesByRegion[r.Prefix]...)
 	}
 	return regions
 }

@@ -28,7 +28,7 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-multistream v0.6.1
-	github.com/probe-lab/go-libdht v0.2.1
+	github.com/probe-lab/go-libdht v0.2.2-0.20251002120700-4b3bd9833237
 	github.com/stretchr/testify v1.11.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opentelemetry.io/otel v1.38.0

@@ -21,46 +21,28 @@ import (
 
 func TestAllEntries(t *testing.T) {
 	tr := trie.New[bitstr.Key, string]()
-	elements := []struct {
-		key   bitstr.Key
-		fruit string
-	}{
-		{
-			key:   bitstr.Key("000"),
-			fruit: "apple",
-		},
-		{
-			key:   bitstr.Key("010"),
-			fruit: "banana",
-		},
-		{
-			key:   bitstr.Key("101"),
-			fruit: "cherry",
-		},
-		{
-			key:   bitstr.Key("111"),
-			fruit: "durian",
-		},
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
 	}
-
-	for _, e := range elements {
-		tr.Add(e.key, e.fruit)
-	}
+	tr.AddMany(entries...)
 
 	// Test in 0 -> 1 order
-	entries := AllEntries(tr, bitstr.Key("000"))
-	require.Equal(t, len(elements), len(entries))
-	for i := range entries {
-		require.Equal(t, entries[i].Key, elements[i].key)
-		require.Equal(t, entries[i].Data, elements[i].fruit)
+	result := AllEntries(tr, bitstr.Key("000"))
+	require.Equal(t, len(entries), len(result))
+	for i := range result {
+		require.Equal(t, result[i].Key, entries[i].Key)
+		require.Equal(t, result[i].Data, entries[i].Data)
 	}
 
 	// Test in reverse order (1 -> 0)
-	entries = AllEntries(tr, bitstr.Key("111"))
-	require.Equal(t, len(elements), len(entries))
-	for i := range entries {
-		require.Equal(t, entries[i].Key, elements[len(elements)-1-i].key)
-		require.Equal(t, entries[i].Data, elements[len(elements)-1-i].fruit)
+	result = AllEntries(tr, bitstr.Key("111"))
+	require.Equal(t, len(entries), len(result))
+	for i := range result {
+		require.Equal(t, result[i].Key, entries[len(entries)-1-i].Key)
+		require.Equal(t, result[i].Data, entries[len(entries)-1-i].Data)
 	}
 }
 
@@ -71,9 +53,11 @@ func TestFindPrefixOfKey(t *testing.T) {
 		"00",
 		"10",
 	}
-	for _, k := range keys {
-		tr.Add(k, struct{}{})
+	entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
+	for i, k := range keys {
+		entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
 	}
+	tr.AddMany(entries...)
 
 	match, ok := FindPrefixOfKey(tr, bitstr.Key("00"))
 	require.True(t, ok)
@@ -97,9 +81,11 @@ func TestFindPrefixOfTooShortKey(t *testing.T) {
 		"0010",
 		"0011",
 	}
-	for _, k := range keys {
-		tr.Add(k, struct{}{})
+	entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
+	for i, k := range keys {
+		entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
 	}
+	tr.AddMany(entries...)
 	_, ok := FindPrefixOfKey(tr, bitstr.Key("000"))
 	require.False(t, ok)
 }
@@ -121,9 +107,11 @@ func TestFindSubtrie(t *testing.T) {
 	_, ok := FindSubtrie(tr, bitstr.Key("0000"))
 	require.False(t, ok)
 
-	for _, k := range keys {
-		tr.Add(k, struct{}{})
+	entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
+	for i, k := range keys {
+		entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
 	}
+	tr.AddMany(entries...)
 
 	subtrie, ok := FindSubtrie(tr, bitstr.Key(""))
 	require.True(t, ok)
@@ -171,12 +159,14 @@ func TestNextNonEmptyLeafFullTrie(t *testing.T) {
 	tr := trie.New[bitstr.Key, any]()
 	nKeys := 1 << bitlen
 	binaryKeys := make([]bitstr.Key, 0, nKeys)
+	entries := make([]trie.Entry[bitstr.Key, any], 0, nKeys)
 	for i := range nKeys {
 		binary := fmt.Sprintf("%0*b", bitlen, i)
 		k := bitstr.Key(binary)
-		tr.Add(k, struct{}{})
+		entries = append(entries, trie.Entry[bitstr.Key, any]{Key: k, Data: struct{}{}})
 		binaryKeys = append(binaryKeys, k)
 	}
+	tr.AddMany(entries...)
 
 	order := binaryKeys[0]
 	t.Run("OrderZero", func(t *testing.T) {
@@ -211,13 +201,15 @@ func TestNextNonEmptyLeafSparseTrie(t *testing.T) {
 	tr := trie.New[bitstr.Key, any]()
 	nKeys := 1 << (bitlen - sparsity)
 	binaryKeys := make([]bitstr.Key, 0, nKeys)
+	entries := make([]trie.Entry[bitstr.Key, any], 0, nKeys)
 	suffix := (1 << sparsity) - 1
 	for i := range nKeys {
 		binary := fmt.Sprintf("%0*b", bitlen, i*(1<<sparsity)+suffix)
 		k := bitstr.Key(binary)
-		tr.Add(k, struct{}{})
+		entries = append(entries, trie.Entry[bitstr.Key, any]{Key: k, Data: struct{}{}})
 		binaryKeys = append(binaryKeys, k)
 	}
+	tr.AddMany(entries...)
 
 	order := bitstr.Key(fmt.Sprintf("%0*b", bitlen, 0))
 	t.Run("OrderZero", func(t *testing.T) {
@@ -388,9 +380,11 @@ func TestPruneSubtrie(t *testing.T) {
 
 	resetTrie := func() {
 		*tr = trie.Trie[bitstr.Key, struct{}]{}
-		for _, k := range keys {
-			tr.Add(k, struct{}{})
+		entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
+		for i, k := range keys {
+			entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
 		}
+		tr.AddMany(entries...)
 		require.Equal(t, len(keys), tr.Size())
 	}
 
@@ -436,9 +430,11 @@ func TestPruneSubtrie(t *testing.T) {
 func TestTrieGaps(t *testing.T) {
 	initTrie := func(keys []bitstr.Key) *trie.Trie[bitstr.Key, struct{}] {
 		tr := trie.New[bitstr.Key, struct{}]()
-		for _, k := range keys {
-			tr.Add(k, struct{}{})
+		entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
+		for i, k := range keys {
+			entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
 		}
+		tr.AddMany(entries...)
 		return tr
 	}
 	t.Run("Gap in empty trie", func(t *testing.T) {
@@ -676,16 +672,20 @@ func TestAllocateToKClosestSingle(t *testing.T) {
 		"1110",
 	}
 	dests := trie.New[bitstr.Key, bitstr.Key]()
-	for _, k := range destKeys {
-		dests.Add(k, k)
+	destEntries := make([]trie.Entry[bitstr.Key, bitstr.Key], len(destKeys))
+	for i, k := range destKeys {
+		destEntries[i] = trie.Entry[bitstr.Key, bitstr.Key]{Key: k, Data: k}
 	}
+	dests.AddMany(destEntries...)
 	itemKeys := []bitstr.Key{
 		"0000",
 	}
 	items := trie.New[bitstr.Key, bitstr.Key]()
-	for _, k := range itemKeys {
-		items.Add(k, k)
+	itemEntries := make([]trie.Entry[bitstr.Key, bitstr.Key], len(itemKeys))
+	for i, k := range itemKeys {
+		itemEntries[i] = trie.Entry[bitstr.Key, bitstr.Key]{Key: k, Data: k}
 	}
+	items.AddMany(itemEntries...)
 	allocs := AllocateToKClosest(items, dests, 3)
 
 	// "0000" should be assigned to ["0000", "0001", "0011"]
@@ -709,9 +709,11 @@ func TestAllocateToKClosestBasic(t *testing.T) {
 		"1110",
 	}
 	dests := trie.New[bitstr.Key, bitstr.Key]()
-	for _, k := range destKeys {
-		dests.Add(k, k)
+	destEntries := make([]trie.Entry[bitstr.Key, bitstr.Key], len(destKeys))
+	for i, k := range destKeys {
+		destEntries[i] = trie.Entry[bitstr.Key, bitstr.Key]{Key: k, Data: k}
 	}
+	dests.AddMany(destEntries...)
 	itemKeys := []bitstr.Key{
 		"0000",
 		"0011",
@@ -722,9 +724,11 @@ func TestAllocateToKClosestBasic(t *testing.T) {
 		"1101",
 	}
 	items := trie.New[bitstr.Key, bitstr.Key]()
-	for _, k := range itemKeys {
-		items.Add(k, k)
+	itemEntries := make([]trie.Entry[bitstr.Key, bitstr.Key], len(itemKeys))
+	for i, k := range itemKeys {
+		itemEntries[i] = trie.Entry[bitstr.Key, bitstr.Key]{Key: k, Data: k}
 	}
+	items.AddMany(itemEntries...)
 	allocs := AllocateToKClosest(items, dests, 3)
 
 	expected := map[bitstr.Key][]bitstr.Key{
@@ -745,9 +749,11 @@ func TestAllocateToKClosestSingleDest(t *testing.T) {
 		"0000",
 	}
 	dests := trie.New[bitstr.Key, bitstr.Key]()
-	for _, k := range destKeys {
-		dests.Add(k, k)
+	destEntries := make([]trie.Entry[bitstr.Key, bitstr.Key], len(destKeys))
+	for i, k := range destKeys {
+		destEntries[i] = trie.Entry[bitstr.Key, bitstr.Key]{Key: k, Data: k}
 	}
+	dests.AddMany(destEntries...)
 	itemKeys := []bitstr.Key{
 		"0000",
 		"0011",
@@ -758,9 +764,11 @@ func TestAllocateToKClosestSingleDest(t *testing.T) {
 		"1101",
 	}
 	items := trie.New[bitstr.Key, bitstr.Key]()
-	for _, k := range itemKeys {
-		items.Add(k, k)
+	itemEntries := make([]trie.Entry[bitstr.Key, bitstr.Key], len(itemKeys))
+	for i, k := range itemKeys {
+		itemEntries[i] = trie.Entry[bitstr.Key, bitstr.Key]{Key: k, Data: k}
 	}
+	items.AddMany(itemEntries...)
 	allocs := AllocateToKClosest(items, dests, 3)
 
 	require.Len(t, allocs, 1)
@@ -781,15 +789,19 @@ func TestAllocateToKClosest(t *testing.T) {
 	replication := 12
 
 	items := trie.New[bit256.Key, bit256.Key]()
-	for range nItems {
+	itemEntries := make([]trie.Entry[bit256.Key, bit256.Key], nItems)
+	for idx := range nItems {
 		i := genRandBit256()
-		items.Add(i, i)
+		itemEntries[idx] = trie.Entry[bit256.Key, bit256.Key]{Key: i, Data: i}
 	}
+	items.AddMany(itemEntries...)
 	dests := trie.New[bit256.Key, bit256.Key]()
-	for range nDests {
+	destEntries := make([]trie.Entry[bit256.Key, bit256.Key], nDests)
+	for idx := range nDests {
 		d := genRandBit256()
-		dests.Add(d, d)
+		destEntries[idx] = trie.Entry[bit256.Key, bit256.Key]{Key: d, Data: d}
 	}
+	dests.AddMany(destEntries...)
 
 	allocs := AllocateToKClosest(items, dests, replication)
 
@@ -889,11 +901,13 @@ func TestExtractMinimalRegions(t *testing.T) {
 	// Test behavior when trie is empty
 	regions := extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Nil(t, regions)
+	peerEntries := make([]trie.Entry[bit256.Key, peer.ID], len(pids))
 	for i := range pids {
 		pid := genPeerWithPrefix(prefixes[i])
 		pids[i] = pid
-		peersTrie.Add(PeerIDToBit256(pid), pid)
+		peerEntries[i] = trie.Entry[bit256.Key, peer.ID]{Key: PeerIDToBit256(pid), Data: pid}
 	}
+	peersTrie.AddMany(peerEntries...)
 
 	regions = extractMinimalRegions(peersTrie, bitstr.Key(""), replicationFactor, order)
 	require.Len(t, regions, 3)

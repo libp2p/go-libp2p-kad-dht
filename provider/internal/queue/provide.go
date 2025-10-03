@@ -29,7 +29,7 @@ type ProvideQueue struct {
 	mu sync.Mutex
 
 	queue prefixQueue
-	keys  *trie.Trie[bit256.Key, mh.Multihash] // used to store keys in the queue
+	keys  *trie.Trie[bit256.Key, mh.Multihash] // stores keys currently in the queue
 }
 
 // NewProvideQueue creates a new ProvideQueue instance.
@@ -163,14 +163,22 @@ func (q *ProvideQueue) Remove(keys ...mh.Multihash) {
 func (q *ProvideQueue) IsEmpty() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.queue.Size() == 0
+	return q.keys.IsEmptyLeaf()
 }
 
-// Size returns the number of regions containing at least one key in the queue.
+// Size returns the number of keys currently in the queue.
 func (q *ProvideQueue) Size() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.keys.Size()
+}
+
+// NumRegions returns the number of regions containing at least one key
+// currently in the queue.
+func (q *ProvideQueue) NumRegions() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.queue.Size()
 }
 
 // Clear removes all keys from the queue and returns the number of keys that

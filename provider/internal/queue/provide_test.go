@@ -56,6 +56,8 @@ func TestProvideEnqueueSimple(t *testing.T) {
 	}
 	// Verify the count of multihashes matches
 	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, q.Size())
+	// Verify count of regions in the queue
+	require.Equal(t, len(prefixes), q.NumRegions())
 }
 
 func TestProvideEnqueueOverlapping(t *testing.T) {
@@ -73,6 +75,7 @@ func TestProvideEnqueueOverlapping(t *testing.T) {
 	}
 
 	require.Equal(t, 1, q.queue.prefixes.Size()) // Only shortest prefix should remain
+	require.Equal(t, 1, q.NumRegions())
 	require.Equal(t, 1, q.queue.queue.Len())
 	require.GreaterOrEqual(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[0] }), 0) // "000" is in queue
 	require.Negative(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[1] }))          // "0000" is NOT in queue
@@ -90,6 +93,7 @@ func TestProvideEnqueueOverlapping(t *testing.T) {
 	}
 
 	require.Equal(t, 2, q.queue.prefixes.Size()) // only "000" and "111" should remain
+	require.Equal(t, 2, q.NumRegions())
 	require.Equal(t, 2, q.queue.queue.Len())
 	require.GreaterOrEqual(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[1] }), 0) // "111" is in queue
 	require.Negative(t, q.queue.queue.Index(func(k bitstr.Key) bool { return k == prefixes[0] }))          // "1111" is NOT in queue

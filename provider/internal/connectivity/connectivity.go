@@ -43,6 +43,8 @@ type ConnectivityChecker struct {
 
 	lastCheck           time.Time
 	onlineCheckInterval time.Duration // minimum check interval when online
+	lastStateChange     time.Time
+	lastStateChangeLk   sync.Mutex
 
 	checkFunc func() bool // function to check whether node is online
 
@@ -117,6 +119,20 @@ func (c *ConnectivityChecker) IsOnline() bool {
 	return c.online.Load()
 }
 
+// LastStateChange returns the timestamp of the last state change.
+func (c *ConnectivityChecker) LastStateChange() time.Time {
+	c.lastStateChangeLk.Lock()
+	defer c.lastStateChangeLk.Unlock()
+	return c.lastStateChange
+}
+
+// stateChanged should be called whenever the connectivity state changes.
+func (c *ConnectivityChecker) stateChanged() {
+	c.lastStateChangeLk.Lock()
+	defer c.lastStateChangeLk.Unlock()
+	c.lastStateChange = time.Now()
+}
+
 // TriggerCheck triggers an asynchronous connectivity check.
 //
 // * If a check is already running, does nothing.
@@ -148,6 +164,7 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		}
 
 		// Online -> Disconnected
+		c.stateChanged()
 		c.online.Store(false)
 
 		// Start periodic checks until node comes back Online
@@ -161,8 +178,9 @@ func (c *ConnectivityChecker) probeLoop(init bool) {
 	var offlineC <-chan time.Time
 	if !init {
 		if c.offlineDelay == 0 {
+			// Online -> Offline
+			c.stateChanged()
 			if c.onOffline != nil {
-				// Online -> Offline
 				c.onOffline()
 			}
 		} else {
@@ -187,6 +205,7 @@ func (c *ConnectivityChecker) probeLoop(init bool) {
 			timer.Reset(delay)
 		case <-offlineC:
 			// Disconnected -> Offline
+			c.stateChanged()
 			if c.onOffline != nil {
 				c.onOffline()
 			}
@@ -205,6 +224,7 @@ func (c *ConnectivityChecker) probe() bool {
 			c.online.Store(true)
 
 			c.lastCheck = time.Now()
+			c.stateChanged()
 			if c.onOnline != nil {
 				c.onOnline()
 			}

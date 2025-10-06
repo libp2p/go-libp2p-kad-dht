@@ -169,14 +169,19 @@ func TestKeysAllocationsToPeers(t *testing.T) {
 
 	mhs := genMultihashes(nKeys)
 	keysTrie := trie.New[bit256.Key, mh.Multihash]()
-	for _, c := range mhs {
-		keysTrie.Add(keyspace.MhToBit256(c), c)
+	keyEntries := make([]trie.Entry[bit256.Key, mh.Multihash], len(mhs))
+	for i, c := range mhs {
+		keyEntries[i] = trie.Entry[bit256.Key, mh.Multihash]{Key: keyspace.MhToBit256(c), Data: c}
 	}
+	keysTrie.AddMany(keyEntries...)
+
 	peers := random.Peers(nPeers)
 	peersTrie := trie.New[bit256.Key, peer.ID]()
-	for i := range peers {
-		peersTrie.Add(keyspace.PeerIDToBit256(peers[i]), peers[i])
+	peerEntries := make([]trie.Entry[bit256.Key, peer.ID], len(peers))
+	for i, p := range peers {
+		peerEntries[i] = trie.Entry[bit256.Key, peer.ID]{Key: keyspace.PeerIDToBit256(p), Data: p}
 	}
+	peersTrie.AddMany(peerEntries...)
 	keysAllocations := keyspace.AllocateToKClosest(keysTrie, peersTrie, replicationFactor)
 
 	for _, c := range mhs {
@@ -225,9 +230,11 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		nPeers := 128
 		peers := random.Peers(nPeers)
 		peersTrie := trie.New[bit256.Key, peer.ID]()
-		for _, p := range peers {
-			peersTrie.Add(keyspace.PeerIDToBit256(p), p)
+		peerEntries := make([]trie.Entry[bit256.Key, peer.ID], len(peers))
+		for i, p := range peers {
+			peerEntries[i] = trie.Entry[bit256.Key, peer.ID]{Key: keyspace.PeerIDToBit256(p), Data: p}
 		}
+		peersTrie.AddMany(peerEntries...)
 
 		router := &mockRouter{
 			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {

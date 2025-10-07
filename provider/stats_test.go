@@ -60,7 +60,6 @@ func TestStats(t *testing.T) {
 			},
 		}
 		blocked := false
-		// blockedLk := sync.Mutex{}
 		blockedCond := sync.NewCond(&sync.Mutex{})
 		msgSender := &mockMsgSender{
 			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {

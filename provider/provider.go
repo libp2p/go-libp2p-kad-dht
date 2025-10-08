@@ -1166,7 +1166,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	if keyCount == 0 {
 		return
 	}
-	logger.Debugw("batchProvide called", "prefix", prefix, "count", len(keys))
+	logger.Debugw("batchProvide called", "prefix", prefix, "count", keyCount)
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the
@@ -1177,11 +1177,11 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	startTime := time.Now()
 	s.stats.ongoingProvides.start(keyCount)
 	defer func() {
-		s.stats.ongoingProvides.finish(keyCount)
+		s.stats.ongoingProvides.finish(len(keys))
 		s.stats.provideDuration.Add(int64(time.Since(startTime)))
 	}()
 
-	if len(keys) <= individualProvideThreshold {
+	if keyCount <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
 		s.individualProvide(prefix, keys, false, false)
@@ -1198,9 +1198,10 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	// Add any key matching the covered prefix from the provide queue to the
 	// current provide batch.
 	extraKeys := s.provideQueue.DequeueMatching(coveredPrefix)
-	keys = append(keys, extraKeys...)
-	keyCount += len(extraKeys)
-	s.stats.ongoingProvides.addKeys(len(extraKeys))
+	if len(extraKeys) > 0 {
+		keys = append(keys, extraKeys...)
+		s.stats.ongoingProvides.addKeys(len(extraKeys))
+	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
@@ -1234,11 +1235,11 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	startTime := time.Now()
 	s.stats.ongoingReprovides.start(keyCount)
 	defer func() {
-		s.stats.ongoingReprovides.finish(keyCount)
+		s.stats.ongoingReprovides.finish(len(keys))
 		s.stats.reprovideDuration.Add(prefix, int64(time.Since(startTime)))
 	}()
 
-	if len(keys) <= individualProvideThreshold {
+	if keyCount <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
 		s.individualProvide(prefix, keys, true, periodicReprovide)
@@ -1281,8 +1282,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 				s.reschedulePrefix(prefix)
 			}
 		}
-		s.stats.ongoingProvides.addKeys(len(keys) - keyCount)
-		keyCount = len(keys)
+		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
 	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 

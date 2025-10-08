@@ -91,6 +91,7 @@ type Network struct {
 
 	// Keyspace coverage analysis
 	CompleteKeyspaceCoverage bool    `json:"complete_keyspace_coverage"` // whether all regions were covered
+	AvgRegionSize            float64 `json:"avg_region_size"`            // average size of keyspace regions
 	AvgHolders               float64 `json:"avg_holders"`                // average holders per key
 	ReplicationFactor        int     `json:"replication_factor"`         // target replication factor
 }

@@ -628,6 +628,7 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 	if len(peers) == 0 {
 		return nil, "", fmt.Errorf("no peers found when exploring prefix %s", prefix)
 	}
+	s.stats.regionSize.Add(int64(len(peers)))
 	regions, coveredPrefix = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order)
 	return regions, coveredPrefix, nil
 }

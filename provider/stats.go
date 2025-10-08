@@ -125,6 +125,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	peersSum := s.stats.peers.Sum()
 	peersFullyCovered := s.stats.peers.FullyCovered()
 	reachableSum := s.stats.reachable.Sum()
+	avgRegionSize := s.stats.regionSize.Avg()
 	avgHoldersAvg := s.stats.avgHolders.Avg()
 
 	keysProvidedPerMinute := 0.
@@ -158,6 +159,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		Peers:                    int(peersSum),
 		CompleteKeyspaceCoverage: peersFullyCovered,
 		Reachable:                int(reachableSum),
+		AvgRegionSize:            avgRegionSize,
 		AvgHolders:               avgHoldersAvg,
 		ReplicationFactor:        s.replicationFactor,
 	}
@@ -187,6 +189,7 @@ type operationStats struct {
 	// Network topology metrics (by keyspace region)
 	peers      timeseries.CycleStats      // number of peers per region
 	reachable  timeseries.CycleStats      // number of reachable peers per region
+	regionSize timeseries.IntTimeSeries   // average size of keyspace regions
 	avgHolders timeseries.FloatTimeSeries // average holders per key (weighted)
 
 	cycleStatsLk sync.Mutex // protects cycle-based statistics
@@ -196,6 +199,7 @@ func newOperationStats(reprovideInterval, maxDelay time.Duration) operationStats
 	return operationStats{
 		keysPerProvide:  timeseries.NewIntTimeSeries(reprovideInterval),
 		provideDuration: timeseries.NewIntTimeSeries(reprovideInterval),
+		regionSize:      timeseries.NewIntTimeSeries(reprovideInterval),
 		avgHolders:      timeseries.NewFloatTimeSeries(reprovideInterval),
 
 		keysPerReprovide:  timeseries.NewCycleStats(reprovideInterval, maxDelay),

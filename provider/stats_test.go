@@ -163,6 +163,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, 0., stats.Network.AvgHolders)
+		require.Equal(t, 0., stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		wg := sync.WaitGroup{}
@@ -230,6 +231,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, 0., stats.Network.AvgHolders)
+		require.Equal(t, 0., stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		// Sleep 1 minute, so that we provide 1 key per minute
@@ -299,6 +301,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, float64(recordsProvided), stats.Network.AvgHolders)
+		require.Equal(t, 0., stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		// Add more keys from the same keyspace region as `h` to the keystore. They
@@ -330,6 +333,9 @@ func TestStats(t *testing.T) {
 		stats = prov.Stats()
 
 		reprovidedKeys := len(newKeys) + 1
+
+		regionSizeInt := 1 << (peerPrefixBitlen - prov.cachedAvgPrefixLen)
+		regionSize := float64(regionSizeInt)
 
 		require.False(t, stats.Closed)
 		require.Equal(t, "online", stats.Connectivity.Status)
@@ -371,6 +377,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, float64(recordsProvided), stats.Network.AvgHolders)
+		require.Equal(t, regionSize, stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		// Reprovide takes 2 minutes
@@ -440,6 +447,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, len(reachablePeers), stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, float64(len(reachablePeers))/float64(len(sollicitedPeers))*float64(replicationFactor), stats.Network.AvgHolders)
+		require.Equal(t, regionSize, stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		keysPerPrefix := 3
@@ -522,6 +530,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, len(reachablePeers), stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, float64(len(reachablePeers))/float64(len(sollicitedPeers))*float64(replicationFactor), stats.Network.AvgHolders)
+		require.Equal(t, regionSize, stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		blockedCond.L.Lock()
@@ -587,6 +596,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, len(reachablePeers), stats.Network.Reachable)
 		require.False(t, stats.Network.CompleteKeyspaceCoverage)
 		require.Equal(t, float64(balancedKeysRecords+newKeysProvidedRecords+recordsProvided)/float64(len(balancedKeys)+len(newKeys)+1), stats.Network.AvgHolders)
+		require.Equal(t, regionSize, stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		// Wait a full reprovide cycle for all reprovide to happen
@@ -635,6 +645,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, len(peers)*(reachabilityModulo-1)/reachabilityModulo, stats.Network.Reachable)
 		require.True(t, stats.Network.CompleteKeyspaceCoverage) // After reproviding all regions, we cover the full keyspace
 		require.Equal(t, float64(replicationFactor)*float64(reachabilityModulo-1)/float64(reachabilityModulo), stats.Network.AvgHolders)
+		require.Equal(t, regionSize, stats.Network.AvgRegionSize)
 		require.Equal(t, replicationFactor, stats.Network.ReplicationFactor)
 
 		// Switch to disconnected

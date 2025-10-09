@@ -349,11 +349,11 @@ func (s *keystore) size(ctx context.Context) (size int, err error) {
 	q := query.Query{KeysOnly: true}
 	for _, err = range ds.QueryIter(ctx, s.ds, q) {
 		if err != nil {
-			return
+			return size, err
 		}
 		size++
 	}
-	return
+	return size, err
 }
 
 // executeOperation sends an operation request to the worker goroutine and

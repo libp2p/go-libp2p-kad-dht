@@ -31,6 +31,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -187,9 +188,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	cleanupFuncs := []func() error{}
 
+	var mapDs *ds.MapDatastore
 	if cfg.keystore == nil {
 		// Setup KeyStore if missing
-		mapDs := ds.NewMapDatastore()
+		mapDs = ds.NewMapDatastore()
 		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		cfg.keystore, err = keystore.NewKeystore(mapDs)
 		if err != nil {
@@ -198,6 +200,15 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		}
 		cleanupFuncs = append(cleanupFuncs, cfg.keystore.Close)
 	}
+	if cfg.datastore == nil {
+		// Setup datastore if missing
+		if mapDs == nil {
+			mapDs = ds.NewMapDatastore()
+			cleanupFuncs = append(cleanupFuncs, mapDs.Close)
+		}
+		cfg.datastore = mapDs
+	}
+
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(
 		"total_provide_count",
@@ -272,13 +283,14 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
 	prov.connectivity.Start()
 
+	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
 	// Load keys that were logged to the datastore back to the provide queue.
-	if err := prov.provideQueue.DrainDatastore(ctx, nil); err != nil { // TODO: pass datastore
+	if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
 		logger.Errorw("failed to drain provide queue from datastore", "error", err)
 	}
 
 	// Provide queue is persisted on close.
-	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, nil) } // TODO: pass datastore
+	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs) }
 	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
 
 	// Don't need to start schedule timer yet

@@ -272,10 +272,17 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
 	prov.connectivity.Start()
 
+	// Load keys that were logged to the datastore back to the provide queue.
+	if err := prov.provideQueue.DrainDatastore(ctx, nil); err != nil { // TODO: pass datastore
+		logger.Errorw("failed to drain provide queue from datastore", "error", err)
+	}
+
+	// Provide queue is persisted on close.
+	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, nil) } // TODO: pass datastore
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
+
 	// Don't need to start schedule timer yet
 	prov.scheduleTimer.Stop()
-
-	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close)
 
 	prov.wg.Add(1)
 	go prov.run()

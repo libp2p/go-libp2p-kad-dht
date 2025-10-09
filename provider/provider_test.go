@@ -1497,3 +1497,111 @@ func TestClosestPeersToPrefixErrors(t *testing.T) {
 		})
 	})
 }
+
+// TestQueuePersistence tests that the provide queue is persisted when the
+// provider is closed and loaded again when it restarts.
+func TestQueuePersistence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pid, err := peer.Decode("12BoooooPEER")
+		require.NoError(t, err)
+
+		// Create a datastore that will be shared across provider instances
+		mapDs := ds.NewMapDatastore()
+		defer mapDs.Close()
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return []peer.ID{pid}, nil
+			},
+		}
+		msgSender := &mockMsgSender{
+			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+				// Don't actually send messages in this test
+				return nil
+			},
+		}
+
+		checkInterval := time.Second
+
+		// Create the first provider instance with NO workers
+		// This ensures keys stay in the queue and won't be processed
+		opts0 := []Option{
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithDatastore(mapDs),
+			WithSelfAddrs(func() []ma.Multiaddr {
+				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+				require.NoError(t, err)
+				return []ma.Multiaddr{addr}
+			}),
+			WithConnectivityCheckOnlineInterval(checkInterval),
+			WithMaxWorkers(0),               // No workers = keys stay in queue
+			WithDedicatedBurstWorkers(0),    // No dedicated burst workers
+			WithDedicatedPeriodicWorkers(0), // No dedicated periodic workers
+		}
+		prov0, err := New(opts0...)
+		require.NoError(t, err)
+
+		synctest.Wait()
+		require.True(t, prov0.connectivity.IsOnline())
+
+		// SKip the avg prefix length estimation
+		prov0.avgPrefixLenLk.Lock()
+		prov0.cachedAvgPrefixLen = 4
+		prov0.avgPrefixLenLk.Unlock()
+
+		// Generate test keys
+		mhs := random.Multihashes(8)
+
+		// Provide keys - they will be queued but not processed (no workers)
+		err = prov0.ProvideOnce(mhs...)
+		require.NoError(t, err)
+		synctest.Wait()
+
+		// Verify the queue is not empty before closing
+		queueSizeBefore := prov0.provideQueue.Size()
+		require.Equal(t, len(mhs), queueSizeBefore, "queue size should match number of provided keys")
+
+		// Close the first provider - this should persist the queue
+		err = prov0.Close()
+		require.NoError(t, err)
+
+		// Create a second provider instance with the same datastore
+		opts1 := []Option{
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithDatastore(mapDs),
+			WithSelfAddrs(func() []ma.Multiaddr {
+				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+				require.NoError(t, err)
+				return []ma.Multiaddr{addr}
+			}),
+			WithConnectivityCheckOnlineInterval(checkInterval),
+			WithMaxWorkers(0),               // Still no workers to keep queue stable
+			WithDedicatedBurstWorkers(0),    // No dedicated burst workers
+			WithDedicatedPeriodicWorkers(0), // No dedicated periodic workers
+		}
+		prov1, err := New(opts1...)
+		require.NoError(t, err)
+		defer prov1.Close()
+
+		synctest.Wait()
+		require.True(t, prov1.connectivity.IsOnline())
+
+		// Verify the queue was loaded from the datastore
+		queueSizeAfter := prov1.provideQueue.Size()
+		require.Equal(t, queueSizeBefore, queueSizeAfter, "queue size should match after restart")
+		require.False(t, prov1.provideQueue.IsEmpty(), "queue should not be empty after restart")
+
+		// Verify the keys are the same by dequeuing them
+		var dequeuedKeys []mh.Multihash
+		for !prov1.provideQueue.IsEmpty() {
+			_, keys, ok := prov1.provideQueue.Dequeue()
+			require.True(t, ok)
+			dequeuedKeys = append(dequeuedKeys, keys...)
+		}
+		require.ElementsMatch(t, mhs, dequeuedKeys, "dequeued keys should match original keys")
+	})
+}

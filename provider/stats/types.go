@@ -33,7 +33,7 @@ type Connectivity struct {
 type Schedule struct {
 	Keys                int        `json:"keys"`
 	Regions             int        `json:"regions"`
-	AvgPrefixLength     int        `json:"avg_prefix_length"`
+	AvgPrefixLength     float64    `json:"avg_prefix_length"`
 	NextReprovideAt     time.Time  `json:"next_reprovide_at"`
 	NextReprovidePrefix bitstr.Key `json:"next_reprovide_prefix"`
 }

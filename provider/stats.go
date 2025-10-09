@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/timeseries"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/stats"
 	"github.com/probe-lab/go-libdht/kad/trie"
@@ -29,7 +30,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	}
 
 	s.avgPrefixLenLk.Lock()
-	avgPrefixLen := s.cachedAvgPrefixLen
+	avgPrefixLenCached := s.cachedAvgPrefixLen
 	s.avgPrefixLenLk.Unlock()
 
 	// Connectivity status
@@ -37,7 +38,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	if s.connectivity.IsOnline() {
 		status = "online"
 	} else {
-		if avgPrefixLen >= 0 {
+		if avgPrefixLenCached >= 0 {
 			status = "disconnected"
 		} else {
 			status = "offline"
@@ -50,9 +51,22 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Schedule information
 	s.scheduleLk.Lock()
-	scheduleSize := s.schedule.Size()
+	var scheduleSize int
+	var avgPrefixLen float64
 	nextPrefix := s.scheduleCursor
 	ok, nextReprovideOffset := trie.Find(s.schedule, nextPrefix)
+	if avgPrefixLen >= 0 && !s.schedule.IsEmptyLeaf() {
+		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
+		scheduleSize = len(scheduleEntries)
+		prefixSum := 0.
+		for _, e := range scheduleEntries {
+			prefixSum += float64(e.Key.BitLen())
+		}
+		avgPrefixLen = prefixSum / float64(scheduleSize)
+	} else {
+		scheduleSize = s.schedule.Size()
+		avgPrefixLen = float64(avgPrefixLenCached)
+	}
 	s.scheduleLk.Unlock()
 
 	currentOffset := s.currentTimeOffset()

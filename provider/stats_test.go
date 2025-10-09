@@ -120,6 +120,7 @@ func TestStats(t *testing.T) {
 		time.Sleep(time.Minute)
 
 		avgPrefixLen := 5
+		avgPrefixLenFloat := float64(avgPrefixLen)
 
 		// Initial stats check
 		stats := prov.Stats()
@@ -131,7 +132,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, 0, stats.Schedule.Keys)
 		require.Equal(t, 0, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key(""), stats.Schedule.NextReprovidePrefix)
 		require.Equal(t, time.Time{}, stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -199,7 +200,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, 1, stats.Schedule.Keys)
 		require.Equal(t, 1, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key(strings.Repeat("0", avgPrefixLen)), stats.Schedule.NextReprovidePrefix)
 		require.Equal(t, startTime.Add(reprovideInterval), stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -269,7 +270,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, 1, stats.Schedule.Keys)
 		require.Equal(t, 1, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key(strings.Repeat("0", avgPrefixLen)), stats.Schedule.NextReprovidePrefix)
 		require.Equal(t, startTime.Add(reprovideInterval), stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -345,7 +346,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, reprovidedKeys, stats.Schedule.Keys)
 		require.Equal(t, 0, stats.Schedule.Regions) // during the reprovide region is removed from schedule, it will be added back after reprovide is complete
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key(strings.Repeat("0", avgPrefixLen)), stats.Schedule.NextReprovidePrefix)
 		require.Equal(t, time.Time{}, stats.Schedule.NextReprovideAt) // region removed from schedule
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -415,7 +416,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, reprovidedKeys, stats.Schedule.Keys)
 		require.Equal(t, 1, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key(strings.Repeat("0", avgPrefixLen)), stats.Schedule.NextReprovidePrefix)
 		require.Equal(t, startTime.Add(2*reprovideInterval), stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -498,7 +499,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, reprovidedKeys+len(balancedKeys), stats.Schedule.Keys)
 		require.Equal(t, nRegions, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key("10000"), stats.Schedule.NextReprovidePrefix) // prefix at "half" of the keyspace
 		require.Equal(t, startTime.Add(reprovideInterval+prov.reprovideTimeForPrefix("10000")), stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -564,7 +565,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, reprovidedKeys+len(balancedKeys), stats.Schedule.Keys)
 		require.Equal(t, nRegions, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key("10000"), stats.Schedule.NextReprovidePrefix) // prefix at "half" of the keyspace
 		require.Equal(t, startTime.Add(reprovideInterval+prov.reprovideTimeForPrefix("10000")), stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)
@@ -613,7 +614,7 @@ func TestStats(t *testing.T) {
 		require.Equal(t, 0, stats.Queues.PendingRegionReprovides)
 		require.Equal(t, reprovidedKeys+len(balancedKeys), stats.Schedule.Keys)
 		require.Equal(t, nRegions, stats.Schedule.Regions)
-		require.Equal(t, avgPrefixLen, stats.Schedule.AvgPrefixLength)
+		require.Equal(t, avgPrefixLenFloat, stats.Schedule.AvgPrefixLength)
 		require.Equal(t, bitstr.Key("10000"), stats.Schedule.NextReprovidePrefix) // prefix at "half" of the keyspace
 		require.Equal(t, startTime.Add(2*reprovideInterval+prov.reprovideTimeForPrefix("10000")), stats.Schedule.NextReprovideAt)
 		require.Equal(t, maxWorkers, stats.Workers.Max)

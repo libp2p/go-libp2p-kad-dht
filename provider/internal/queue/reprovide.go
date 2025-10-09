@@ -14,7 +14,7 @@ type ReprovideQueue struct {
 	queue prefixQueue
 }
 
-// New creates a new ReprovideQueue instance.
+// NewReprovideQueue creates a new ReprovideQueue instance.
 func NewReprovideQueue() *ReprovideQueue {
 	return &ReprovideQueue{queue: prefixQueue{prefixes: trie.New[bitstr.Key, struct{}]()}}
 }

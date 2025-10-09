@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
@@ -41,7 +42,8 @@ type config struct {
 	peerid peer.ID
 	router KadClosestPeersRouter
 
-	keystore keystore.Keystore
+	keystore  keystore.Keystore
+	datastore datastore.Batching
 
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
@@ -276,6 +278,18 @@ func WithKeystore(ks keystore.Keystore) Option {
 			return errors.New("reprovider config: multihash store cannot be nil")
 		}
 		cfg.keystore = ks
+		return nil
+	}
+}
+
+// WithDatastore defines the datastore used to keep track of the keyspace
+// region reprovides and persist the provide queue on close.
+func WithDatastore(ds datastore.Batching) Option {
+	return func(cfg *config) error {
+		if ds == nil {
+			return errors.New("reprovider config: datastore cannot be nil")
+		}
+		cfg.datastore = ds
 		return nil
 	}
 }

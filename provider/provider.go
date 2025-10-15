@@ -887,13 +887,13 @@ func (s *SweepingProvider) handleReprovide() {
 			// reprovideInterval.
 			nextKeyFound := false
 			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-			next = scheduleEntries[0]
+			next = &scheduleEntries[0]
 			for _, entry := range scheduleEntries {
 				// Add all regions from the schedule to the reprovide queue. The next
 				// region to be scheduled for reprovide is the one immediately
 				// following the current time offset in the schedule.
 				if !nextKeyFound && entry.Data > currentTimeOffset {
-					next = entry
+					next = &entry
 					nextKeyFound = true
 				}
 				s.reprovideQueue.Enqueue(entry.Key)

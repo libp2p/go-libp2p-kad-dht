@@ -315,7 +315,7 @@ func TestProvidePersistAndDrainDatastore(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 
 	// Persist the queue
-	err := q1.Persist(ctx, store)
+	err := q1.Persist(ctx, store, 100)
 	require.NoError(t, err)
 
 	// Verify original queue is unchanged
@@ -371,7 +371,7 @@ func TestProvidePersistEmptyQueue(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 
 	// Persist empty queue
-	err := q.Persist(ctx, store)
+	err := q.Persist(ctx, store, 100)
 	require.NoError(t, err)
 
 	// Load into new queue
@@ -412,7 +412,7 @@ func TestProvideDrainDatastoreIsAdditive(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 
 	// Persist first queue
-	err := q1.Persist(ctx, store)
+	err := q1.Persist(ctx, store, 100)
 	require.NoError(t, err)
 
 	// Create and populate second queue with different prefixes
@@ -460,7 +460,7 @@ func TestProvideDrainDatastoreRemovesPersisted(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 
 	// Persist the queue
-	err := q.Persist(ctx, store)
+	err := q.Persist(ctx, store, 100)
 	require.NoError(t, err)
 
 	// Verify data is in datastore
@@ -497,6 +497,82 @@ func TestProvideDrainDatastoreRemovesPersisted(t *testing.T) {
 	require.True(t, q3.IsEmpty())
 }
 
+func TestProvidePersistWithBatching(t *testing.T) {
+	ctx := context.Background()
+	nMultihashesPerPrefix := 1 << 3
+
+	// Create and populate a queue with enough prefixes to trigger batch commits
+	q1 := NewProvideQueue()
+	prefixes := []bitstr.Key{
+		"000",
+		"001",
+		"010",
+		"011",
+		"100",
+		"101",
+		"110",
+	}
+
+	mhMap := make(map[bitstr.Key][]mh.Multihash)
+	for _, prefix := range prefixes {
+		mhs := genMultihashesMatchingPrefix(prefix, nMultihashesPerPrefix)
+		q1.Enqueue(prefix, mhs...)
+		mhMap[prefix] = mhs
+	}
+
+	require.Equal(t, len(prefixes), q1.NumRegions())
+	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, q1.Size())
+
+	// Create a datastore
+	store := dssync.MutexWrap(ds.NewMapDatastore())
+
+	// Persist with small batch size to trigger mid-loop batch commits
+	// With 7 prefixes and batchSize=3, we'll commit at i=3 and i=6, plus final commit
+	err := q1.Persist(ctx, store, 3)
+	require.NoError(t, err)
+
+	// Verify original queue is unchanged
+	require.Equal(t, len(prefixes), q1.NumRegions())
+	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, q1.Size())
+
+	// Create a new queue and load from datastore
+	q2 := NewProvideQueue()
+	err = q2.DrainDatastore(ctx, store)
+	require.NoError(t, err)
+
+	// Verify loaded queue matches original
+	require.Equal(t, q1.Size(), q2.Size())
+	require.Equal(t, q1.NumRegions(), q2.NumRegions())
+
+	// Verify prefix order is preserved
+	for i := range prefixes {
+		require.Equal(t, q1.queue.queue.At(i), q2.queue.queue.At(i))
+	}
+
+	// Verify all keys are present by dequeuing and comparing
+	for range prefixes {
+		prefix1, mhs1, ok1 := q1.Dequeue()
+		prefix2, mhs2, ok2 := q2.Dequeue()
+
+		require.True(t, ok1)
+		require.True(t, ok2)
+		require.Equal(t, prefix1, prefix2)
+		require.ElementsMatch(t, mhs1, mhs2)
+	}
+
+	require.True(t, q1.IsEmpty())
+	require.True(t, q2.IsEmpty())
+
+	// Verify datastore is empty after DrainDatastore
+	results, err := store.Query(ctx, query.Query{KeysOnly: true})
+	require.NoError(t, err)
+	count := 0
+	for range results.Next() {
+		count++
+	}
+	require.Equal(t, 0, count)
+}
+
 func TestProvidePersistLoadWithOverlappingPrefixes(t *testing.T) {
 	ctx := context.Background()
 	nMultihashesPerPrefix := 1 << 3
@@ -521,7 +597,7 @@ func TestProvidePersistLoadWithOverlappingPrefixes(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 
 	// Persist the queue
-	err := q1.Persist(ctx, store)
+	err := q1.Persist(ctx, store, 100)
 	require.NoError(t, err)
 
 	// Load into new queue

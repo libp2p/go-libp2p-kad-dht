@@ -29,6 +29,7 @@ type Keystore interface {
 	Delete(context.Context, ...mh.Multihash) error
 	Empty(context.Context) error
 	Size(context.Context) (int, error)
+	BatchSize() int
 	Close() error
 }
 
@@ -381,6 +382,11 @@ func (s *keystore) executeOperation(op opType, ctx context.Context, keys []mh.Mu
 	case <-ctx.Done():
 		return nil, 0, false, ctx.Err()
 	}
+}
+
+// BatchSize returns the configured batch size for datastore operations.
+func (s *keystore) BatchSize() int {
+	return s.batchSize
 }
 
 // Put stores the provided keys in the underlying datastore, grouping them by

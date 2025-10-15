@@ -211,7 +211,7 @@ func (q *ProvideQueue) Clear() int {
 // * {queue-position:012x}/{prefix-bitstring}
 //
 // This operation does not modify the queue's in-memory state.
-func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching) error {
+func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching, batchSize int) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -239,7 +239,19 @@ func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching) error {
 				return fmt.Errorf("failed to store prefix data: %w", err)
 			}
 		}
+
 		i++
+
+		if i%batchSize == 0 {
+			// Max batch size reached, commit and start a new batch.
+			if err := batch.Commit(ctx); err != nil {
+				return fmt.Errorf("failed to commit batch: %w", err)
+			}
+			batch, err = d.Batch(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to create batch: %w", err)
+			}
+		}
 	}
 
 	if err := batch.Commit(ctx); err != nil {

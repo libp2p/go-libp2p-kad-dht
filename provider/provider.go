@@ -289,8 +289,9 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		logger.Errorw("failed to drain provide queue from datastore", "error", err)
 	}
 
-	// Provide queue is persisted on close.
-	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs) }
+	// Provide queue is persisted on close, reuse keystore batch size.
+	batchSize := prov.keystore.BatchSize()
+	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
 	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
 
 	// Don't need to start schedule timer yet

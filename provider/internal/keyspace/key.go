@@ -1,3 +1,5 @@
+// Package keyspace provides utilities for Kademlia keyspace operations,
+// including keys, prefixes, and trie operations.
 package keyspace
 
 import (

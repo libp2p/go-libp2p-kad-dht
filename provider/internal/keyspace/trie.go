@@ -17,16 +17,16 @@ var zeroKey = bit256.ZeroKey()
 
 // AllEntries returns all entries (key + value) stored in the trie `t` sorted
 // by their keys in the supplied `order`.
-func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []*trie.Entry[K0, D] {
+func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
 	return allEntriesAtDepth(t, order, 0)
 }
 
-func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []*trie.Entry[K0, D] {
+func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []trie.Entry[K0, D] {
 	if t == nil || t.IsEmptyLeaf() {
 		return nil
 	}
 	if t.IsNonEmptyLeaf() {
-		return []*trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
+		return []trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
 	}
 	b := int(order.Bit(depth))
 	return append(allEntriesAtDepth(t.Branch(b), order, depth+1),
@@ -186,6 +186,104 @@ func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0,
 		return true
 	}
 	return false
+}
+
+// CoalesceTrie merges sibling keys into their parent prefix recursively. When
+// two keys in the trie differ only in their last bit (e.g., "1100" and "1101"),
+// they are replaced by their common parent prefix (e.g., "110"). This process
+// continues recursively until no more sibling pairs exist, reducing the trie to
+// its minimal prefix coverage.
+// Data associated with coalesced keys is discarded.
+func CoalesceTrie[D any](t *trie.Trie[bitstr.Key, D]) {
+	branches := [2]*trie.Trie[bitstr.Key, D]{t.Branch(0), t.Branch(1)}
+	for _, b := range branches {
+		if b != nil && !b.IsLeaf() {
+			CoalesceTrie(b)
+		}
+	}
+	if branches[0].IsNonEmptyLeaf() && branches[1].IsNonEmptyLeaf() {
+		keys := [2]bitstr.Key{*branches[0].Key(), *branches[1].Key()}
+		l := keys[0].BitLen() - 1
+		if keys[0].BitLen() == keys[1].BitLen() && keys[0].CommonPrefixLength(keys[1]) == l {
+			// Remove siblings from self (parent), and set common prefix as key.
+			*t = trie.Trie[bitstr.Key, D]{}
+			parentKey := keys[0][:l]
+			var d D
+			t.Add(parentKey, d)
+		}
+	}
+}
+
+// SubtractTrie returns a new trie containing all entries from trie `a` that
+// are not covered by any prefix in trie `b`. This performs a set subtraction
+// operation (a - b) where keys in `a` are excluded if they match or are
+// prefixed by any key in `b`.
+//
+// For example:
+//   - a: ["0000", "0010", "0100"]
+//   - b: ["00"]
+//   - Result: ["0100"]
+//
+// The subtraction is prefix-aware: if `b` contains "00", all keys in `a`
+// starting with "00" (like "0000" and "0010") are excluded from the result.
+func SubtractTrie[D any](a, b *trie.Trie[bitstr.Key, D]) *trie.Trie[bitstr.Key, D] {
+	res := trie.New[bitstr.Key, D]()
+	subtractTrieAtDepth(a, b, res, 0)
+	return res
+}
+
+// subtractTrieAtDepth recursively performs trie subtraction (t0 - t1) at the
+// specified depth, adding entries from t0 to res that are not covered by
+// prefixes in t1. The depth parameter tracks the current bit position being
+// examined during the traversal.
+func subtractTrieAtDepth[D any](t0, t1, res *trie.Trie[bitstr.Key, D], depth int) {
+	if t0 == nil || t0.IsEmptyLeaf() {
+		return
+	}
+	if t1 == nil || t1.IsEmptyLeaf() {
+		// t1 is empty, nothing to subtract, add all t0 to result.
+		res.AddMany(AllEntries(t0, bit256.ZeroKey())...)
+		return
+	}
+
+	if t0.HasKey() && t1.HasKey() {
+		// Both t0 and t1 are leaves.
+		k0, k1 := *t0.Key(), *t1.Key()
+		if !IsBitstrPrefix(k1, k0) {
+			res.Add(k0, t0.Data())
+		}
+		return
+	}
+	if t0.HasKey() && !t1.HasKey() {
+		// t0 is a leaf, but t1 is not.
+		k0 := t0.Key()
+		if k0.BitLen() <= depth {
+			res.Add(*k0, t0.Data())
+			return
+		}
+		b := int(k0.Bit(depth))
+		// Go deeper in t1's branch that could cover t0's key.
+		subtractTrieAtDepth(t0, t1.Branch(b), res, depth+1)
+		return
+	}
+	if t1.HasKey() && !t0.HasKey() {
+		// t1 is a leaf, but t0 is not.
+		k1 := t1.Key()
+		if k1.BitLen() <= depth {
+			// t1 covers all entries in t0, nothing to add.
+			return
+		}
+		b := int(k1.Bit(depth))
+		// Add all entries in t0's branch that is not covered by t1.
+		res.AddMany(AllEntries(t0.Branch(1-b), bit256.ZeroKey())...)
+		// Go deeper in the branch covered by t1.
+		subtractTrieAtDepth(t0.Branch(b), t1, res, depth+1)
+		return
+	}
+	// Both t0 and t1 are not leaves.
+	for i := range 2 {
+		subtractTrieAtDepth(t0.Branch(i), t1.Branch(i), res, depth+1)
+	}
 }
 
 // TrieGaps returns all prefixes that aren't covered by a key (prefix) in the

@@ -475,6 +475,21 @@ func TestSubtractTrie(t *testing.T) {
 		}
 		return tries
 	}
+	t.Run("Subtract from empty trie", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{},
+			{
+				"0",
+				"10",
+			},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.True(t, trie.Equal(tries[0], res))
+	})
 	t.Run("Subtract empty trie", func(t *testing.T) {
 		keys := [2][]bitstr.Key{
 			{
@@ -584,15 +599,19 @@ func TestSubtractTrie(t *testing.T) {
 			{
 				"000",
 				"001",
-				"01",
-				"100",
+				"010",
+				"100000",
 				"1100",
 				"1110",
 				"1111",
 			},
 			{
-				"0000",
+				"00000",
+				"00001",
 				"001",
+				"011",
+				"10010",
+				"10011",
 				"101",
 				"11",
 			},
@@ -605,8 +624,8 @@ func TestSubtractTrie(t *testing.T) {
 		require.False(t, res.IsEmptyLeaf())
 		expectedKeys := []bitstr.Key{
 			"000",
-			"01",
-			"100",
+			"010",
+			"100000",
 		}
 		require.Equal(t, len(expectedKeys), res.Size())
 		for _, k := range expectedKeys {

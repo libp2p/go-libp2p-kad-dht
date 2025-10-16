@@ -195,6 +195,9 @@ func pruneSubtrieAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0,
 // its minimal prefix coverage.
 // Data associated with coalesced keys is discarded.
 func CoalesceTrie[D any](t *trie.Trie[bitstr.Key, D]) {
+	if t == nil || t.IsLeaf() {
+		return
+	}
 	branches := [2]*trie.Trie[bitstr.Key, D]{t.Branch(0), t.Branch(1)}
 	for _, b := range branches {
 		if b != nil && !b.IsLeaf() {

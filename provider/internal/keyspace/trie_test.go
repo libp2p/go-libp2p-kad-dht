@@ -440,6 +440,8 @@ func TestCoalesceTrie(t *testing.T) {
 		"111",
 	}
 	tr := trie.New[bitstr.Key, struct{}]()
+	// Try coalescing an empty trie
+	CoalesceTrie(tr)
 	entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
 	for i, k := range keys {
 		entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}

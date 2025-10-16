@@ -214,29 +214,31 @@ func CoalesceTrie[D any](t *trie.Trie[bitstr.Key, D]) {
 	}
 }
 
-// SubtractTrie returns a new trie containing all entries from trie `a` that
-// are not covered by any prefix in trie `b`. This performs a set subtraction
-// operation (a - b) where keys in `a` are excluded if they match or are
-// prefixed by any key in `b`.
+// SubtractTrie returns a new trie containing all entries from trie `t0` that
+// are not covered by any prefix in trie `t1`. This performs a set subtraction
+// operation (t0 - t1) where keys in `t0` are excluded if they match or are
+// prefixed by any key in `t1`.
 //
 // For example:
-//   - a: ["0000", "0010", "0100"]
-//   - b: ["00"]
+//   - t0: ["0000", "0010", "0100"]
+//   - t1: ["00"]
 //   - Result: ["0100"]
 //
-// The subtraction is prefix-aware: if `b` contains "00", all keys in `a`
+// The subtraction is prefix-aware: if `t1` contains "00", all keys in `t0`
 // starting with "00" (like "0000" and "0010") are excluded from the result.
-func SubtractTrie[D any](a, b *trie.Trie[bitstr.Key, D]) *trie.Trie[bitstr.Key, D] {
-	res := trie.New[bitstr.Key, D]()
-	subtractTrieAtDepth(a, b, res, 0)
+func SubtractTrie[D0, D1 any](t0 *trie.Trie[bitstr.Key, D0], t1 *trie.Trie[bitstr.Key, D1]) *trie.Trie[bitstr.Key, D0] {
+	res := trie.New[bitstr.Key, D0]()
+	subtractTrieAtDepth(t0, t1, res, 0)
 	return res
 }
 
 // subtractTrieAtDepth recursively performs trie subtraction (t0 - t1) at the
-// specified depth, adding entries from t0 to res that are not covered by
-// prefixes in t1. The depth parameter tracks the current bit position being
+// specified depth, adding entries from `t0` to `res` that are not covered by
+// prefixes in `t1`. The `depth` parameter tracks the current bit position being
 // examined during the traversal.
-func subtractTrieAtDepth[D any](t0, t1, res *trie.Trie[bitstr.Key, D], depth int) {
+func subtractTrieAtDepth[D0, D1 any](t0 *trie.Trie[bitstr.Key, D0],
+	t1 *trie.Trie[bitstr.Key, D1], res *trie.Trie[bitstr.Key, D0], depth int,
+) {
 	if t0 == nil || t0.IsEmptyLeaf() {
 		return
 	}

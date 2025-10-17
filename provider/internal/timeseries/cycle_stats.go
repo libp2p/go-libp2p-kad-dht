@@ -38,8 +38,9 @@ func NewCycleStats(ttl, maxDelay time.Duration) CycleStats {
 // Cleanup removes entries that have exceeded their TTL plus maximum delay.
 func (s *CycleStats) Cleanup() {
 	allEntries := keyspace.AllEntries(s.trie, bit256.ZeroKey())
+	now := time.Now()
 	for _, e := range allEntries {
-		if e.Data.time.Add(s.ttl + s.maxDelay).Before(time.Now()) {
+		if e.Data.time.Add(s.ttl + s.maxDelay).Before(now) {
 			s.trie.Remove(e.Key)
 			if subtrie, ok := keyspace.FindSubtrie(s.queue, e.Key); ok {
 				for _, qe := range keyspace.AllEntries(subtrie, bit256.ZeroKey()) {

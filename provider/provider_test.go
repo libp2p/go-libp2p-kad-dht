@@ -19,7 +19,6 @@ import (
 
 	"github.com/guillaumemichel/reservedpool"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
@@ -1579,23 +1578,6 @@ func TestQueuePersistence(t *testing.T) {
 	})
 }
 
-func dumpHistory(t *testing.T, prov *SweepingProvider) {
-	t.Log("now", time.Now())
-	q := query.Query{
-		Prefix:   reprovideHistoryKeyPrefix,
-		Orders:   []query.Order{query.OrderByKey{}},
-		KeysOnly: true,
-	}
-	res, err := prov.datastore.Query(context.Background(), q)
-	require.NoError(t, err)
-	for r := range res.Next() {
-		require.NoError(t, r.Error)
-		ti, key, err := parseReprovideHistoryKey(r.Key)
-		require.NoError(t, err)
-		t.Log(key, ti)
-	}
-}
-
 func TestResumeReprovides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
@@ -1648,6 +1630,13 @@ func TestResumeReprovides(t *testing.T) {
 			},
 		}
 
+		requireNoPendingReprovides := func() {
+			prov.activeReprovidesLk.Lock()
+			require.Zero(t, prov.activeReprovides.Size())
+			prov.activeReprovidesLk.Unlock()
+			require.Zero(t, prov.reprovideQueue.Size())
+		}
+
 		ds := dssync.MutexWrap(datastore.NewMapDatastore())
 		ks, err := keystore.NewKeystore(ds)
 		require.NoError(t, err)
@@ -1679,6 +1668,7 @@ func TestResumeReprovides(t *testing.T) {
 		nRegions := prov.schedule.Size()
 		prov.scheduleLk.Unlock()
 		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
+		requireNoPendingReprovides()
 
 		// All keys have been provided once, clear for cycle of reprovides.
 		reprovidedLk.Lock()
@@ -1694,10 +1684,12 @@ func TestResumeReprovides(t *testing.T) {
 		reprovidedLk.Lock()
 		require.Len(t, reprovided, nRegions/2, "should have reprovided %d regions", nRegions/2)
 		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
 
 		time.Sleep(2 * reprovideInterval)
 		// Provider has run for 2.5*reprovideInterval
 		synctest.Wait()
+		requireNoPendingReprovides()
 
 		// Close provider
 		err = prov.Close()
@@ -1721,52 +1713,55 @@ func TestResumeReprovides(t *testing.T) {
 
 		require.Equal(t, prov.cycleStart, cycleStart, "cycle start should be unchanged after restart")
 
+		// Since the node was offline for reprovideInterval/4, the provider needs
+		// to reprovide nRegions/4 ASAP. They should be provided by now.
 		require.Len(t, reprovided, nRegions/4, "should have reprovided %d regions in second round", nRegions/4)
-		require.Zero(t, prov.reprovideQueue.Size())
-
-		reprovidedLk.Lock()
-		clear(reprovided)
-		reprovidedLk.Unlock()
-
-		dumpHistory(t, prov)
-
-		recent, err := prov.loadRecentlyReprovidedRegions(time.Now())
-		require.NoError(t, err)
-		recentEntries := keyspace.AllEntries(recent, prov.order)
-		recentKeys := make([]bitstr.Key, len(recentEntries))
-		for i, e := range recentEntries {
-			recentKeys[i] = e.Key
-		}
-		t.Logf("recently reprovided regions after restart (%d): %v", len(recentKeys), recentKeys)
+		requireNoPendingReprovides()
 
 		time.Sleep(reprovideInterval / 4)
 		synctest.Wait()
 
-		dumpHistory(t, prov)
-		prov.activeReprovidesLk.Lock()
-		t.Logf("active reprovides %d", prov.activeReprovides.Size())
-		prov.activeReprovidesLk.Unlock()
-
-		t.Log("reprovide queue size", prov.reprovideQueue.Size())
-
-		prov.scheduleLk.Lock()
-		t.Log("next prefix", prov.scheduleCursor)
-		prov.scheduleLk.Unlock()
-
-		reprovidedLk.Lock()
-		require.Len(t, reprovided, nRegions/4) // should be nRegions/2
-		reprovidedLk.Unlock()
-
-		time.Sleep(reprovideInterval / 4)
-		synctest.Wait()
+		// 0.25*reprovideInterval after restart.
+		// 0.5*reprovideInterval after shutdown.
+		// 3*reprovidesInterval since initial start.
 		reprovidedLk.Lock()
 		require.Len(t, reprovided, nRegions/2)
 		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
 
-		time.Sleep(reprovideInterval / 2)
+		// reprovideInterval/2 after restart.
+		// 0.75*reprovideInterval after shutdown.
+		// 3.25*reprovidesInterval since initial start.
+		time.Sleep(reprovideInterval / 4)
+		synctest.Wait()
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, 3*nRegions/4)
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		// 0.75*reprovideInterval after restart.
+		// 1*reprovideInterval after shutdown.
+		// 3.5*reprovidesInterval since initial start.
+		time.Sleep(reprovideInterval / 4)
 		synctest.Wait()
 		reprovidedLk.Lock()
 		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
 		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		// All keys have been provided once, clear for cycle of reprovides.
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
+		// 1.75*reprovideInterval after restart.
+		// 2*reprovideInterval after shutdown.
+		// 4.5*reprovidesInterval since initial start.
+		time.Sleep(reprovideInterval)
+		synctest.Wait()
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
 	})
 }

@@ -35,6 +35,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-datastore/query"
+	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -195,10 +196,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	cleanupFuncs := []func() error{}
 
-	var mapDs *ds.MapDatastore
+	var mapDs ds.Batching
 	if cfg.keystore == nil {
 		// Setup KeyStore if missing
-		mapDs = ds.NewMapDatastore()
+		mapDs = dssync.MutexWrap(ds.NewMapDatastore())
 		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		cfg.keystore, err = keystore.NewKeystore(mapDs)
 		if err != nil {
@@ -210,7 +211,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	if cfg.datastore == nil {
 		// Setup datastore if missing
 		if mapDs == nil {
-			mapDs = ds.NewMapDatastore()
+			mapDs = dssync.MutexWrap(ds.NewMapDatastore())
 			cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		}
 		cfg.datastore = mapDs

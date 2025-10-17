@@ -22,6 +22,8 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
+	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 
@@ -1603,5 +1605,70 @@ func TestQueuePersistence(t *testing.T) {
 			dequeuedKeys = append(dequeuedKeys, keys...)
 		}
 		require.ElementsMatch(t, mhs, dequeuedKeys, "dequeued keys should match original keys")
+	})
+}
+
+// TestWithHostOption tests that the WithHost option properly sets the host
+// and extracts the peer ID when not provided separately
+func TestWithHostOption(t *testing.T) {
+	t.Run("WithHostNil", func(t *testing.T) {
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return []peer.ID{}, nil
+			},
+		}
+
+		msgSender := &mockMsgSender{}
+
+		// WithHost(nil) should error
+		opts := []Option{
+			WithHost(nil),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithSelfAddrs(func() []ma.Multiaddr {
+				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+				require.NoError(t, err)
+				return []ma.Multiaddr{addr}
+			}),
+		}
+
+		_, err := New(opts...)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "host cannot be nil")
+	})
+
+	t.Run("WithHostAndNoPeerID", func(t *testing.T) {
+		// Create a real libp2p host
+		h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+		require.NoError(t, err)
+		defer h.Close()
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return []peer.ID{}, nil
+			},
+		}
+
+		msgSender := &mockMsgSender{}
+
+		// Use WithHost without WithPeerID
+		opts := []Option{
+			WithHost(h), // Don't set peer ID separately
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithSelfAddrs(func() []ma.Multiaddr {
+				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+				require.NoError(t, err)
+				return []ma.Multiaddr{addr}
+			}),
+		}
+
+		prov, err := New(opts...)
+		require.NoError(t, err)
+		defer prov.Close()
+
+		// Verify peer ID was extracted from host
+		require.Equal(t, h.ID(), prov.peerid, "peer ID should be extracted from host")
+		require.Equal(t, h, prov.host, "host should be set")
 	})
 }

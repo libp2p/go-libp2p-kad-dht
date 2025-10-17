@@ -56,7 +56,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			continue
 		}
 		dhtOpts := []provider.Option{
-			provider.WithPeerID(dht.PeerID()),
+			provider.WithHost(dht.Host()),
 			provider.WithReplicationFactor(dht.BucketSize()),
 			provider.WithSelfAddrs(dht.FilteredAddrs),
 			provider.WithRouter(dht),

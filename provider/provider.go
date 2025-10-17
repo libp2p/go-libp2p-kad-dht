@@ -500,7 +500,7 @@ func (s *SweepingProvider) schedulePrefixNoLock(prefix bitstr.Key, justReprovide
 		// The key following prefix is the schedule cursor.
 		timeUntilPrefixReprovide := s.timeUntil(nextReprovideTime)
 		_, scheduledAlarm := trie.Find(s.schedule, s.scheduleCursor)
-		if timeUntilPrefixReprovide < s.timeUntil(scheduledAlarm) {
+		if timeUntilPrefixReprovide < s.timeUntil(scheduledAlarm)%s.reprovideInterval {
 			s.scheduleNextReprovideNoLock(prefix, timeUntilPrefixReprovide)
 		}
 	}
@@ -586,12 +586,12 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-// nextPrefixToReprovide returns the next prefix to reprovide, based on the
-// current time offset.
+// nextPrefixToReprovideNoLock returns the next prefix to reprovide, based on
+// the current time offset.
 func (s *SweepingProvider) nextPrefixToReprovideNoLock(offset time.Duration) (bitstr.Key, error) {
-	maxVal := time.Duration(1 << maxPrefixSize)
-	intPrefix := offset * maxVal / s.reprovideInterval
-	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
+	maxVal := 1 << maxPrefixSize
+	intPrefix := uint64(float64(offset) / float64(s.reprovideInterval) * float64(maxVal))
+	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, int64(intPrefix)))
 	nextRegion := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order)
 	if nextRegion == nil {
 		return "", errors.New("schedule is empty")
@@ -1017,7 +1017,7 @@ func (s *SweepingProvider) handleReprovide() {
 
 		// next is in the future
 		nextPrefix = next.Key
-		timeUntilNextReprovide = s.timeUntil(next.Data)
+		timeUntilNextReprovide = s.timeUntil(next.Data) % s.reprovideInterval
 	}
 
 	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilNextReprovide)
@@ -1036,7 +1036,7 @@ func (s *SweepingProvider) handleReprovide() {
 	s.wg.Add(1)
 	go func() {
 		if err := s.workerPool.Acquire(periodicWorker); err == nil {
-			s.batchReprovide(currentPrefix, true)
+			s.batchReprovide(currentPrefix)
 			s.workerPool.Release(periodicWorker)
 		}
 		s.wg.Done()
@@ -1185,7 +1185,8 @@ func (s *SweepingProvider) onOnline() {
 				logger.Warnf("couldn't load not expired regions: %s", err)
 			}
 			if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
-				s.scheduleNextReprovideNoLock(nextPrefix, s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)))
+				timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)) % s.reprovideInterval
+				s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
 			}
 			s.scheduleLk.Unlock()
 		})
@@ -1398,7 +1399,7 @@ func (s *SweepingProvider) reprovideLateRegions() {
 		if ok {
 			s.wg.Add(1)
 			go func(prefix bitstr.Key) {
-				s.batchReprovide(prefix, false)
+				s.batchReprovide(prefix)
 				s.workerPool.Release(burstWorker)
 				s.wg.Done()
 			}(prefix)
@@ -1431,7 +1432,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	if keyCount <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
-		s.individualProvide(prefix, keys, false, false)
+		s.individualProvide(prefix, keys, false)
 		return
 	}
 
@@ -1451,12 +1452,12 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
-	if !s.provideRegions(regions, addrInfo, false, false) {
+	if !s.provideRegions(regions, addrInfo, false) {
 		logger.Warnf("failed to provide any region for prefix %s", prefix)
 	}
 }
 
-func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide bool) {
+func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the
@@ -1468,9 +1469,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	keys, err := s.keystore.Get(s.ctx, prefix)
 	if err != nil {
 		s.failedReprovide(prefix, fmt.Errorf("couldn't reprovide, error when loading keys: %s", err))
-		if periodicReprovide {
-			s.reschedulePrefix(prefix)
-		}
+		s.reschedulePrefix(prefix)
 		return
 	}
 	keyCount := len(keys)
@@ -1489,16 +1488,14 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	if keyCount <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
-		s.individualProvide(prefix, keys, true, periodicReprovide)
+		s.individualProvide(prefix, keys, true)
 		return
 	}
 
 	regions, coveredPrefix, err := s.exploreSwarm(prefix)
 	if err != nil {
 		s.failedReprovide(prefix, fmt.Errorf("reprovide '%s': %w", prefix, err))
-		if periodicReprovide {
-			s.reschedulePrefix(prefix)
-		}
+		s.reschedulePrefix(prefix)
 		return
 	}
 	logger.Debugf("reprovide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
@@ -1525,16 +1522,14 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 		if err != nil {
 			err = fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 			s.failedReprovide(prefix, err)
-			if periodicReprovide {
-				s.reschedulePrefix(prefix)
-			}
+			s.reschedulePrefix(prefix)
 		}
 		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
 		prefix = coveredPrefix
 	}
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
-	if s.provideRegions(regions, addrInfo, true, periodicReprovide) {
+	if s.provideRegions(regions, addrInfo, true) {
 		s.persistSuccessfulReprovide(prefix)
 	} else {
 		logger.Warnf("failed to reprovide any region for prefix %s", prefix)
@@ -1575,7 +1570,7 @@ func (s *SweepingProvider) selfAddrInfo() (peer.AddrInfo, bool) {
 // without exploring the associated keyspace regions. It performs "normal" DHT
 // provides for the supplied keys, handles failures and schedules next
 // reprovide is necessary.
-func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multihash, reprovide bool, periodicReprovide bool) {
+func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multihash, reprovide bool) {
 	if len(keys) == 0 {
 		return
 	}
@@ -1583,17 +1578,17 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 	var provideErr error
 	if len(keys) == 1 {
 		coveredPrefix, err := s.vanillaProvide(keys[0], reprovide)
+		// Schedule next reprovide for the prefix that was actually covered by
+		// the GCP, otherwise we may schedule a reprovide for a prefix too short
+		// or too long.
 		if err != nil && !reprovide {
 			// Put the key back in the provide queue.
 			s.failedProvide(prefix, keys, fmt.Errorf("individual provide failed for prefix '%s', %w", prefix, err))
 		}
-		provideErr = err
-		if periodicReprovide {
-			// Schedule next reprovide for the prefix that was actually covered by
-			// the GCP, otherwise we may schedule a reprovide for a prefix too short
-			// or too long.
-			s.reschedulePrefix(coveredPrefix)
+		if reprovide && err == nil {
+			prefix = coveredPrefix
 		}
+		provideErr = err
 	} else {
 		wg := sync.WaitGroup{}
 		success := atomic.Bool{}
@@ -1616,11 +1611,9 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 			// Only errors if all provides failed.
 			provideErr = fmt.Errorf("all individual provides failed for prefix %s", prefix)
 		}
-		if periodicReprovide {
-			s.reschedulePrefix(prefix)
-		}
 	}
 	if reprovide {
+		s.reschedulePrefix(prefix)
 		if provideErr == nil {
 			s.persistSuccessfulReprovide(prefix)
 		} else {
@@ -1632,7 +1625,7 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 // provideRegions contains common logic to batchProvide() and batchReprovide().
 // It iterate over supplied regions, and allocates the regions provider records
 // to the appropriate DHT servers.
-func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo, reprovide, periodicReprovide bool) bool {
+func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo, reprovide bool) bool {
 	errCount := 0
 	for _, r := range regions {
 		allKeys := keyspace.AllValues(r.Keys, s.order)
@@ -1659,9 +1652,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			s.stats.cycleStatsLk.Unlock()
 
 			s.releaseRegionReprovide(r.Prefix)
-			if periodicReprovide {
-				s.reschedulePrefix(r.Prefix)
-			}
+			s.reschedulePrefix(r.Prefix)
 		} else {
 			s.stats.keysPerProvide.Add(int64(nKeys))
 			s.stats.cycleStatsLk.Unlock()

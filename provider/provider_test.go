@@ -19,6 +19,8 @@ import (
 
 	"github.com/guillaumemichel/reservedpool"
 	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/query"
+	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -436,12 +438,12 @@ func TestIndividualProvideSingle(t *testing.T) {
 	}
 
 	// Providing no keys returns no error
-	r.individualProvide(prefix, nil, false, false)
+	r.individualProvide(prefix, nil, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(0)
 
 	// Providing a single key - success
-	r.individualProvide(prefix, mhs, false, false)
+	r.individualProvide(prefix, mhs, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
@@ -450,7 +452,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, gcpErr
 	}
-	r.individualProvide(prefix, mhs, false, false)
+	r.individualProvide(prefix, mhs, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed key ends up in the provide queue.
@@ -459,7 +461,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	require.Equal(t, mhs, keys)
 
 	// Reproviding a single key - failure
-	r.individualProvide(prefix, mhs, true, true)
+	r.individualProvide(prefix, mhs, true)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed prefix ends up in the reprovide queue.
@@ -529,7 +531,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	}
 
 	// Providing two keys - success
-	r.individualProvide(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
@@ -538,7 +540,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, gcpErr
 	}
-	r.individualProvide(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Assert keys are added to provide queue
@@ -552,7 +554,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	require.ElementsMatch(t, pendingKeys, ks)
 
 	// Reproviding two keys - failure
-	r.individualProvide(prefix, ks, true, true)
+	r.individualProvide(prefix, ks, true)
 	require.True(t, takeAllContainsErr(obsLogs, "all individual provides failed for prefix"))
 	assertAdvertisementCount(1)
 	// Assert prefix is added to reprovide queue.
@@ -573,7 +575,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		return closestPeers, nil
 	}
 
-	r.individualProvide(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	// Verify one key was now provided 2x, and other key only 1x since it just failed.
 	msgSenderLk.Lock()
@@ -590,7 +592,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	require.True(t, r.reprovideQueue.IsEmpty())
 	require.True(t, r.provideQueue.IsEmpty())
 
-	r.individualProvide(prefix, ks, true, true)
+	r.individualProvide(prefix, ks, true)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	// Verify only one of the 2 keys was provided. Providing failed for the other.
 	msgSenderLk.Lock()
@@ -1490,7 +1492,7 @@ func TestQueuePersistence(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a datastore that will be shared across provider instances
-		mapDs := datastore.NewMapDatastore()
+		mapDs := dssync.MutexWrap(datastore.NewMapDatastore())
 		defer mapDs.Close()
 
 		router := &mockRouter{
@@ -1577,6 +1579,23 @@ func TestQueuePersistence(t *testing.T) {
 	})
 }
 
+func dumpHistory(t *testing.T, prov *SweepingProvider) {
+	t.Log("now", time.Now())
+	q := query.Query{
+		Prefix:   reprovideHistoryKeyPrefix,
+		Orders:   []query.Order{query.OrderByKey{}},
+		KeysOnly: true,
+	}
+	res, err := prov.datastore.Query(context.Background(), q)
+	require.NoError(t, err)
+	for r := range res.Next() {
+		require.NoError(t, r.Error)
+		ti, key, err := parseReprovideHistoryKey(r.Key)
+		require.NoError(t, err)
+		t.Log(key, ti)
+	}
+}
+
 func TestResumeReprovides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
@@ -1614,9 +1633,7 @@ func TestResumeReprovides(t *testing.T) {
 		}
 
 		reprovidedLk := sync.Mutex{}
-		reprovidedTotal := make(map[bitstr.Key]struct{})
-		reprovidedRound2 := make(map[bitstr.Key]struct{})
-		secondRound := false
+		reprovided := make(map[bitstr.Key]struct{})
 		msgSender := &mockMsgSender{
 			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
 				h, err := mh.Cast(m.GetKey())
@@ -1625,16 +1642,13 @@ func TestResumeReprovides(t *testing.T) {
 				regionalPrefix := getPrefixFromSchedule(k)
 
 				reprovidedLk.Lock()
-				reprovidedTotal[regionalPrefix] = struct{}{}
-				if secondRound {
-					reprovidedRound2[regionalPrefix] = struct{}{}
-				}
+				reprovided[regionalPrefix] = struct{}{}
 				reprovidedLk.Unlock()
 				return nil
 			},
 		}
 
-		ds := datastore.NewMapDatastore()
+		ds := dssync.MutexWrap(datastore.NewMapDatastore())
 		ks, err := keystore.NewKeystore(ds)
 		require.NoError(t, err)
 		defer ks.Close()
@@ -1661,27 +1675,44 @@ func TestResumeReprovides(t *testing.T) {
 		synctest.Wait()
 		require.True(t, prov.connectivity.IsOnline())
 
+		prov.scheduleLk.Lock()
+		nRegions := prov.schedule.Size()
+		prov.scheduleLk.Unlock()
+		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
+
+		// All keys have been provided once, clear for cycle of reprovides.
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
 		cycleStart := prov.cycleStart
 		require.Equal(t, time.Now(), cycleStart)
 
 		time.Sleep(reprovideInterval / 2) // wait half a reprovide cycle
 		synctest.Wait()
 
-		prov.scheduleLk.Lock()
-		nRegions := prov.schedule.Size()
-		prov.scheduleLk.Unlock()
-
 		reprovidedLk.Lock()
-		require.Len(t, reprovidedTotal, nRegions/2, "should have reprovided %d regions", nRegions/2)
-		require.Empty(t, reprovidedRound2)
+		require.Len(t, reprovided, nRegions/2, "should have reprovided %d regions", nRegions/2)
 		reprovidedLk.Unlock()
+
+		time.Sleep(2 * reprovideInterval)
+		// Provider has run for 2.5*reprovideInterval
+		synctest.Wait()
 
 		// Close provider
 		err = prov.Close()
 		require.NoError(t, err)
 
+		time.Sleep(reprovideInterval / 4) // wait some time before restarting
+		// 2.75*reprovideInterval since initial start
+		synctest.Wait()
+
+		// Clear reprovided regions
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
 		// Restart provider
-		secondRound = true
 		prov, err = New(opts...)
 		require.NoError(t, err)
 		defer prov.Close()
@@ -1690,25 +1721,52 @@ func TestResumeReprovides(t *testing.T) {
 
 		require.Equal(t, prov.cycleStart, cycleStart, "cycle start should be unchanged after restart")
 
+		require.Len(t, reprovided, nRegions/4, "should have reprovided %d regions in second round", nRegions/4)
+		require.Zero(t, prov.reprovideQueue.Size())
+
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
+		dumpHistory(t, prov)
+
+		recent, err := prov.loadRecentlyReprovidedRegions(time.Now())
+		require.NoError(t, err)
+		recentEntries := keyspace.AllEntries(recent, prov.order)
+		recentKeys := make([]bitstr.Key, len(recentEntries))
+		for i, e := range recentEntries {
+			recentKeys[i] = e.Key
+		}
+		t.Logf("recently reprovided regions after restart (%d): %v", len(recentKeys), recentKeys)
+
 		time.Sleep(reprovideInterval / 4)
 		synctest.Wait()
+
+		dumpHistory(t, prov)
+		prov.activeReprovidesLk.Lock()
+		t.Logf("active reprovides %d", prov.activeReprovides.Size())
+		prov.activeReprovidesLk.Unlock()
+
+		t.Log("reprovide queue size", prov.reprovideQueue.Size())
+
+		prov.scheduleLk.Lock()
+		t.Log("next prefix", prov.scheduleCursor)
+		prov.scheduleLk.Unlock()
+
 		reprovidedLk.Lock()
-		require.Len(t, reprovidedRound2, nRegions/4, "should have reprovided %d regions in second round", nRegions/4)
-		require.Len(t, reprovidedTotal, 3*nRegions/4, "should have reprovided %d regions", 3*nRegions/4)
+		require.Len(t, reprovided, nRegions/4) // should be nRegions/2
 		reprovidedLk.Unlock()
 
 		time.Sleep(reprovideInterval / 4)
 		synctest.Wait()
 		reprovidedLk.Lock()
-		require.Len(t, reprovidedRound2, nRegions/2, "should have reprovided %d regions in second round", nRegions/2)
-		require.Len(t, reprovidedTotal, nRegions, "should have reprovided all regions")
+		require.Len(t, reprovided, nRegions/2)
 		reprovidedLk.Unlock()
 
 		time.Sleep(reprovideInterval / 2)
 		synctest.Wait()
 		reprovidedLk.Lock()
-		require.Len(t, reprovidedRound2, nRegions, "should have reprovided all regions in second round")
-		require.Len(t, reprovidedTotal, nRegions, "should have reprovided all regions")
+		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
 		reprovidedLk.Unlock()
 	})
 }

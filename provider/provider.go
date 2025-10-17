@@ -34,7 +34,9 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 
@@ -95,6 +97,9 @@ const (
 	// minimalRegionReachablePeersRatio is the minimum ratio of reachable peers
 	// in a region for the provide to be considered a success.
 	minimalRegionReachablePeersRatio float32 = 0.2
+
+	// connMgrTag is used to protect libp2p connections during batch provides.
+	connMgrTag = "batchProvide"
 )
 
 var (
@@ -133,6 +138,7 @@ type SweepingProvider struct {
 	cleanupFuncs []func() error
 
 	peerid peer.ID
+	host   host.Host
 	order  bit256.Key
 	router KadClosestPeersRouter
 
@@ -242,6 +248,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 		router: cfg.router,
 		peerid: cfg.peerid,
+		host:   cfg.host,
 		order:  keyspace.PeerIDToBit256(cfg.peerid),
 
 		connectivity: connChecker,
@@ -750,6 +757,19 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	if nPeers == 0 {
 		return reachablePeers, err
 	}
+	if s.host != nil {
+		// Keep addresses in peerstore while providing. If there are many keys to
+		// provide, operations may take a while, and we don't want to forget the
+		// addresses, which may trigger new DHT lookups.
+		for p := range keysAllocations {
+			s.host.Peerstore().SetAddrs(p, s.host.Peerstore().Addrs(p), peerstore.PermanentAddrTTL)
+		}
+		defer func() {
+			for p := range keysAllocations {
+				s.host.Peerstore().UpdateAddrs(p, peerstore.PermanentAddrTTL, peerstore.RecentlyConnectedAddrTTL)
+			}
+		}()
+	}
 	startTime := time.Now()
 	errCount := atomic.Uint32{}
 	nWorkers := s.maxProvideConnsPerWorker
@@ -773,6 +793,11 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 						failedKeysCount[string(k)]++
 					}
 					failedKeysCountLk.Unlock()
+					if s.host != nil {
+						// Remove addresses from peerstore if there was an error providing
+						// to that peer.
+						s.host.Peerstore().ClearAddrs(job.pid)
+					}
 				}
 			}
 		}()
@@ -819,6 +844,10 @@ func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 // provideKeysToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given keys.
 func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
+	if s.host != nil {
+		s.host.ConnManager().Protect(p, connMgrTag)
+		defer s.host.ConnManager().Unprotect(p, connMgrTag)
+	}
 	var errCount, errStreak int
 	for i, mh := range keys {
 		pmes.Key = mh

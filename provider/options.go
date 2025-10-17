@@ -9,6 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
@@ -40,6 +41,7 @@ type config struct {
 	connectivityCheckOnlineInterval time.Duration
 
 	peerid peer.ID
+	host   host.Host
 	router KadClosestPeersRouter
 
 	keystore  keystore.Keystore
@@ -83,7 +85,10 @@ func getOpts(opts []Option) (config, error) {
 
 	// Validate config
 	if len(cfg.peerid) == 0 {
-		return config{}, errors.New("reprovider config: peer id is required")
+		if cfg.host == nil {
+			return config{}, errors.New("reprovider config: peer id is required")
+		}
+		cfg.peerid = cfg.host.ID()
 	}
 	if cfg.router == nil {
 		return config{}, errors.New("reprovider config: router is required")
@@ -161,6 +166,20 @@ func WithOfflineDelay(d time.Duration) Option {
 func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.connectivityCheckOnlineInterval = d
+		return nil
+	}
+}
+
+// WithHost sets the libp2p host running the provider.
+// It is useful to protect the open connections and keep addresses in the
+// peerstore during provide operations. Additionally, it is used to get the
+// peer.ID if missing.
+func WithHost(h host.Host) Option {
+	return func(cfg *config) error {
+		if h == nil {
+			return errors.New("reprovider config: host cannot be nil")
+		}
+		cfg.host = h
 		return nil
 	}
 }

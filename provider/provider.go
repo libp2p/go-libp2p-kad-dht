@@ -590,6 +590,8 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 // the current time offset.
 func (s *SweepingProvider) nextPrefixToReprovideNoLock(offset time.Duration) (bitstr.Key, error) {
 	maxVal := 1 << maxPrefixSize
+	// Division before multiplication to avoid integer overflow. This is why we
+	// need to use float.
 	intPrefix := uint64(float64(offset) / float64(s.reprovideInterval) * float64(maxVal))
 	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, int64(intPrefix)))
 	nextRegion := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order)

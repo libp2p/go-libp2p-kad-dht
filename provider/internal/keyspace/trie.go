@@ -393,7 +393,7 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 
 // KeyspaceCovered checks whether the trie covers the entire keyspace without
 // gaps.
-func KeyspaceCovered[V any](t *trie.Trie[bitstr.Key, V]) bool {
+func KeyspaceCovered[D any](t *trie.Trie[bitstr.Key, D]) bool {
 	if t.IsLeaf() {
 		if t.HasKey() {
 			return *t.Key() == ""
@@ -411,18 +411,16 @@ outerLoop:
 			return false
 		}
 
-		if len(p) == stackTopLen {
-			for len(p) == stackTopLen {
-				if stackTopLen == 1 && stackTop == p {
-					stack = stack[:len(stack)-1]
-					continue outerLoop
-				}
-				// Match with stackTop, pop stack and continue
-				p = p[:stackTopLen-1]
+		for len(p) == stackTopLen {
+			if stackTopLen == 1 && stackTop == p {
 				stack = stack[:len(stack)-1]
-				stackTop = stack[len(stack)-1]
-				stackTopLen = len(stackTop)
+				continue outerLoop
 			}
+			// Match with stackTop, pop stack and continue
+			p = p[:stackTopLen-1]
+			stack = stack[:len(stack)-1]
+			stackTop = stack[len(stack)-1]
+			stackTopLen = len(stackTop)
 		}
 
 		stack = append(stack, FlipLastBit(p))

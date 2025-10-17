@@ -99,6 +99,10 @@ const (
 	// minimalRegionReachablePeersRatio is the minimum ratio of reachable peers
 	// in a region for the provide to be considered a success.
 	minimalRegionReachablePeersRatio float32 = 0.2
+
+	// providerDatastoreNamespace is the namespace in the datastore where
+	// provider data is stored.
+	providerDatastoreNamespace string = "provider"
 )
 
 var (
@@ -109,6 +113,13 @@ var (
 	// performed as usual, but keys aren't added to provide queue nor advertised
 	// to the network.
 	ErrOffline = errors.New("provider: offline")
+
+	// reprovideHistoryKeyPrefix is the prefix for keys storing the timestamp of
+	// the last reprovide for a given region in the datastore.
+	reprovideHistoryKeyPrefix = path.Join(providerDatastoreNamespace, "history")
+	// reprovideCycleStartKey is the key storing the start time of the initial
+	// reprovide cycle.
+	reprovideCycleStartKey = ds.NewKey(path.Join(providerDatastoreNamespace, "cycle_start"))
 )
 
 const LoggerName = "dht/provider"
@@ -315,6 +326,38 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	return prov, nil
 }
 
+// initFromPersistedState initializes the provider from persisted state on
+// startup. It restores the reprovide cycle start time and enqueues any regions
+// that expired during downtime for immediate reproviding.
+func (s *SweepingProvider) initFromPersistedState() {
+	now := time.Now()
+	cycleStart, err := s.readCycleStart()
+	if err != nil || cycleStart.IsZero() {
+		// cycle start time is zero on initial run.
+		if err != nil {
+			logger.Warnf("couldn't read cycle start time: %s", err)
+		}
+		s.writeCycleStart(now)
+		cycleStart = now
+	}
+	s.startedAt = now
+	s.cycleStart = cycleStart
+
+	currentOffset := s.timeOffset(now)
+	// Unlock schedule while querying the datastore.
+	recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
+	s.scheduleLk.Lock()
+	defer s.scheduleLk.Unlock()
+	if err == nil {
+		s.enqueueExpiredRegionsNoLock(recentlyReprovided)
+	} else {
+		logger.Warnf("couldn't load not expired regions: %s", err)
+	}
+	if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
+		s.scheduleNextReprovideNoLock(nextPrefix, s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)))
+	}
+}
+
 func (s *SweepingProvider) run() {
 	defer s.wg.Done()
 
@@ -372,6 +415,161 @@ func (s *SweepingProvider) closed() bool {
 	default:
 		return false
 	}
+}
+
+// writeCycleStart persists the reprovide cycle start time to the datastore.
+func (s *SweepingProvider) writeCycleStart(t time.Time) error {
+	return s.datastore.Put(context.Background(), reprovideCycleStartKey, []byte(formatTimestampHex(t)))
+}
+
+// readCycleStart reads the reprovide cycle start time from the datastore.
+// Returns a zero time if the key is not found (first run).
+func (s *SweepingProvider) readCycleStart() (time.Time, error) {
+	v, err := s.datastore.Get(context.Background(), reprovideCycleStartKey)
+	if err != nil {
+		if errors.Is(err, ds.ErrNotFound) {
+			// Initial run, no cycle start time stored yet.
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	t, err := parseTimestampHex(string(v))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t, nil
+}
+
+// formatTimestampHex returns a hex representation of the given timestamp,
+// suitable for lexicographical ordering.
+//
+// 8 hex digits = 32 bits, valid until year 2106.
+func formatTimestampHex(t time.Time) string {
+	return fmt.Sprintf("%08x", t.Unix())
+}
+
+// parseTimestampHex parses a hex representation of a timestamp as returned by
+// formatTimestampHex.
+func parseTimestampHex(s string) (time.Time, error) {
+	var ts int64
+	_, err := fmt.Sscanf(s, "%x", &ts)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(ts, 0), nil
+}
+
+// enqueueExpiredRegionsNoLock identifies regions in the schedule that haven't
+// been reprovided within the reprovide interval and adds them to the reprovide
+// queue. Assumes the schedule lock is held.
+func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.Trie[bitstr.Key, struct{}]) {
+	keyspace.CoalesceTrie(recentlyReprovided)
+	// Take a copy of schedule from which we remove recently reprovided regions.
+	toReprovideTrie := keyspace.SubtractTrie(s.schedule, recentlyReprovided)
+	toReprovideEntries := keyspace.AllEntries(toReprovideTrie, s.order)
+	toReprovideKeys := make([]bitstr.Key, len(toReprovideEntries))
+	for i, entry := range toReprovideEntries {
+		toReprovideKeys[i] = entry.Key
+	}
+	s.reprovideQueue.Enqueue(toReprovideKeys...)
+}
+
+// persistSuccessfulReprovide logs a successful reprovide to the datastore for
+// resumption after restarts.
+func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
+	now := time.Now()
+	k := ds.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
+	if err := s.datastore.Put(context.Background(), k, []byte{}); err != nil {
+		logger.Warnf("couldn't persist successful reprovide for prefix %s: %s", prefix, err)
+	}
+	s.gcReprovideHistoryIfNeeded(now)
+}
+
+// loadRecentlyReprovidedRegions loads all regions that have been successfully
+// reprovided within the last reprovide interval from the datastore.
+func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.Trie[bitstr.Key, struct{}], error) {
+	s.gcReprovideHistoryIfNeeded(now)
+
+	q := query.Query{
+		Prefix:   reprovideHistoryKeyPrefix,
+		Orders:   []query.Order{query.OrderByKey{}},
+		KeysOnly: true,
+	}
+	res, err := s.datastore.Query(context.Background(), q)
+	if err != nil {
+		return nil, err
+	}
+	regions := trie.New[bitstr.Key, struct{}]()
+	for r := range res.Next() {
+		if r.Error != nil {
+			return nil, r.Error
+		}
+		_, key, err := parseReprovideHistoryKey(r.Key)
+		if err != nil {
+			s.datastore.Delete(context.Background(), ds.NewKey(r.Key))
+			continue
+		}
+		regions.Add(key, struct{}{})
+	}
+	return regions, nil
+}
+
+// gcReprovideHistoryIfNeeded removes reprovide log entries older than the
+// reprovide interval. GC runs at most once per reprovide interval.
+func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
+	lastGC := time.Unix(s.lastReprovideHistoryGC.Load(), 0)
+	if now.Sub(lastGC) < s.reprovideInterval {
+		// Only run GC once per reprovide interval.
+		return
+	}
+
+	q := query.Query{
+		Prefix:   reprovideHistoryKeyPrefix,
+		Orders:   []query.Order{query.OrderByKey{}},
+		KeysOnly: true,
+	}
+	deadline := now.Add(-s.reprovideInterval)
+	res, err := s.datastore.Query(context.Background(), q)
+	if err != nil {
+		logger.Warnf("couldn't query reprovide history for gc: %s", err)
+		return
+	}
+	for r := range res.Next() {
+		if r.Error != nil {
+			logger.Warnf("couldn't query reprovide history for gc: %s", r.Error)
+			return
+		}
+		k := r.Key
+		t, _, err := parseReprovideHistoryKey(k)
+		if err == nil && t.After(deadline) {
+			// Reached non-expired entries; cleanup complete as keys are sorted by
+			// time.
+			break
+		}
+		// Either key is invalid or log is expired, delete key.
+		s.datastore.Delete(context.Background(), ds.NewKey(k))
+	}
+	s.lastReprovideHistoryGC.Store(now.Unix())
+}
+
+// parseReprovideLogKey parses a datastore key from the reprovide history log.
+// Expected format: /provider/history/<hex-timestamp>/<prefix>
+func parseReprovideHistoryKey(k string) (time.Time, bitstr.Key, error) {
+	parts := strings.Split(k, "/")
+	lenParts := len(parts)
+	if lenParts < 4 || lenParts > 5 {
+		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
+	}
+	t, err := parseTimestampHex(parts[3])
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
+	}
+	var prefix bitstr.Key
+	if lenParts == 5 {
+		prefix = bitstr.Key(parts[4])
+	}
+	// lenParts == 4 means empty prefix ("").
+	return t, prefix, nil
 }
 
 // scheduleNextReprovideNoLock makes sure the scheduler wakes up in
@@ -513,6 +711,19 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	val, _ := strconv.ParseInt(string(k), 2, 64)
 	// Calculate the time offset as a fraction of the overall reprovide interval.
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
+}
+
+// nextPrefixToReprovide returns the next prefix to reprovide, based on the
+// current time offset.
+func (s *SweepingProvider) nextPrefixToReprovideNoLock(offset time.Duration) (bitstr.Key, error) {
+	maxVal := time.Duration(1 << maxPrefixSize)
+	intPrefix := offset * maxVal / s.reprovideInterval
+	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
+	nextRegion := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order)
+	if nextRegion == nil {
+		return "", errors.New("schedule is empty")
+	}
+	return nextRegion.Key, nil
 }
 
 // approxPrefixLen makes a few GetClosestPeers calls to get an estimate
@@ -1320,214 +1531,10 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if s.provideRegions(regions, addrInfo, true, periodicReprovide) {
-		s.persistSuccessfulReprovide(prefix) // TODO: also for individualReprovide
+		s.persistSuccessfulReprovide(prefix)
 	} else {
 		logger.Warnf("failed to reprovide any region for prefix %s", prefix)
 	}
-}
-
-var (
-	providerDatastoreNamespace = "provider"
-	reprovideHistoryKeyPrefix  = path.Join(providerDatastoreNamespace, "history")
-	reprovideCycleStartKey     = ds.NewKey(path.Join(providerDatastoreNamespace, "cycle_start"))
-)
-
-// formatTimestampHex returns a hex representation of the given timestamp,
-// suitable for lexicographical ordering.
-//
-// 8 hex digits = 32 bits, valid until year 2106.
-func formatTimestampHex(t time.Time) string {
-	return fmt.Sprintf("%08x", t.Unix())
-}
-
-// parseTimestampHex parses a hex representation of a timestamp as returned by
-// formatTimestampHex.
-func parseTimestampHex(s string) (time.Time, error) {
-	var ts int64
-	_, err := fmt.Sscanf(s, "%x", &ts)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.Unix(ts, 0), nil
-}
-
-// writeCycleStart persists the reprovide cycle start time to the datastore.
-func (s *SweepingProvider) writeCycleStart(t time.Time) error {
-	return s.datastore.Put(context.Background(), reprovideCycleStartKey, []byte(formatTimestampHex(t)))
-}
-
-// readCycleStart reads the reprovide cycle start time from the datastore.
-// Returns a zero time if the key is not found (first run).
-func (s *SweepingProvider) readCycleStart() (time.Time, error) {
-	v, err := s.datastore.Get(context.Background(), reprovideCycleStartKey)
-	if err != nil {
-		if errors.Is(err, ds.ErrNotFound) {
-			// Initial run, no cycle start time stored yet.
-			return time.Time{}, nil
-		}
-		return time.Time{}, err
-	}
-	t, err := parseTimestampHex(string(v))
-	if err != nil {
-		return time.Time{}, err
-	}
-	return t, nil
-}
-
-// initFromPersistedState initializes the provider from persisted state on
-// startup. It restores the reprovide cycle start time and enqueues any regions
-// that expired during downtime for immediate reproviding.
-func (s *SweepingProvider) initFromPersistedState() {
-	now := time.Now()
-	cycleStart, err := s.readCycleStart()
-	if err != nil || cycleStart.IsZero() {
-		// cycle start time is zero on initial run.
-		if err != nil {
-			logger.Warnf("couldn't read cycle start time: %s", err)
-		}
-		s.writeCycleStart(now)
-		cycleStart = now
-	}
-	s.startedAt = now
-	s.cycleStart = cycleStart
-
-	currentOffset := s.timeOffset(now)
-	s.scheduleLk.Lock()
-	defer s.scheduleLk.Unlock()
-	s.enqueueExpiredRegionsNoLock(now)
-	if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
-		s.scheduleNextReprovideNoLock(nextPrefix, s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)))
-	}
-}
-
-// nextPrefixToReprovide returns the next prefix to reprovide, based on the
-// current time offset.
-func (s *SweepingProvider) nextPrefixToReprovideNoLock(offset time.Duration) (bitstr.Key, error) {
-	maxVal := time.Duration(1 << maxPrefixSize)
-	intPrefix := offset * maxVal / s.reprovideInterval
-	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, intPrefix))
-	nextRegion := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order)
-	if nextRegion == nil {
-		return "", errors.New("schedule is empty")
-	}
-	return nextRegion.Key, nil
-}
-
-// enqueueExpiredRegionsNoLock identifies regions in the schedule that haven't
-// been reprovided within the reprovide interval and adds them to the reprovide
-// queue. Assumes the schedule lock is held.
-func (s *SweepingProvider) enqueueExpiredRegionsNoLock(now time.Time) {
-	recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
-	if err != nil {
-		logger.Warnf("couldn't load not expired regions: %s", err)
-		return
-	}
-	keyspace.CoalesceTrie(recentlyReprovided)
-	// Take a copy of schedule from which we remove recently reprovided regions.
-	toReprovideTrie := keyspace.SubtractTrie(s.schedule, recentlyReprovided)
-	toReprovideEntries := keyspace.AllEntries(toReprovideTrie, s.order)
-	toReprovideKeys := make([]bitstr.Key, len(toReprovideEntries))
-	for i, entry := range toReprovideEntries {
-		toReprovideKeys[i] = entry.Key
-	}
-	s.reprovideQueue.Enqueue(toReprovideKeys...)
-}
-
-// loadRecentlyReprovidedRegions loads all regions that have been successfully
-// reprovided within the last reprovide interval from the datastore.
-func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.Trie[bitstr.Key, struct{}], error) {
-	s.gcReprovideHistoryIfNeeded(now)
-
-	q := query.Query{
-		Prefix:   reprovideHistoryKeyPrefix,
-		Orders:   []query.Order{query.OrderByKey{}},
-		KeysOnly: true,
-	}
-	res, err := s.datastore.Query(context.Background(), q)
-	if err != nil {
-		return nil, err
-	}
-	regions := trie.New[bitstr.Key, struct{}]()
-	for r := range res.Next() {
-		if r.Error != nil {
-			return nil, r.Error
-		}
-		_, key, err := parseReprovideLogKey(r.Key)
-		if err != nil {
-			s.datastore.Delete(context.Background(), ds.NewKey(r.Key))
-			continue
-		}
-		regions.Add(key, struct{}{})
-	}
-	return regions, nil
-}
-
-// persistSuccessfulReprovide logs a successful reprovide to the datastore for
-// resumption after restarts.
-func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
-	now := time.Now()
-	k := ds.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
-	if err := s.datastore.Put(context.Background(), k, []byte{}); err != nil {
-		logger.Warnf("couldn't persist successful reprovide for prefix %s: %s", prefix, err)
-	}
-	s.gcReprovideHistoryIfNeeded(now)
-}
-
-// gcReprovideHistoryIfNeeded removes reprovide log entries older than the
-// reprovide interval. GC runs at most once per reprovide interval.
-func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
-	lastGC := time.Unix(s.lastReprovideHistoryGC.Load(), 0)
-	if now.Sub(lastGC) < s.reprovideInterval {
-		// Only run GC once per reprovide interval.
-		return
-	}
-
-	q := query.Query{
-		Prefix:   reprovideHistoryKeyPrefix,
-		Orders:   []query.Order{query.OrderByKey{}},
-		KeysOnly: true,
-	}
-	deadline := now.Add(-s.reprovideInterval)
-	res, err := s.datastore.Query(context.Background(), q)
-	if err != nil {
-		logger.Warnf("couldn't query reprovide history for gc: %s", err)
-		return
-	}
-	for r := range res.Next() {
-		if r.Error != nil {
-			logger.Warnf("couldn't query reprovide history for gc: %s", r.Error)
-			return
-		}
-		k := r.Key
-		t, _, err := parseReprovideLogKey(k)
-		if err == nil && t.After(deadline) {
-			// Reached non-expired entries; cleanup complete as keys are sorted by
-			// time.
-			break
-		}
-		// Either key is invalid or log is expired, delete key.
-		s.datastore.Delete(context.Background(), ds.NewKey(k))
-	}
-	s.lastReprovideHistoryGC.Store(now.Unix())
-}
-
-// parseReprovideLogKey parses a datastore key from the reprovide history log.
-// Expected format: /provider/history/<hex-timestamp>/<prefix>
-func parseReprovideLogKey(k string) (time.Time, bitstr.Key, error) {
-	parts := strings.Split(k, "/")
-	lenParts := len(parts)
-	if lenParts < 4 || lenParts > 5 {
-		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
-	}
-	t, err := parseTimestampHex(parts[3])
-	if err != nil {
-		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
-	}
-	var prefix bitstr.Key
-	if lenParts == 5 {
-		prefix = bitstr.Key(parts[4])
-	}
-	return t, prefix, nil
 }
 
 func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash, err error) {

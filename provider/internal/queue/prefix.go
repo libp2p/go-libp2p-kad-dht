@@ -27,17 +27,19 @@ type prefixQueue struct {
 // supplied prefix at the position of the first superstring in the queue, and
 // remove all superstrings from the queue. The prefixes are consolidated around
 // the shortest prefix.
-func (q *prefixQueue) Push(prefix bitstr.Key) {
-	if firstRemovedIndex := q.removeSuperstrings(prefix); firstRemovedIndex >= 0 {
-		// `prefix` has superstrings in the queue. Remove them all and insert
-		// `prefix` in the queue at the location of the first removed superstring.
-		q.queue.Insert(firstRemovedIndex, prefix)
-		// Add `prefix` to prefixes trie.
-		q.prefixes.Add(prefix, struct{}{})
-	} else if _, ok := keyspace.FindPrefixOfKey(q.prefixes, prefix); !ok {
-		// No prefixes nor superstrings of `prefix` found in the queue.
-		q.queue.PushBack(prefix)
-		q.prefixes.Add(prefix, struct{}{})
+func (q *prefixQueue) Push(prefixes ...bitstr.Key) {
+	for _, prefix := range prefixes {
+		if firstRemovedIndex := q.removeSuperstrings(prefix); firstRemovedIndex >= 0 {
+			// `prefix` has superstrings in the queue. Remove them all and insert
+			// `prefix` in the queue at the location of the first removed superstring.
+			q.queue.Insert(firstRemovedIndex, prefix)
+			// Add `prefix` to prefixes trie.
+			q.prefixes.Add(prefix, struct{}{})
+		} else if _, ok := keyspace.FindPrefixOfKey(q.prefixes, prefix); !ok {
+			// No prefixes nor superstrings of `prefix` found in the queue.
+			q.queue.PushBack(prefix)
+			q.prefixes.Add(prefix, struct{}{})
+		}
 	}
 }
 

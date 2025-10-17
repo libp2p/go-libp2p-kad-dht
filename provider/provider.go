@@ -1017,7 +1017,7 @@ func (s *SweepingProvider) handleReprovide() {
 
 		// next is in the future
 		nextPrefix = next.Key
-		timeUntilNextReprovide = s.timeUntil(next.Data) % s.reprovideInterval
+		timeUntilNextReprovide = s.timeUntil(next.Data)
 	}
 
 	s.scheduleNextReprovideNoLock(nextPrefix, timeUntilNextReprovide)

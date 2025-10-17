@@ -55,7 +55,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	var avgPrefixLen float64
 	nextPrefix := s.scheduleCursor
 	ok, nextReprovideOffset := trie.Find(s.schedule, nextPrefix)
-	if avgPrefixLen >= 0 && !s.schedule.IsEmptyLeaf() {
+	if avgPrefixLenCached >= 0 && !s.schedule.IsEmptyLeaf() {
 		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
 		scheduleSize = len(scheduleEntries)
 		prefixSum := 0.

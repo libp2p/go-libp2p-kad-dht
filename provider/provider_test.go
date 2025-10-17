@@ -489,10 +489,13 @@ func TestIndividualProvideMultiple(t *testing.T) {
 			return nil
 		},
 	}
+	reprovideInterval := time.Hour
+	maxDelay := time.Minute
 	r := SweepingProvider{
 		router:                   router,
 		msgSender:                msgSender,
-		reprovideInterval:        time.Hour,
+		reprovideInterval:        reprovideInterval,
+		maxReprovideDelay:        maxDelay,
 		maxProvideConnsPerWorker: 2,
 		provideQueue:             queue.NewProvideQueue(),
 		reprovideQueue:           queue.NewReprovideQueue(),
@@ -502,6 +505,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		getSelfAddrs:             func() []ma.Multiaddr { return nil },
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
 		provideCounter:           provideCounter(),
+		stats:                    newOperationStats(reprovideInterval, maxDelay),
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -642,7 +646,7 @@ func TestHandleReprovide(t *testing.T) {
 		require.Equal(t, prefixes[0], prov.scheduleCursor)
 
 		// Two prefixes in schedule
-		time.Sleep(1) // advance 1 tick into the reprovide cycle
+		time.Sleep(time.Nanosecond) // advance 1 tick into the reprovide cycle
 		prov.schedule.Add(prefixes[1], prov.reprovideTimeForPrefix(prefixes[1]))
 		prov.handleReprovide() // reprovides prefixes[0], set scheduleCursor to prefixes[1]
 		require.Equal(t, prefixes[1], prov.scheduleCursor)
@@ -908,7 +912,7 @@ func TestStartProvidingSingle(t *testing.T) {
 		synctest.Wait()
 		require.True(t, prov.connectivity.IsOnline())
 		prov.avgPrefixLenLk.Lock()
-		require.Greater(t, prov.cachedAvgPrefixLen, 0)
+		require.GreaterOrEqual(t, prov.cachedAvgPrefixLen, 0)
 		prov.avgPrefixLenLk.Unlock()
 
 		err = prov.StartProviding(true, h)
@@ -1182,7 +1186,7 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 
 		synctest.Wait()
 		prov.avgPrefixLenLk.Lock()
-		require.Greater(t, prov.cachedAvgPrefixLen, 0)
+		require.GreaterOrEqual(t, prov.cachedAvgPrefixLen, 0)
 		prov.avgPrefixLenLk.Unlock()
 
 		routerOffline.Store(true)

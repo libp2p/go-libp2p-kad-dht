@@ -391,6 +391,43 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 	return m
 }
 
+// KeyspaceCovered checks whether the trie covers the entire keyspace without
+// gaps.
+func KeyspaceCovered[D any](t *trie.Trie[bitstr.Key, D]) bool {
+	if t.IsLeaf() {
+		if t.HasKey() {
+			return *t.Key() == ""
+		}
+		return false
+	}
+
+	stack := []bitstr.Key{"1", "0"}
+outerLoop:
+	for _, entry := range AllEntries(t, bit256.ZeroKey()) {
+		p := entry.Key
+		stackTop := stack[len(stack)-1]
+		stackTopLen := len(stackTop)
+		if len(p) < stackTopLen {
+			return false
+		}
+
+		for len(p) == stackTopLen {
+			if stackTopLen == 1 && stackTop == p {
+				stack = stack[:len(stack)-1]
+				continue outerLoop
+			}
+			// Match with stackTop, pop stack and continue
+			p = p[:stackTopLen-1]
+			stack = stack[:len(stack)-1]
+			stackTop = stack[len(stack)-1]
+			stackTopLen = len(stackTop)
+		}
+
+		stack = append(stack, FlipLastBit(p))
+	}
+	return len(stack) == 0
+}
+
 // Region represents a subtrie of the complete DHT keyspace.
 //
 //   - Prefix is the identifier of the subtrie.

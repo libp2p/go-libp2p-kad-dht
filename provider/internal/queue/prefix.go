@@ -1,3 +1,5 @@
+// Package queue provides queues for batching DHT provide operations by
+// Kademlia prefix, with optional datastore persistence.
 package queue
 
 import (

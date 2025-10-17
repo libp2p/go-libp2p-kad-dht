@@ -1,8 +1,13 @@
 package queue
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"sync"
 
+	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/query"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/probe-lab/go-libdht/kad/key/bit256"
@@ -57,7 +62,12 @@ func (q *ProvideQueue) Enqueue(prefix bitstr.Key, keys ...mh.Multihash) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.enqueueNoLock(prefix, keys)
+}
 
+// enqueueNoLock adds the supplied keys to the queue under the given prefix
+// without acquiring the mutex. The caller must hold q.mu.
+func (q *ProvideQueue) enqueueNoLock(prefix bitstr.Key, keys []mh.Multihash) {
 	// Enqueue the prefix in the queue if required.
 	q.queue.Push(prefix)
 
@@ -192,4 +202,145 @@ func (q *ProvideQueue) Clear() int {
 	*q.keys = trie.Trie[bit256.Key, mh.Multihash]{}
 
 	return size
+}
+
+// Persist saves the current state of the queue to the provided datastore.
+//
+// The queue state includes the ordered list of prefixes and all associated
+// multihashes. The data is stored under keys formatted as:
+// * {queue-position:012x}/{prefix-bitstring}
+//
+// This operation does not modify the queue's in-memory state.
+func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching, batchSize int) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	// Create a batch for efficient writes
+	batch, err := d.Batch(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create batch: %w", err)
+	}
+
+	i := 0
+	for prefix := range q.queue.queue.Iter() {
+		// Find all keys matching this prefix
+		if subtrie, ok := keyspace.FindSubtrie(q.keys, prefix); ok {
+			keys := keyspace.AllValues(subtrie, bit256.ZeroKey())
+
+			// Concatenate all multihash bytes
+			var buf []byte
+			for _, h := range keys {
+				buf = append(buf, []byte(h)...)
+			}
+
+			// Store with queue position and prefix as key
+			key := ds.NewKey(fmt.Sprintf("%012x/%s", i, string(prefix)))
+			if err := batch.Put(ctx, key, buf); err != nil {
+				return fmt.Errorf("failed to store prefix data: %w", err)
+			}
+		}
+
+		i++
+
+		if i%batchSize == 0 {
+			// Max batch size reached, commit and start a new batch.
+			if err := batch.Commit(ctx); err != nil {
+				return fmt.Errorf("failed to commit batch: %w", err)
+			}
+			batch, err = d.Batch(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to create batch: %w", err)
+			}
+		}
+	}
+
+	if err := batch.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit batch: %w", err)
+	}
+
+	return nil
+}
+
+// decodeMultihashes parses concatenated multihash bytes and returns individual multihashes.
+func decodeMultihashes(data []byte) ([]mh.Multihash, error) {
+	var multihashes []mh.Multihash
+	offset := 0
+
+	for offset < len(data) {
+		// Parse the multihash at current offset
+		// MHFromBytes returns (consumed, multihash, error)
+		consumed, mhash, err := mh.MHFromBytes(data[offset:])
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode multihash at offset %d: %w", offset, err)
+		}
+
+		multihashes = append(multihashes, mhash)
+		offset += consumed
+	}
+
+	return multihashes, nil
+}
+
+// DrainDatastore loads persisted queue entries from the datastore, adds them to
+// the current queue, and removes them from the datastore.
+//
+// This operation does NOT clear the existing queue state - it is additive.
+func (q *ProvideQueue) DrainDatastore(ctx context.Context, d ds.Batching) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	// Query all persisted entries, ordered by key (which preserves queue order)
+	dsQuery := query.Query{
+		Orders: []query.Order{query.OrderByKey{}},
+	}
+
+	results, err := d.Query(ctx, dsQuery)
+	if err != nil {
+		return fmt.Errorf("failed to query datastore: %w", err)
+	}
+
+	// Create a batch for deletes
+	batch, err := d.Batch(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create batch: %w", err)
+	}
+
+	for result := range results.Next() {
+		if result.Error != nil {
+			return fmt.Errorf("error reading query result: %w", result.Error)
+		}
+
+		// Key format: "/position/prefix"
+		parts := strings.Split(strings.TrimPrefix(result.Key, "/"), "/")
+		if len(parts) != 2 {
+			continue // Skip invalid keys
+		}
+		prefix := bitstr.Key(parts[1])
+
+		// Decode concatenated multihashes
+		keys, err := decodeMultihashes(result.Value)
+		if err != nil {
+			return fmt.Errorf("failed to decode multihashes for prefix %s: %w", prefix, err)
+		}
+		if len(keys) == 0 {
+			continue
+		}
+
+		// Add keys to provide queue
+		q.enqueueNoLock(prefix, keys)
+
+		// Delete key from datastore
+		batch.Delete(ctx, ds.NewKey(result.Key))
+	}
+
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close query results: %w", err)
+	}
+
+	// Commit deletions
+	if err := batch.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit batch: %w", err)
+	}
+
+	return nil
 }

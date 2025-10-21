@@ -303,10 +303,9 @@ func WithDatastore(ds datastore.Batching) Option {
 // WithLoggerName sets the go-log logger name for the DHT provider.
 func WithLoggerName(name string) Option {
 	return func(cfg *config) error {
-		if len(name) == 0 {
-			return errors.New("reprovider config: logger name cannot be empty")
+		if len(name) > 0 {
+			cfg.loggerName = name
 		}
-		cfg.loggerName = name
 		return nil
 	}
 }

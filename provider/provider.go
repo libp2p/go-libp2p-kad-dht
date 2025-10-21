@@ -87,6 +87,9 @@ const (
 	// 32*replicatonFactor peers, which should be more than enough, even if the
 	// supplied prefix is too short.
 	maxExplorationPrefixSearches = 64
+	// maxConsecutiveNoFreshPeers is the maximum number of consecutive lookups
+	// that find no new peers before stopping exploration early.
+	maxConsecutiveNoFreshPeers = 2
 
 	// maxConsecutiveProvideFailuresAllowed is the maximum number of consecutive
 	// provides that are allowed to fail to the same remote peer before cancelling
@@ -666,7 +669,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	coverageTrie := trie.New[bitstr.Key, struct{}]()
 
 	var gaps []bitstr.Key
-	i := 0
+	i, noFreshPeersFoundCount := 0, 0
 	// Go down the trie to fully cover prefix.
 	for ; i < maxExplorationPrefixSearches; i++ {
 		if !s.connectivity.IsOnline() {
@@ -683,8 +686,27 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			return nil, errors.New("dht lookup did not return any peers")
 		}
 		coveredPrefix, coveredPeers := keyspace.ShortestCoveredPrefix(fullKey, closestPeers)
+		// Track whether we discovered any new peers. If too many consecutive
+		// lookups find no new peers, break early as we've likely found all peers
+		// in the region.
+		freshPeerFound := false
 		for _, p := range coveredPeers {
-			allClosestPeers[p] = struct{}{}
+			if !freshPeerFound {
+				if _, ok := allClosestPeers[p]; !ok {
+					allClosestPeers[p] = struct{}{}
+					freshPeerFound = true
+				}
+			} else {
+				allClosestPeers[p] = struct{}{}
+			}
+		}
+		if !freshPeerFound {
+			noFreshPeersFoundCount++
+			if noFreshPeersFoundCount >= maxConsecutiveNoFreshPeers {
+				break
+			}
+		} else {
+			noFreshPeersFoundCount = 0
 		}
 
 		if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); !ok {

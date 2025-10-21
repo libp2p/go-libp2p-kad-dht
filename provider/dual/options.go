@@ -350,17 +350,16 @@ func WithLoggerNameWAN(loggerName string) Option {
 
 func withLoggerName(loggerName string, dhts ...uint8) Option {
 	return func(cfg *config) error {
-		if len(loggerName) == 0 {
-			return errors.New("logger name cannot be empty")
-		}
-		switch len(dhts) {
-		case 1:
-			cfg.loggerNames[dhts[0]] = loggerName
-		case 2:
-			cfg.loggerNames[wanID] = loggerName
-			cfg.loggerNames[lanID] = loggerName + DefaultLoggerNameLANSuffix
-		default:
-			return errors.New("invalid number of dhts specified")
+		if len(loggerName) > 0 {
+			switch len(dhts) {
+			case 1:
+				cfg.loggerNames[dhts[0]] = loggerName
+			case 2:
+				cfg.loggerNames[wanID] = loggerName
+				cfg.loggerNames[lanID] = loggerName + DefaultLoggerNameLANSuffix
+			default:
+				return errors.New("invalid number of dhts specified")
+			}
 		}
 		return nil
 	}

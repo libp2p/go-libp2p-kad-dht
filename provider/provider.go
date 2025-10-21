@@ -298,27 +298,29 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		stats:          newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
 	}
 
-	// Restore reprovide cycle start time from datastore or initialize it.
-	prov.setCycleStart()
+	// Provide queue is persisted on close, reuse keystore batch size.
+	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
+	batchSize := prov.keystore.BatchSize()
+	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
+
+	if cfg.resumeCycle {
+		// Restore reprovide cycle start time from datastore or initialize it.
+		prov.setCycleStart()
+
+		// Load keys that were saved to the datastore back to the provide queue.
+		if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
+			logger.Errorw("failed to drain provide queue from datastore", "error", err)
+		}
+	}
+
+	// Don't need to start schedule timer yet
+	prov.scheduleTimer.Stop()
 
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
 	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
 	prov.connectivity.Start()
-
-	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
-	// Load keys that were logged to the datastore back to the provide queue.
-	if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
-		logger.Errorw("failed to drain provide queue from datastore", "error", err)
-	}
-
-	// Provide queue is persisted on close, reuse keystore batch size.
-	batchSize := prov.keystore.BatchSize()
-	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
-	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
-
-	// Don't need to start schedule timer yet
-	prov.scheduleTimer.Stop()
 
 	prov.wg.Add(1)
 	go prov.run()

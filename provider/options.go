@@ -53,6 +53,8 @@ type config struct {
 	dedicatedPeriodicWorkers int
 	dedicatedBurstWorkers    int
 	maxProvideConnsPerWorker int
+
+	resumeCycle bool
 }
 
 type Option func(opt *config) error
@@ -72,6 +74,8 @@ func getOpts(opts []Option) (config, error) {
 		maxProvideConnsPerWorker: 20,
 
 		addLocalRecord: func(mh mh.Multihash) error { return nil },
+
+		resumeCycle: true,
 	}
 
 	// Apply options
@@ -290,6 +294,25 @@ func WithDatastore(ds datastore.Batching) Option {
 			return errors.New("reprovider config: datastore cannot be nil")
 		}
 		cfg.datastore = ds
+		return nil
+	}
+}
+
+// WithResumeCycle sets whether the reprovider should resume the previous
+// reprovide cycle from where it left off when the node was last shut down.
+//
+// When set to true (default), the provider will restore its state from the
+// datastore and continue reproviding regions according to their previous
+// schedule. This ensures continuity across node restarts and prevents gaps
+// in provider record availability.
+//
+// When set to false, the provider starts a fresh reprovide cycle, ignoring
+// any previously persisted state. All regions will be scheduled for
+// reprovision from scratch. This is useful for testing or when you want to
+// reset the reprovide schedule.
+func WithResumeCycle(resume bool) Option {
+	return func(cfg *config) error {
+		cfg.resumeCycle = resume
 		return nil
 	}
 }

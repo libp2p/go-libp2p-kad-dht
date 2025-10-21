@@ -346,13 +346,13 @@ func (s *SweepingProvider) setCycleStart() {
 
 // writeCycleStart persists the reprovide cycle start time to the datastore.
 func (s *SweepingProvider) writeCycleStart(t time.Time) error {
-	return s.datastore.Put(context.Background(), reprovideCycleStartKey, []byte(formatTimestampHex(t)))
+	return s.datastore.Put(s.ctx, reprovideCycleStartKey, []byte(formatTimestampHex(t)))
 }
 
 // readCycleStart reads the reprovide cycle start time from the datastore.
 // Returns a zero time if the key is not found (first run).
 func (s *SweepingProvider) readCycleStart() (time.Time, error) {
-	v, err := s.datastore.Get(context.Background(), reprovideCycleStartKey)
+	v, err := s.datastore.Get(s.ctx, reprovideCycleStartKey)
 	if err != nil {
 		if errors.Is(err, ds.ErrNotFound) {
 			// Initial run, no cycle start time stored yet.
@@ -1217,7 +1217,7 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
 	now := time.Now()
 	k := ds.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
-	if err := s.datastore.Put(context.Background(), k, []byte{}); err != nil {
+	if err := s.datastore.Put(s.ctx, k, []byte{}); err != nil {
 		logger.Warnf("couldn't persist successful reprovide for prefix %s: %s", prefix, err)
 	}
 	s.gcReprovideHistoryIfNeeded(now)
@@ -1233,7 +1233,7 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 		Orders:   []query.Order{query.OrderByKey{}},
 		KeysOnly: true,
 	}
-	res, err := s.datastore.Query(context.Background(), q)
+	res, err := s.datastore.Query(s.ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -1244,7 +1244,7 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 		}
 		_, key, err := parseReprovideHistoryKey(r.Key)
 		if err != nil {
-			s.datastore.Delete(context.Background(), ds.NewKey(r.Key))
+			s.datastore.Delete(s.ctx, ds.NewKey(r.Key))
 			continue
 		}
 		regions.Add(key, struct{}{})
@@ -1267,7 +1267,7 @@ func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
 		KeysOnly: true,
 	}
 	deadline := now.Add(-s.reprovideInterval)
-	res, err := s.datastore.Query(context.Background(), q)
+	res, err := s.datastore.Query(s.ctx, q)
 	if err != nil {
 		logger.Warnf("couldn't query reprovide history for gc: %s", err)
 		return
@@ -1285,7 +1285,7 @@ func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
 			break
 		}
 		// Either key is invalid or log is expired, delete key.
-		s.datastore.Delete(context.Background(), ds.NewKey(k))
+		s.datastore.Delete(s.ctx, ds.NewKey(k))
 	}
 	s.lastReprovideHistoryGC.Store(now.Unix())
 }

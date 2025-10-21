@@ -63,6 +63,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithAddLocalRecord(func(h mh.Multihash) error {
 				return dht.Provide(dht.Context(), cid.NewCidV1(cid.Raw, h), false)
 			}),
+			provider.WithResumeCycle(cfg.resumeCycle[i]),
 			provider.WithKeystore(cfg.keystore),
 			provider.WithMessageSender(cfg.msgSenders[i]),
 			provider.WithReprovideInterval(cfg.reprovideInterval[i]),

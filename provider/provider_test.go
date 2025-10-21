@@ -219,6 +219,8 @@ func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
 	require.Equal(t, 15*time.Second, s.reprovideTimeForPrefix("1111"))
 }
 
+var defaultLogger = logging.Logger(DefaultLoggerName)
+
 func TestReprovideTimeForPrefixWithCustomOrder(t *testing.T) {
 	s := SweepingProvider{
 		reprovideInterval: 16 * time.Second,
@@ -256,6 +258,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 			router:            router,
 			replicationFactor: replicationFactor,
 			connectivity:      noopConnectivityChecker(),
+			logger:            defaultLogger,
 		}
 		r.connectivity.Start()
 		defer r.connectivity.Close()
@@ -391,7 +394,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(LoggerName, "warn")
+	logging.SetLogLevel(DefaultLoggerName, "warn")
 
 	mhs := genMultihashes(1)
 	prefix := bitstr.Key("1011101111")
@@ -426,6 +429,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 		getSelfAddrs:             func() []ma.Multiaddr { return nil },
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
 		provideCounter:           provideCounter(),
+		logger:                   defaultLogger,
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -473,7 +477,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(LoggerName, "warn")
+	logging.SetLogLevel(DefaultLoggerName, "warn")
 
 	ks := genMultihashes(2)
 	prefix := bitstr.Key("")
@@ -517,6 +521,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		provideCounter:           provideCounter(),
 		stats:                    newOperationStats(reprovideInterval, maxDelay),
 		datastore:                ds,
+		logger:                   defaultLogger,
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -635,6 +640,7 @@ func TestHandleReprovide(t *testing.T) {
 			maxReprovideDelay: 5 * time.Second,
 
 			getSelfAddrs: func() []ma.Multiaddr { return nil },
+			logger:       defaultLogger,
 		}
 		prov.scheduleTimer.Stop()
 		connChecker.Start()

@@ -17,6 +17,12 @@ const (
 	wanID
 )
 
+const (
+	DefaultLoggerNameLANSuffix = "/lan"
+	DefaultLoggerNameWAN       = provider.DefaultLoggerName
+	DefaultLoggerNameLAN       = provider.DefaultLoggerName + DefaultLoggerNameLANSuffix
+)
+
 type config struct {
 	resumeCycle [2]bool
 	keystore    keystore.Keystore
@@ -33,7 +39,8 @@ type config struct {
 	dedicatedBurstWorkers    [2]int
 	maxProvideConnsPerWorker [2]int
 
-	msgSenders [2]pb.MessageSender
+	msgSenders  [2]pb.MessageSender
+	loggerNames [2]string
 }
 
 type Option func(opt *config) error
@@ -47,6 +54,7 @@ func getOpts(opts []Option, d *dual.DHT) (config, error) {
 
 		offlineDelay:                    [2]time.Duration{provider.DefaultOfflineDelay, provider.DefaultOfflineDelay},
 		connectivityCheckOnlineInterval: [2]time.Duration{provider.DefaultConnectivityCheckOnlineInterval, provider.DefaultConnectivityCheckOnlineInterval},
+		loggerNames:                     [2]string{DefaultLoggerNameLAN, DefaultLoggerNameWAN},
 
 		maxWorkers:               [2]int{4, 4},
 		dedicatedPeriodicWorkers: [2]int{2, 2},
@@ -344,4 +352,38 @@ func WithMessageSenderLAN(msgSender pb.MessageSender) Option {
 
 func WithMessageSenderWAN(msgSender pb.MessageSender) Option {
 	return withMessageSender(msgSender, wanID)
+}
+
+// WithLoggerName sets the go-log logger names for both the WAN and LAN DHT
+// providers.
+//
+// The logger for the WAN Provider will be set to loggerName, and the logger
+// for the LAN Provider will be set to loggerName + DefaultLoggerNameLANSuffix.
+func WithLoggerName(loggerName string) Option {
+	return withLoggerName(loggerName, lanID, wanID)
+}
+
+func WithLoggerNameLAN(loggerName string) Option {
+	return withLoggerName(loggerName, lanID)
+}
+
+func WithLoggerNameWAN(loggerName string) Option {
+	return withLoggerName(loggerName, wanID)
+}
+
+func withLoggerName(loggerName string, dhts ...uint8) Option {
+	return func(cfg *config) error {
+		if len(loggerName) > 0 {
+			switch len(dhts) {
+			case 1:
+				cfg.loggerNames[dhts[0]] = loggerName
+			case 2:
+				cfg.loggerNames[wanID] = loggerName
+				cfg.loggerNames[lanID] = loggerName + DefaultLoggerNameLANSuffix
+			default:
+				return errors.New("invalid number of dhts specified")
+			}
+		}
+		return nil
+	}
 }

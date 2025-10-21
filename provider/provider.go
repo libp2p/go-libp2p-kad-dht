@@ -32,7 +32,7 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
-	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -107,10 +107,6 @@ var (
 	ErrOffline = errors.New("provider: offline")
 )
 
-const LoggerName = "dht/provider"
-
-var logger = logging.Logger(LoggerName)
-
 type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
 }
@@ -177,6 +173,7 @@ type SweepingProvider struct {
 	addLocalRecord func(mh.Multihash) error
 
 	provideCounter metric.Int64Counter
+	logger         *log.ZapEventLogger
 	stats          operationStats
 }
 
@@ -276,6 +273,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		activeReprovides: trie.New[bitstr.Key, struct{}](),
 
 		provideCounter: providerCounter,
+		logger:         log.Logger(cfg.loggerName),
 		stats:          newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
 	}
 	// Set up callbacks after both provider and connectivity checker are initialized
@@ -286,7 +284,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
 	// Load keys that were logged to the datastore back to the provide queue.
 	if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
-		logger.Errorw("failed to drain provide queue from datastore", "error", err)
+		prov.logger.Errorw("failed to drain provide queue from datastore", "error", err)
 	}
 
 	// Provide queue is persisted on close, reuse keystore batch size.
@@ -306,7 +304,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 func (s *SweepingProvider) run() {
 	defer s.wg.Done()
 
-	logger.Debug("Starting SweepingProvider")
+	s.logger.Debug("Starting SweepingProvider")
 	retryTicker := time.NewTicker(retryInterval)
 	defer retryTicker.Stop()
 
@@ -437,7 +435,7 @@ func (s *SweepingProvider) unscheduleSubsumedPrefixesNoLock(prefix bitstr.Key) {
 		} else {
 			timeUntilReprovide := s.timeUntil(next.Data)
 			s.scheduleNextReprovideNoLock(next.Key, timeUntilReprovide)
-			logger.Debugf("next scheduled prefix now is %s", s.scheduleCursor)
+			s.logger.Debugf("next scheduled prefix now is %s", s.scheduleCursor)
 		}
 	}
 }
@@ -523,7 +521,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 				}
 				peers, err := s.router.GetClosestPeers(s.ctx, string(randomMh))
 				if err != nil {
-					logger.Infof("GetClosestPeers failed during prefix len approximation measurement: %s", err)
+					s.logger.Infof("GetClosestPeers failed during prefix len approximation measurement: %s", err)
 				} else {
 					if len(peers) < 2 {
 						return // Ignore result if less than 2 other peers in DHT.
@@ -554,7 +552,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 	} else {
 		s.cachedAvgPrefixLen = int(cplSum.Load() / nSamples)
 	}
-	logger.Debugf("prefix len approximation is %d", s.cachedAvgPrefixLen)
+	s.logger.Debugf("prefix len approximation is %d", s.cachedAvgPrefixLen)
 	s.lastAvgPrefixLen = time.Now()
 }
 
@@ -620,7 +618,7 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitst
 	s.stats.cycleStatsLk.Unlock()
 
 	if err == nil {
-		logger.Debugw("sent provider record", "prefix", coveredPrefix, "count", 1, "keys", keys)
+		s.logger.Debugw("sent provider record", "prefix", coveredPrefix, "count", 1, "keys", keys)
 	}
 
 	return coveredPrefix, err
@@ -709,18 +707,18 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 				break
 			}
 		}
-		logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
+		s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 
 		nextPrefix = gaps[0]
 	}
 	if i == maxExplorationPrefixSearches {
-		logger.Warnw("closestPeersToPrefix needed more than maxPrefixSearches iterations", "gaps", gaps)
+		s.logger.Warnw("closestPeersToPrefix needed more than maxPrefixSearches iterations", "gaps", gaps)
 	}
 	peers := make([]peer.ID, 0, len(allClosestPeers))
 	for p := range allClosestPeers {
 		peers = append(peers, p)
 	}
-	logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
+	s.logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
 	return peers, nil
 }
 
@@ -798,7 +796,7 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	s.provideCounter.Add(s.ctx, int64(successfulKeys))
 
 	errCountLoaded := int(errCount.Load())
-	logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
+	s.logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
 	reachablePeers = nPeers - errCountLoaded
 
 	if errCountLoaded == nPeers || errCountLoaded > int(float32(nPeers)*(1-minimalRegionReachablePeersRatio)) {
@@ -1186,7 +1184,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	if keyCount == 0 {
 		return
 	}
-	logger.Debugw("batchProvide called", "prefix", prefix, "count", keyCount)
+	s.logger.Debugw("batchProvide called", "prefix", prefix, "count", keyCount)
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the
@@ -1213,7 +1211,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 		s.failedProvide(prefix, keys, fmt.Errorf("provide '%s': %w", prefix, err))
 		return
 	}
-	logger.Debugf("provide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
+	s.logger.Debugf("provide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
 
 	// Add any key matching the covered prefix from the provide queue to the
 	// current provide batch.
@@ -1225,7 +1223,7 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, false, false) {
-		logger.Warnf("failed to provide any region for prefix %s", prefix)
+		s.logger.Warnf("failed to provide any region for prefix %s", prefix)
 	}
 }
 
@@ -1248,7 +1246,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	}
 	keyCount := len(keys)
 	if keyCount == 0 {
-		logger.Infof("No keys to reprovide for prefix %s", prefix)
+		s.logger.Infof("No keys to reprovide for prefix %s", prefix)
 		return
 	}
 
@@ -1274,7 +1272,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 		}
 		return
 	}
-	logger.Debugf("reprovide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
+	s.logger.Debugf("reprovide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
 
 	regions = s.claimRegionReprovide(regions)
 
@@ -1307,12 +1305,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key, periodicReprovide b
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if !s.provideRegions(regions, addrInfo, true, periodicReprovide) {
-		logger.Warnf("failed to reprovide any region for prefix %s", prefix)
+		s.logger.Warnf("failed to reprovide any region for prefix %s", prefix)
 	}
 }
 
 func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash, err error) {
-	logger.Warn(err)
+	s.logger.Warn(err)
 	// Put keys back to the provide queue.
 	s.provideQueue.Enqueue(prefix, keys...)
 
@@ -1320,7 +1318,7 @@ func (s *SweepingProvider) failedProvide(prefix bitstr.Key, keys []mh.Multihash,
 }
 
 func (s *SweepingProvider) failedReprovide(prefix bitstr.Key, err error) {
-	logger.Warn(err)
+	s.logger.Warn(err)
 	// Put prefix in the reprovide queue.
 	s.reprovideQueue.Enqueue(prefix)
 
@@ -1335,7 +1333,7 @@ func (s *SweepingProvider) failedReprovide(prefix bitstr.Key, err error) {
 func (s *SweepingProvider) selfAddrInfo() (peer.AddrInfo, bool) {
 	addrs := s.getSelfAddrs()
 	if len(addrs) == 0 {
-		logger.Warn("provider: no self addresses available for providing keys")
+		s.logger.Warn("provider: no self addresses available for providing keys")
 		return peer.AddrInfo{}, false
 	}
 	return peer.AddrInfo{ID: s.peerid, Addrs: addrs}, true
@@ -1444,7 +1442,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		}
 		keyCount := len(allKeys)
 		s.provideCounter.Add(s.ctx, int64(keyCount))
-		logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
+		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)
@@ -1594,7 +1592,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	for _, p := range missing {
 		ok, err := s.keystore.ContainsPrefix(s.ctx, p)
 		if err != nil {
-			logger.Warnf("couldn't refresh schedule for prefix %s: %s", p, err)
+			s.logger.Warnf("couldn't refresh schedule for prefix %s: %s", p, err)
 		}
 		if ok {
 			toInsert = append(toInsert, p)

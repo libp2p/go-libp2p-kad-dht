@@ -29,6 +29,9 @@ const (
 	// a network operation fails, and the ConnectivityCheckOnlineInterval limits
 	// how often such a check is performed.
 	DefaultConnectivityCheckOnlineInterval = 1 * time.Minute
+
+	// DefaultLoggerName is the default logger name for the DHT provider.
+	DefaultLoggerName = "dht/provider"
 )
 
 type config struct {
@@ -53,6 +56,8 @@ type config struct {
 	dedicatedPeriodicWorkers int
 	dedicatedBurstWorkers    int
 	maxProvideConnsPerWorker int
+
+	loggerName string
 }
 
 type Option func(opt *config) error
@@ -65,6 +70,7 @@ func getOpts(opts []Option) (config, error) {
 		maxReprovideDelay:               DefaultMaxReprovideDelay,
 		offlineDelay:                    DefaultOfflineDelay,
 		connectivityCheckOnlineInterval: DefaultConnectivityCheckOnlineInterval,
+		loggerName:                      DefaultLoggerName,
 
 		maxWorkers:               4,
 		dedicatedPeriodicWorkers: 2,
@@ -290,6 +296,16 @@ func WithDatastore(ds datastore.Batching) Option {
 			return errors.New("reprovider config: datastore cannot be nil")
 		}
 		cfg.datastore = ds
+		return nil
+	}
+}
+
+// WithLoggerName sets the go-log logger name for the DHT provider.
+func WithLoggerName(name string) Option {
+	return func(cfg *config) error {
+		if len(name) > 0 {
+			cfg.loggerName = name
+		}
 		return nil
 	}
 }

@@ -1080,6 +1080,7 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 		newKeys, err := s.keystore.Put(s.ctx, keys...)
 		if err != nil {
 			s.logger.Errorf("couldn't add keys to keystore: %s", err)
+			return
 		}
 		if !force {
 			keys = newKeys

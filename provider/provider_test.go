@@ -305,8 +305,7 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 
 	mhs := append(mhs00000, mhs1000...)
 
-	prefixes, err := prov.groupAndScheduleKeysByPrefix(mhs, false)
-	require.NoError(t, err)
+	prefixes := prov.groupAndScheduleKeysByPrefix(mhs, false)
 	require.Len(t, prefixes, 2)
 	require.Contains(t, prefixes, bitstr.Key("000"))
 	require.Len(t, prefixes["000"], 3) // no duplicate entry
@@ -316,8 +315,7 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	// Schedule is still empty
 	require.True(t, prov.schedule.IsEmptyLeaf())
 
-	prefixes, err = prov.groupAndScheduleKeysByPrefix(mhs, true)
-	require.NoError(t, err)
+	prefixes = prov.groupAndScheduleKeysByPrefix(mhs, true)
 	require.Len(t, prefixes, 2)
 	require.Contains(t, prefixes, bitstr.Key("000"))
 	require.Len(t, prefixes["000"], 3)
@@ -332,8 +330,7 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	mhs11111 := genMultihashesMatchingPrefix("11111", 4)
 	mhs1110 := genMultihashesMatchingPrefix("1110", 4)
 	mhs = append(mhs11111, mhs1110...)
-	prefixes, err = prov.groupAndScheduleKeysByPrefix(mhs, true)
-	require.NoError(t, err)
+	prefixes = prov.groupAndScheduleKeysByPrefix(mhs, true)
 	// All keys should be consolidated into "111"
 	require.Len(t, prefixes, 1)
 	require.Contains(t, prefixes, bitstr.Key("111"))
@@ -348,8 +345,7 @@ func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	prov.schedule.Add(bitstr.Key("10"), 0*time.Second)
 
 	mhs1 := genMultihashesMatchingPrefix("10", 6)
-	prefixes, err = prov.groupAndScheduleKeysByPrefix(mhs1, true)
-	require.NoError(t, err)
+	prefixes = prov.groupAndScheduleKeysByPrefix(mhs1, true)
 	require.Len(t, prefixes, 1)
 	require.Contains(t, prefixes, bitstr.Key("10"))
 	require.Len(t, prefixes["10"], 6)
@@ -815,9 +811,9 @@ func TestProvideOnce(t *testing.T) {
 
 		h := genMultihashes(1)[0]
 
-		// Node is offline, ProvideOne should error
+		// Node is offline, no provide should happen
 		err = prov.ProvideOnce(h)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err)
 		require.True(t, prov.provideQueue.IsEmpty())
 		require.Equal(t, int32(0), provideCount.Load(), "should not have provided when offline 0")
 
@@ -1326,6 +1322,15 @@ func TestOperationsOffline(t *testing.T) {
 				return nil, errors.New("offline")
 			},
 		}
+
+		provideCount := atomic.Int32{}
+		msgSender := &mockMsgSender{
+			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+				provideCount.Add(1)
+				return nil
+			},
+		}
+
 		opts := []Option{
 			WithReprovideInterval(time.Hour),
 			WithReplicationFactor(1),
@@ -1334,7 +1339,7 @@ func TestOperationsOffline(t *testing.T) {
 			WithDedicatedPeriodicWorkers(0),
 			WithPeerID(pid),
 			WithRouter(router),
-			WithMessageSender(&mockMsgSender{}),
+			WithMessageSender(msgSender),
 			WithSelfAddrs(getMockAddrs(t)),
 			WithOfflineDelay(offlineDelay),
 			WithConnectivityCheckOnlineInterval(checkInterval),
@@ -1347,15 +1352,18 @@ func TestOperationsOffline(t *testing.T) {
 
 		// Not bootstrapped yet, OFFLINE
 		err = prov.ProvideOnce(k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err, "ProvideOnce should not error when offline")
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when offline")
 		err = prov.StartProviding(false, k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err, "StartProviding should not error when offline")
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when offline")
 		err = prov.StartProviding(true, k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err, "StartProviding should not error when offline")
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when offline")
 		err = prov.RefreshSchedule()
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err)
 		err = prov.AddToSchedule(k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err)
 		err = prov.StopProviding(k) // no error for StopProviding
 		require.NoError(t, err)
 
@@ -1364,9 +1372,12 @@ func TestOperationsOffline(t *testing.T) {
 		synctest.Wait()
 		require.True(t, prov.connectivity.IsOnline())
 
-		// ONLINE, operations shouldn't error
+		// ONLINE, operations shouldn't error and provides should happen
+		provideCount.Store(0) // reset counter
 		err = prov.ProvideOnce(k)
 		require.NoError(t, err)
+		synctest.Wait()
+		require.Greater(t, provideCount.Load(), int32(0), "provides should happen when online")
 		err = prov.StartProviding(false, k)
 		require.NoError(t, err)
 		err = prov.StartProviding(true, k)
@@ -1384,7 +1395,8 @@ func TestOperationsOffline(t *testing.T) {
 		synctest.Wait()
 		require.False(t, prov.connectivity.IsOnline())
 
-		// DISCONNECTED, operations shoudln't error until node is OFFLINE
+		// DISCONNECTED, operations shouldn't error until node is OFFLINE
+		provideCount.Store(0) // reset counter
 		err = prov.ProvideOnce(k)
 		require.NoError(t, err)
 		err = prov.StartProviding(false, k)
@@ -1397,6 +1409,8 @@ func TestOperationsOffline(t *testing.T) {
 		require.NoError(t, err)
 		err = prov.StopProviding(k) // no error for StopProviding
 		require.NoError(t, err)
+		// Still disconnected, so no provides should have happened
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when disconnected")
 
 		prov.provideQueue.Enqueue("0000", k)
 		require.Equal(t, 1, prov.provideQueue.Size())
@@ -1410,17 +1424,21 @@ func TestOperationsOffline(t *testing.T) {
 		require.Equal(t, -1, prov.cachedAvgPrefixLen)
 		prov.avgPrefixLenLk.Unlock()
 
-		// All operations should error again
+		// Operations should not error but no provides should happen
+		provideCount.Store(0) // reset counter
 		err = prov.ProvideOnce(k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err, "ProvideOnce should not error when offline")
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when offline")
 		err = prov.StartProviding(false, k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err, "StartProviding should not error when offline")
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when offline")
 		err = prov.StartProviding(true, k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err, "StartProviding should not error when offline")
+		require.Equal(t, int32(0), provideCount.Load(), "no provides should happen when offline")
 		err = prov.RefreshSchedule()
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err)
 		err = prov.AddToSchedule(k)
-		require.ErrorIs(t, err, ErrOffline)
+		require.NoError(t, err)
 		err = prov.StopProviding(k) // no error for StopProviding
 		require.NoError(t, err)
 	})

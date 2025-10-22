@@ -210,7 +210,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 	var mapDs ds.Batching
 	if cfg.keystore == nil {
-		// Setup KeyStore if missing
+		// Setup Keystore if missing
 		mapDs = dssync.MutexWrap(ds.NewMapDatastore())
 		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		cfg.keystore, err = keystore.NewKeystore(mapDs)
@@ -1809,7 +1809,7 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 	return err
 }
 
-// RefreshSchedule scans the KeyStore for any keys that are not currently
+// RefreshSchedule scans the Keystore for any keys that are not currently
 // scheduled for reproviding. If such keys are found, it schedules their
 // associated keyspace region to be reprovided.
 //
@@ -1844,7 +1844,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		}
 	}
 
-	// Only keep the missing prefixes for which there are keys in the KeyStore.
+	// Only keep the missing prefixes for which there are keys in the Keystore.
 	toInsert := make([]bitstr.Key, 0)
 	for _, p := range missing {
 		ok, err := s.keystore.ContainsPrefix(s.ctx, p)

@@ -427,6 +427,216 @@ func TestPruneSubtrie(t *testing.T) {
 	require.True(t, tr.Branch(0).IsEmptyLeaf())
 }
 
+func TestCoalesceTrie(t *testing.T) {
+	keys := []bitstr.Key{
+		"0000",
+		"0001",
+		"0010",
+		"0011",
+		"01",
+		"1000",
+		"1011",
+		"110",
+		"111",
+	}
+	tr := trie.New[bitstr.Key, struct{}]()
+	// Try coalescing an empty trie
+	CoalesceTrie(tr)
+	entries := make([]trie.Entry[bitstr.Key, struct{}], len(keys))
+	for i, k := range keys {
+		entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
+	}
+	tr.AddMany(entries...)
+
+	CoalesceTrie(tr)
+
+	coalescedKeys := []bitstr.Key{
+		"0",
+		"1000",
+		"1011",
+		"11",
+	}
+	require.Equal(t, len(coalescedKeys), tr.Size())
+	for _, k := range coalescedKeys {
+		ok, _ := trie.Find(tr, k)
+		require.True(t, ok)
+	}
+}
+
+func TestSubtractTrie(t *testing.T) {
+	initTries := func(keys [2][]bitstr.Key) [2]*trie.Trie[bitstr.Key, struct{}] {
+		tries := [2]*trie.Trie[bitstr.Key, struct{}]{}
+		for i, ks := range keys {
+			tr := trie.New[bitstr.Key, struct{}]()
+			entries := make([]trie.Entry[bitstr.Key, struct{}], len(ks))
+			for i, k := range ks {
+				entries[i] = trie.Entry[bitstr.Key, struct{}]{Key: k, Data: struct{}{}}
+			}
+			tr.AddMany(entries...)
+			tries[i] = tr
+		}
+		return tries
+	}
+	t.Run("Subtract from empty trie", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{},
+			{
+				"0",
+				"10",
+			},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.True(t, trie.Equal(tries[0], res))
+	})
+	t.Run("Subtract empty trie", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{
+				"00",
+				"01",
+				"10",
+				"11",
+			},
+			{},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.True(t, trie.Equal(tries[0], res))
+	})
+	t.Run("Subtract trie with empty key", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{
+				"00",
+				"01",
+				"10",
+				"11",
+			},
+			{""},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.True(t, res.IsEmptyLeaf())
+	})
+	t.Run("Subtract trie with full coverage", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{
+				"00",
+				"01",
+				"10",
+				"11",
+			},
+			{
+				"0",
+				"10",
+				"11",
+			},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.True(t, res.IsEmptyLeaf())
+	})
+	t.Run("Subtract trie with half coverage ('0')", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{
+				"00",
+				"01",
+				"10",
+				"11",
+			},
+			{
+				"0",
+			},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.False(t, res.IsEmptyLeaf())
+		require.Equal(t, 2, res.Size())
+		found, _ := trie.Find(res, "10")
+		require.True(t, found)
+		found, _ = trie.Find(res, "11")
+		require.True(t, found)
+	})
+	t.Run("Subtract trie with half coverage ('10', '11')", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{
+				"00",
+				"01",
+				"10",
+				"11",
+			},
+			{
+				"10",
+				"11",
+			},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.False(t, res.IsEmptyLeaf())
+		require.Equal(t, 2, res.Size())
+		found, _ := trie.Find(res, "00")
+		require.True(t, found)
+		found, _ = trie.Find(res, "01")
+		require.True(t, found)
+	})
+	t.Run("Subtract complex trie", func(t *testing.T) {
+		keys := [2][]bitstr.Key{
+			{
+				"000",
+				"001",
+				"010",
+				"100000",
+				"1100",
+				"1110",
+				"1111",
+			},
+			{
+				"00000",
+				"00001",
+				"001",
+				"011",
+				"10010",
+				"10011",
+				"101",
+				"11",
+			},
+		}
+		tries := initTries(keys)
+		for i, tr := range tries {
+			require.Equal(t, len(keys[i]), tr.Size())
+		}
+		res := SubtractTrie(tries[0], tries[1])
+		require.False(t, res.IsEmptyLeaf())
+		expectedKeys := []bitstr.Key{
+			"000",
+			"010",
+			"100000",
+		}
+		require.Equal(t, len(expectedKeys), res.Size())
+		for _, k := range expectedKeys {
+			found, _ := trie.Find(res, k)
+			require.True(t, found)
+		}
+	})
+}
+
 func TestTrieGaps(t *testing.T) {
 	initTrie := func(keys []bitstr.Key) *trie.Trie[bitstr.Key, struct{}] {
 		tr := trie.New[bitstr.Key, struct{}]()

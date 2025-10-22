@@ -24,7 +24,8 @@ const (
 )
 
 type config struct {
-	keystore keystore.Keystore
+	resumeCycle [2]bool
+	keystore    keystore.Keystore
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
@@ -47,6 +48,7 @@ type Option func(opt *config) error
 // getOpts creates a config and applies Options to it.
 func getOpts(opts []Option, d *dual.DHT) (config, error) {
 	cfg := config{
+		resumeCycle:       [2]bool{true, true},
 		reprovideInterval: [2]time.Duration{amino.DefaultReprovideInterval, amino.DefaultReprovideInterval},
 		maxReprovideDelay: [2]time.Duration{provider.DefaultMaxReprovideDelay, provider.DefaultMaxReprovideDelay},
 
@@ -83,6 +85,27 @@ func getOpts(opts []Option, d *dual.DHT) (config, error) {
 		return config{}, errors.New("provider config: total dedicated workers exceed max workers")
 	}
 	return cfg, nil
+}
+
+func withResumeCycle(resume bool, dhts ...uint8) Option {
+	return func(cfg *config) error {
+		for _, dht := range dhts {
+			cfg.resumeCycle[dht] = resume
+		}
+		return nil
+	}
+}
+
+func WithResumeCycle(resume bool) Option {
+	return withResumeCycle(resume, lanID, wanID)
+}
+
+func WithResumeCycleLAN(resume bool) Option {
+	return withResumeCycle(resume, lanID)
+}
+
+func WithResumeCycleWAN(resume bool) Option {
+	return withResumeCycle(resume, wanID)
 }
 
 func WithKeystore(ks keystore.Keystore) Option {

@@ -215,13 +215,61 @@ func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching, batchSize int
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	// Create a batch for efficient writes
+	commitBatchIfFull := func(b *ds.Batch, size int) error {
+		if size%batchSize == 0 {
+			// Max batch size reached, commit and start a new batch.
+			if err := (*b).Commit(ctx); err != nil {
+				return fmt.Errorf("failed to commit batch: %w", err)
+			}
+			newBatch, err := d.Batch(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to create batch: %w", err)
+			}
+			*b = newBatch
+		}
+		return nil
+	}
+	finalCommit := func(b ds.Batch, size int) error {
+		if size%batchSize != 0 {
+			if err := b.Commit(ctx); err != nil {
+				return fmt.Errorf("failed to commit batch: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// Remove all existing persisted entries first.
 	batch, err := d.Batch(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create batch: %w", err)
 	}
-
+	res, err := d.Query(ctx, query.Query{KeysOnly: true})
+	if err != nil {
+		return fmt.Errorf("failed to query datastore: %w", err)
+	}
+	defer res.Close()
 	i := 0
+	for r := range res.Next() {
+		if r.Error != nil {
+			return fmt.Errorf("error reading query result: %w", r.Error)
+		}
+		batch.Delete(ctx, ds.NewKey(r.Key))
+		i++
+		if err := commitBatchIfFull(&batch, i); err != nil {
+			return err
+		}
+	}
+	if err := finalCommit(batch, i); err != nil {
+		return err
+	}
+
+	// Batch writes
+	batch, err = d.Batch(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create batch: %w", err)
+	}
+
+	i = 0
 	for prefix := range q.queue.queue.Iter() {
 		// Find all keys matching this prefix
 		if subtrie, ok := keyspace.FindSubtrie(q.keys, prefix); ok {
@@ -239,25 +287,15 @@ func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching, batchSize int
 				return fmt.Errorf("failed to store prefix data: %w", err)
 			}
 		}
-
 		i++
-
-		if i%batchSize == 0 {
-			// Max batch size reached, commit and start a new batch.
-			if err := batch.Commit(ctx); err != nil {
-				return fmt.Errorf("failed to commit batch: %w", err)
-			}
-			batch, err = d.Batch(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to create batch: %w", err)
-			}
+		if err := commitBatchIfFull(&batch, i); err != nil {
+			return err
 		}
 	}
 
-	if err := batch.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit batch: %w", err)
+	if err := finalCommit(batch, i); err != nil {
+		return err
 	}
-
 	return nil
 }
 

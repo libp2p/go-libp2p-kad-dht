@@ -1823,6 +1823,8 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	s.scheduleLk.Lock()
 	prefixLen := s.getAvgPrefixLenNoLock()
 	if prefixLen < 0 {
+		// Provider is currently offline, schedule will be refreshed when the node
+		// comes back online.
 		s.scheduleLk.Unlock()
 		return nil
 	}

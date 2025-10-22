@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -120,6 +121,8 @@ var (
 	// reprovideCycleStartKey is the key storing the start time of the initial
 	// reprovide cycle.
 	reprovideCycleStartKey = ds.NewKey(path.Join(providerDatastoreNamespace, "cycle_start"))
+	// maxTime is the maximum time value.
+	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
 )
 
 type KadClosestPeersRouter interface {
@@ -302,14 +305,19 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
 	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
 
-	if cfg.resumeCycle {
-		// Restore reprovide cycle start time from datastore or initialize it.
-		prov.setCycleStart()
+	// Restore reprovide cycle start time from datastore or initialize it.
+	prov.setCycleStart(cfg.resumeCycle)
 
+	if cfg.resumeCycle {
 		// Load keys that were saved to the datastore back to the provide queue.
 		if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
 			prov.logger.Errorw("failed to drain provide queue from datastore", "error", err)
 		}
+	} else {
+		// Clear any previously stored reprovide logs, since we are off a fresh
+		// start. This results in reproviding all keys in the keystore when the
+		// node comes online.
+		prov.gcReprovideHistoryIfNeeded(maxTime)
 	}
 
 	// Don't need to start schedule timer yet
@@ -326,20 +334,40 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	return prov, nil
 }
 
-// initFromPersistedState initializes the provider from persisted state on
-// startup. It restores the reprovide cycle start time and enqueues any regions
-// that expired during downtime for immediate reproviding.
-func (s *SweepingProvider) setCycleStart() {
+// setCycleStart initializes the reprovide cycle start time for the provider.
+//
+// If resume is true, it attempts to restore the cycle start time from the
+// datastore. This allows the provider to maintain a consistent reprovide
+// schedule across restarts. If the stored value cannot be read or is zero
+// (indicating a fresh installation), the current time is used instead.
+//
+// If resume is false, the current time is used as the cycle start and
+// persisted to the datastore.
+//
+// The cycle start time serves as the temporal anchor for the reprovide
+// schedule, ensuring keys are reprovided at deterministic intervals relative
+// to this initial timestamp.
+func (s *SweepingProvider) setCycleStart(resume bool) {
 	now := time.Now()
-	cycleStart, err := s.readCycleStart()
-	if err != nil || cycleStart.IsZero() {
-		// cycle start time is zero on initial run.
+	cycleStart := now
+
+	if resume {
+		stored, err := s.readCycleStart()
 		if err != nil {
 			s.logger.Warnf("couldn't read cycle start time: %s", err)
 		}
-		s.writeCycleStart(now)
-		cycleStart = now
+		// Use stored value if successfully read and non-zero
+		if err == nil && !stored.IsZero() {
+			cycleStart = stored
+		}
 	}
+
+	// Write cycle start if using current time (either !resume or failed to
+	// restore).
+	if cycleStart.Equal(now) {
+		s.writeCycleStart(now)
+	}
+
 	s.startedAt = now
 	s.cycleStart = cycleStart
 }

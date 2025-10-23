@@ -284,7 +284,7 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 func WithKeystore(ks keystore.Keystore) Option {
 	return func(cfg *config) error {
 		if ks == nil {
-			return errors.New("reprovider config: multihash store cannot be nil")
+			return errors.New("reprovider config: keystore cannot be nil")
 		}
 		cfg.keystore = ks
 		return nil

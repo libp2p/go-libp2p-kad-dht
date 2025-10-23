@@ -1277,7 +1277,6 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 	for i, entry := range toReprovideEntries {
 		toReprovideKeys[i] = entry.Key
 	}
-	fmt.Println("enqueueExpiredRegionsNoLock", len(toReprovideKeys), recentlyReprovided.Size(), s.schedule.Size())
 	s.reprovideQueue.Enqueue(toReprovideKeys...)
 }
 

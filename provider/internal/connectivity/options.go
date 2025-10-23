@@ -6,9 +6,10 @@ import (
 )
 
 type config struct {
-	onlineCheckInterval time.Duration // minimum check interval when online
+	startDisconnected bool
 
-	offlineDelay time.Duration
+	onlineCheckInterval time.Duration // minimum check interval when online
+	offlineDelay        time.Duration
 
 	onOffline func()
 	onOnline  func()
@@ -64,6 +65,13 @@ func WithOnOffline(f func()) Option {
 func WithOnOnline(f func()) Option {
 	return func(cfg *config) error {
 		cfg.onOnline = f
+		return nil
+	}
+}
+
+func WithStartDisconnected() Option {
+	return func(cfg *config) error {
+		cfg.startDisconnected = true
 		return nil
 	}
 }

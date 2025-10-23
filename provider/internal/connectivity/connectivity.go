@@ -1,9 +1,19 @@
+// Package connectivity provides thread-safe network connectivity checking with
+// state management and callback notifications for online/offline transitions.
 package connectivity
 
 import (
 	"sync"
 	"sync/atomic"
 	"time"
+)
+
+type Status int
+
+const (
+	Online Status = iota
+	Disconnected
+	Offline
 )
 
 const (
@@ -16,7 +26,7 @@ const (
 // state. The `checkFunc` callback used to verify network connectivity is user
 // supplied.
 //
-// State Machine starting in OFFLINE state (when `Start()` is called)
+// State Machine starting when `Start()` is called:
 //  1. OFFLINE state:
 //     - Calls `checkFunc` with exponential backoff until node is found ONLINE.
 //     - Calls to `TriggerCheck()` are ignored while OFFLINE.
@@ -33,13 +43,17 @@ const (
 //     `onOnline()` callback is called.
 //     - After `offlineDelay` has passed in DISCONNECTED state, state changes
 //     to OFFLINE and `onOffline()` callback is called.
+//
+// The State Machine starts in OFFLINE state by default, and in DISCONNECTED
+// state if WithStartDisconnected Option is used.
 type ConnectivityChecker struct {
 	done      chan struct{}
 	closed    bool
 	closeOnce sync.Once
 	mutex     sync.Mutex
 
-	online atomic.Bool
+	online            atomic.Bool
+	startDisconnected bool
 
 	lastCheck           time.Time
 	onlineCheckInterval time.Duration // minimum check interval when online
@@ -62,6 +76,7 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 	c := &ConnectivityChecker{
 		done:                make(chan struct{}),
 		checkFunc:           checkFunc,
+		startDisconnected:   cfg.startDisconnected,
 		onlineCheckInterval: cfg.onlineCheckInterval,
 		onOffline:           cfg.onOffline,
 		onOnline:            cfg.onOnline,
@@ -84,8 +99,8 @@ func (c *ConnectivityChecker) SetCallbacks(onOnline, onOffline func()) {
 	c.onOffline = onOffline
 }
 
-// Start the ConnectivityChecker in Offline state, by begining connectivity
-// probes, until the node is found Online.
+// Start the ConnectivityChecker in Offline or Disconnected state, by begining
+// connectivity probes, until the node is found Online.
 //
 // If SetCallbacks() is used, Start() must be called after SetCallbacks().
 func (c *ConnectivityChecker) Start() {
@@ -99,7 +114,7 @@ func (c *ConnectivityChecker) Start() {
 			return
 		}
 		// Wait for node to come online
-		c.probeLoop(true)
+		c.probeLoop(c.startDisconnected)
 	}()
 }
 
@@ -168,15 +183,15 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		c.online.Store(false)
 
 		// Start periodic checks until node comes back Online
-		c.probeLoop(false)
+		c.probeLoop(true)
 	}()
 }
 
 // probeLoop runs connectivity probes with exponential backoff until the node
 // comes back Online, or the ConnectivityChecker is closed.
-func (c *ConnectivityChecker) probeLoop(init bool) {
+func (c *ConnectivityChecker) probeLoop(disconnected bool) {
 	var offlineC <-chan time.Time
-	if !init {
+	if disconnected {
 		if c.offlineDelay == 0 {
 			// Online -> Offline
 			c.stateChanged()

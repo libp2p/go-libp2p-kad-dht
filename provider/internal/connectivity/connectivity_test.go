@@ -225,7 +225,7 @@ func TestStateTransitions(t *testing.T) {
 			synctest.Wait()
 			require.Equal(t, int32(1), checkCount.Load())
 
-			time.Sleep(1)
+			time.Sleep(time.Nanosecond)
 			connChecker.TriggerCheck() // checkInterval has passed, new check is run
 			synctest.Wait()
 			require.Equal(t, int32(2), checkCount.Load())
@@ -328,6 +328,45 @@ func TestExponentialBackoff(t *testing.T) {
 	})
 }
 
+func TestStartDisconnected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		offlineDelay := time.Minute
+
+		offlineChan := make(chan struct{})
+		onOffline := func() { close(offlineChan) }
+
+		connChecker, err := New(offlineCheckFunc,
+			WithOfflineDelay(offlineDelay),
+			WithOnOffline(onOffline),
+			WithStartDisconnected(),
+		)
+		require.NoError(t, err)
+		defer connChecker.Close()
+
+		require.False(t, connChecker.IsOnline())
+
+		connChecker.Start()
+
+		// Should still be probing and not yet offline
+		require.False(t, connChecker.mutex.TryLock())
+		require.False(t, connChecker.IsOnline())
+
+		// onOffline should not have been called yet
+		select {
+		case <-offlineChan:
+			require.FailNow(t, "onOffline shouldn't have been called yet")
+		default:
+		}
+
+		// After offlineDelay, onOffline callback should be called
+		time.Sleep(offlineDelay)
+
+		<-offlineChan // wait for onOffline to be called
+		require.False(t, connChecker.IsOnline())
+		require.Equal(t, time.Now(), connChecker.LastStateChange())
+	})
+}
+
 func TestInvalidOptions(t *testing.T) {
 	t.Run("negative online check interval", func(t *testing.T) {
 		_, err := New(onlineCheckFunc, WithOnlineCheckInterval(-1))
@@ -399,6 +438,7 @@ func TestClose(t *testing.T) {
 		defer connChecker.Close()
 
 		connChecker.Start()
+		// Node is already online
 		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
 		require.False(t, connChecker.IsOnline())
 

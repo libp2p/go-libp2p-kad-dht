@@ -75,6 +75,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
 			provider.WithMaxProvideConnsPerWorker(cfg.maxProvideConnsPerWorker[i]),
 			provider.WithLoggerName(cfg.loggerNames[i]),
+			provider.WithDhtType(descriptors[i]),
 		}
 		if cfg.keystore != nil {
 			dhtOpts = append(dhtOpts, provider.WithKeystore(cfg.keystore))

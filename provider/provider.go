@@ -31,6 +31,7 @@ import (
 
 	pool "github.com/guillaumemichel/reservedpool"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/ipfs/go-datastore"
@@ -191,6 +192,7 @@ type SweepingProvider struct {
 	provideCounter metric.Int64Counter
 	logger         *log.ZapEventLogger
 	stats          operationStats
+	metricsDhtType string
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
@@ -308,6 +310,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		provideCounter: providerCounter,
 		logger:         logger,
 		stats:          newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
+		metricsDhtType: cfg.metricsDhtType,
 	}
 
 	// Provide queue is persisted on close, reuse keystore batch size.
@@ -333,6 +336,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 	// Don't need to start schedule timer yet
 	prov.scheduleTimer.Stop()
+
+	// Initialize the counter to 0 to ensure it's exported by Prometheus even
+	// before first provide
+	prov.increaseProvideCounter(0)
 
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
@@ -961,7 +968,7 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	successfulKeys := nKeys - failedKeys
 	s.stats.avgHolders.AddWeighted(float64(holdersSum)/float64(nKeys), nKeys)
 	s.stats.addCompletedKeys(successfulKeys, failedKeys)
-	s.provideCounter.Add(s.ctx, int64(successfulKeys))
+	s.increaseProvideCounter(successfulKeys)
 
 	errCountLoaded := int(errCount.Load())
 	s.logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
@@ -971,6 +978,16 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 		err = fmt.Errorf("unable to provide to enough peers (%d/%d)", reachablePeers, nPeers)
 	}
 	return reachablePeers, err
+}
+
+// increaseProvideCounter increases the provide counter metric by n.
+func (s *SweepingProvider) increaseProvideCounter(n int) {
+	opts := []metric.AddOption{}
+	if len(s.metricsDhtType) > 0 {
+		// if s.metricsDhtType is set, add it as an attribute
+		opts = append(opts, metric.WithAttributes(attribute.String("dht", s.metricsDhtType)))
+	}
+	s.provideCounter.Add(s.ctx, int64(n), opts...)
 }
 
 // genProvideMessage generates a new provide message with the supplied
@@ -1738,7 +1755,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			continue
 		}
 		keyCount := len(allKeys)
-		s.provideCounter.Add(s.ctx, int64(keyCount))
+		s.increaseProvideCounter(keyCount)
 		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.

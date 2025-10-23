@@ -57,8 +57,9 @@ type config struct {
 	dedicatedBurstWorkers    int
 	maxProvideConnsPerWorker int
 
-	resumeCycle bool
-	loggerName  string
+	resumeCycle    bool
+	loggerName     string
+	metricsDhtType string
 }
 
 type Option func(opt *config) error
@@ -327,6 +328,18 @@ func WithLoggerName(name string) Option {
 	return func(cfg *config) error {
 		if len(name) > 0 {
 			cfg.loggerName = name
+		}
+		return nil
+	}
+}
+
+// WithDhtType sets the DHT type label used in the prometheus metrics. It
+// should be used when multiple providers are running in the same process to
+// differentiate them.
+func WithDhtType(dhtType string) Option {
+	return func(cfg *config) error {
+		if len(dhtType) > 0 {
+			cfg.metricsDhtType = dhtType
 		}
 		return nil
 	}

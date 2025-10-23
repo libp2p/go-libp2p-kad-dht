@@ -19,6 +19,7 @@ import (
 
 	"github.com/guillaumemichel/reservedpool"
 	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
 	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
@@ -1663,6 +1664,7 @@ func TestResumeReprovides(t *testing.T) {
 
 		ds := dssync.MutexWrap(datastore.NewMapDatastore())
 		ks, err := keystore.NewKeystore(ds)
+		provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
 		require.NoError(t, err)
 		defer ks.Close()
 
@@ -1679,7 +1681,7 @@ func TestResumeReprovides(t *testing.T) {
 			WithRouter(router),
 			WithMessageSender(msgSender),
 			WithSelfAddrs(getMockAddrs(t)),
-			WithDatastore(ds),
+			WithDatastore(provDs),
 			WithKeystore(ks),
 		}
 		prov, err = New(opts...)

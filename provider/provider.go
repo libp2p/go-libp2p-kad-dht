@@ -100,10 +100,6 @@ const (
 	// minimalRegionReachablePeersRatio is the minimum ratio of reachable peers
 	// in a region for the provide to be considered a success.
 	minimalRegionReachablePeersRatio float32 = 0.2
-
-	// providerDatastoreNamespace is the namespace in the datastore where
-	// provider data is stored.
-	providerDatastoreNamespace string = "provider"
 )
 
 var (
@@ -111,10 +107,10 @@ var (
 	ErrClosed = errors.New("provider: closed")
 	// reprovideHistoryKeyPrefix is the prefix for keys storing the timestamp of
 	// the last reprovide for a given region in the datastore.
-	reprovideHistoryKeyPrefix = path.Join(providerDatastoreNamespace, "history")
+	reprovideHistoryKeyPrefix = "history"
 	// reprovideCycleStartKey is the key storing the start time of the initial
 	// reprovide cycle.
-	reprovideCycleStartKey = ds.NewKey(path.Join(providerDatastoreNamespace, "cycle_start"))
+	reprovideCycleStartKey = ds.NewKey("cycle_start")
 	// maxTime is the maximum time value.
 	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
 )
@@ -1310,22 +1306,22 @@ func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
 }
 
 // parseReprovideLogKey parses a datastore key from the reprovide history log.
-// Expected format: /provider/history/<hex-timestamp>/<prefix>
+// Expected format: /history/<hex-timestamp>/<prefix>
 func parseReprovideHistoryKey(k string) (time.Time, bitstr.Key, error) {
 	parts := strings.Split(k, "/")
 	lenParts := len(parts)
-	if lenParts < 4 || lenParts > 5 {
+	if lenParts < 3 || lenParts > 4 {
 		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
 	}
-	t, err := parseTimestampHex(parts[3])
+	t, err := parseTimestampHex(parts[2])
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
 	}
 	var prefix bitstr.Key
-	if lenParts == 5 {
-		prefix = bitstr.Key(parts[4])
+	if lenParts == 4 {
+		prefix = bitstr.Key(parts[3])
 	}
-	// lenParts == 4 means empty prefix ("").
+	// lenParts == 3 means empty prefix ("").
 	return t, prefix, nil
 }
 

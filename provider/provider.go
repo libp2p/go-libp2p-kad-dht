@@ -34,7 +34,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/ipfs/go-datastore"
-	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -111,10 +110,10 @@ var (
 	reprovideHistoryKeyPrefix = "history"
 	// reprovideCycleStartKey is the key storing the start time of the initial
 	// reprovide cycle.
-	reprovideCycleStartKey = ds.NewKey("cycle_start")
+	reprovideCycleStartKey = datastore.NewKey("cycle_start")
 	// avgPrefixLenDatastoreKey is the key storing the average prefix length
 	// computed from the schedule.
-	avgPrefixLenDatastoreKey = ds.NewKey("avg_prefix_len")
+	avgPrefixLenDatastoreKey = datastore.NewKey("avg_prefix_len")
 	// maxTime is the maximum time value.
 	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
 )
@@ -148,7 +147,7 @@ type SweepingProvider struct {
 
 	keystore keystore.Keystore
 
-	datastore              ds.Batching
+	datastore              datastore.Batching
 	lastReprovideHistoryGC atomic.Int64
 	bootstrapped           atomic.Bool
 
@@ -202,10 +201,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	cleanupFuncs := []func() error{}
 
-	var mapDs ds.Batching
+	var mapDs datastore.Batching
 	if cfg.keystore == nil {
 		// Setup Keystore if missing
-		mapDs = dssync.MutexWrap(ds.NewMapDatastore())
+		mapDs = dssync.MutexWrap(datastore.NewMapDatastore())
 		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		cfg.keystore, err = keystore.NewKeystore(mapDs)
 		if err != nil {
@@ -217,7 +216,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	if cfg.datastore == nil {
 		// Setup datastore if missing
 		if mapDs == nil {
-			mapDs = dssync.MutexWrap(ds.NewMapDatastore())
+			mapDs = dssync.MutexWrap(datastore.NewMapDatastore())
 			cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		}
 		cfg.datastore = mapDs
@@ -312,7 +311,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 
 	// Provide queue is persisted on close, reuse keystore batch size.
-	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
+	pqueueDs := namespace.Wrap(cfg.datastore, datastore.NewKey("pqueue"))
 	batchSize := prov.keystore.BatchSize()
 	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
 	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue, prov.persistAvgPrefixLen)
@@ -394,7 +393,7 @@ func (s *SweepingProvider) writeCycleStart(t time.Time) error {
 func (s *SweepingProvider) readCycleStart() (time.Time, error) {
 	v, err := s.datastore.Get(s.ctx, reprovideCycleStartKey)
 	if err != nil {
-		if errors.Is(err, ds.ErrNotFound) {
+		if errors.Is(err, datastore.ErrNotFound) {
 			// Initial run, no cycle start time stored yet.
 			return time.Time{}, nil
 		}
@@ -1286,7 +1285,7 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 // resumption after restarts.
 func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
 	now := time.Now()
-	k := ds.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
+	k := datastore.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
 	if err := s.datastore.Put(s.ctx, k, []byte{}); err != nil {
 		s.logger.Warnf("couldn't persist successful reprovide for prefix %s: %s", prefix, err)
 	}
@@ -1314,7 +1313,7 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 		}
 		_, key, err := parseReprovideHistoryKey(r.Key)
 		if err != nil {
-			s.datastore.Delete(s.ctx, ds.NewKey(r.Key))
+			s.datastore.Delete(s.ctx, datastore.NewKey(r.Key))
 			continue
 		}
 		regions.Add(key, struct{}{})
@@ -1355,7 +1354,7 @@ func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
 			break
 		}
 		// Either key is invalid or log is expired, delete key.
-		s.datastore.Delete(s.ctx, ds.NewKey(k))
+		s.datastore.Delete(s.ctx, datastore.NewKey(k))
 	}
 	s.lastReprovideHistoryGC.Store(now.Unix())
 }

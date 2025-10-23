@@ -689,18 +689,11 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		// Track whether we discovered any new peers. If too many consecutive
 		// lookups find no new peers, break early as we've likely found all peers
 		// in the region.
-		freshPeerFound := false
+		closestPeersBefore := len(allClosestPeers)
 		for _, p := range coveredPeers {
-			if !freshPeerFound {
-				if _, ok := allClosestPeers[p]; !ok {
-					allClosestPeers[p] = struct{}{}
-					freshPeerFound = true
-				}
-			} else {
-				allClosestPeers[p] = struct{}{}
-			}
+			allClosestPeers[p] = struct{}{}
 		}
-		if !freshPeerFound {
+		if len(allClosestPeers) <= closestPeersBefore {
 			noFreshPeersFoundCount++
 			if noFreshPeersFoundCount >= maxConsecutiveNoFreshPeers {
 				break

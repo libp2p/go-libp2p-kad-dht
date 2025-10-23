@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/ipfs/go-datastore"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-datastore/query"
@@ -222,6 +223,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		cfg.datastore = mapDs
 	}
 
+	logger := log.Logger(cfg.loggerName)
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(
 		"total_provide_count",
@@ -232,13 +234,30 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		return nil, err
 	}
 	ctx, cancelCtx := context.WithCancel(context.Background())
+	connCheckerOpts := []connectivity.Option{
+		connectivity.WithOfflineDelay(cfg.offlineDelay),
+		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
+	}
+
+	cachedAvgPrefixLen := -1
+	if cfg.resumeCycle {
+		// If resuming, and avgPrefixLen was persisted to datastore, start in
+		// DISCONNECTED mode (instead of OFFLINE).
+		if l, err := loadAvgPrefixLen(ctx, cfg.datastore); err != nil {
+			logger.Warnf("couldn't read average prefix length: %s", err)
+		} else if l >= 0 {
+			// Start in state `disconnected`
+			connCheckerOpts = append(connCheckerOpts, connectivity.WithStartDisconnected())
+			cachedAvgPrefixLen = l
+		}
+	}
+
 	connChecker, err := connectivity.New(
 		func() bool {
 			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 			return err == nil && len(peers) > 0
 		},
-		connectivity.WithOfflineDelay(cfg.offlineDelay),
-		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
+		connCheckerOpts...,
 	)
 	if err != nil {
 		cancelCtx()
@@ -270,7 +289,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
 
 		avgPrefixLenValidity: defaultPrefixLenValidity,
-		cachedAvgPrefixLen:   -1,
+		cachedAvgPrefixLen:   cachedAvgPrefixLen,
 
 		msgSender:      cfg.msgSender,
 		getSelfAddrs:   cfg.selfAddrs,
@@ -288,7 +307,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		activeReprovides: trie.New[bitstr.Key, struct{}](),
 
 		provideCounter: providerCounter,
-		logger:         log.Logger(cfg.loggerName),
+		logger:         logger,
 		stats:          newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
 	}
 
@@ -301,20 +320,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	// Restore reprovide cycle start time from datastore or initialize it.
 	prov.setCycleStart(cfg.resumeCycle)
 
-	connectivityStartState := 0 // start offline
 	if cfg.resumeCycle {
 		// Load keys that were saved to the datastore back to the provide queue.
 		if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
 			prov.logger.Errorw("failed to drain provide queue from datastore", "error", err)
-		}
-		if l, err := prov.loadAvgPrefixLen(); err != nil {
-			prov.logger.Warnf("couldn't read average prefix length: %s", err)
-		} else if l >= 0 {
-			// Start in state `disconnected`
-			connectivityStartState = 1 // start disconnected
-			prov.avgPrefixLenLk.Lock()
-			prov.cachedAvgPrefixLen = l
-			prov.avgPrefixLenLk.Unlock()
 		}
 	} else {
 		// Clear any previously stored reprovide logs, since we are off a fresh
@@ -329,7 +338,6 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
 	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
-	_ = connectivityStartState // TODO: use this when calling Start()
 	prov.connectivity.Start()
 
 	prov.wg.Add(1)
@@ -732,10 +740,10 @@ func (s *SweepingProvider) persistAvgPrefixLen() error {
 	return s.datastore.Put(s.ctx, avgPrefixLenDatastoreKey, []byte{byte(l)})
 }
 
-func (s *SweepingProvider) loadAvgPrefixLen() (int, error) {
-	val, err := s.datastore.Get(s.ctx, avgPrefixLenDatastoreKey)
+func loadAvgPrefixLen(ctx context.Context, ds datastore.Batching) (int, error) {
+	val, err := ds.Get(ctx, avgPrefixLenDatastoreKey)
 	if err != nil {
-		if errors.Is(err, ds.ErrNotFound) {
+		if errors.Is(err, datastore.ErrNotFound) {
 			// Suppress error if not found, -1 indicates missing value.
 			err = nil
 		}

@@ -107,7 +107,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Timing information
 	snapshot.Timing = stats.Timing{
-		Uptime:             time.Since(s.cycleStart),
+		Uptime:             time.Since(s.startedAt),
 		ReprovidesInterval: s.reprovideInterval,
 		CycleStart:         now.Add(-currentOffset),
 		CurrentTimeOffset:  currentOffset,

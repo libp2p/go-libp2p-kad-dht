@@ -1,3 +1,4 @@
+// Package dual provides a SweepingProvider for dual DHT setups (LAN and WAN).
 package dual
 
 import (
@@ -63,6 +64,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithAddLocalRecord(func(h mh.Multihash) error {
 				return dht.Provide(dht.Context(), cid.NewCidV1(cid.Raw, h), false)
 			}),
+			provider.WithResumeCycle(cfg.resumeCycle[i]),
 			provider.WithKeystore(cfg.keystore),
 			provider.WithMessageSender(cfg.msgSenders[i]),
 			provider.WithReprovideInterval(cfg.reprovideInterval[i]),
@@ -73,6 +75,7 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithDedicatedPeriodicWorkers(cfg.dedicatedPeriodicWorkers[i]),
 			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
 			provider.WithMaxProvideConnsPerWorker(cfg.maxProvideConnsPerWorker[i]),
+			provider.WithLoggerName(cfg.loggerNames[i]),
 		}
 		sweepingProviders[i], err = provider.New(dhtOpts...)
 		if err != nil {

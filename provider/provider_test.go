@@ -18,7 +18,8 @@ import (
 	"time"
 
 	"github.com/guillaumemichel/reservedpool"
-	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -94,6 +95,14 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 		}
 	}
 	return mhs
+}
+
+func getMockAddrs(t *testing.T) func() []ma.Multiaddr {
+	return func() []ma.Multiaddr {
+		addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
+		require.NoError(t, err)
+		return []ma.Multiaddr{addr}
+	}
 }
 
 var _ pb.MessageSender = (*mockMsgSender)(nil)
@@ -212,6 +221,8 @@ func TestReprovideTimeForPrefixWithOrderZero(t *testing.T) {
 	require.Equal(t, 15*time.Second, s.reprovideTimeForPrefix("1111"))
 }
 
+var defaultLogger = logging.Logger(DefaultLoggerName)
+
 func TestReprovideTimeForPrefixWithCustomOrder(t *testing.T) {
 	s := SweepingProvider{
 		reprovideInterval: 16 * time.Second,
@@ -249,6 +260,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 			router:            router,
 			replicationFactor: replicationFactor,
 			connectivity:      noopConnectivityChecker(),
+			logger:            defaultLogger,
 		}
 		r.connectivity.Start()
 		defer r.connectivity.Close()
@@ -384,7 +396,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(LoggerName, "warn")
+	logging.SetLogLevel(DefaultLoggerName, "warn")
 
 	mhs := genMultihashes(1)
 	prefix := bitstr.Key("1011101111")
@@ -419,6 +431,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 		getSelfAddrs:             func() []ma.Multiaddr { return nil },
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
 		provideCounter:           provideCounter(),
+		logger:                   defaultLogger,
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -430,12 +443,12 @@ func TestIndividualProvideSingle(t *testing.T) {
 	}
 
 	// Providing no keys returns no error
-	r.individualProvide(prefix, nil, false, false)
+	r.individualProvide(prefix, nil, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(0)
 
 	// Providing a single key - success
-	r.individualProvide(prefix, mhs, false, false)
+	r.individualProvide(prefix, mhs, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
@@ -444,7 +457,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, gcpErr
 	}
-	r.individualProvide(prefix, mhs, false, false)
+	r.individualProvide(prefix, mhs, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed key ends up in the provide queue.
@@ -453,7 +466,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 	require.Equal(t, mhs, keys)
 
 	// Reproviding a single key - failure
-	r.individualProvide(prefix, mhs, true, true)
+	r.individualProvide(prefix, mhs, true)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Verify failed prefix ends up in the reprovide queue.
@@ -466,7 +479,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	obsCore, obsLogs := observer.New(zap.WarnLevel)
 	logging.SetPrimaryCore(obsCore)
 	logging.SetAllLoggers(logging.LevelError)
-	logging.SetLogLevel(LoggerName, "warn")
+	logging.SetLogLevel(DefaultLoggerName, "warn")
 
 	ks := genMultihashes(2)
 	prefix := bitstr.Key("")
@@ -493,6 +506,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	}
 	reprovideInterval := time.Hour
 	maxDelay := time.Minute
+	ds := datastore.NewMapDatastore()
 	r := SweepingProvider{
 		router:                   router,
 		msgSender:                msgSender,
@@ -508,6 +522,8 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		addLocalRecord:           func(mh mh.Multihash) error { return nil },
 		provideCounter:           provideCounter(),
 		stats:                    newOperationStats(reprovideInterval, maxDelay),
+		datastore:                ds,
+		logger:                   defaultLogger,
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -521,7 +537,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	}
 
 	// Providing two keys - success
-	r.individualProvide(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	assertAdvertisementCount(1)
 
@@ -530,7 +546,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	router.getClosestPeersFunc = func(ctx context.Context, k string) ([]peer.ID, error) {
 		return nil, gcpErr
 	}
-	r.individualProvide(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	assertAdvertisementCount(1)
 	// Assert keys are added to provide queue
@@ -544,7 +560,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	require.ElementsMatch(t, pendingKeys, ks)
 
 	// Reproviding two keys - failure
-	r.individualProvide(prefix, ks, true, true)
+	r.individualProvide(prefix, ks, true)
 	require.True(t, takeAllContainsErr(obsLogs, "all individual provides failed for prefix"))
 	assertAdvertisementCount(1)
 	// Assert prefix is added to reprovide queue.
@@ -565,7 +581,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		return closestPeers, nil
 	}
 
-	r.individualProvide(prefix, ks, false, false)
+	r.individualProvide(prefix, ks, false)
 	require.True(t, takeAllContainsErr(obsLogs, gcpErr.Error()))
 	// Verify one key was now provided 2x, and other key only 1x since it just failed.
 	msgSenderLk.Lock()
@@ -582,7 +598,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	require.True(t, r.reprovideQueue.IsEmpty())
 	require.True(t, r.provideQueue.IsEmpty())
 
-	r.individualProvide(prefix, ks, true, true)
+	r.individualProvide(prefix, ks, true)
 	require.True(t, noWarningsNorAbove(obsLogs))
 	// Verify only one of the 2 keys was provided. Providing failed for the other.
 	msgSenderLk.Lock()
@@ -626,6 +642,7 @@ func TestHandleReprovide(t *testing.T) {
 			maxReprovideDelay: 5 * time.Second,
 
 			getSelfAddrs: func() []ma.Multiaddr { return nil },
+			logger:       defaultLogger,
 		}
 		prov.scheduleTimer.Stop()
 		connChecker.Start()
@@ -727,16 +744,10 @@ func TestClose(t *testing.T) {
 			WithRouter(router),
 			WithMessageSender(msgSender),
 			WithReplicationFactor(1),
-
 			WithMaxWorkers(4),
 			WithDedicatedBurstWorkers(0),
 			WithDedicatedPeriodicWorkers(0),
-
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 		)
 		require.NoError(t, err)
 		synctest.Wait()
@@ -796,11 +807,7 @@ func TestProvideOnce(t *testing.T) {
 			WithPeerID(pid),
 			WithRouter(router),
 			WithMessageSender(msgSender),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 			WithOfflineDelay(offlineDelay),
 			WithConnectivityCheckOnlineInterval(checkInterval),
 		}
@@ -899,11 +906,7 @@ func TestStartProvidingSingle(t *testing.T) {
 			WithPeerID(pid),
 			WithRouter(router),
 			WithMessageSender(msgSender),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 			WithOfflineDelay(offlineDelay),
 			WithConnectivityCheckOnlineInterval(checkInterval),
 		}
@@ -1022,11 +1025,7 @@ func TestStartProvidingMany(t *testing.T) {
 			WithPeerID(pid),
 			WithRouter(router),
 			WithMessageSender(msgSender),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 		}
 		prov, err := New(opts...)
 		require.NoError(t, err)
@@ -1174,11 +1173,7 @@ func TestStartProvidingUnstableNetwork(t *testing.T) {
 			WithPeerID(pid),
 			WithRouter(router),
 			WithMessageSender(msgSender),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 			WithOfflineDelay(offlineDelay),
 			WithConnectivityCheckOnlineInterval(connectivityCheckInterval),
 		}
@@ -1256,7 +1251,7 @@ func TestAddToSchedule(t *testing.T) {
 
 func TestRefreshSchedule(t *testing.T) {
 	ctx := context.Background()
-	mapDs := ds.NewMapDatastore()
+	mapDs := datastore.NewMapDatastore()
 	defer mapDs.Close()
 	ks, err := keystore.NewKeystore(mapDs)
 	require.NoError(t, err)
@@ -1342,11 +1337,7 @@ func TestOperationsOffline(t *testing.T) {
 			WithPeerID(pid),
 			WithRouter(router),
 			WithMessageSender(&mockMsgSender{}),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 			WithOfflineDelay(offlineDelay),
 			WithConnectivityCheckOnlineInterval(checkInterval),
 		}
@@ -1508,7 +1499,7 @@ func TestQueuePersistence(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a datastore that will be shared across provider instances
-		mapDs := ds.NewMapDatastore()
+		mapDs := dssync.MutexWrap(datastore.NewMapDatastore())
 		defer mapDs.Close()
 
 		router := &mockRouter{
@@ -1516,12 +1507,7 @@ func TestQueuePersistence(t *testing.T) {
 				return []peer.ID{pid}, nil
 			},
 		}
-		msgSender := &mockMsgSender{
-			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
-				// Don't actually send messages in this test
-				return nil
-			},
-		}
+		msgSender := &mockMsgSender{}
 
 		checkInterval := time.Second
 
@@ -1530,13 +1516,9 @@ func TestQueuePersistence(t *testing.T) {
 		opts0 := []Option{
 			WithPeerID(pid),
 			WithRouter(router),
-			WithMessageSender(msgSender),
+			WithMessageSender(&mockMsgSender{}),
 			WithDatastore(mapDs),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 			WithConnectivityCheckOnlineInterval(checkInterval),
 			WithMaxWorkers(0),               // No workers = keys stay in queue
 			WithDedicatedBurstWorkers(0),    // No dedicated burst workers
@@ -1548,7 +1530,7 @@ func TestQueuePersistence(t *testing.T) {
 		synctest.Wait()
 		require.True(t, prov0.connectivity.IsOnline())
 
-		// SKip the avg prefix length estimation
+		// Skip the avg prefix length estimation
 		prov0.avgPrefixLenLk.Lock()
 		prov0.cachedAvgPrefixLen = 4
 		prov0.avgPrefixLenLk.Unlock()
@@ -1575,11 +1557,7 @@ func TestQueuePersistence(t *testing.T) {
 			WithRouter(router),
 			WithMessageSender(msgSender),
 			WithDatastore(mapDs),
-			WithSelfAddrs(func() []ma.Multiaddr {
-				addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-				require.NoError(t, err)
-				return []ma.Multiaddr{addr}
-			}),
+			WithSelfAddrs(getMockAddrs(t)),
 			WithConnectivityCheckOnlineInterval(checkInterval),
 			WithMaxWorkers(0),               // Still no workers to keep queue stable
 			WithDedicatedBurstWorkers(0),    // No dedicated burst workers
@@ -1670,5 +1648,193 @@ func TestWithHostOption(t *testing.T) {
 		// Verify peer ID was extracted from host
 		require.Equal(t, h.ID(), prov.peerid, "peer ID should be extracted from host")
 		require.Equal(t, h, prov.host, "host should be set")
+	})
+}
+
+func TestResumeReprovides(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka") // kadid starts with 16*"0"
+		require.NoError(t, err)
+
+		replicationFactor := 4
+		peerPrefixBitlen := 6
+		require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+		var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
+		peers := make([]peer.ID, nPeers)
+		for i := range nPeers {
+			b := i << (bitsPerByte - peerPrefixBitlen)
+			k := [32]byte{b}
+			peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
+			require.NoError(t, err)
+		}
+
+		reprovideInterval := time.Hour
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+				return sortedPeers[:min(replicationFactor, len(peers))], nil
+			},
+		}
+
+		var prov *SweepingProvider
+		getPrefixFromSchedule := func(k bit256.Key) bitstr.Key {
+			prov.activeReprovidesLk.Lock()
+			defer prov.activeReprovidesLk.Unlock()
+			prefix, ok := keyspace.FindPrefixOfKey(prov.activeReprovides, k)
+			require.True(t, ok)
+			return prefix
+		}
+
+		reprovidedLk := sync.Mutex{}
+		reprovided := make(map[bitstr.Key]struct{})
+		msgSender := &mockMsgSender{
+			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+				h, err := mh.Cast(m.GetKey())
+				require.NoError(t, err)
+				k := keyspace.MhToBit256(h)
+				regionalPrefix := getPrefixFromSchedule(k)
+
+				reprovidedLk.Lock()
+				reprovided[regionalPrefix] = struct{}{}
+				reprovidedLk.Unlock()
+				return nil
+			},
+		}
+
+		requireNoPendingReprovides := func() {
+			prov.activeReprovidesLk.Lock()
+			require.Zero(t, prov.activeReprovides.Size())
+			prov.activeReprovidesLk.Unlock()
+			require.Zero(t, prov.reprovideQueue.Size())
+		}
+
+		ds := dssync.MutexWrap(datastore.NewMapDatastore())
+		ks, err := keystore.NewKeystore(ds)
+		require.NoError(t, err)
+		defer ks.Close()
+
+		mhs := genBalancedMultihashes(10)
+		ks.Put(ctx, mhs...)
+
+		opts := []Option{
+			WithReprovideInterval(reprovideInterval),
+			WithReplicationFactor(replicationFactor),
+			WithMaxWorkers(1),
+			WithDedicatedBurstWorkers(0),
+			WithDedicatedPeriodicWorkers(0),
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithDatastore(ds),
+			WithKeystore(ks),
+		}
+		prov, err = New(opts...)
+		require.NoError(t, err)
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		prov.scheduleLk.Lock()
+		nRegions := prov.schedule.Size()
+		prov.scheduleLk.Unlock()
+		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
+		requireNoPendingReprovides()
+
+		// All keys have been provided once, clear for cycle of reprovides.
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
+		cycleStart := prov.cycleStart
+		require.Equal(t, time.Now(), cycleStart)
+
+		time.Sleep(reprovideInterval / 2) // wait half a reprovide cycle
+		synctest.Wait()
+
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, nRegions/2, "should have reprovided %d regions", nRegions/2)
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		time.Sleep(2 * reprovideInterval)
+		// Provider has run for 2.5*reprovideInterval
+		synctest.Wait()
+		requireNoPendingReprovides()
+
+		// Close provider
+		err = prov.Close()
+		require.NoError(t, err)
+
+		time.Sleep(reprovideInterval / 4) // wait some time before restarting
+		// 2.75*reprovideInterval since initial start
+		synctest.Wait()
+
+		// Clear reprovided regions
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
+		// Restart provider
+		prov, err = New(opts...)
+		require.NoError(t, err)
+		defer prov.Close()
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		require.Equal(t, prov.cycleStart, cycleStart, "cycle start should be unchanged after restart")
+
+		// Since the node was offline for reprovideInterval/4, the provider needs
+		// to reprovide nRegions/4 ASAP. They should be provided by now.
+		require.Len(t, reprovided, nRegions/4, "should have reprovided %d regions in second round", nRegions/4)
+		requireNoPendingReprovides()
+
+		time.Sleep(reprovideInterval / 4)
+		synctest.Wait()
+
+		// 0.25*reprovideInterval after restart.
+		// 0.5*reprovideInterval after shutdown.
+		// 3*reprovidesInterval since initial start.
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, nRegions/2)
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		// reprovideInterval/2 after restart.
+		// 0.75*reprovideInterval after shutdown.
+		// 3.25*reprovidesInterval since initial start.
+		time.Sleep(reprovideInterval / 4)
+		synctest.Wait()
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, 3*nRegions/4)
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		// 0.75*reprovideInterval after restart.
+		// 1*reprovideInterval after shutdown.
+		// 3.5*reprovidesInterval since initial start.
+		time.Sleep(reprovideInterval / 4)
+		synctest.Wait()
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		// All keys have been provided once, clear for cycle of reprovides.
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
+		// 1.75*reprovideInterval after restart.
+		// 2*reprovideInterval after shutdown.
+		// 4.5*reprovidesInterval since initial start.
+		time.Sleep(reprovideInterval)
+		synctest.Wait()
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, nRegions, "should have reprovided all regions")
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
 	})
 }

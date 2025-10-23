@@ -111,6 +111,9 @@ var (
 	// reprovideCycleStartKey is the key storing the start time of the initial
 	// reprovide cycle.
 	reprovideCycleStartKey = ds.NewKey("cycle_start")
+	// avgPrefixLenDatastoreKey is the key storing the average prefix length
+	// computed from the schedule.
+	avgPrefixLenDatastoreKey = ds.NewKey("avg_prefix_len")
 	// maxTime is the maximum time value.
 	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
 )
@@ -146,7 +149,7 @@ type SweepingProvider struct {
 
 	datastore              ds.Batching
 	lastReprovideHistoryGC atomic.Int64
-	resumeReprovidesOnce   sync.Once
+	bootstrapped           atomic.Bool
 
 	replicationFactor int
 
@@ -293,15 +296,25 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
 	batchSize := prov.keystore.BatchSize()
 	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
-	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue, prov.persistAvgPrefixLen)
 
 	// Restore reprovide cycle start time from datastore or initialize it.
 	prov.setCycleStart(cfg.resumeCycle)
 
+	connectivityStartState := 0 // start offline
 	if cfg.resumeCycle {
 		// Load keys that were saved to the datastore back to the provide queue.
 		if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
 			prov.logger.Errorw("failed to drain provide queue from datastore", "error", err)
+		}
+		if l, err := prov.loadAvgPrefixLen(); err != nil {
+			prov.logger.Warnf("couldn't read average prefix length: %s", err)
+		} else if l >= 0 {
+			// Start in state `disconnected`
+			connectivityStartState = 1 // start disconnected
+			prov.avgPrefixLenLk.Lock()
+			prov.cachedAvgPrefixLen = l
+			prov.avgPrefixLenLk.Unlock()
 		}
 	} else {
 		// Clear any previously stored reprovide logs, since we are off a fresh
@@ -316,6 +329,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
 	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
+	_ = connectivityStartState // TODO: use this when calling Start()
 	prov.connectivity.Start()
 
 	prov.wg.Add(1)
@@ -703,6 +717,34 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 		s.lastAvgPrefixLen = time.Now()
 	}
 	return s.cachedAvgPrefixLen
+}
+
+func (s *SweepingProvider) persistAvgPrefixLen() error {
+	l := s.getAvgPrefixLenNoLock()
+
+	if l < 0 {
+		// Node is offline, don't persit prefix length.
+		return nil
+	}
+	if l > keyspace.KeyLen {
+		return fmt.Errorf("cannot persist invalid average prefix length %d", l)
+	}
+	return s.datastore.Put(s.ctx, avgPrefixLenDatastoreKey, []byte{byte(l)})
+}
+
+func (s *SweepingProvider) loadAvgPrefixLen() (int, error) {
+	val, err := s.datastore.Get(s.ctx, avgPrefixLenDatastoreKey)
+	if err != nil {
+		if errors.Is(err, ds.ErrNotFound) {
+			// Suppress error if not found, -1 indicates missing value.
+			err = nil
+		}
+		return -1, err
+	}
+	if len(val) != 1 {
+		return -1, fmt.Errorf("invalid avg prefix len value in datastore")
+	}
+	return int(val[0]), nil
 }
 
 // vanillaProvide provides a single key to the network without any
@@ -1178,7 +1220,10 @@ func (s *SweepingProvider) onOnline() {
 	cachedAvgPrefixLen := s.cachedAvgPrefixLen
 	s.avgPrefixLenLk.Unlock()
 
-	if cachedAvgPrefixLen == -1 {
+	wasOffline := cachedAvgPrefixLen == -1
+	notBootstrapped := !s.bootstrapped.Load()
+
+	if wasOffline || notBootstrapped {
 		// Provider was previously Offline (not Disconnected).
 		// Run prefix length measurement, and refresh schedule afterwards.
 		if !s.approxPrefixLenRunning.TryLock() {
@@ -1188,25 +1233,26 @@ func (s *SweepingProvider) onOnline() {
 		s.approxPrefixLenRunning.Unlock()
 
 		s.RefreshSchedule()
+	}
 
+	if notBootstrapped {
 		// When the node initially comes online, add all regions that weren't
 		// reprovided in the last reprovideInterval to the reprovide queue.
-		s.resumeReprovidesOnce.Do(func() {
-			now := time.Now()
-			currentOffset := s.timeOffset(now)
-			recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
-			s.scheduleLk.Lock()
-			if err == nil {
-				s.enqueueExpiredRegionsNoLock(recentlyReprovided)
-			} else {
-				s.logger.Warnf("couldn't load not expired regions: %s", err)
-			}
-			if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
-				timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)) % s.reprovideInterval
-				s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
-			}
-			s.scheduleLk.Unlock()
-		})
+		now := time.Now()
+		currentOffset := s.timeOffset(now)
+		recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
+		s.scheduleLk.Lock()
+		if err == nil {
+			s.enqueueExpiredRegionsNoLock(recentlyReprovided)
+		} else {
+			s.logger.Warnf("couldn't load not expired regions: %s", err)
+		}
+		if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
+			timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)) % s.reprovideInterval
+			s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
+		}
+		s.scheduleLk.Unlock()
+		s.bootstrapped.Store(true)
 	}
 
 	s.catchupPendingWork()
@@ -1224,6 +1270,7 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 	for i, entry := range toReprovideEntries {
 		toReprovideKeys[i] = entry.Key
 	}
+	fmt.Println("enqueueExpiredRegionsNoLock", len(toReprovideKeys), recentlyReprovided.Size(), s.schedule.Size())
 	s.reprovideQueue.Enqueue(toReprovideKeys...)
 }
 

@@ -1951,10 +1951,12 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	var reprovideAll bool
 	// Insert prefixes into the schedule
 	s.scheduleLk.Lock()
-	_, resettableKeystore := s.keystore.(*keystore.ResettableKeystore)
-	if resettableKeystore && len(toInsert) > s.schedule.Size() {
-		// Schedule size is about to double
-		reprovideAll = true
+	if len(gaps) > 1 || gaps[0] != bitstr.Key("") {
+		_, resettableKeystore := s.keystore.(*keystore.ResettableKeystore)
+		if resettableKeystore && len(toInsert) > s.schedule.Size() {
+			// Schedule size is about to double
+			reprovideAll = true
+		}
 	}
 	for _, p := range toInsert {
 		s.schedulePrefixNoLock(p, false)
@@ -1962,10 +1964,10 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	if reprovideAll {
 		// If the keystore is resettable, RefreshSchedule should be called after a
 		// Keystore.Reset(), to reflect recent changes on the schedule.
-		// If the size of the schedule is about to double, it means that many new
-		// keys were added to the Keystore recently, and we want to reprovide all
-		// regions as soon as possible to make sure the provider records are
-		// available in the DHT.
+		// If the schedule is not empty, and its size is about to double, it means
+		// that many new keys were added to the Keystore recently, and we want to
+		// reprovide all regions as soon as possible to make sure the provider
+		// records are available in the DHT.
 		// This is a corner case that is required for Kubo, as Keystore.Reset()
 		// takes a while.
 		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {

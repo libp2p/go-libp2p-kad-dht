@@ -1332,7 +1332,10 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 			s.datastore.Delete(s.ctx, datastore.NewKey(r.Key))
 			continue
 		}
-		regions.Add(key, struct{}{})
+		if _, prefixAlreadyInTrie := keyspace.FindPrefixOfKey(regions, key); !prefixAlreadyInTrie {
+			keyspace.PruneSubtrie(regions, key)
+			regions.Add(key, struct{}{})
+		}
 	}
 	return regions, nil
 }

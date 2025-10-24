@@ -1308,9 +1308,11 @@ func TestFindPeerWithQueryFilter(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Wait for the DHT to process the connection and store peer addresses
+	// This ensures the peer is findable, not just that a network connection exists
 	require.Eventually(t, func() bool {
-		return len(dhts[2].host.Network().ConnsToPeer(filteredPeer.ID())) > 0
-	}, 30*time.Millisecond, time.Millisecond, "failed to connect to peer")
+		return len(dhts[2].host.Peerstore().Addrs(filteredPeer.ID())) > 0
+	}, 5*time.Second, 10*time.Millisecond, "DHT failed to process peer connection")
 
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()

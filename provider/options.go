@@ -9,6 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
@@ -43,6 +44,7 @@ type config struct {
 	connectivityCheckOnlineInterval time.Duration
 
 	peerid peer.ID
+	host   host.Host
 	router KadClosestPeersRouter
 
 	keystore  keystore.Keystore
@@ -86,25 +88,28 @@ func getOpts(opts []Option) (config, error) {
 	// Apply options
 	for i, opt := range opts {
 		if err := opt(&cfg); err != nil {
-			return config{}, fmt.Errorf("reprovider dht option %d error: %s", i, err)
+			return config{}, fmt.Errorf("provider dht option %d error: %s", i, err)
 		}
 	}
 
 	// Validate config
 	if len(cfg.peerid) == 0 {
-		return config{}, errors.New("reprovider config: peer id is required")
+		if cfg.host == nil {
+			return config{}, errors.New("provider config: peer id or host is required")
+		}
+		cfg.peerid = cfg.host.ID()
 	}
 	if cfg.router == nil {
-		return config{}, errors.New("reprovider config: router is required")
+		return config{}, errors.New("provider config: router is required")
 	}
 	if cfg.msgSender == nil {
-		return config{}, errors.New("reprovider config: message sender is required")
+		return config{}, errors.New("provider config: message sender is required")
 	}
 	if cfg.selfAddrs == nil {
-		return config{}, errors.New("reprovider config: self addrs func is required")
+		return config{}, errors.New("provider config: self addrs func is required")
 	}
 	if cfg.dedicatedPeriodicWorkers+cfg.dedicatedBurstWorkers > cfg.maxWorkers {
-		return config{}, errors.New("reprovider config: total dedicated workers exceed max workers")
+		return config{}, errors.New("provider config: total dedicated workers exceed max workers")
 	}
 	return cfg, nil
 }
@@ -115,7 +120,7 @@ func getOpts(opts []Option) (config, error) {
 func WithReplicationFactor(n int) Option {
 	return func(cfg *config) error {
 		if n <= 0 {
-			return errors.New("reprovider config: replication factor must be a positive integer")
+			return errors.New("provider config: replication factor must be a positive integer")
 		}
 		cfg.replicationFactor = n
 		return nil
@@ -126,7 +131,7 @@ func WithReplicationFactor(n int) Option {
 func WithReprovideInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		if d <= 0 {
-			return errors.New("reprovider config: reprovide interval must be greater than 0")
+			return errors.New("provider config: reprovide interval must be greater than 0")
 		}
 		cfg.reprovideInterval = d
 		return nil
@@ -142,7 +147,7 @@ func WithReprovideInterval(d time.Duration) Option {
 func WithMaxReprovideDelay(d time.Duration) Option {
 	return func(cfg *config) error {
 		if d <= 0 {
-			return errors.New("reprovider config: max reprovide delay must be greater than 0")
+			return errors.New("provider config: max reprovide delay must be greater than 0")
 		}
 		cfg.maxReprovideDelay = d
 		return nil
@@ -156,7 +161,7 @@ func WithMaxReprovideDelay(d time.Duration) Option {
 func WithOfflineDelay(d time.Duration) Option {
 	return func(cfg *config) error {
 		if d < 0 {
-			return errors.New("reprovider config: offline delay must be non-negative")
+			return errors.New("provider config: offline delay must be non-negative")
 		}
 		cfg.offlineDelay = d
 		return nil
@@ -170,6 +175,20 @@ func WithOfflineDelay(d time.Duration) Option {
 func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.connectivityCheckOnlineInterval = d
+		return nil
+	}
+}
+
+// WithHost sets the libp2p host running the provider.
+// It is useful to protect the open connections and keep addresses in the
+// peerstore during provide operations. Additionally, it is used to get the
+// peer.ID if missing.
+func WithHost(h host.Host) Option {
+	return func(cfg *config) error {
+		if h == nil {
+			return errors.New("provider config: host cannot be nil")
+		}
+		cfg.host = h
 		return nil
 	}
 }
@@ -213,7 +232,7 @@ func WithSelfAddrs(f func() []ma.Multiaddr) Option {
 func WithAddLocalRecord(f func(mh.Multihash) error) Option {
 	return func(cfg *config) error {
 		if f == nil {
-			return errors.New("reprovider config: add local record function cannot be nil")
+			return errors.New("provider config: add local record function cannot be nil")
 		}
 		cfg.addLocalRecord = f
 		return nil
@@ -233,7 +252,7 @@ func WithAddLocalRecord(f func(mh.Multihash) error) Option {
 func WithMaxWorkers(n int) Option {
 	return func(cfg *config) error {
 		if n < 0 {
-			return errors.New("reprovider config: max workers must be non-negative")
+			return errors.New("provider config: max workers must be non-negative")
 		}
 		cfg.maxWorkers = n
 		return nil
@@ -245,7 +264,7 @@ func WithMaxWorkers(n int) Option {
 func WithDedicatedPeriodicWorkers(n int) Option {
 	return func(cfg *config) error {
 		if n < 0 {
-			return errors.New("reprovider config: dedicated periodic workers must be non-negative")
+			return errors.New("provider config: dedicated periodic workers must be non-negative")
 		}
 		cfg.dedicatedPeriodicWorkers = n
 		return nil
@@ -259,7 +278,7 @@ func WithDedicatedPeriodicWorkers(n int) Option {
 func WithDedicatedBurstWorkers(n int) Option {
 	return func(cfg *config) error {
 		if n < 0 {
-			return errors.New("reprovider config: dedicated burst workers must be non-negative")
+			return errors.New("provider config: dedicated burst workers must be non-negative")
 		}
 		cfg.dedicatedBurstWorkers = n
 		return nil
@@ -272,7 +291,7 @@ func WithDedicatedBurstWorkers(n int) Option {
 func WithMaxProvideConnsPerWorker(n int) Option {
 	return func(cfg *config) error {
 		if n <= 0 {
-			return errors.New("reprovider config: max provide conns per worker must be greater than 0")
+			return errors.New("provider config: max provide conns per worker must be greater than 0")
 		}
 		cfg.maxProvideConnsPerWorker = n
 		return nil
@@ -284,7 +303,7 @@ func WithMaxProvideConnsPerWorker(n int) Option {
 func WithKeystore(ks keystore.Keystore) Option {
 	return func(cfg *config) error {
 		if ks == nil {
-			return errors.New("reprovider config: multihash store cannot be nil")
+			return errors.New("provider config: multihash store cannot be nil")
 		}
 		cfg.keystore = ks
 		return nil
@@ -296,7 +315,7 @@ func WithKeystore(ks keystore.Keystore) Option {
 func WithDatastore(ds datastore.Batching) Option {
 	return func(cfg *config) error {
 		if ds == nil {
-			return errors.New("reprovider config: datastore cannot be nil")
+			return errors.New("provider config: datastore cannot be nil")
 		}
 		cfg.datastore = ds
 		return nil

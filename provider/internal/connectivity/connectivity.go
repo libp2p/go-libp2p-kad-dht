@@ -8,14 +8,6 @@ import (
 	"time"
 )
 
-type Status int
-
-const (
-	Online Status = iota
-	Disconnected
-	Offline
-)
-
 const (
 	initialBackoffDelay = 100 * time.Millisecond
 	maxBackoffDelay     = time.Minute

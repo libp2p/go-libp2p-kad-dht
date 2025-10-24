@@ -195,7 +195,11 @@ func TestProvidesExpire(t *testing.T) {
 		}
 	}
 
-	time.Sleep(ProvideValidity/2 + 2*defaultCleanupInterval)
+	// Sleep long enough for first batch to expire, but not the second batch
+	// First batch: added at t=0, expires at t=500ms (ProvideValidity)
+	// Second batch: added at t=250ms, expires at t=750ms
+	// We sleep 350ms (total 600ms) to provide 150ms margin before second batch expires
+	time.Sleep(ProvideValidity/2 + defaultCleanupInterval)
 
 	for _, h := range mhs[:5] {
 		out, _ := p.GetProviders(ctx, h)

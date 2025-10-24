@@ -40,7 +40,9 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
 
@@ -93,6 +95,9 @@ const (
 	// 32*replicatonFactor peers, which should be more than enough, even if the
 	// supplied prefix is too short.
 	maxExplorationPrefixSearches = 64
+	// maxConsecutiveNoFreshPeers is the maximum number of consecutive lookups
+	// that find no new peers before stopping exploration early.
+	maxConsecutiveNoFreshPeers = 2
 
 	// maxConsecutiveProvideFailuresAllowed is the maximum number of consecutive
 	// provides that are allowed to fail to the same remote peer before cancelling
@@ -101,6 +106,9 @@ const (
 	// minimalRegionReachablePeersRatio is the minimum ratio of reachable peers
 	// in a region for the provide to be considered a success.
 	minimalRegionReachablePeersRatio float32 = 0.2
+
+	// connMgrTag is used to protect libp2p connections during batch provides.
+	connMgrTag = "batchProvide"
 )
 
 var (
@@ -141,6 +149,7 @@ type SweepingProvider struct {
 	cleanupFuncs []func() error
 
 	peerid peer.ID
+	host   host.Host
 	order  bit256.Key
 	router KadClosestPeersRouter
 
@@ -275,6 +284,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 		router: cfg.router,
 		peerid: cfg.peerid,
+		host:   cfg.host,
 		order:  keyspace.PeerIDToBit256(cfg.peerid),
 
 		connectivity: connChecker,
@@ -839,7 +849,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	coverageTrie := trie.New[bitstr.Key, struct{}]()
 
 	var gaps []bitstr.Key
-	i := 0
+	i, noFreshPeersFoundCount := 0, 0
 	// Go down the trie to fully cover prefix.
 	for ; i < maxExplorationPrefixSearches; i++ {
 		if !s.connectivity.IsOnline() {
@@ -856,8 +866,20 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			return nil, errors.New("dht lookup did not return any peers")
 		}
 		coveredPrefix, coveredPeers := keyspace.ShortestCoveredPrefix(fullKey, closestPeers)
+		// Track whether we discovered any new peers. If too many consecutive
+		// lookups find no new peers, break early as we've likely found all peers
+		// in the region.
+		closestPeersBefore := len(allClosestPeers)
 		for _, p := range coveredPeers {
 			allClosestPeers[p] = struct{}{}
+		}
+		if len(allClosestPeers) <= closestPeersBefore {
+			noFreshPeersFoundCount++
+			if noFreshPeersFoundCount >= maxConsecutiveNoFreshPeers {
+				break
+			}
+		} else {
+			noFreshPeersFoundCount = 0
 		}
 
 		if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); !ok {
@@ -923,6 +945,19 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	if nPeers == 0 {
 		return reachablePeers, err
 	}
+	if s.host != nil {
+		// Keep addresses in peerstore while providing. If there are many keys to
+		// provide, operations may take a while, and we don't want to forget the
+		// addresses, which may trigger new DHT lookups.
+		for p := range keysAllocations {
+			s.host.Peerstore().SetAddrs(p, s.host.Peerstore().Addrs(p), peerstore.PermanentAddrTTL)
+		}
+		defer func() {
+			for p := range keysAllocations {
+				s.host.Peerstore().UpdateAddrs(p, peerstore.PermanentAddrTTL, peerstore.RecentlyConnectedAddrTTL)
+			}
+		}()
+	}
 	startTime := time.Now()
 	errCount := atomic.Uint32{}
 	nWorkers := s.maxProvideConnsPerWorker
@@ -946,6 +981,11 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 						failedKeysCount[string(k)]++
 					}
 					failedKeysCountLk.Unlock()
+					if s.host != nil {
+						// Remove addresses from peerstore if there was an error providing
+						// to that peer.
+						s.host.Peerstore().ClearAddrs(job.pid)
+					}
 				}
 			}
 		}()
@@ -1002,6 +1042,10 @@ func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 // provideKeysToPeer performs the network operation to advertise to the given
 // DHT server (p) that we serve all the given keys.
 func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
+	if s.host != nil {
+		s.host.ConnManager().Protect(p, connMgrTag)
+		defer s.host.ConnManager().Unprotect(p, connMgrTag)
+	}
 	var errCount, errStreak int
 	for i, mh := range keys {
 		pmes.Key = mh

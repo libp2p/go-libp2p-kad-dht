@@ -255,8 +255,8 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 	connChecker, err := connectivity.New(
 		func() bool {
-			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
-			return err == nil && len(peers) > 0
+			_, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
+			return err == nil
 		},
 		connCheckerOpts...,
 	)

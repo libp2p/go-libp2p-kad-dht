@@ -642,21 +642,6 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-// nextPrefixToReprovideNoLock returns the next prefix to reprovide, based on
-// the current time offset.
-func (s *SweepingProvider) nextPrefixToReprovideNoLock(offset time.Duration) (bitstr.Key, error) {
-	maxVal := 1 << maxPrefixSize
-	// Division before multiplication to avoid integer overflow. This is why we
-	// need to use float.
-	intPrefix := uint64(float64(offset) / float64(s.reprovideInterval) * float64(maxVal))
-	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, int64(intPrefix)))
-	nextRegion := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order)
-	if nextRegion == nil {
-		return "", errors.New("schedule is empty")
-	}
-	return nextRegion.Key, nil
-}
-
 // approxPrefixLen makes a few GetClosestPeers calls to get an estimate
 // of the prefix length to be used in the network.
 //
@@ -1307,17 +1292,12 @@ func (s *SweepingProvider) onOnline() {
 		// When the node initially comes online, add all regions that weren't
 		// reprovided in the last reprovideInterval to the reprovide queue.
 		now := time.Now()
-		currentOffset := s.timeOffset(now)
 		recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
 		s.scheduleLk.Lock()
 		if err == nil {
 			s.enqueueExpiredRegionsNoLock(recentlyReprovided)
 		} else {
 			s.logger.Warnf("couldn't load not expired regions: %s", err)
-		}
-		if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
-			timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)) % s.reprovideInterval
-			s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
 		}
 		s.scheduleLk.Unlock()
 		s.bootstrapped.Store(true)

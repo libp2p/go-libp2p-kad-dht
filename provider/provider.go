@@ -735,7 +735,7 @@ func (s *SweepingProvider) persistAvgPrefixLen() error {
 		// Node is offline, don't persit prefix length.
 		return nil
 	}
-	if l > keyspace.KeyLen {
+	if l >= keyspace.KeyLen {
 		return fmt.Errorf("cannot persist invalid average prefix length %d", l)
 	}
 	return s.datastore.Put(s.ctx, avgPrefixLenDatastoreKey, []byte{byte(l)})
@@ -753,7 +753,11 @@ func loadAvgPrefixLen(ctx context.Context, ds datastore.Batching) (int, error) {
 	if len(val) != 1 {
 		return -1, fmt.Errorf("invalid avg prefix len value in datastore")
 	}
-	return int(val[0]), nil
+	l := int(val[0])
+	if l >= keyspace.KeyLen {
+		return -1, fmt.Errorf("invalid avg prefix len in datastore: %d >= %d", l, keyspace.KeyLen)
+	}
+	return l, nil
 }
 
 // vanillaProvide provides a single key to the network without any

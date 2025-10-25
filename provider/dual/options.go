@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -17,15 +19,16 @@ const (
 	wanID
 )
 
-const (
-	DefaultLoggerNameLANSuffix = "/lan"
-	DefaultLoggerNameWAN       = provider.DefaultLoggerName
-	DefaultLoggerNameLAN       = provider.DefaultLoggerName + DefaultLoggerNameLANSuffix
+var (
+	descriptors          = [2]string{"lan", "wan"}
+	DefaultLoggerNameWAN = provider.DefaultLoggerName
+	DefaultLoggerNameLAN = provider.DefaultLoggerName + "/" + descriptors[lanID]
 )
 
 type config struct {
 	resumeCycle [2]bool
 	keystore    keystore.Keystore
+	datastores  [2]datastore.Batching
 
 	reprovideInterval [2]time.Duration // [0] = LAN, [1] = WAN
 	maxReprovideDelay [2]time.Duration
@@ -84,6 +87,9 @@ func getOpts(opts []Option, d *dual.DHT) (config, error) {
 	if cfg.dedicatedPeriodicWorkers[wanID]+cfg.dedicatedBurstWorkers[wanID] > cfg.maxWorkers[wanID] {
 		return config{}, errors.New("provider config: total dedicated workers exceed max workers")
 	}
+	if cfg.datastores[lanID] != nil && cfg.datastores[lanID] == cfg.datastores[wanID] {
+		return config{}, errors.New("provider config: LAN and WAN datastores cannot be the same")
+	}
 	return cfg, nil
 }
 
@@ -116,6 +122,37 @@ func WithKeystore(ks keystore.Keystore) Option {
 		cfg.keystore = ks
 		return nil
 	}
+}
+
+func withDatastore(ds datastore.Batching, dhts ...uint8) Option {
+	return func(cfg *config) error {
+		if ds == nil {
+			return errors.New("provider config: datastore cannot be nil")
+		}
+		switch len(dhts) {
+		case 1:
+			cfg.datastores[dhts[0]] = ds
+		case 2:
+			for _, dht := range dhts {
+				cfg.datastores[dht] = namespace.Wrap(ds, datastore.NewKey(descriptors[dht]))
+			}
+		default:
+			return errors.New("provider config: invalid number of dhts specified")
+		}
+		return nil
+	}
+}
+
+func WithDatastore(ds datastore.Batching) Option {
+	return withDatastore(ds, lanID, wanID)
+}
+
+func WithDatastoreLAN(ds datastore.Batching) Option {
+	return withDatastore(ds, lanID)
+}
+
+func WithDatastoreWAN(ds datastore.Batching) Option {
+	return withDatastore(ds, wanID)
 }
 
 func withReprovideInterval(reprovideInterval time.Duration, dhts ...uint8) Option {
@@ -379,7 +416,7 @@ func withLoggerName(loggerName string, dhts ...uint8) Option {
 				cfg.loggerNames[dhts[0]] = loggerName
 			case 2:
 				cfg.loggerNames[wanID] = loggerName
-				cfg.loggerNames[lanID] = loggerName + DefaultLoggerNameLANSuffix
+				cfg.loggerNames[lanID] = loggerName + "/" + descriptors[lanID]
 			default:
 				return errors.New("invalid number of dhts specified")
 			}

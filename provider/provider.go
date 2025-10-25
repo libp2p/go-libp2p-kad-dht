@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -30,9 +31,10 @@ import (
 
 	pool "github.com/guillaumemichel/reservedpool"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -107,26 +109,22 @@ const (
 
 	// connMgrTag is used to protect libp2p connections during batch provides.
 	connMgrTag = "batchProvide"
-	// providerDatastoreNamespace is the namespace in the datastore where
-	// provider data is stored.
-	providerDatastoreNamespace string = "provider"
 )
 
 var (
 	// ErrClosed is returned when the provider is closed.
 	ErrClosed = errors.New("provider: closed")
-	// ErrOffline is returned when the provider is offline, and cannot process
-	// the request. When a node is offline, operations on the keystore are
-	// performed as usual, but keys aren't added to provide queue nor advertised
-	// to the network.
-	ErrOffline = errors.New("provider: offline")
-
 	// reprovideHistoryKeyPrefix is the prefix for keys storing the timestamp of
 	// the last reprovide for a given region in the datastore.
-	reprovideHistoryKeyPrefix = path.Join(providerDatastoreNamespace, "history")
+	reprovideHistoryKeyPrefix = "history"
 	// reprovideCycleStartKey is the key storing the start time of the initial
 	// reprovide cycle.
-	reprovideCycleStartKey = ds.NewKey(path.Join(providerDatastoreNamespace, "cycle_start"))
+	reprovideCycleStartKey = datastore.NewKey("cycle_start")
+	// avgPrefixLenDatastoreKey is the key storing the average prefix length
+	// computed from the schedule.
+	avgPrefixLenDatastoreKey = datastore.NewKey("avg_prefix_len")
+	// maxTime is the maximum time value.
+	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
 )
 
 type KadClosestPeersRouter interface {
@@ -159,9 +157,9 @@ type SweepingProvider struct {
 
 	keystore keystore.Keystore
 
-	datastore              ds.Batching
+	datastore              datastore.Batching
 	lastReprovideHistoryGC atomic.Int64
-	resumeReprovidesOnce   sync.Once
+	bootstrapped           atomic.Bool
 
 	replicationFactor int
 
@@ -203,6 +201,7 @@ type SweepingProvider struct {
 	provideCounter metric.Int64Counter
 	logger         *log.ZapEventLogger
 	stats          operationStats
+	metricsDhtType string
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
@@ -213,10 +212,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	}
 	cleanupFuncs := []func() error{}
 
-	var mapDs ds.Batching
+	var mapDs datastore.Batching
 	if cfg.keystore == nil {
-		// Setup KeyStore if missing
-		mapDs = dssync.MutexWrap(ds.NewMapDatastore())
+		// Setup Keystore if missing
+		mapDs = dssync.MutexWrap(datastore.NewMapDatastore())
 		cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		cfg.keystore, err = keystore.NewKeystore(mapDs)
 		if err != nil {
@@ -228,12 +227,13 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	if cfg.datastore == nil {
 		// Setup datastore if missing
 		if mapDs == nil {
-			mapDs = dssync.MutexWrap(ds.NewMapDatastore())
+			mapDs = dssync.MutexWrap(datastore.NewMapDatastore())
 			cleanupFuncs = append(cleanupFuncs, mapDs.Close)
 		}
 		cfg.datastore = mapDs
 	}
 
+	logger := log.Logger(cfg.loggerName)
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	providerCounter, err := meter.Int64Counter(
 		"total_provide_count",
@@ -244,13 +244,30 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		return nil, err
 	}
 	ctx, cancelCtx := context.WithCancel(context.Background())
-	connChecker, err := connectivity.New(
-		func() bool {
-			peers, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
-			return err == nil && len(peers) > 0
-		},
+	connCheckerOpts := []connectivity.Option{
 		connectivity.WithOfflineDelay(cfg.offlineDelay),
 		connectivity.WithOnlineCheckInterval(cfg.connectivityCheckOnlineInterval),
+	}
+
+	cachedAvgPrefixLen := -1
+	if cfg.resumeCycle {
+		// If resuming, and avgPrefixLen was persisted to datastore, start in
+		// DISCONNECTED mode (instead of OFFLINE).
+		if l, err := loadAvgPrefixLen(ctx, cfg.datastore); err != nil {
+			logger.Warnf("couldn't read average prefix length: %s", err)
+		} else if l >= 0 {
+			// Start in state `disconnected`
+			connCheckerOpts = append(connCheckerOpts, connectivity.WithStartDisconnected())
+			cachedAvgPrefixLen = l
+		}
+	}
+
+	connChecker, err := connectivity.New(
+		func() bool {
+			_, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
+			return err == nil
+		},
+		connCheckerOpts...,
 	)
 	if err != nil {
 		cancelCtx()
@@ -283,7 +300,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
 
 		avgPrefixLenValidity: defaultPrefixLenValidity,
-		cachedAvgPrefixLen:   -1,
+		cachedAvgPrefixLen:   cachedAvgPrefixLen,
 
 		msgSender:      cfg.msgSender,
 		getSelfAddrs:   cfg.selfAddrs,
@@ -301,28 +318,38 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		activeReprovides: trie.New[bitstr.Key, struct{}](),
 
 		provideCounter: providerCounter,
-		logger:         log.Logger(cfg.loggerName),
+		logger:         logger,
 		stats:          newOperationStats(cfg.reprovideInterval, cfg.maxReprovideDelay),
+		metricsDhtType: cfg.metricsDhtType,
 	}
 
 	// Provide queue is persisted on close, reuse keystore batch size.
-	pqueueDs := namespace.Wrap(cfg.datastore, ds.NewKey("pqueue"))
+	pqueueDs := namespace.Wrap(cfg.datastore, datastore.NewKey("pqueue"))
 	batchSize := prov.keystore.BatchSize()
 	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
-	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue)
+	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue, prov.persistAvgPrefixLen)
+
+	// Restore reprovide cycle start time from datastore or initialize it.
+	prov.setCycleStart(cfg.resumeCycle)
 
 	if cfg.resumeCycle {
-		// Restore reprovide cycle start time from datastore or initialize it.
-		prov.setCycleStart()
-
 		// Load keys that were saved to the datastore back to the provide queue.
 		if err := prov.provideQueue.DrainDatastore(ctx, pqueueDs); err != nil {
 			prov.logger.Errorw("failed to drain provide queue from datastore", "error", err)
 		}
+	} else {
+		// Clear any previously stored reprovide logs, since we are off a fresh
+		// start. This results in reproviding all keys in the keystore when the
+		// node comes online.
+		prov.gcReprovideHistoryIfNeeded(maxTime)
 	}
 
 	// Don't need to start schedule timer yet
 	prov.scheduleTimer.Stop()
+
+	// Initialize the counter to 0 to ensure it's exported by Prometheus even
+	// before first provide
+	prov.increaseProvideCounter(0)
 
 	// Set up callbacks after both provider and connectivity checker are initialized
 	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
@@ -335,20 +362,40 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	return prov, nil
 }
 
-// initFromPersistedState initializes the provider from persisted state on
-// startup. It restores the reprovide cycle start time and enqueues any regions
-// that expired during downtime for immediate reproviding.
-func (s *SweepingProvider) setCycleStart() {
+// setCycleStart initializes the reprovide cycle start time for the provider.
+//
+// If resume is true, it attempts to restore the cycle start time from the
+// datastore. This allows the provider to maintain a consistent reprovide
+// schedule across restarts. If the stored value cannot be read or is zero
+// (indicating a fresh installation), the current time is used instead.
+//
+// If resume is false, the current time is used as the cycle start and
+// persisted to the datastore.
+//
+// The cycle start time serves as the temporal anchor for the reprovide
+// schedule, ensuring keys are reprovided at deterministic intervals relative
+// to this initial timestamp.
+func (s *SweepingProvider) setCycleStart(resume bool) {
 	now := time.Now()
-	cycleStart, err := s.readCycleStart()
-	if err != nil || cycleStart.IsZero() {
-		// cycle start time is zero on initial run.
+	cycleStart := now
+
+	if resume {
+		stored, err := s.readCycleStart()
 		if err != nil {
 			s.logger.Warnf("couldn't read cycle start time: %s", err)
 		}
-		s.writeCycleStart(now)
-		cycleStart = now
+		// Use stored value if successfully read and non-zero
+		if err == nil && !stored.IsZero() {
+			cycleStart = stored
+		}
 	}
+
+	// Write cycle start if using current time (either !resume or failed to
+	// restore).
+	if cycleStart.Equal(now) {
+		s.writeCycleStart(now)
+	}
+
 	s.startedAt = now
 	s.cycleStart = cycleStart
 }
@@ -363,7 +410,7 @@ func (s *SweepingProvider) writeCycleStart(t time.Time) error {
 func (s *SweepingProvider) readCycleStart() (time.Time, error) {
 	v, err := s.datastore.Get(s.ctx, reprovideCycleStartKey)
 	if err != nil {
-		if errors.Is(err, ds.ErrNotFound) {
+		if errors.Is(err, datastore.ErrNotFound) {
 			// Initial run, no cycle start time stored yet.
 			return time.Time{}, nil
 		}
@@ -595,21 +642,6 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 	return time.Duration(int64(s.reprovideInterval) * val / maxInt)
 }
 
-// nextPrefixToReprovideNoLock returns the next prefix to reprovide, based on
-// the current time offset.
-func (s *SweepingProvider) nextPrefixToReprovideNoLock(offset time.Duration) (bitstr.Key, error) {
-	maxVal := 1 << maxPrefixSize
-	// Division before multiplication to avoid integer overflow. This is why we
-	// need to use float.
-	intPrefix := uint64(float64(offset) / float64(s.reprovideInterval) * float64(maxVal))
-	prefix := bitstr.Key(fmt.Sprintf("%0*b", maxPrefixSize, int64(intPrefix)))
-	nextRegion := keyspace.NextNonEmptyLeaf(s.schedule, prefix, s.order)
-	if nextRegion == nil {
-		return "", errors.New("schedule is empty")
-	}
-	return nextRegion.Key, nil
-}
-
 // approxPrefixLen makes a few GetClosestPeers calls to get an estimate
 // of the prefix length to be used in the network.
 //
@@ -670,17 +702,18 @@ func (s *SweepingProvider) approxPrefixLen() {
 //
 // Hangs until the first measurement is done if the average prefix length is
 // missing.
-func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
+func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	s.avgPrefixLenLk.Lock()
 	defer s.avgPrefixLenLk.Unlock()
 
 	if s.cachedAvgPrefixLen == -1 {
-		return -1, ErrOffline
+		// -1 represents uninitialized state.
+		return -1
 	}
 
 	if s.lastAvgPrefixLen.Add(s.avgPrefixLenValidity).After(time.Now()) {
 		// Return cached value if it is still valid.
-		return s.cachedAvgPrefixLen, nil
+		return s.cachedAvgPrefixLen
 	}
 	prefixLenSum := 0
 	if !s.schedule.IsEmptyLeaf() {
@@ -692,7 +725,39 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() (int, error) {
 		s.cachedAvgPrefixLen = prefixLenSum / len(scheduleEntries)
 		s.lastAvgPrefixLen = time.Now()
 	}
-	return s.cachedAvgPrefixLen, nil
+	return s.cachedAvgPrefixLen
+}
+
+func (s *SweepingProvider) persistAvgPrefixLen() error {
+	l := s.getAvgPrefixLenNoLock()
+
+	if l < 0 {
+		// Node is offline, don't persit prefix length.
+		return nil
+	}
+	if l >= keyspace.KeyLen {
+		return fmt.Errorf("cannot persist invalid average prefix length %d", l)
+	}
+	return s.datastore.Put(s.ctx, avgPrefixLenDatastoreKey, []byte{byte(l)})
+}
+
+func loadAvgPrefixLen(ctx context.Context, ds datastore.Batching) (int, error) {
+	val, err := ds.Get(ctx, avgPrefixLenDatastoreKey)
+	if err != nil {
+		if errors.Is(err, datastore.ErrNotFound) {
+			// Suppress error if not found, -1 indicates missing value.
+			err = nil
+		}
+		return -1, err
+	}
+	if len(val) != 1 {
+		return -1, fmt.Errorf("invalid avg prefix len value in datastore")
+	}
+	l := int(val[0])
+	if l >= keyspace.KeyLen {
+		return -1, fmt.Errorf("invalid avg prefix len in datastore: %d >= %d", l, keyspace.KeyLen)
+	}
+	return l, nil
 }
 
 // vanillaProvide provides a single key to the network without any
@@ -777,7 +842,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	// Go down the trie to fully cover prefix.
 	for ; i < maxExplorationPrefixSearches; i++ {
 		if !s.connectivity.IsOnline() {
-			return nil, ErrOffline
+			return nil, errors.New("node is offline")
 		}
 		fullKey := keyspace.FirstFullKeyWithPrefix(nextPrefix, s.order)
 		closestPeers, err := s.closestPeersToKey(fullKey)
@@ -932,7 +997,7 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 	successfulKeys := nKeys - failedKeys
 	s.stats.avgHolders.AddWeighted(float64(holdersSum)/float64(nKeys), nKeys)
 	s.stats.addCompletedKeys(successfulKeys, failedKeys)
-	s.provideCounter.Add(s.ctx, int64(successfulKeys))
+	s.increaseProvideCounter(successfulKeys)
 
 	errCountLoaded := int(errCount.Load())
 	s.logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
@@ -942,6 +1007,16 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 		err = fmt.Errorf("unable to provide to enough peers (%d/%d)", reachablePeers, nPeers)
 	}
 	return reachablePeers, err
+}
+
+// increaseProvideCounter increases the provide counter metric by n.
+func (s *SweepingProvider) increaseProvideCounter(n int) {
+	opts := []metric.AddOption{}
+	if len(s.metricsDhtType) > 0 {
+		// if s.metricsDhtType is set, add it as an attribute
+		opts = append(opts, metric.WithAttributes(attribute.String("dht", s.metricsDhtType)))
+	}
+	s.provideCounter.Add(s.ctx, int64(n), opts...)
 }
 
 // genProvideMessage generates a new provide message with the supplied
@@ -1090,16 +1165,17 @@ func (s *SweepingProvider) handleReprovide() {
 
 // handleProvide provides supplied keys to the network if needed and schedules
 // the keys to be reprovided if needed.
-func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) error {
+func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) {
 	if len(keys) == 0 {
-		return nil
+		return
 	}
 	if reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
 		newKeys, err := s.keystore.Put(s.ctx, keys...)
 		if err != nil {
-			return fmt.Errorf("couldn't add keys to keystore: %w", err)
+			s.logger.Errorf("couldn't add keys to keystore: %s", err)
+			return
 		}
 		if !force {
 			keys = newKeys
@@ -1107,14 +1183,11 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 	}
 
 	if s.isOffline() {
-		return ErrOffline
+		return
 	}
-	prefixes, err := s.groupAndScheduleKeysByPrefix(keys, reprovide)
-	if err != nil {
-		return err
-	}
+	prefixes := s.groupAndScheduleKeysByPrefix(keys, reprovide)
 	if len(prefixes) == 0 {
-		return nil
+		return
 	}
 	// Sort prefixes by number of keys.
 	sortedPrefixesAndKeys := keyspace.SortPrefixesBySize(prefixes)
@@ -1125,13 +1198,12 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 
 	s.wg.Add(1)
 	go s.provideLoop()
-	return nil
 }
 
 // groupAndScheduleKeysByPrefix groups the supplied keys by their prefixes as
 // present in the schedule, and if `schedule` is set to true, add these
 // prefixes to the schedule to be reprovided.
-func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) (map[bitstr.Key][]mh.Multihash, error) {
+func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, schedule bool) map[bitstr.Key][]mh.Multihash {
 	seen := make(map[string]struct{})
 	prefixTrie := trie.New[bitstr.Key, struct{}]()
 	prefixes := make(map[bitstr.Key][]mh.Multihash)
@@ -1156,10 +1228,9 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 		prefix, inSchedule := keyspace.FindPrefixOfKey(s.schedule, k)
 		if !inSchedule {
 			if avgPrefixLen == -1 {
-				var err error
-				avgPrefixLen, err = s.getAvgPrefixLenNoLock()
-				if err != nil {
-					return nil, err
+				avgPrefixLen = s.getAvgPrefixLenNoLock()
+				if avgPrefixLen == -1 {
+					return nil
 				}
 			}
 			prefix = bitstr.Key(key.BitString(k)[:avgPrefixLen])
@@ -1180,7 +1251,7 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 		prefixTrie.Add(prefix, struct{}{})
 		prefixes[prefix] = mhs
 	}
-	return prefixes, nil
+	return prefixes
 }
 
 func (s *SweepingProvider) isOffline() bool {
@@ -1206,7 +1277,10 @@ func (s *SweepingProvider) onOnline() {
 	cachedAvgPrefixLen := s.cachedAvgPrefixLen
 	s.avgPrefixLenLk.Unlock()
 
-	if cachedAvgPrefixLen == -1 {
+	wasOffline := cachedAvgPrefixLen == -1
+	notBootstrapped := !s.bootstrapped.Load()
+
+	if wasOffline || notBootstrapped {
 		// Provider was previously Offline (not Disconnected).
 		// Run prefix length measurement, and refresh schedule afterwards.
 		if !s.approxPrefixLenRunning.TryLock() {
@@ -1216,25 +1290,21 @@ func (s *SweepingProvider) onOnline() {
 		s.approxPrefixLenRunning.Unlock()
 
 		s.RefreshSchedule()
+	}
 
+	if notBootstrapped {
 		// When the node initially comes online, add all regions that weren't
 		// reprovided in the last reprovideInterval to the reprovide queue.
-		s.resumeReprovidesOnce.Do(func() {
-			now := time.Now()
-			currentOffset := s.timeOffset(now)
-			recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
-			s.scheduleLk.Lock()
-			if err == nil {
-				s.enqueueExpiredRegionsNoLock(recentlyReprovided)
-			} else {
-				s.logger.Warnf("couldn't load not expired regions: %s", err)
-			}
-			if nextPrefix, err := s.nextPrefixToReprovideNoLock(currentOffset); err == nil {
-				timeUntilReprovide := s.timeUntil(s.reprovideTimeForPrefix(nextPrefix)) % s.reprovideInterval
-				s.scheduleNextReprovideNoLock(nextPrefix, timeUntilReprovide)
-			}
-			s.scheduleLk.Unlock()
-		})
+		now := time.Now()
+		recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
+		s.scheduleLk.Lock()
+		if err == nil {
+			s.enqueueExpiredRegionsNoLock(recentlyReprovided)
+		} else {
+			s.logger.Warnf("couldn't load not expired regions: %s", err)
+		}
+		s.scheduleLk.Unlock()
+		s.bootstrapped.Store(true)
 	}
 
 	s.catchupPendingWork()
@@ -1259,7 +1329,7 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 // resumption after restarts.
 func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
 	now := time.Now()
-	k := ds.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
+	k := datastore.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
 	if err := s.datastore.Put(s.ctx, k, []byte{}); err != nil {
 		s.logger.Warnf("couldn't persist successful reprovide for prefix %s: %s", prefix, err)
 	}
@@ -1287,10 +1357,13 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 		}
 		_, key, err := parseReprovideHistoryKey(r.Key)
 		if err != nil {
-			s.datastore.Delete(s.ctx, ds.NewKey(r.Key))
+			s.datastore.Delete(s.ctx, datastore.NewKey(r.Key))
 			continue
 		}
-		regions.Add(key, struct{}{})
+		if _, prefixAlreadyInTrie := keyspace.FindPrefixOfKey(regions, key); !prefixAlreadyInTrie {
+			keyspace.PruneSubtrie(regions, key)
+			regions.Add(key, struct{}{})
+		}
 	}
 	return regions, nil
 }
@@ -1328,28 +1401,28 @@ func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
 			break
 		}
 		// Either key is invalid or log is expired, delete key.
-		s.datastore.Delete(s.ctx, ds.NewKey(k))
+		s.datastore.Delete(s.ctx, datastore.NewKey(k))
 	}
 	s.lastReprovideHistoryGC.Store(now.Unix())
 }
 
 // parseReprovideLogKey parses a datastore key from the reprovide history log.
-// Expected format: /provider/history/<hex-timestamp>/<prefix>
+// Expected format: /history/<hex-timestamp>/<prefix>
 func parseReprovideHistoryKey(k string) (time.Time, bitstr.Key, error) {
 	parts := strings.Split(k, "/")
 	lenParts := len(parts)
-	if lenParts < 4 || lenParts > 5 {
+	if lenParts < 3 || lenParts > 4 {
 		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
 	}
-	t, err := parseTimestampHex(parts[3])
+	t, err := parseTimestampHex(parts[2])
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("invalid reprovide log key: %s", k)
 	}
 	var prefix bitstr.Key
-	if lenParts == 5 {
-		prefix = bitstr.Key(parts[4])
+	if lenParts == 4 {
+		prefix = bitstr.Key(parts[3])
 	}
-	// lenParts == 4 means empty prefix ("").
+	// lenParts == 3 means empty prefix ("").
 	return t, prefix, nil
 }
 
@@ -1713,7 +1786,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			continue
 		}
 		keyCount := len(allKeys)
-		s.provideCounter.Add(s.ctx, int64(keyCount))
+		s.increaseProvideCounter(keyCount)
 		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
@@ -1759,7 +1832,8 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
 	}
-	return s.handleProvide(true, false, keys...)
+	s.handleProvide(true, false, keys...)
+	return nil
 }
 
 // StartProviding provides the given keys to the DHT swarm unless they were
@@ -1776,7 +1850,8 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) erro
 	if s.closed() {
 		return ErrClosed
 	}
-	return s.handleProvide(force, true, keys...)
+	s.handleProvide(force, true, keys...)
+	return nil
 }
 
 // StopProviding stops reproviding the given keys to the DHT swarm. The node
@@ -1817,14 +1892,15 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
 	}
-	if s.isOffline() {
-		return ErrOffline
+	if !s.isOffline() {
+		// If node is offline, the schedule will be refreshed when the node
+		// comes back online.
+		s.groupAndScheduleKeysByPrefix(keys, true)
 	}
-	_, err := s.groupAndScheduleKeysByPrefix(keys, true)
-	return err
+	return nil
 }
 
-// RefreshSchedule scans the KeyStore for any keys that are not currently
+// RefreshSchedule scans the Keystore for any keys that are not currently
 // scheduled for reproviding. If such keys are found, it schedules their
 // associated keyspace region to be reprovided.
 //
@@ -1842,10 +1918,12 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	}
 	// Look for prefixes not included in the schedule
 	s.scheduleLk.Lock()
-	prefixLen, err := s.getAvgPrefixLenNoLock()
-	if err != nil {
+	prefixLen := s.getAvgPrefixLenNoLock()
+	if prefixLen < 0 {
+		// Provider is currently offline, schedule will be refreshed when the node
+		// comes back online.
 		s.scheduleLk.Unlock()
-		return err
+		return nil
 	}
 	gaps := keyspace.TrieGaps(s.schedule, "", s.order)
 	s.scheduleLk.Unlock()
@@ -1859,7 +1937,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		}
 	}
 
-	// Only keep the missing prefixes for which there are keys in the KeyStore.
+	// Only keep the missing prefixes for which there are keys in the Keystore.
 	toInsert := make([]bitstr.Key, 0)
 	for _, p := range missing {
 		ok, err := s.keystore.ContainsPrefix(s.ctx, p)
@@ -1874,10 +1952,31 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		return nil
 	}
 
+	var reprovideAll bool
 	// Insert prefixes into the schedule
 	s.scheduleLk.Lock()
+	if len(gaps) > 1 || gaps[0] != bitstr.Key("") {
+		_, resettableKeystore := s.keystore.(*keystore.ResettableKeystore)
+		if resettableKeystore && len(toInsert) > s.schedule.Size() {
+			// Schedule size is about to double
+			reprovideAll = true
+		}
+	}
 	for _, p := range toInsert {
 		s.schedulePrefixNoLock(p, false)
+	}
+	if reprovideAll {
+		// If the keystore is resettable, RefreshSchedule should be called after a
+		// Keystore.Reset(), to reflect recent changes on the schedule.
+		// If the schedule is not empty, and its size is about to double, it means
+		// that many new keys were added to the Keystore recently, and we want to
+		// reprovide all regions as soon as possible to make sure the provider
+		// records are available in the DHT.
+		// This is a corner case that is required for Kubo, as Keystore.Reset()
+		// takes a while.
+		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {
+			s.reprovideQueue.Enqueue(entry.Key)
+		}
 	}
 	s.scheduleLk.Unlock()
 	return nil

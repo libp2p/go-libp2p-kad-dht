@@ -65,7 +65,6 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 				return dht.Provide(dht.Context(), cid.NewCidV1(cid.Raw, h), false)
 			}),
 			provider.WithResumeCycle(cfg.resumeCycle[i]),
-			provider.WithKeystore(cfg.keystore),
 			provider.WithMessageSender(cfg.msgSenders[i]),
 			provider.WithReprovideInterval(cfg.reprovideInterval[i]),
 			provider.WithMaxReprovideDelay(cfg.maxReprovideDelay[i]),
@@ -76,6 +75,13 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithDedicatedBurstWorkers(cfg.dedicatedBurstWorkers[i]),
 			provider.WithMaxProvideConnsPerWorker(cfg.maxProvideConnsPerWorker[i]),
 			provider.WithLoggerName(cfg.loggerNames[i]),
+			provider.WithDhtType(descriptors[i]),
+		}
+		if cfg.keystore != nil {
+			dhtOpts = append(dhtOpts, provider.WithKeystore(cfg.keystore))
+		}
+		if cfg.datastores[i] != nil {
+			dhtOpts = append(dhtOpts, provider.WithDatastore(cfg.datastores[i]))
 		}
 		sweepingProviders[i], err = provider.New(dhtOpts...)
 		if err != nil {

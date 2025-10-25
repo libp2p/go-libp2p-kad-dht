@@ -152,7 +152,7 @@ func WithDatastoreLAN(ds datastore.Batching) Option {
 }
 
 func WithDatastoreWAN(ds datastore.Batching) Option {
-	return withDatastore(ds, lanID)
+	return withDatastore(ds, wanID)
 }
 
 func withReprovideInterval(reprovideInterval time.Duration, dhts ...uint8) Option {

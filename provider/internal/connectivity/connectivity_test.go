@@ -104,6 +104,7 @@ func TestStateTransitions(t *testing.T) {
 			online.Store(true)
 
 			<-onlineChan // wait for onOnline to be run
+			synctest.Wait()
 			require.True(t, connChecker.IsOnline())
 			select {
 			case <-offlineChan:
@@ -139,6 +140,7 @@ func TestStateTransitions(t *testing.T) {
 			connChecker.Start()
 
 			<-onlineChan // wait for onOnline to be run
+			synctest.Wait()
 			require.True(t, connChecker.IsOnline())
 			require.Equal(t, time.Now(), connChecker.lastCheck)
 			require.Equal(t, time.Now(), connChecker.LastStateChange())
@@ -175,6 +177,7 @@ func TestStateTransitions(t *testing.T) {
 
 			require.False(t, connChecker.IsOnline())
 			<-offlineChan // wait for callback to be run
+			synctest.Wait()
 			require.Equal(t, time.Now(), connChecker.LastStateChange())
 
 			connChecker.TriggerCheck() // noop since Offline
@@ -209,6 +212,7 @@ func TestStateTransitions(t *testing.T) {
 			connChecker.Start()
 
 			<-onlineChan
+			synctest.Wait()
 
 			onlineSince := time.Now()
 			require.True(t, connChecker.IsOnline())
@@ -270,6 +274,7 @@ func TestSetCallbacks(t *testing.T) {
 		connChecker.Start()
 
 		<-onlineChan // wait for newOnOnline to be called
+		synctest.Wait()
 		require.True(t, connChecker.IsOnline())
 		require.Equal(t, int32(0), oldOnlineCount.Load())
 		require.Equal(t, int32(1), newOnlineCount.Load())
@@ -283,6 +288,7 @@ func TestSetCallbacks(t *testing.T) {
 		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
 
 		<-offlineChan // wait for newOnOffline to be called
+		synctest.Wait()
 		require.False(t, connChecker.IsOnline())
 		require.Equal(t, int32(0), oldOfflineCount.Load())
 		require.Equal(t, int32(1), newOfflineCount.Load())

@@ -1679,6 +1679,7 @@ func (s *SweepingProvider) selfAddrInfo() (peer.AddrInfo, bool) {
 	addrs := s.getSelfAddrs()
 	if len(addrs) == 0 {
 		s.logger.Warn("provider: no self addresses available for providing keys")
+		s.connectivity.TriggerCheck()
 		return peer.AddrInfo{}, false
 	}
 	return peer.AddrInfo{ID: s.peerid, Addrs: addrs}, true

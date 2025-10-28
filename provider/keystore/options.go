@@ -8,7 +8,7 @@ type config struct {
 	batchSize  int
 }
 
-// Options for configuring a Keystore.
+// Option for configuring a Keystore.
 type Option func(*config) error
 
 const (

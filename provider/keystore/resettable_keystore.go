@@ -10,6 +10,8 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
+
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
 )
 
 var ErrResetInProgress = errors.New("reset already in progress")
@@ -169,9 +171,17 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 	if err != nil {
 		return err
 	}
+	seen := make(map[bit256.Key]struct{}, len(keys))
 	var added int64
 	for _, h := range keys {
-		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits)
+		k := keyspace.MhToBit256(h)
+		// Skip duplicates within this batch
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+
+		dsk := dsKey(k, s.prefixBits)
 		ok, err := s.altDs.Has(ctx, dsk)
 		if err != nil {
 			return err

@@ -94,7 +94,7 @@ func NewResettableKeystore(d ds.Batching, opts ...Option) (*ResettableKeystore, 
 // worker processes operations sequentially in a single goroutine for ResettableKeystore
 func (s *ResettableKeystore) worker() {
 	defer close(s.done)
-	s.size, _ = refreshSize(context.Background(), s.ds)
+	s.loadSize()
 
 	for {
 		select {

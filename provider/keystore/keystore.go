@@ -8,6 +8,7 @@ package keystore
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,7 +24,16 @@ import (
 	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 )
 
-var ErrClosed = errors.New("keystore is closed")
+var (
+	// ErrClosed is returned when an operation is attempted on a closed Keystore.
+	ErrClosed = errors.New("keystore is closed")
+
+	// sizeKey is the datastore key used to store the keystore size as a startup
+	// optimization. The key is ephemeral: it only exists between Close() and the
+	// next startup, when it is immediately deleted. This avoids stale size data
+	// and ensures the key doesn't count toward the size calculation.
+	sizeKey = ds.NewKey("size")
+)
 
 // Keystore provides thread-safe storage and retrieval of multihashes, indexed
 // by their kademlia 256-bit identifier.
@@ -163,7 +173,7 @@ func (s *keystore) decodeKey(dsk string) (bit256.Key, error) {
 // worker processes operations sequentially in a single goroutine
 func (s *keystore) worker() {
 	defer close(s.done)
-	s.size, _ = refreshSize(context.Background(), s.ds)
+	s.loadSize()
 
 	for {
 		select {
@@ -216,6 +226,40 @@ func (s *keystore) worker() {
 			}
 		}
 	}
+}
+
+// loadSize initializes the in-memory size counter during startup. It attempts
+// to read the persisted size from the previous session, falling back to a full
+// datastore scan if unavailable or corrupt. The size key is immediately deleted
+// after reading to ensure it remains ephemeral: only existing between clean
+// shutdown and startup. This prevents stale data if the process crashes while
+// running, and ensures the metadata key itself doesn't count toward the size.
+func (s *keystore) loadSize() error {
+	sizeBytes, err := s.ds.Get(context.Background(), sizeKey)
+	if err == nil && len(sizeBytes) == 8 {
+		s.size = int(binary.BigEndian.Uint64(sizeBytes))
+		// Delete immediately to keep the key ephemeral.
+		s.ds.Delete(context.Background(), sizeKey)
+		return nil
+	}
+	// Size unavailable or corrupt, delete any stale metadata and perform full refresh.
+	s.ds.Delete(context.Background(), sizeKey)
+	size, err := refreshSize(context.Background(), s.ds)
+	if err != nil {
+		return err
+	}
+	s.size = size
+	return nil
+}
+
+// persistSize saves the current size to the datastore as a startup optimization.
+// This is only called during clean shutdown (in Close(), after the worker exits),
+// allowing the next startup to avoid a full datastore scan. If the process crashes,
+// the size key won't exist and loadSize() will fall back to refreshSize().
+func (s *keystore) persistSize() error {
+	sizeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(sizeBytes, uint64(s.size))
+	return s.ds.Put(context.Background(), sizeKey, sizeBytes)
 }
 
 // put stores the provided keys and returns the keys that weren't present
@@ -477,15 +521,20 @@ func (s *keystore) Size(ctx context.Context) (int, error) {
 	return size, err
 }
 
-// Close shuts down the worker goroutine and releases resources.
+// Close shuts down the worker goroutine and releases resources. It persists
+// the current size to the datastore after the worker exits, enabling fast
+// startup on the next run. The ordering is critical: persistSize() must be
+// called after <-s.done to avoid race conditions with the worker goroutine.
 func (s *keystore) Close() error {
+	var err error
 	select {
 	case <-s.close:
 		// Already closed
 		return nil
 	default:
 		close(s.close)
-		<-s.done
+		<-s.done              // Wait for worker to exit
+		err = s.persistSize() // Safe to access s.size after worker exits
 	}
-	return nil
+	return err
 }

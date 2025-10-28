@@ -66,6 +66,7 @@ type operationResponse struct {
 // keystore indexes multihashes by their kademlia identifier.
 type keystore struct {
 	ds         ds.Batching
+	size       int // no mutex required, accessed only in worker goroutine
 	prefixBits int
 	batchSize  int
 
@@ -160,6 +161,7 @@ func (s *keystore) decodeKey(dsk string) (bit256.Key, error) {
 // worker processes operations sequentially in a single goroutine
 func (s *keystore) worker() {
 	defer close(s.done)
+	s.size, _ = refreshSize(context.Background(), s.ds)
 
 	for {
 		select {
@@ -170,6 +172,11 @@ func (s *keystore) worker() {
 			case opPut:
 				newKeys, err := s.put(op.ctx, op.keys)
 				op.response <- operationResponse{multihashes: newKeys, err: err}
+				if err != nil {
+					if size, err := refreshSize(op.ctx, s.ds); err == nil {
+						s.size = size
+					}
+				}
 
 			case opGet:
 				keys, err := s.get(op.ctx, op.prefix)
@@ -182,14 +189,25 @@ func (s *keystore) worker() {
 			case opDelete:
 				err := s.delete(op.ctx, op.keys)
 				op.response <- operationResponse{err: err}
+				if err != nil {
+					if size, err := refreshSize(op.ctx, s.ds); err == nil {
+						s.size = size
+					}
+				}
 
 			case opEmpty:
 				err := empty(op.ctx, s.ds, s.batchSize)
 				op.response <- operationResponse{err: err}
+				if err == nil {
+					s.size = 0
+				} else {
+					if size, err := refreshSize(op.ctx, s.ds); err == nil {
+						s.size = size
+					}
+				}
 
 			case opSize:
-				size, err := s.size(op.ctx)
-				op.response <- operationResponse{size: size, err: err}
+				op.response <- operationResponse{size: s.size}
 
 			default:
 				op.response <- operationResponse{err: fmt.Errorf("unknown operation %d", op.op)}
@@ -198,8 +216,8 @@ func (s *keystore) worker() {
 	}
 }
 
-// put stores the provided keys while assuming s.lk is already held, and
-// returns the keys that weren't present already in the keystore.
+// put stores the provided keys and returns the keys that weren't present
+// already in the keystore.
 func (s *keystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash, error) {
 	seen := make(map[bit256.Key]struct{}, len(keys))
 	b, err := s.ds.Batch(ctx)
@@ -229,6 +247,7 @@ func (s *keystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 	if err := b.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.size += len(newKeys)
 	return newKeys, nil
 }
 
@@ -289,8 +308,7 @@ func (s *keystore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 	return false, nil
 }
 
-// empty deletes all entries under the datastore prefix, assuming s.lk is
-// already held.
+// empty deletes all entries under the datastore prefix
 func empty(ctx context.Context, d ds.Batching, batchSize int) error {
 	batch, err := d.Batch(ctx)
 	if err != nil {
@@ -338,20 +356,35 @@ func (s *keystore) delete(ctx context.Context, keys []mh.Multihash) error {
 	if err != nil {
 		return err
 	}
+	seen := make(map[bit256.Key]struct{}, len(keys))
+	removedCount := 0
 	for _, h := range keys {
-		dsk := dsKey(keyspace.MhToBit256(h), s.prefixBits)
-		err := b.Delete(ctx, dsk)
+		k := keyspace.MhToBit256(h)
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		dsk := dsKey(k, s.prefixBits)
+		ok, err := s.ds.Has(ctx, dsk)
 		if err != nil {
 			return err
 		}
+		if ok {
+			if err := b.Delete(ctx, dsk); err != nil {
+				return err
+			}
+			removedCount++
+		}
 	}
+	s.size -= removedCount
 	return b.Commit(ctx)
 }
 
-// size returns the number of keys currently stored in the Keystore.
-func (s *keystore) size(ctx context.Context) (size int, err error) {
+// refreshSize iterates over all keys in the supplied datastore to count the
+// total number of stored keys.
+func refreshSize(ctx context.Context, d ds.Datastore) (size int, err error) {
 	q := query.Query{KeysOnly: true}
-	for _, err = range ds.QueryIter(ctx, s.ds, q) {
+	for _, err = range ds.QueryIter(ctx, d, q) {
 		if err != nil {
 			return size, err
 		}

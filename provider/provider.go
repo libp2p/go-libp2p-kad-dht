@@ -648,8 +648,8 @@ func (s *SweepingProvider) reprovideTimeForPrefix(prefix bitstr.Key) time.Durati
 // This function blocks until GetClosestPeers succeeds or the provider is
 // closed. No provide operation can happen until this function returns.
 func (s *SweepingProvider) approxPrefixLen() {
-	cplSum := atomic.Int32{}
-	cplSamples := atomic.Int32{}
+	cplSum := atomic.Int64{}
+	cplSamples := atomic.Int64{}
 	wg := sync.WaitGroup{}
 	wg.Add(approxPrefixLenGCPCount)
 	for range approxPrefixLenGCPCount {
@@ -672,7 +672,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 					for _, p := range peers[1:] {
 						cpl = min(cpl, key.CommonPrefixLength(firstPeerKey, keyspace.PeerIDToBit256(p)))
 					}
-					cplSum.Add(int32(cpl))
+					cplSum.Add(int64(cpl))
 					cplSamples.Add(1)
 					return
 				}

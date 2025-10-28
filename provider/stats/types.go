@@ -20,9 +20,9 @@ type Stats struct {
 }
 
 type Queues struct {
-	PendingKeyProvides      int `json:"pending_key_provides"`
-	PendingRegionProvides   int `json:"pending_region_provides"`
-	PendingRegionReprovides int `json:"pending_region_reprovides"`
+	PendingKeyProvides      int64 `json:"pending_key_provides"`
+	PendingRegionProvides   int64 `json:"pending_region_provides"`
+	PendingRegionReprovides int64 `json:"pending_region_reprovides"`
 }
 
 type Connectivity struct {
@@ -31,8 +31,8 @@ type Connectivity struct {
 }
 
 type Schedule struct {
-	Keys                int        `json:"keys"`
-	Regions             int        `json:"regions"`
+	Keys                int64      `json:"keys"`
+	Regions             int64      `json:"regions"`
 	AvgPrefixLength     float64    `json:"avg_prefix_length"`
 	NextReprovideAt     time.Time  `json:"next_reprovide_at"`
 	NextReprovidePrefix bitstr.Key `json:"next_reprovide_prefix"`
@@ -72,16 +72,16 @@ type OngoingOperations struct {
 
 type PastOperations struct {
 	// Cumulative totals since provider started
-	RecordsProvided int `json:"records_provided"` // total provider records sent
-	KeysProvided    int `json:"keys_provided"`    // total keys successfully provided
-	KeysFailed      int `json:"keys_failed"`      // total keys that failed to provide
+	RecordsProvided int64 `json:"records_provided"` // total provider records sent
+	KeysProvided    int64 `json:"keys_provided"`    // total keys successfully provided
+	KeysFailed      int64 `json:"keys_failed"`      // total keys that failed to provide
 
 	// Performance metrics from last reprovide cycle
 	KeysProvidedPerMinute     float64       `json:"keys_provided_per_minute"`      // provide rate
 	KeysReprovidedPerMinute   float64       `json:"keys_reprovided_per_minute"`    // reprovide rate
 	RegionReprovideDuration   time.Duration `json:"reprovide_duration"`            // avg time per region
 	AvgKeysPerReprovide       float64       `json:"avg_keys_per_reprovide"`        // avg keys per region
-	RegionReprovidedLastCycle int           `json:"regions_reprovided_last_cycle"` // regions processed
+	RegionReprovidedLastCycle int64         `json:"regions_reprovided_last_cycle"` // regions processed
 }
 
 type Network struct {

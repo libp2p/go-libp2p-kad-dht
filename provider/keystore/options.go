@@ -12,7 +12,7 @@ type config struct {
 type Option func(*config) error
 
 const (
-	DefaultPath       = "/provider/keystore"
+	DefaultPath       = "keystore"
 	DefaultBatchSize  = 1 << 14
 	DefaultPrefixBits = 16
 )

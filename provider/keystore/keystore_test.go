@@ -257,6 +257,294 @@ func testKeystoreSizeImpl(t *testing.T, store Keystore) {
 	require.Equal(t, len(mhs0)+nKeys, size)
 }
 
+func TestKeystoreSizePersistence(t *testing.T) {
+	t.Run("Keystore", func(t *testing.T) {
+		d := ds.NewMapDatastore()
+		defer d.Close()
+
+		testKeystoreSizePersistenceImpl(t, d, func(datastore ds.Batching) (Keystore, error) {
+			return NewKeystore(datastore)
+		})
+	})
+
+	t.Run("ResettableKeystore", func(t *testing.T) {
+		d := ds.NewMapDatastore()
+		defer d.Close()
+
+		testKeystoreSizePersistenceImpl(t, d, func(datastore ds.Batching) (Keystore, error) {
+			return NewResettableKeystore(datastore)
+		})
+	})
+}
+
+func testKeystoreSizePersistenceImpl(t *testing.T, datastore ds.Batching, newStore func(ds.Batching) (Keystore, error)) {
+	ctx := context.Background()
+
+	// Create keystore, add keys, and close it
+	store, err := newStore(datastore)
+	require.NoError(t, err)
+
+	const initialKeys = 100
+	mhs := random.Multihashes(initialKeys)
+	_, err = store.Put(ctx, mhs...)
+	require.NoError(t, err)
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys, size)
+
+	// Close should persist size
+	err = store.Close()
+	require.NoError(t, err)
+
+	// Reopen keystore - should load persisted size without scanning
+	store2, err := newStore(datastore)
+	require.NoError(t, err)
+	defer store2.Close()
+
+	// Size should be correct (loaded from persisted value)
+	size2, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys, size2, "loaded size should match persisted size")
+
+	// Add more keys to verify it continues to work
+	const additionalKeys = 50
+	moreMhs := random.Multihashes(additionalKeys)
+	_, err = store2.Put(ctx, moreMhs...)
+	require.NoError(t, err)
+
+	size3, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys+additionalKeys, size3, "size should update correctly after loading")
+}
+
+func TestKeystoreSizeFallbackOnCorruption(t *testing.T) {
+	keystoreTypes := []struct {
+		name    string
+		newFunc func(ds.Batching) (Keystore, error)
+	}{
+		{"Keystore", func(d ds.Batching) (Keystore, error) { return NewKeystore(d) }},
+		{"ResettableKeystore", func(d ds.Batching) (Keystore, error) { return NewResettableKeystore(d) }},
+	}
+
+	subtests := []struct {
+		name string
+		impl func(*testing.T, ds.Batching, func(ds.Batching) (Keystore, error))
+	}{
+		{"Missing size key (simulates crash)", testKeystoreSizeMissingKeyImpl},
+		{"Restart without crash", testKeystoreSizeCleanRestartImpl},
+	}
+
+	for _, kt := range keystoreTypes {
+		t.Run(kt.name, func(t *testing.T) {
+			for _, st := range subtests {
+				t.Run(st.name, func(t *testing.T) {
+					d := ds.NewMapDatastore()
+					defer d.Close()
+
+					st.impl(t, d, kt.newFunc)
+				})
+			}
+		})
+	}
+}
+
+func testKeystoreSizeMissingKeyImpl(t *testing.T, datastore ds.Batching, newStore func(ds.Batching) (Keystore, error)) {
+	ctx := context.Background()
+
+	// Create keystore and add keys, but don't close it (simulates crash)
+	store, err := newStore(datastore)
+	require.NoError(t, err)
+
+	const numKeys = 50
+	mhs := random.Multihashes(numKeys)
+	_, err = store.Put(ctx, mhs...)
+	require.NoError(t, err)
+
+	// Don't call store.Close() - simulates crash
+	// Note: In real crash scenario, the worker just stops without persisting
+
+	// Open new keystore - should fall back to refreshSize since no size was persisted
+	store2, err := newStore(datastore)
+	require.NoError(t, err)
+	defer store2.Close()
+
+	size, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, numKeys, size, "should count existing keys when no persisted size exists")
+}
+
+func testKeystoreSizeCleanRestartImpl(t *testing.T, datastore ds.Batching, newStore func(ds.Batching) (Keystore, error)) {
+	ctx := context.Background()
+
+	// Create keystore, add keys, and properly close
+	store, err := newStore(datastore)
+	require.NoError(t, err)
+
+	const numKeys = 75
+	mhs := random.Multihashes(numKeys)
+	_, err = store.Put(ctx, mhs...)
+	require.NoError(t, err)
+
+	err = store.Close()
+	require.NoError(t, err)
+
+	// Reopen - should use persisted size (fast startup)
+	store2, err := newStore(datastore)
+	require.NoError(t, err)
+	defer store2.Close()
+
+	size, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, numKeys, size, "should load persisted size on clean restart")
+}
+
+func TestKeystoreSizeWithDeleteAndEmpty(t *testing.T) {
+	keystoreTypes := []struct {
+		name    string
+		newFunc func(ds.Batching) (Keystore, error)
+	}{
+		{"Keystore", func(d ds.Batching) (Keystore, error) { return NewKeystore(d) }},
+		{"ResettableKeystore", func(d ds.Batching) (Keystore, error) { return NewResettableKeystore(d) }},
+	}
+
+	subtests := []struct {
+		name string
+		impl func(*testing.T, Keystore)
+	}{
+		{"Size after deletes", testKeystoreSizeAfterDeletesImpl},
+		{"Size after Empty", testKeystoreSizeAfterEmptyImpl},
+		{"Size with duplicate puts", testKeystoreSizeWithDuplicatePutsImpl},
+	}
+
+	for _, kt := range keystoreTypes {
+		t.Run(kt.name, func(t *testing.T) {
+			for _, st := range subtests {
+				t.Run(st.name, func(t *testing.T) {
+					d := ds.NewMapDatastore()
+					defer d.Close()
+					store, err := kt.newFunc(d)
+					require.NoError(t, err)
+					defer store.Close()
+
+					st.impl(t, store)
+				})
+			}
+		})
+	}
+}
+
+func testKeystoreSizeAfterDeletesImpl(t *testing.T, store Keystore) {
+	ctx := context.Background()
+
+	// Add keys
+	const totalKeys = 100
+	mhs := random.Multihashes(totalKeys)
+	_, err := store.Put(ctx, mhs...)
+	require.NoError(t, err)
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, totalKeys, size)
+
+	// Delete some keys
+	const keysToDelete = 30
+	err = store.Delete(ctx, mhs[:keysToDelete]...)
+	require.NoError(t, err)
+
+	const remainingKeys = totalKeys - keysToDelete
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, remainingKeys, size, "size should decrease after deletes")
+
+	// Delete the same keys again (idempotent)
+	err = store.Delete(ctx, mhs[:keysToDelete]...)
+	require.NoError(t, err)
+
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, remainingKeys, size, "size should not change when deleting non-existent keys")
+
+	// Delete remaining keys
+	err = store.Delete(ctx, mhs[keysToDelete:]...)
+	require.NoError(t, err)
+
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, size, "size should be 0 after deleting all keys")
+}
+
+func testKeystoreSizeAfterEmptyImpl(t *testing.T, store Keystore) {
+	ctx := context.Background()
+
+	// Add keys
+	const initialKeys = 200
+	mhs := random.Multihashes(initialKeys)
+	_, err := store.Put(ctx, mhs...)
+	require.NoError(t, err)
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys, size)
+
+	// Empty the keystore
+	err = store.Empty(ctx)
+	require.NoError(t, err)
+
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, size, "size should be 0 after Empty")
+
+	// Verify we can add keys again
+	const keysAfterEmpty = 50
+	newMhs := random.Multihashes(keysAfterEmpty)
+	_, err = store.Put(ctx, newMhs...)
+	require.NoError(t, err)
+
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, keysAfterEmpty, size, "size should work correctly after Empty")
+}
+
+func testKeystoreSizeWithDuplicatePutsImpl(t *testing.T, store Keystore) {
+	ctx := context.Background()
+
+	const initialKeys = 50
+	mhs := random.Multihashes(initialKeys)
+
+	// First put
+	added, err := store.Put(ctx, mhs...)
+	require.NoError(t, err)
+	require.Len(t, added, initialKeys)
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys, size)
+
+	// Second put with same keys - should not increase size
+	added, err = store.Put(ctx, mhs...)
+	require.NoError(t, err)
+	require.Len(t, added, 0, "duplicate keys should not be added")
+
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys, size, "size should not increase for duplicate keys")
+
+	// Mixed put: some new, some existing
+	const newKeysInMix = 30
+	const existingKeysInMix = 20
+	newMhs := random.Multihashes(newKeysInMix)
+	mixed := append(mhs[:existingKeysInMix], newMhs...)
+	added, err = store.Put(ctx, mixed...)
+	require.NoError(t, err)
+	require.Len(t, added, newKeysInMix, "only new keys should be added")
+
+	const totalAfterMix = initialKeys + newKeysInMix
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, totalAfterMix, size, "size should only increase by new keys")
+}
+
 func TestDsKey(t *testing.T) {
 	s := keystore{
 		prefixBits: 8,

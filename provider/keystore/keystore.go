@@ -1,3 +1,8 @@
+// Package keystore provides persistent storage for multihashes used by the DHT
+// provider system. It maintains an indexed datastore of multihashes with their
+// Kademlia 256-bit keys, enabling efficient content routing operations. It
+// allows prefix-based queries to retrieve all multihashes that share a common
+// Kademlia prefix.
 package keystore
 
 import (

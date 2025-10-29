@@ -1280,9 +1280,9 @@ func (s *SweepingProvider) onOnline() {
 	s.avgPrefixLenLk.Unlock()
 
 	wasOffline := cachedAvgPrefixLen == -1
-	notBootstrapped := !s.bootstrapped.Load()
+	bootstrapped := s.bootstrapped.Load()
 
-	if wasOffline || notBootstrapped {
+	if wasOffline || !bootstrapped {
 		// Provider was previously Offline (not Disconnected).
 		// Run prefix length measurement, and refresh schedule afterwards.
 		if !s.approxPrefixLenRunning.TryLock() {
@@ -1294,18 +1294,29 @@ func (s *SweepingProvider) onOnline() {
 		s.RefreshSchedule()
 	}
 
-	if notBootstrapped && !s.skipBootstrapReprovide {
-		// When the node initially comes online, add all regions that weren't
-		// reprovided in the last reprovideInterval to the reprovide queue.
-		now := time.Now()
-		recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now)
-		s.scheduleLk.Lock()
-		if err == nil {
-			s.enqueueExpiredRegionsNoLock(recentlyReprovided)
+	if !bootstrapped {
+		if !s.skipBootstrapReprovide {
+			// When the node initially comes online, add all regions that weren't
+			// reprovided in the last reprovideInterval to the reprovide queue.
+			now := time.Now()
+			if recentlyReprovided, err := s.loadRecentlyReprovidedRegions(now); err == nil {
+				s.scheduleLk.Lock()
+				s.enqueueExpiredRegionsNoLock(recentlyReprovided)
+				s.scheduleLk.Unlock()
+			} else {
+				s.logger.Warnf("couldn't load not expired regions: %s", err)
+			}
 		} else {
-			s.logger.Warnf("couldn't load not expired regions: %s", err)
+			// When skipping bootstrap reprovide, still initialize the schedule timer
+			// to start the normal reprovide cycle from the beginning.
+			s.scheduleLk.Lock()
+			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
+			if len(scheduleEntries) > 0 {
+				first := &scheduleEntries[0]
+				s.scheduleNextReprovideNoLock(first.Key, s.timeUntil(first.Data))
+			}
+			s.scheduleLk.Unlock()
 		}
-		s.scheduleLk.Unlock()
 		s.bootstrapped.Store(true)
 	}
 

@@ -294,9 +294,6 @@ loop:
 			keys = append(keys, c.Hash())
 			if len(keys) >= s.batchSize {
 				if err := s.altPut(ctx, keys); err != nil {
-					if size, err := refreshSize(ctx, s.altDs); err == nil {
-						s.altSize.Store(int64(size))
-					}
 					return err
 				}
 				keys = keys[:0]
@@ -305,9 +302,6 @@ loop:
 	}
 	// Put final batch
 	if err := s.altPut(ctx, keys); err != nil {
-		if size, err := refreshSize(ctx, s.altDs); err == nil {
-			s.altSize.Store(int64(size))
-		}
 		return err
 	}
 	success = true

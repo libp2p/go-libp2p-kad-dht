@@ -820,8 +820,10 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 	if len(peers) == 0 {
 		return nil, "", fmt.Errorf("no peers found when exploring prefix %s", prefix)
 	}
-	s.stats.regionSize.Add(int64(len(peers)))
 	regions, coveredPrefix = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order)
+	for _, r := range regions {
+		s.stats.regionSize.Add(int64(r.Peers.Size()))
+	}
 	return regions, coveredPrefix, nil
 }
 
@@ -1620,19 +1622,6 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 
 	regions = s.claimRegionReprovide(regions)
 
-	// Remove all keys matching coveredPrefix from provide queue. No need to
-	// provide them anymore since they are about to be reprovided.
-	s.provideQueue.DequeueMatching(coveredPrefix)
-	// Remove covered prefix from the reprovide queue, so since we are about the
-	// reprovide the region.
-	s.reprovideQueue.Remove(coveredPrefix)
-
-	// When reproviding a region, remove all scheduled regions starting with
-	// the currently covered prefix.
-	s.scheduleLk.Lock()
-	s.unscheduleSubsumedPrefixesNoLock(coveredPrefix)
-	s.scheduleLk.Unlock()
-
 	if len(coveredPrefix) < len(prefix) {
 		// Covered prefix is shorter than the requested one, load all the keys
 		// matching the covered prefix from the keystore.
@@ -1641,10 +1630,25 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 			err = fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
 			s.failedReprovide(prefix, err)
 			s.reschedulePrefix(prefix)
+			return
 		}
 		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
 		prefix = coveredPrefix
 	}
+
+	// Remove all keys matching coveredPrefix from provide queue. No need to
+	// provide them anymore since they are about to be reprovided.
+	s.provideQueue.DequeueMatching(prefix)
+	// Remove covered prefix from the reprovide queue, so since we are about the
+	// reprovide the region.
+	s.reprovideQueue.Remove(prefix)
+
+	// When reproviding a region, remove all scheduled regions starting with
+	// the currently covered prefix.
+	s.scheduleLk.Lock()
+	s.unscheduleSubsumedPrefixesNoLock(prefix)
+	s.scheduleLk.Unlock()
+
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if s.provideRegions(regions, addrInfo, true) {
@@ -1786,9 +1790,8 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			}
 			continue
 		}
-		keyCount := len(allKeys)
-		s.increaseProvideCounter(keyCount)
-		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
+		s.increaseProvideCounter(nKeys)
+		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

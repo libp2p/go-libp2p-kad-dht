@@ -8,6 +8,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -32,7 +33,7 @@ const (
 	DefaultConnectivityCheckOnlineInterval = 1 * time.Minute
 
 	// DefaultLoggerName is the default logger name for the DHT provider.
-	DefaultLoggerName = "dht/provider"
+	DefaultLoggerName = internal.DefaultLoggerName
 )
 
 type config struct {

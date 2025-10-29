@@ -16,6 +16,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/ipfs/go-datastore/query"
+	"github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
@@ -89,6 +90,8 @@ type keystore struct {
 	requests chan operation
 	close    chan struct{}
 	done     chan struct{}
+
+	logger *log.ZapEventLogger
 }
 
 // NewKeystore creates a new Keystore backed by the provided datastore.

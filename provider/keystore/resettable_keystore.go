@@ -110,6 +110,8 @@ func (s *ResettableKeystore) worker() {
 				if err != nil {
 					if size, err := refreshSize(op.ctx, s.ds); err == nil {
 						s.size = size
+					} else {
+						s.logger.Error("keystore: failed to refresh size after put: ", err)
 					}
 				}
 
@@ -127,6 +129,8 @@ func (s *ResettableKeystore) worker() {
 				if err != nil {
 					if size, err := refreshSize(op.ctx, s.ds); err == nil {
 						s.size = size
+					} else {
+						s.logger.Error("keystore: failed to refresh size after delete: ", err)
 					}
 				}
 
@@ -138,6 +142,8 @@ func (s *ResettableKeystore) worker() {
 				} else {
 					if size, err := refreshSize(op.ctx, s.ds); err == nil {
 						s.size = size
+					} else {
+						s.logger.Error("keystore: failed to refresh size after empty: ", err)
 					}
 				}
 
@@ -159,6 +165,8 @@ func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 		if err := s.altPut(ctx, keys); err != nil {
 			if size, err := refreshSize(ctx, s.altDs); err == nil {
 				s.altSize.Store(int64(size))
+			} else {
+				s.logger.Error("keystore: failed to refresh size after alt put: ", err)
 			}
 		}
 	}

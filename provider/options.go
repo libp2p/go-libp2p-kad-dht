@@ -59,9 +59,10 @@ type config struct {
 	dedicatedBurstWorkers    int
 	maxProvideConnsPerWorker int
 
-	resumeCycle    bool
-	loggerName     string
-	metricsDhtType string
+	resumeCycle            bool
+	skipBootstrapReprovide bool
+	loggerName             string
+	metricsDhtType         string
 }
 
 type Option func(opt *config) error
@@ -360,6 +361,19 @@ func WithDhtType(dhtType string) Option {
 		if len(dhtType) > 0 {
 			cfg.metricsDhtType = dhtType
 		}
+		return nil
+	}
+}
+
+// WithSkipBootstrapReprovide sets whether the initial reprovide should be
+// skipped when the provider starts.
+//
+// This option should be set to true if the node has a low profile and can
+// afford to wait one reprovide cycle for all keys to be available in the DHT
+// swarm.
+func WithSkipBootstrapReprovide(skip bool) Option {
+	return func(cfg *config) error {
+		cfg.skipBootstrapReprovide = skip
 		return nil
 	}
 }

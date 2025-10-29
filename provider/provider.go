@@ -160,6 +160,7 @@ type SweepingProvider struct {
 	datastore              datastore.Batching
 	lastReprovideHistoryGC atomic.Int64
 	bootstrapped           atomic.Bool
+	skipBootstrapReprovide bool
 
 	replicationFactor int
 
@@ -289,9 +290,10 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 		connectivity: connChecker,
 
-		replicationFactor: cfg.replicationFactor,
-		reprovideInterval: cfg.reprovideInterval,
-		maxReprovideDelay: cfg.maxReprovideDelay,
+		replicationFactor:      cfg.replicationFactor,
+		reprovideInterval:      cfg.reprovideInterval,
+		maxReprovideDelay:      cfg.maxReprovideDelay,
+		skipBootstrapReprovide: cfg.skipBootstrapReprovide,
 
 		workerPool: pool.New(cfg.maxWorkers, map[workerType]int{
 			periodicWorker: cfg.dedicatedPeriodicWorkers,
@@ -1292,7 +1294,7 @@ func (s *SweepingProvider) onOnline() {
 		s.RefreshSchedule()
 	}
 
-	if notBootstrapped {
+	if notBootstrapped && !s.skipBootstrapReprovide {
 		// When the node initially comes online, add all regions that weren't
 		// reprovided in the last reprovideInterval to the reprovide queue.
 		now := time.Now()

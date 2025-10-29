@@ -1,11 +1,16 @@
 package keystore
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
+)
 
 type config struct {
 	path       string
 	prefixBits int
 	batchSize  int
+	loggerName string
 }
 
 // Option for configuring a Keystore.
@@ -15,6 +20,7 @@ const (
 	DefaultPath       = "keystore"
 	DefaultBatchSize  = 1 << 14
 	DefaultPrefixBits = 16
+	DefaultLoggerName = internal.DefaultLoggerName
 )
 
 // getOpts creates a config and applies Options to it.
@@ -23,6 +29,7 @@ func getOpts(opts []Option) (config, error) {
 		path:       DefaultPath,
 		prefixBits: DefaultPrefixBits,
 		batchSize:  DefaultBatchSize,
+		loggerName: DefaultLoggerName,
 	}
 
 	for i, opt := range opts {
@@ -69,6 +76,17 @@ func WithBatchSize(size int) Option {
 			return fmt.Errorf("invalid batch size %d", size)
 		}
 		cfg.batchSize = size
+		return nil
+	}
+}
+
+// WithLoggerName sets the logger name for the keystore.
+func WithLoggerName(name string) Option {
+	return func(cfg *config) error {
+		if len(name) == 0 {
+			return fmt.Errorf("logger name cannot be empty")
+		}
+		cfg.loggerName = name
 		return nil
 	}
 }

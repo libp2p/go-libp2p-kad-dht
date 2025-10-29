@@ -3,6 +3,7 @@ package keystore
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -215,12 +216,11 @@ func TestKeystoreResetSizeWithConcurrentPuts(t *testing.T) {
 	resetMhs := random.Multihashes(resetKeys)
 
 	// Send keys in batches to allow concurrent puts
-	const resetBatchPoint = 20
 	go func() {
 		for i, h := range resetMhs {
 			resetChan <- cid.NewCidV1(cid.Raw, h)
 			// Allow some concurrent puts to happen
-			if i == resetBatchPoint {
+			if i == 20 {
 				// Add concurrent keys during reset
 				concurrent := random.Multihashes(concurrentKeys)
 				_, err := store.Put(ctx, concurrent...)
@@ -232,6 +232,8 @@ func TestKeystoreResetSizeWithConcurrentPuts(t *testing.T) {
 
 	err = store.ResetCids(ctx, resetChan)
 	require.NoError(t, err)
+
+	time.Sleep(5 * time.Millisecond) // Ensure all concurrent puts are done
 
 	// Size should include both reset keys and concurrent puts
 	const expectedTotalSize = resetKeys + concurrentKeys

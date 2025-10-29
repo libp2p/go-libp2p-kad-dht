@@ -821,6 +821,7 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 		return nil, "", fmt.Errorf("no peers found when exploring prefix %s", prefix)
 	}
 	regions, coveredPrefix = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order)
+	s.logger.Debugw("exploreSwarm", "requestedPrefix", prefix, "coveredPrefix", coveredPrefix, "numRegions", len(regions))
 	for _, r := range regions {
 		s.stats.regionSize.Add(int64(r.Peers.Size()))
 	}
@@ -882,6 +883,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		if len(gaps) == 0 {
 			if len(allClosestPeers) >= s.replicationFactor {
 				// We have full coverage of `prefix`.
+				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 				break
 			}
 			for len(gaps) == 0 && len(prefix) > 0 {
@@ -892,6 +894,7 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			}
 			if len(gaps) == 0 {
 				// We don't have enough peers, but we have covered the whole keyspace.
+				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 				break
 			}
 		}

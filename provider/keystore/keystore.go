@@ -193,6 +193,8 @@ func (s *keystore) worker() {
 				if err != nil {
 					if size, err := refreshSize(op.ctx, s.ds); err == nil {
 						s.size = size
+					} else {
+						s.logger.Error("keystore: failed to refresh size after put: ", err)
 					}
 				}
 
@@ -210,6 +212,8 @@ func (s *keystore) worker() {
 				if err != nil {
 					if size, err := refreshSize(op.ctx, s.ds); err == nil {
 						s.size = size
+					} else {
+						s.logger.Error("keystore: failed to refresh size after delete: ", err)
 					}
 				}
 
@@ -221,6 +225,8 @@ func (s *keystore) worker() {
 				} else {
 					if size, err := refreshSize(op.ctx, s.ds); err == nil {
 						s.size = size
+					} else {
+						s.logger.Error("keystore: failed to refresh size after empty: ", err)
 					}
 				}
 
@@ -240,22 +246,21 @@ func (s *keystore) worker() {
 // after reading to ensure it remains ephemeral: only existing between clean
 // shutdown and startup. This prevents stale data if the process crashes while
 // running, and ensures the metadata key itself doesn't count toward the size.
-func (s *keystore) loadSize() error {
+func (s *keystore) loadSize() {
 	sizeBytes, err := s.ds.Get(context.Background(), sizeKey)
 	if err == nil && len(sizeBytes) == 8 {
 		s.size = int(binary.BigEndian.Uint64(sizeBytes))
 		// Delete immediately to keep the key ephemeral.
 		s.ds.Delete(context.Background(), sizeKey)
-		return nil
+		return
 	}
 	// Size unavailable or corrupt, delete any stale metadata and perform full refresh.
 	s.ds.Delete(context.Background(), sizeKey)
-	size, err := refreshSize(context.Background(), s.ds)
-	if err != nil {
-		return err
+	if size, err := refreshSize(context.Background(), s.ds); err == nil {
+		s.size = size
+	} else {
+		s.logger.Error("keystore: failed to refresh size during load: ", err)
 	}
-	s.size = size
-	return nil
 }
 
 // persistSize saves the current size to the datastore as a startup optimization.

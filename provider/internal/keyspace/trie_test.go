@@ -1068,6 +1068,102 @@ func genPeerWithPrefix(t *testing.T, prefix bitstr.Key) peer.ID {
 	return pid
 }
 
+// TestRegionsFromPeersSplitting tests that RegionsFromPeers correctly splits
+// regions at various depths with different peer distributions.
+func TestRegionsFromPeersSplitting(t *testing.T) {
+	regionSize := 20
+
+	// Defines how many peers match each prefix
+	type prefixCount struct {
+		prefix bitstr.Key
+		count  int
+	}
+
+	testCases := []struct {
+		name                  string
+		prefixes              []prefixCount
+		expectedCoveredPrefix bitstr.Key
+		expectedNumRegions    int
+	}{
+		{
+			name: "shallow prefix, balanced distribution",
+			prefixes: []prefixCount{
+				{"0", 25},
+				{"1", 20},
+			},
+			expectedCoveredPrefix: "",
+			expectedNumRegions:    2,
+		},
+		{
+			name: "long prefix, balanced distribution",
+			prefixes: []prefixCount{
+				{"00110011", 21},
+				{"00110010", 39},
+			},
+			expectedCoveredPrefix: "0011001",
+			expectedNumRegions:    2,
+		},
+		{
+			name: "3 regions",
+			prefixes: []prefixCount{
+				{"00110011", 21},
+				{"00110010", 39},
+				{"0011000", 20},
+			},
+			expectedCoveredPrefix: "001100",
+			expectedNumRegions:    3,
+		},
+		{
+			name: "underpopulated region",
+			prefixes: []prefixCount{
+				{"00000000", 11}, // underpopulated, will be merged with other
+				{"00000001", 21},
+			},
+			expectedCoveredPrefix: "0000000",
+			expectedNumRegions:    1,
+		},
+		{
+			name: "many small regions, merged into one",
+			// "0011" has enough peers, but not its neighbor "0010" so it must be
+			// grouped with it into "001". Then "001"'s neighbor "0001" is also
+			// underpopulated, so they must be grouped into "00", forming one large
+			// region out of many smaller ones.
+			prefixes: []prefixCount{
+				{"0000", 10},
+				{"0001", 9},
+				{"0010", 19},
+				{"0011", 21},
+			},
+			expectedCoveredPrefix: "00",
+			expectedNumRegions:    1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			peers := make([]peer.ID, 0)
+			for _, prefixes := range tc.prefixes {
+				uniquePeers := make(map[string]struct{})
+				for len(uniquePeers) < prefixes.count {
+					p := genPeerWithPrefix(t, prefixes.prefix)
+					uniquePeers[string(p)] = struct{}{}
+				}
+				for p := range uniquePeers {
+					peers = append(peers, peer.ID(p))
+				}
+			}
+			regions, coveredPrefix := RegionsFromPeers(peers, regionSize, zeroKey)
+			require.Equal(t, tc.expectedCoveredPrefix, coveredPrefix)
+			require.Equal(t, tc.expectedNumRegions, len(regions))
+			totalSize := 0
+			for _, r := range regions {
+				totalSize += r.Peers.Size()
+			}
+			require.Equal(t, len(peers), totalSize)
+		})
+	}
+}
+
 func TestExtractMinimalRegions(t *testing.T) {
 	replicationFactor := 3
 	selfID := [32]byte{}
@@ -1255,89 +1351,4 @@ func TestKeyspaceCovered(t *testing.T) {
 		tr.Add(bitstr.Key("111"), struct{}{})
 		require.True(t, KeyspaceCovered(tr))
 	})
-}
-
-// TestRegionsFromPeersDeepPrefix reproduces a bug where RegionsFromPeers fails to
-// split regions when all peers share a long common prefix.
-//
-// Scenario from production logs:
-// - 66 peers total with prefix "01111100"
-// - 38 peers match "011111000"
-// - 28 peers match "011111001"
-// - replicationFactor = 20
-// Expected: 2 regions (both > 20 peers)
-// Actual: 1 region (BUG - fails to split)
-func TestRegionsFromPeersDeepPrefix(t *testing.T) {
-	replicationFactor := 20
-	order := bit256.ZeroKey()
-	targetPrefix := bitstr.Key("01111100")
-
-	// Generate peers matching the production scenario
-	peersSet := make(map[string]struct{}, 66)
-
-	// Generate 38 peers matching prefix "011111000"
-	prefix0 := bitstr.Key("011111000")
-	for len(peersSet) < 38 {
-		p := genPeerWithPrefix(t, prefix0)
-		peersSet[string(p)] = struct{}{}
-	}
-
-	// Generate 28 peers matching prefix "011111001"
-	prefix1 := bitstr.Key("011111001")
-	for len(peersSet) < 66 {
-		p := genPeerWithPrefix(t, prefix1)
-		peersSet[string(p)] = struct{}{}
-	}
-
-	// Verify the distribution
-	count0, count1 := 0, 0
-	peers := make([]peer.ID, 0, len(peersSet))
-	for pStr := range peersSet {
-		p := peer.ID(pStr)
-		peers = append(peers, p)
-		peerKey := PeerIDToBit256(p)
-		if IsPrefix(prefix0, peerKey) {
-			count0++
-		} else if IsPrefix(prefix1, peerKey) {
-			count1++
-		}
-	}
-	require.Equal(t, 38, count0, "should have 38 peers with prefix 011111000")
-	require.Equal(t, 28, count1, "should have 28 peers with prefix 011111001")
-
-	// Call RegionsFromPeers
-	regions, coveredPrefix := RegionsFromPeers(peers, replicationFactor, order)
-
-	require.Equal(t, targetPrefix, coveredPrefix)
-	t.Logf("Covered prefix: %s", coveredPrefix)
-	t.Logf("Number of regions: %d", len(regions))
-	for i, r := range regions {
-		t.Logf("Region %d: prefix=%s, peers=%d", i, r.Prefix, r.Peers.Size())
-	}
-
-	// Expected behavior: should split into 2 regions
-	// Both branches have >= replicationFactor peers
-	require.Equal(t, 2, len(regions),
-		"BUG: Should split into 2 regions since both 011111000 (38 peers) and 011111001 (28 peers) have >= %d peers",
-		replicationFactor)
-
-	// Verify the regions
-	if len(regions) == 2 {
-		// Both regions should have the correct prefixes and peer counts
-		region0Prefix := bitstr.Key("011111000")
-		region1Prefix := bitstr.Key("011111001")
-
-		// Find which region is which
-		var region0, region1 *Region
-		if regions[0].Prefix == region0Prefix {
-			region0, region1 = &regions[0], &regions[1]
-		} else {
-			region0, region1 = &regions[1], &regions[0]
-		}
-
-		require.Equal(t, region0Prefix, region0.Prefix)
-		require.Equal(t, region1Prefix, region1.Prefix)
-		require.Equal(t, 38, region0.Peers.Size())
-		require.Equal(t, 28, region1.Peers.Size())
-	}
 }

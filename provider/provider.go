@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -1771,17 +1772,17 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo, reprovide bool) bool {
 	errCount := 0
 	for _, r := range regions {
-		allKeys := keyspace.AllValues(r.Keys, s.order)
-		nKeys := len(allKeys)
-		if nKeys == 0 {
+		if r.Keys == nil || r.Keys.IsEmptyLeaf() {
 			if reprovide {
 				s.releaseRegionReprovide(r.Prefix)
 			}
 			continue
 		}
 		// Add keys to local provider store
-		for _, h := range allKeys {
+		nKeys := 0
+		for h := range keyspace.ValuesIter(r.Keys, s.order) {
 			s.addLocalRecord(h)
+			nKeys++
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
 		reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
@@ -1811,7 +1812,9 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			continue
 		}
 		s.increaseProvideCounter(nKeys)
-		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", allKeys)
+		if s.logger.Level() <= zapcore.DebugLevel {
+			s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", keyspace.AllValues(r.Keys, s.order))
+		}
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

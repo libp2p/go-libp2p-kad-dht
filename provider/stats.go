@@ -24,9 +24,9 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Queue metrics
 	snapshot.Queues = stats.Queues{
-		PendingKeyProvides:      s.provideQueue.Size(),
-		PendingRegionProvides:   s.provideQueue.NumRegions(),
-		PendingRegionReprovides: s.reprovideQueue.Size(),
+		PendingKeyProvides:      int64(s.provideQueue.Size()),
+		PendingRegionProvides:   int64(s.provideQueue.NumRegions()),
+		PendingRegionReprovides: int64(s.reprovideQueue.Size()),
 	}
 
 	s.avgPrefixLenLk.Lock()
@@ -51,20 +51,20 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Schedule information
 	s.scheduleLk.Lock()
-	var scheduleSize int
+	var scheduleSize int64
 	var avgPrefixLen float64
 	nextPrefix := s.scheduleCursor
 	ok, nextReprovideOffset := trie.Find(s.schedule, nextPrefix)
 	if avgPrefixLenCached >= 0 && !s.schedule.IsEmptyLeaf() {
 		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-		scheduleSize = len(scheduleEntries)
+		scheduleSize = int64(len(scheduleEntries))
 		prefixSum := 0.
 		for _, e := range scheduleEntries {
 			prefixSum += float64(e.Key.BitLen())
 		}
 		avgPrefixLen = prefixSum / float64(scheduleSize)
 	} else {
-		scheduleSize = s.schedule.Size()
+		scheduleSize = int64(s.schedule.Size())
 		avgPrefixLen = float64(avgPrefixLenCached)
 	}
 	s.scheduleLk.Unlock()
@@ -75,9 +75,9 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		nextReprovideAt = now.Add(s.timeUntil(nextReprovideOffset))
 	}
 
-	keys := -1 // Default value if keyStore.Size() fails
+	var keys int64 = -1 // Default value if keyStore.Size() fails
 	if keyCount, err := s.keystore.Size(context.Background()); err == nil {
-		keys = keyCount
+		keys = int64(keyCount)
 	}
 	snapshot.Schedule = stats.Schedule{
 		Keys:                keys,
@@ -123,19 +123,32 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Take snapshots of cycle stats data while holding the lock
 	s.stats.cycleStatsLk.Lock()
-	s.stats.keysPerReprovide.Cleanup()
-	s.stats.reprovideDuration.Cleanup()
-	s.stats.peers.Cleanup()
-	s.stats.reachable.Cleanup()
+
+	// We need to clean up the CycleStats with an appropriate deadline. This
+	// deadline should be reprovideInterval + maxReprovideDelay + reprovideDuration.
+	// But since we don't know reprovideDuration yet, we do a two-step cleanup.
+
+	// First, clean up reprovideDuration with 2*reprovideInterval to get an initial average
+	s.stats.reprovideDuration.Cleanup(2 * s.reprovideInterval)
+	reprovideDurationAvg := s.stats.reprovideDuration.Avg()
+
+	// Now calculate the proper deadline: reprovideInterval + maxReprovideDelay + reprovideDuration
+	statsDeadline := s.reprovideInterval + s.maxReprovideDelay + time.Duration(reprovideDurationAvg)
+
+	// Clean up all CycleStats with the calculated deadline
+	s.stats.reprovideDuration.Cleanup(statsDeadline)
+	s.stats.keysPerReprovide.Cleanup(statsDeadline)
+	s.stats.peers.Cleanup(statsDeadline)
+	s.stats.reachable.Cleanup(statsDeadline)
 
 	// Capture data for calculations outside the lock
 	keysPerProvideSum := s.stats.keysPerProvide.Sum()
 	provideDurationSum := s.stats.provideDuration.Sum()
 	keysPerReprovideSum := s.stats.keysPerReprovide.Sum()
 	reprovideDurationSum := s.stats.reprovideDuration.Sum()
-	reprovideDurationAvg := s.stats.reprovideDuration.Avg()
+	reprovideDurationAvg = s.stats.reprovideDuration.Avg()
 	keysPerReprovideAvg := s.stats.keysPerReprovide.Avg()
-	reprovideDurationCount := s.stats.reprovideDuration.Count()
+	reprovideDurationCount := int64(s.stats.reprovideDuration.Count())
 	peersSum := s.stats.peers.Sum()
 	peersFullyCovered := s.stats.peers.FullyCovered()
 	reachableSum := s.stats.reachable.Sum()
@@ -153,9 +166,9 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	s.stats.cycleStatsLk.Unlock()
 
 	pastOps := stats.PastOperations{
-		RecordsProvided: int(s.stats.recordsProvided.Load()),
-		KeysProvided:    int(s.stats.keysProvided.Load()),
-		KeysFailed:      int(s.stats.keysFailed.Load()),
+		RecordsProvided: int64(s.stats.recordsProvided.Load()),
+		KeysProvided:    int64(s.stats.keysProvided.Load()),
+		KeysFailed:      int64(s.stats.keysFailed.Load()),
 
 		KeysProvidedPerMinute:     keysProvidedPerMinute,
 		KeysReprovidedPerMinute:   keysReprovidedPerMinute,
@@ -184,9 +197,9 @@ func (s *SweepingProvider) Stats() stats.Stats {
 // operationStats tracks provider operation metrics over time windows.
 type operationStats struct {
 	// Cumulative counters since provider started
-	recordsProvided atomic.Int32 // total provider records sent
-	keysProvided    atomic.Int32 // total keys successfully provided
-	keysFailed      atomic.Int32 // total keys that failed to provide
+	recordsProvided atomic.Int64 // total provider records sent
+	keysProvided    atomic.Int64 // total keys successfully provided
+	keysFailed      atomic.Int64 // total keys that failed to provide
 
 	// Current ongoing operations
 	ongoingProvides   ongoingOpStats // active provide operations
@@ -216,43 +229,43 @@ func newOperationStats(reprovideInterval, maxDelay time.Duration) operationStats
 		regionSize:      timeseries.NewIntTimeSeries(reprovideInterval),
 		avgHolders:      timeseries.NewFloatTimeSeries(reprovideInterval),
 
-		keysPerReprovide:  timeseries.NewCycleStats(reprovideInterval, maxDelay),
-		reprovideDuration: timeseries.NewCycleStats(reprovideInterval, maxDelay),
-		peers:             timeseries.NewCycleStats(reprovideInterval, maxDelay),
-		reachable:         timeseries.NewCycleStats(reprovideInterval, maxDelay),
+		keysPerReprovide:  timeseries.NewCycleStats(maxDelay),
+		reprovideDuration: timeseries.NewCycleStats(maxDelay),
+		peers:             timeseries.NewCycleStats(maxDelay),
+		reachable:         timeseries.NewCycleStats(maxDelay),
 	}
 }
 
 // addProvidedRecords increments the total count of provider records sent.
 func (s *operationStats) addProvidedRecords(count int) {
-	s.recordsProvided.Add(int32(count))
+	s.recordsProvided.Add(int64(count))
 }
 
 // addCompletedKeys updates the counts of successfully provided and failed keys.
 func (s *operationStats) addCompletedKeys(successes, failures int) {
-	s.keysProvided.Add(int32(successes))
-	s.keysFailed.Add(int32(failures))
+	s.keysProvided.Add(int64(successes))
+	s.keysFailed.Add(int64(failures))
 }
 
 // ongoingOpStats tracks currently active operations.
 type ongoingOpStats struct {
-	opCount  atomic.Int32 // number of active operations
-	keyCount atomic.Int32 // total keys being processed in active operations
+	opCount  atomic.Int64 // number of active operations
+	keyCount atomic.Int64 // total keys being processed in active operations
 }
 
 // start records the beginning of a new operation with the given number of keys.
 func (s *ongoingOpStats) start(keyCount int) {
 	s.opCount.Add(1)
-	s.keyCount.Add(int32(keyCount))
+	s.keyCount.Add(int64(keyCount))
 }
 
 // addKeys adds more keys to the current active operations.
 func (s *ongoingOpStats) addKeys(keyCount int) {
-	s.keyCount.Add(int32(keyCount))
+	s.keyCount.Add(int64(keyCount))
 }
 
 // finish records the completion of an operation and removes its keys from the active count.
 func (s *ongoingOpStats) finish(keyCount int) {
 	s.opCount.Add(-1)
-	s.keyCount.Add(-int32(keyCount))
+	s.keyCount.Add(-int64(keyCount))
 }

@@ -323,7 +323,7 @@ func subtractTrieAtDepth[D0, D1 any](t0 *trie.Trie[bitstr.Key, D0],
 	}
 	if t1 == nil || t1.IsEmptyLeaf() {
 		// t1 is empty, nothing to subtract, add all t0 to result.
-		res.AddMany(AllEntries(t0, bit256.ZeroKey())...)
+		res.AddMany(AllEntries(t0, zeroKey)...)
 		return
 	}
 
@@ -356,7 +356,7 @@ func subtractTrieAtDepth[D0, D1 any](t0 *trie.Trie[bitstr.Key, D0],
 		}
 		b := int(k1.Bit(depth))
 		// Add all entries in t0's branch that is not covered by t1.
-		res.AddMany(AllEntries(t0.Branch(1-b), bit256.ZeroKey())...)
+		res.AddMany(AllEntries(t0.Branch(1-b), zeroKey)...)
 		// Go deeper in the branch covered by t1.
 		subtractTrieAtDepth(t0.Branch(b), t1, res, depth+1)
 		return
@@ -582,8 +582,7 @@ func KeyspaceCovered[D any](t *trie.Trie[bitstr.Key, D]) bool {
 
 	stack := []bitstr.Key{"1", "0"}
 outerLoop:
-	for _, entry := range AllEntries(t, bit256.ZeroKey()) {
-		p := entry.Key
+	for p := range KeysIter(t, zeroKey) {
 		stackTop := stack[len(stack)-1]
 		stackTopLen := len(stackTop)
 		if len(p) < stackTopLen {

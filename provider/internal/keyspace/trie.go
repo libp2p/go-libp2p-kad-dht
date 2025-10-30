@@ -565,13 +565,13 @@ func RegionsFromPeers(peers []peer.ID, regionSize int, order bit256.Key) ([]Regi
 	// Navigate to the subtrie at the common prefix depth before extracting regions.
 	// This ensures extractMinimalRegions checks branches at the correct depth.
 	subtrie := peersTrie
-	for i := 0; i < len(commonPrefix); i++ {
+	for i := range commonPrefix {
 		if subtrie.IsLeaf() {
 			break
 		}
 		subtrie = subtrie.Branch(int(commonPrefix.Bit(i)))
 		if subtrie == nil || subtrie.IsEmptyLeaf() {
-			return []Region{}, commonPrefix
+			return nil, commonPrefix
 		}
 	}
 

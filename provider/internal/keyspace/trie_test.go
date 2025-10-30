@@ -1058,18 +1058,116 @@ func TestRegionsFromPeers(t *testing.T) {
 	// regions. Refer to TestExtractMinimalRegions.
 }
 
+func genPeerWithPrefix(t *testing.T, prefix bitstr.Key) peer.ID {
+	k := FirstFullKeyWithPrefix(prefix, zeroKey)
+	bs := KeyToBytes(k)
+	pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
+	require.NoError(t, err)
+	peerKey := PeerIDToBit256(pid)
+	require.True(t, IsPrefix(prefix, peerKey))
+	return pid
+}
+
+// TestRegionsFromPeersSplitting tests that RegionsFromPeers correctly splits
+// regions at various depths with different peer distributions.
+func TestRegionsFromPeersSplitting(t *testing.T) {
+	regionSize := 20
+
+	// Defines how many peers match each prefix
+	type prefixCount struct {
+		prefix bitstr.Key
+		count  int
+	}
+
+	testCases := []struct {
+		name                  string
+		prefixes              []prefixCount
+		expectedCoveredPrefix bitstr.Key
+		expectedNumRegions    int
+	}{
+		{
+			name: "shallow prefix, balanced distribution",
+			prefixes: []prefixCount{
+				{"0", 25},
+				{"1", 20},
+			},
+			expectedCoveredPrefix: "",
+			expectedNumRegions:    2,
+		},
+		{
+			name: "long prefix, balanced distribution",
+			prefixes: []prefixCount{
+				{"00110011", 21},
+				{"00110010", 39},
+			},
+			expectedCoveredPrefix: "0011001",
+			expectedNumRegions:    2,
+		},
+		{
+			name: "3 regions",
+			prefixes: []prefixCount{
+				{"00110011", 21},
+				{"00110010", 39},
+				{"0011000", 20},
+			},
+			expectedCoveredPrefix: "001100",
+			expectedNumRegions:    3,
+		},
+		{
+			name: "underpopulated region",
+			prefixes: []prefixCount{
+				{"00000000", 11}, // underpopulated, will be merged with other
+				{"00000001", 21},
+			},
+			expectedCoveredPrefix: "0000000",
+			expectedNumRegions:    1,
+		},
+		{
+			name: "many small regions, merged into one",
+			// "0011" has enough peers, but not its neighbor "0010" so it must be
+			// grouped with it into "001". Then "001"'s neighbor "0001" is also
+			// underpopulated, so they must be grouped into "00", forming one large
+			// region out of many smaller ones.
+			prefixes: []prefixCount{
+				{"0000", 10},
+				{"0001", 9},
+				{"0010", 19},
+				{"0011", 21},
+			},
+			expectedCoveredPrefix: "00",
+			expectedNumRegions:    1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			peers := make([]peer.ID, 0)
+			for _, prefixes := range tc.prefixes {
+				uniquePeers := make(map[string]struct{})
+				for len(uniquePeers) < prefixes.count {
+					p := genPeerWithPrefix(t, prefixes.prefix)
+					uniquePeers[string(p)] = struct{}{}
+				}
+				for p := range uniquePeers {
+					peers = append(peers, peer.ID(p))
+				}
+			}
+			regions, coveredPrefix := RegionsFromPeers(peers, regionSize, zeroKey)
+			require.Equal(t, tc.expectedCoveredPrefix, coveredPrefix)
+			require.Equal(t, tc.expectedNumRegions, len(regions))
+			totalSize := 0
+			for _, r := range regions {
+				totalSize += r.Peers.Size()
+			}
+			require.Equal(t, len(peers), totalSize)
+		})
+	}
+}
+
 func TestExtractMinimalRegions(t *testing.T) {
 	replicationFactor := 3
 	selfID := [32]byte{}
 	order := bit256.NewKey(selfID[:])
-
-	genPeerWithPrefix := func(prefix bitstr.Key) peer.ID {
-		k := FirstFullKeyWithPrefix(prefix, order)
-		bs := KeyToBytes(k)
-		pid, err := kb.GenRandPeerIDWithCPL(bs, uint(len(prefix)))
-		require.NoError(t, err)
-		return pid
-	}
 
 	prefixes := []bitstr.Key{
 		"00000",
@@ -1113,7 +1211,7 @@ func TestExtractMinimalRegions(t *testing.T) {
 	require.Nil(t, regions)
 	peerEntries := make([]trie.Entry[bit256.Key, peer.ID], len(pids))
 	for i := range pids {
-		pid := genPeerWithPrefix(prefixes[i])
+		pid := genPeerWithPrefix(t, prefixes[i])
 		pids[i] = pid
 		peerEntries[i] = trie.Entry[bit256.Key, peer.ID]{Key: PeerIDToBit256(pid), Data: pid}
 	}

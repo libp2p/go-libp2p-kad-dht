@@ -109,6 +109,9 @@ const (
 
 	// connMgrTag is used to protect libp2p connections during batch provides.
 	connMgrTag = "batchProvide"
+	// maxLoggedPrefixLength is the maximum length of a binary key to log in
+	// debug messages.
+	maxLoggedKeyLength = 12
 )
 
 var (
@@ -822,8 +825,11 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 	if len(peers) == 0 {
 		return nil, "", fmt.Errorf("no peers found when exploring prefix %s", prefix)
 	}
-	s.stats.regionSize.Add(int64(len(peers)))
 	regions, coveredPrefix = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order)
+	s.logger.Debugw("exploreSwarm", "requestedPrefix", prefix, "coveredPrefix", coveredPrefix, "numRegions", len(regions))
+	for _, r := range regions {
+		s.stats.regionSize.Add(int64(r.Peers.Size()))
+	}
 	return regions, coveredPrefix, nil
 }
 
@@ -879,9 +885,11 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		}
 
 		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
+		fullKeyLogKey := fmt.Sprintf("fullKey[:%d]", maxLoggedKeyLength) // for logging purposes
 		if len(gaps) == 0 {
 			if len(allClosestPeers) >= s.replicationFactor {
 				// We have full coverage of `prefix`.
+				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 				break
 			}
 			for len(gaps) == 0 && len(prefix) > 0 {
@@ -892,10 +900,11 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			}
 			if len(gaps) == 0 {
 				// We don't have enough peers, but we have covered the whole keyspace.
+				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 				break
 			}
 		}
-		s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, "fullKey[:12]", fullKey[:12], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
+		s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 
 		nextPrefix = gaps[0]
 	}
@@ -1633,19 +1642,6 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 
 	regions = s.claimRegionReprovide(regions)
 
-	// Remove all keys matching coveredPrefix from provide queue. No need to
-	// provide them anymore since they are about to be reprovided.
-	s.provideQueue.DequeueMatching(coveredPrefix)
-	// Remove covered prefix from the reprovide queue, so since we are about the
-	// reprovide the region.
-	s.reprovideQueue.Remove(coveredPrefix)
-
-	// When reproviding a region, remove all scheduled regions starting with
-	// the currently covered prefix.
-	s.scheduleLk.Lock()
-	s.unscheduleSubsumedPrefixesNoLock(coveredPrefix)
-	s.scheduleLk.Unlock()
-
 	if len(coveredPrefix) < len(prefix) {
 		// Covered prefix is shorter than the requested one, load all the keys
 		// matching the covered prefix from the keystore.
@@ -1654,10 +1650,25 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 			err = fmt.Errorf("could not reprovide, error when loading keys: %s", err)
 			s.failedReprovide(prefix, err)
 			s.reschedulePrefix(prefix)
+			return
 		}
 		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
 		prefix = coveredPrefix
 	}
+
+	// Remove all keys matching coveredPrefix from provide queue. No need to
+	// provide them anymore since they are about to be reprovided.
+	s.provideQueue.DequeueMatching(prefix)
+	// Remove covered prefix from the reprovide queue, so since we are about the
+	// reprovide the region.
+	s.reprovideQueue.Remove(prefix)
+
+	// When reproviding a region, remove all scheduled regions starting with
+	// the currently covered prefix.
+	s.scheduleLk.Lock()
+	s.unscheduleSubsumedPrefixesNoLock(prefix)
+	s.scheduleLk.Unlock()
+
 	regions = keyspace.AssignKeysToRegions(regions, keys)
 
 	if s.provideRegions(regions, addrInfo, true) {
@@ -1799,9 +1810,8 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			}
 			continue
 		}
-		keyCount := len(allKeys)
-		s.increaseProvideCounter(keyCount)
-		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", keyCount, "keys", allKeys)
+		s.increaseProvideCounter(nKeys)
+		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", allKeys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

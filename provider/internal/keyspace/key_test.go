@@ -68,15 +68,15 @@ func TestIsBitstrPrefix(t *testing.T) {
 
 func TestKeyToBytes(t *testing.T) {
 	nKeys := 1 << 8
-	buf := make([]byte, 32)
+	var buf [bit256.KeyLen]byte
 	for range nKeys {
-		if _, err := rand.Read(buf); err != nil {
+		if _, err := rand.Read(buf[:]); err != nil {
 			t.Fatal(err)
 		}
-		b256 := bit256.NewKey(buf)
+		b256 := bit256.NewKeyFromArray(buf)
 		bstr := bitstr.Key(key.BitString(b256))
-		require.Equal(t, buf, KeyToBytes(b256))
-		require.Equal(t, buf, KeyToBytes(bstr))
+		require.Equal(t, buf[:], KeyToBytes(b256))
+		require.Equal(t, buf[:], KeyToBytes(bstr))
 	}
 }
 
@@ -116,10 +116,10 @@ func TestKeyToBytesPadding(t *testing.T) {
 
 func TestShortestCoveredPrefix(t *testing.T) {
 	// All keys share CPL of 5, except one sharing a CPL of 4
-	var target [32]byte
+	var target [bit256.KeyLen]byte
 	_, err := rand.Read(target[:])
 	require.NoError(t, err)
-	targetBitstr := bitstr.Key(key.BitString(bit256.NewKey(target[:])))
+	targetBitstr := bitstr.Key(key.BitString(bit256.NewKeyFromArray(target)))
 
 	cpl := 5
 	nPeers := 16

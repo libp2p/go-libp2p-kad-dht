@@ -453,9 +453,9 @@ func TestStats(t *testing.T) {
 			balancedKeys[i], err = multihash.FromB58String(k)
 			require.NoError(t, err)
 			// Test that the kadid of keys actually cover all prefixes
-			bs := [32]byte{}
+			bs := [bit256.KeyLen]byte{}
 			bs[0] = byte(i/keysPerPrefix + 1) // +1 because we skip prefix "00000"
-			b256 := bit256.NewKey(bs[:])
+			b256 := bit256.NewKeyFromArray(bs)
 			require.True(t, keyspace.IsPrefix(bitstr.Key(key.BitString(b256)[bitsPerByte-avgPrefixLen:bitsPerByte]), keyspace.MhToBit256(balancedKeys[i])))
 		}
 

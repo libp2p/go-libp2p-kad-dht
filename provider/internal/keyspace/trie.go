@@ -69,11 +69,11 @@ func trieIterAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any, T any](
 	return trieIterAtDepth(t.Branch(1-b), order, depth+1, extract, yield)
 }
 
-// AllEntriesIter returns an iterator over all entries (key + value) stored in
+// EntriesIter returns an iterator over all entries (key + value) stored in
 // the trie `t` sorted by their keys in the supplied `order`.
 // The iterator allows processing entries one at a time without loading all of
 // them into memory.
-func AllEntriesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[trie.Entry[K0, D]] {
+func EntriesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[trie.Entry[K0, D]] {
 	return trieIter(t, order, func(node *trie.Trie[K0, D]) trie.Entry[K0, D] {
 		return trie.Entry[K0, D]{Key: *node.Key(), Data: node.Data()}
 	})
@@ -90,21 +90,21 @@ func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 	return out
 }
 
-// AllValuesIter returns an iterator over all values stored in the trie `t`
+// ValuesIter returns an iterator over all values stored in the trie `t`
 // sorted by their keys in the supplied `order`.
 // The iterator allows processing values one at a time without loading all of
 // them into memory.
-func AllValuesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[D] {
+func ValuesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[D] {
 	return trieIter(t, order, func(node *trie.Trie[K0, D]) D {
 		return node.Data()
 	})
 }
 
-// AllKeysIter returns an iterator over all keys stored in the trie `t`
+// KeysIter returns an iterator over all keys stored in the trie `t`
 // sorted by their keys in the supplied `order`.
 // The iterator allows processing keys one at a time without loading all of
 // them into memory.
-func AllKeysIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[K0] {
+func KeysIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[K0] {
 	return trieIter(t, order, func(node *trie.Trie[K0, D]) K0 {
 		return *node.Key()
 	})

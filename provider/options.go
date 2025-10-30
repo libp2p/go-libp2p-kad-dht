@@ -368,9 +368,10 @@ func WithDhtType(dhtType string) Option {
 // WithSkipBootstrapReprovide sets whether the initial reprovide should be
 // skipped when the provider starts.
 //
-// This option should be set to true if the node has a low profile and can
-// afford to wait one reprovide cycle for all keys to be available in the DHT
-// swarm.
+// This option should be set to true if the node has a low memory profile or
+// low bandwidth configuration and can afford to wait a full reprovide cycle
+// for all keys to be provided to the DHT. It essentially avoids a spike in
+// resource usage (memory & bandwidth) at startup.
 func WithSkipBootstrapReprovide(skip bool) Option {
 	return func(cfg *config) error {
 		cfg.skipBootstrapReprovide = skip

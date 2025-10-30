@@ -255,7 +255,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		// If resuming, and avgPrefixLen was persisted to datastore, start in
 		// DISCONNECTED mode (instead of OFFLINE).
 		if l, err := loadAvgPrefixLen(ctx, cfg.datastore); err != nil {
-			logger.Warnf("couldn't read average prefix length: %s", err)
+			logger.Warnf("could not read average prefix length: %s", err)
 		} else if l >= 0 {
 			// Start in state `disconnected`
 			connCheckerOpts = append(connCheckerOpts, connectivity.WithStartDisconnected())
@@ -384,7 +384,7 @@ func (s *SweepingProvider) setCycleStart(resume bool) {
 	if resume {
 		stored, err := s.readCycleStart()
 		if err != nil {
-			s.logger.Warnf("couldn't read cycle start time: %s", err)
+			s.logger.Warnf("could not read cycle start time: %s", err)
 		}
 		// Use stored value if successfully read and non-zero
 		if err == nil && !stored.IsZero() {
@@ -1176,7 +1176,7 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 		// newly added keys.
 		newKeys, err := s.keystore.Put(s.ctx, keys...)
 		if err != nil {
-			s.logger.Errorf("couldn't add keys to keystore: %s", err)
+			s.logger.Errorf("could not add keys to keystore: %s", err)
 			return
 		}
 		if !force {
@@ -1304,7 +1304,7 @@ func (s *SweepingProvider) onOnline() {
 				s.enqueueExpiredRegionsNoLock(recentlyReprovided)
 				s.scheduleLk.Unlock()
 			} else {
-				s.logger.Warnf("couldn't load not expired regions: %s", err)
+				s.logger.Warnf("could not load not expired regions: %s", err)
 			}
 		} else {
 			// When skipping bootstrap reprovide, still initialize the schedule timer
@@ -1344,7 +1344,7 @@ func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
 	now := time.Now()
 	k := datastore.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
 	if err := s.datastore.Put(s.ctx, k, []byte{}); err != nil {
-		s.logger.Warnf("couldn't persist successful reprovide for prefix %s: %s", prefix, err)
+		s.logger.Warnf("could not persist successful reprovide for prefix %s: %s", prefix, err)
 	}
 	s.gcReprovideHistoryIfNeeded(now)
 }
@@ -1398,12 +1398,12 @@ func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
 	deadline := now.Add(-s.reprovideInterval)
 	res, err := s.datastore.Query(s.ctx, q)
 	if err != nil {
-		s.logger.Warnf("couldn't query reprovide history for gc: %s", err)
+		s.logger.Warnf("could not query reprovide history for gc: %s", err)
 		return
 	}
 	for r := range res.Next() {
 		if r.Error != nil {
-			s.logger.Warnf("couldn't query reprovide history for gc: %s", r.Error)
+			s.logger.Warnf("could not query reprovide history for gc: %s", r.Error)
 			return
 		}
 		k := r.Key
@@ -1599,7 +1599,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	// Load keys matching prefix from the keystore.
 	keys, err := s.keystore.Get(s.ctx, prefix)
 	if err != nil {
-		s.failedReprovide(prefix, fmt.Errorf("couldn't reprovide, error when loading keys: %s", err))
+		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
 		s.reschedulePrefix(prefix)
 		return
 	}
@@ -1651,7 +1651,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 		// matching the covered prefix from the keystore.
 		keys, err = s.keystore.Get(s.ctx, coveredPrefix)
 		if err != nil {
-			err = fmt.Errorf("couldn't reprovide, error when loading keys: %s", err)
+			err = fmt.Errorf("could not reprovide, error when loading keys: %s", err)
 			s.failedReprovide(prefix, err)
 			s.reschedulePrefix(prefix)
 		}
@@ -1837,7 +1837,7 @@ func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 // ProvideOnce only sends provider records for the given keys out to the DHT
 // swarm. It does NOT take the responsibility to reprovide these keys.
 //
-// Returns an error if the keys couldn't be added to the provide queue. This
+// Returns an error if the keys could not be added to the provide queue. This
 // can happen if the provider is closed or if the node is currently Offline
 // (either never bootstrapped, or disconnected since more than `OfflineDelay`).
 // The schedule and provide queue depend on the network size, hence recent
@@ -1855,7 +1855,7 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
 //
-// Returns an error if the keys couldn't be added to the provide queue. This
+// Returns an error if the keys could not be added to the provide queue. This
 // can happen if the provider is closed or if the node is currently Offline
 // (either never bootstrapped, or disconnected since more than `OfflineDelay`).
 // The schedule and provide queue depend on the network size, hence recent
@@ -1956,7 +1956,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	for _, p := range missing {
 		ok, err := s.keystore.ContainsPrefix(s.ctx, p)
 		if err != nil {
-			s.logger.Warnf("couldn't refresh schedule for prefix %s: %s", p, err)
+			s.logger.Warnf("could not refresh schedule for prefix %s: %s", p, err)
 		}
 		if ok {
 			toInsert = append(toInsert, p)

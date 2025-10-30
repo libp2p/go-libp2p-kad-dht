@@ -381,8 +381,14 @@ func sortBitstrKeysByOrder[K kad.Key[K]](keys []bitstr.Key, order K) {
 // mapMerge merges all key-value pairs from the source map into the destination
 // map. Values from the source are appended to existing slices in the
 // destination.
-func mapMerge[K comparable, V any](dst, src map[K][]V) {
+func mapMerge[K comparable, V any](dst, src map[K][]V, expectedCap int) {
 	for k, vs := range src {
+		if len(vs) == 0 {
+			continue
+		}
+		if _, ok := dst[k]; !ok {
+			dst[k] = make([]V, 0, expectedCap)
+		}
 		dst[k] = append(dst[k], vs...)
 	}
 }
@@ -398,7 +404,13 @@ func mapMerge[K comparable, V any](dst, src map[K][]V) {
 // Returns a map where each destination value is associated with all items
 // allocated to it. If k is 0 or either trie is empty, returns an empty map.
 func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][]V0 {
-	return allocateToKClosestAtDepth(items, dests, k, 0)
+	destsSize := dests.Size()
+	itemsSize := items.Size()
+	if destsSize == 0 || itemsSize == 0 || k == 0 {
+		return nil
+	}
+	expectedCap := itemsSize*k/destsSize + 1
+	return allocateToKClosestAtDepth(items, dests, k, 0, expectedCap)
 }
 
 // allocateToKClosestAtDepth performs the recursive allocation algorithm at a specific
@@ -417,7 +429,7 @@ func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K,
 //   - depth: current bit depth in the trie traversal
 //
 // Returns a map of destination values to their allocated items.
-func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth int) map[V1][]V0 {
+func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth, expectedCap int) map[V1][]V0 {
 	if k == 0 {
 		return nil
 	}
@@ -465,6 +477,9 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 			}
 			// Allocate matching items to the matching dests branch
 			for _, dest := range matchingDests {
+				if _, ok := m[dest]; !ok {
+					m[dest] = make([]V0, 0, expectedCap)
+				}
 				m[dest] = append(m[dest], matchingItems...)
 			}
 			if nMatchingDests == k || len(otherDests) == 0 {
@@ -477,18 +492,21 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 				// Other branch contains at most the missing number of dests to be
 				// allocated to. Allocate matching items to the other dests branch.
 				for _, dest := range otherDests {
+					if _, ok := m[dest]; !ok {
+						m[dest] = make([]V0, 0, expectedCap)
+					}
 					m[dest] = append(m[dest], matchingItems...)
 				}
 			} else {
 				// Other branch contains more than the missing number of dests, go one
 				// level deeper to assign matching items to the closest dests.
-				allocs := allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1)
-				mapMerge(m, allocs)
+				allocs := allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1, expectedCap)
+				mapMerge(m, allocs, expectedCap)
 			}
 		} else {
 			// Number of matching dests is larger than k, go one level deeper.
-			allocs := allocateToKClosestAtDepth(matchingItemsBranch, matchingDestsBranch, k, depth+1)
-			mapMerge(m, allocs)
+			allocs := allocateToKClosestAtDepth(matchingItemsBranch, matchingDestsBranch, k, depth+1, expectedCap)
+			mapMerge(m, allocs, expectedCap)
 		}
 	}
 	return m

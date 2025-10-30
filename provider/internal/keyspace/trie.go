@@ -531,18 +531,25 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		dests.Branch(0),
 		dests.Branch(1),
 	}
-	destValues := [][]V1{
-		AllValues(dests.Branch(0), zeroKey),
-		AllValues(dests.Branch(1), zeroKey),
+	branchSize := [2]int{
+		destBranches[0].Size(),
+		destBranches[1].Size(),
 	}
-	m := make(map[V1][]V0, len(destValues[0])+len(destValues[1]))
-	for i := range destValues {
+	// Lazy trie enumeration
+	var destValues [2][]V1
+	getDestValues := func(i int) []V1 {
+		if destValues[i] == nil && destBranches[i] != nil && !destBranches[i].IsEmptyLeaf() {
+			destValues[i] = AllValues(destBranches[i], zeroKey)
+		}
+		return destValues[i]
+	}
+	m := make(map[V1][]V0, branchSize[0]+branchSize[1])
+	for i := range 2 {
 		// Assign all items from branch i
-
 		matchingDestsBranch := destBranches[i]
 		otherDestsBranch := destBranches[1-i]
-		matchingDests := destValues[i]
-		otherDests := destValues[1-i]
+		nMatchingDests := branchSize[i]
+		nOtherDests := branchSize[1-i]
 
 		matchingItemsBranch := items.Branch(i)
 		if matchingItemsBranch == nil || matchingItemsBranch.IsEmptyLeaf() {
@@ -554,28 +561,28 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 			// items' current branch contains a single leaf
 			matchingItemsBranch = items
 		}
-		if nMatchingDests := len(matchingDests); nMatchingDests <= k {
+		if nMatchingDests <= k {
 			matchingItems := AllValues(matchingItemsBranch, zeroKey)
 			if len(matchingItems) == 0 {
 				matchingItems = []V0{items.Data()}
 			}
 			// Allocate matching items to the matching dests branch
-			for _, dest := range matchingDests {
+			for _, dest := range getDestValues(i) {
 				if _, ok := m[dest]; !ok {
 					m[dest] = make([]V0, 0, expectedCap)
 				}
 				m[dest] = append(m[dest], matchingItems...)
 			}
-			if nMatchingDests == k || len(otherDests) == 0 {
+			if nMatchingDests == k || nOtherDests == 0 {
 				// Items were assigned to all k dests, or other branch is empty.
 				continue
 			}
 
 			nMissingDests := k - nMatchingDests
-			if len(otherDests) <= nMissingDests {
+			if nOtherDests <= nMissingDests {
 				// Other branch contains at most the missing number of dests to be
 				// allocated to. Allocate matching items to the other dests branch.
-				for _, dest := range otherDests {
+				for _, dest := range getDestValues(1 - i) {
 					if _, ok := m[dest]; !ok {
 						m[dest] = make([]V0, 0, expectedCap)
 					}

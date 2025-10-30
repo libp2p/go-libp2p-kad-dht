@@ -378,21 +378,6 @@ func sortBitstrKeysByOrder[K kad.Key[K]](keys []bitstr.Key, order K) {
 	})
 }
 
-// mapMerge merges all key-value pairs from the source map into the destination
-// map. Values from the source are appended to existing slices in the
-// destination.
-func mapMerge[K comparable, V any](dst, src map[K][]V, expectedCap int) {
-	for k, vs := range src {
-		if len(vs) == 0 {
-			continue
-		}
-		if _, ok := dst[k]; !ok {
-			dst[k] = make([]V, 0, expectedCap)
-		}
-		dst[k] = append(dst[k], vs...)
-	}
-}
-
 // AllocateToKClosest distributes items from the items trie to the k closest
 // destinations in the dests trie based on XOR distance between their keys.
 //
@@ -410,7 +395,9 @@ func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K,
 		return nil
 	}
 	expectedCap := itemsSize*k/destsSize + 1
-	return allocateToKClosestAtDepth(items, dests, k, 0, expectedCap)
+	result := make(map[V1][]V0, destsSize)
+	allocateToKClosestAtDepth(items, dests, k, 0, expectedCap, result)
+	return result
 }
 
 // allocateToKClosestAtDepth performs the recursive allocation algorithm at a specific
@@ -429,33 +416,34 @@ func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K,
 //   - depth: current bit depth in the trie traversal
 //
 // Returns a map of destination values to their allocated items.
-func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth, expectedCap int) map[V1][]V0 {
+func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth, expectedCap int, result map[V1][]V0) {
 	if k == 0 {
-		return nil
+		return
 	}
 	if dests.IsLeaf() {
 		if !dests.HasKey() {
-			return nil
+			return
 		}
 		// Single destination case
-		m := make(map[V1][]V0, 1)
 		dest := dests.Data()
-		m[dest] = make([]V0, 0, expectedCap)
+		if _, ok := result[dest]; !ok {
+			result[dest] = make([]V0, 0, expectedCap)
+		}
 
 		// Get items and append
 		if items.IsNonEmptyLeaf() {
-			m[dest] = append(m[dest], items.Data())
+			result[dest] = append(result[dest], items.Data())
 		} else {
 			allItems := AllValues(items, zeroKey)
-			m[dest] = append(m[dest], allItems...)
+			result[dest] = append(result[dest], allItems...)
 		}
-		return m
+		return
 	}
 	destBranches := []*trie.Trie[K, V1]{
 		dests.Branch(0),
 		dests.Branch(1),
 	}
-	branchSize := [2]int{
+	destBranchSize := [2]int{
 		destBranches[0].Size(),
 		destBranches[1].Size(),
 	}
@@ -467,13 +455,13 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		}
 		return destValues[i]
 	}
-	m := make(map[V1][]V0, branchSize[0]+branchSize[1])
+
 	for i := range 2 {
 		// Assign all items from branch i
 		matchingDestsBranch := destBranches[i]
 		otherDestsBranch := destBranches[1-i]
-		nMatchingDests := branchSize[i]
-		nOtherDests := branchSize[1-i]
+		nMatchingDests := destBranchSize[i]
+		nOtherDests := destBranchSize[1-i]
 
 		matchingItemsBranch := items.Branch(i)
 		if matchingItemsBranch == nil || matchingItemsBranch.IsEmptyLeaf() {
@@ -492,10 +480,10 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 			}
 			// Allocate matching items to the matching dests branch
 			for _, dest := range getDestValues(i) {
-				if _, ok := m[dest]; !ok {
-					m[dest] = make([]V0, 0, expectedCap)
+				if _, ok := result[dest]; !ok {
+					result[dest] = make([]V0, 0, expectedCap)
 				}
-				m[dest] = append(m[dest], matchingItems...)
+				result[dest] = append(result[dest], matchingItems...)
 			}
 			if nMatchingDests == k || nOtherDests == 0 {
 				// Items were assigned to all k dests, or other branch is empty.
@@ -507,25 +495,22 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 				// Other branch contains at most the missing number of dests to be
 				// allocated to. Allocate matching items to the other dests branch.
 				for _, dest := range getDestValues(1 - i) {
-					if _, ok := m[dest]; !ok {
-						m[dest] = make([]V0, 0, expectedCap)
+					if _, ok := result[dest]; !ok {
+						result[dest] = make([]V0, 0, expectedCap)
 					}
-					m[dest] = append(m[dest], matchingItems...)
+					result[dest] = append(result[dest], matchingItems...)
 				}
 			} else {
 				matchingItems = nil // release reference after use
 				// Other branch contains more than the missing number of dests, go one
 				// level deeper to assign matching items to the closest dests.
-				allocs := allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1, expectedCap)
-				mapMerge(m, allocs, expectedCap)
+				allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1, expectedCap, result)
 			}
 		} else {
 			// Number of matching dests is larger than k, go one level deeper.
-			allocs := allocateToKClosestAtDepth(matchingItemsBranch, matchingDestsBranch, k, depth+1, expectedCap)
-			mapMerge(m, allocs, expectedCap)
+			allocateToKClosestAtDepth(matchingItemsBranch, matchingDestsBranch, k, depth+1, expectedCap, result)
 		}
 	}
-	return m
 }
 
 // KeyspaceCovered checks whether the trie covers the entire keyspace without

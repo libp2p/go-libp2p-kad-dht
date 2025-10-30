@@ -513,6 +513,7 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 					m[dest] = append(m[dest], matchingItems...)
 				}
 			} else {
+				matchingItems = nil // release reference after use
 				// Other branch contains more than the missing number of dests, go one
 				// level deeper to assign matching items to the closest dests.
 				allocs := allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1, expectedCap)

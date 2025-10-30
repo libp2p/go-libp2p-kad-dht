@@ -3,7 +3,6 @@ package keystore
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -212,28 +211,33 @@ func TestKeystoreResetSizeWithConcurrentPuts(t *testing.T) {
 	// Start reset with a slow channel (simulates concurrent operations)
 	const resetKeys = 80
 	const concurrentKeys = 30
-	resetChan := make(chan cid.Cid, resetKeys+concurrentKeys)
+	resetChan := make(chan cid.Cid)
 	resetMhs := random.Multihashes(resetKeys)
+	newMhs := random.Multihashes(concurrentKeys)
 
-	// Send keys in batches to allow concurrent puts
+	// Start reset in a goroutine first
+	resetDone := make(chan error, 1)
+	go func() {
+		resetDone <- store.ResetCids(ctx, resetChan)
+	}()
+
+	// Send keys and perform concurrent put during reset
 	go func() {
 		for i, h := range resetMhs {
 			resetChan <- cid.NewCidV1(cid.Raw, h)
-			// Allow some concurrent puts to happen
+			// After sending some keys, we know ResetCids is consuming them
+			// so it's safe to call Put() - it will happen during the reset
 			if i == 20 {
-				// Add concurrent keys during reset
-				concurrent := random.Multihashes(concurrentKeys)
-				_, err := store.Put(ctx, concurrent...)
+				_, err := store.Put(ctx, newMhs...)
 				require.NoError(t, err)
 			}
 		}
 		close(resetChan)
 	}()
 
-	err = store.ResetCids(ctx, resetChan)
+	// Wait for reset to complete
+	err = <-resetDone
 	require.NoError(t, err)
-
-	time.Sleep(5 * time.Millisecond) // Ensure all concurrent puts are done
 
 	// Size should include both reset keys and concurrent puts
 	const expectedTotalSize = resetKeys + concurrentKeys

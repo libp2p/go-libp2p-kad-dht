@@ -93,7 +93,7 @@ func (q *ProvideQueue) Dequeue() (bitstr.Key, []mh.Multihash, bool) {
 
 	// Get all keys that match the prefix.
 	subtrie, _ := keyspace.FindSubtrie(q.keys, prefix)
-	keys := keyspace.AllValues(subtrie, bit256.ZeroKey())
+	keys := keyspace.AllValues(subtrie, zeroKey)
 
 	// Remove the keys from the keys trie.
 	keyspace.PruneSubtrie(q.keys, prefix)
@@ -114,7 +114,7 @@ func (q *ProvideQueue) DequeueMatching(prefix bitstr.Key) []mh.Multihash {
 		// No keys matching the prefix.
 		return nil
 	}
-	keys := keyspace.AllValues(subtrie, bit256.ZeroKey())
+	keys := keyspace.AllValues(subtrie, zeroKey)
 
 	// Remove the keys from the keys trie.
 	keyspace.PruneSubtrie(q.keys, prefix)
@@ -273,11 +273,9 @@ func (q *ProvideQueue) Persist(ctx context.Context, d ds.Batching, batchSize int
 	for prefix := range q.queue.queue.Iter() {
 		// Find all keys matching this prefix
 		if subtrie, ok := keyspace.FindSubtrie(q.keys, prefix); ok {
-			keys := keyspace.AllValues(subtrie, bit256.ZeroKey())
-
 			// Concatenate all multihash bytes
 			var buf []byte
-			for _, h := range keys {
+			for h := range keyspace.ValuesIter(subtrie, zeroKey) {
 				buf = append(buf, []byte(h)...)
 			}
 

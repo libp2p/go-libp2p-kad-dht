@@ -14,7 +14,7 @@ type entry struct {
 	val  int64
 }
 
-// CycleStats tracks statistics organized by keyspace prefixes with TTL-based cleanup.
+// CycleStats tracks statistics organized by keyspace prefixes with deadline-based cleanup.
 // It maintains a trie structure where statistics are aggregated by prefix and
 // automatically cleaned up after the retention period.
 type CycleStats struct {
@@ -22,25 +22,25 @@ type CycleStats struct {
 
 	queue *trie.Trie[bitstr.Key, entry]
 
-	ttl, maxDelay time.Duration
+	maxDelay time.Duration
 }
 
-// NewCycleStats creates a new CycleStats with the specified TTL and maximum delay.
-func NewCycleStats(ttl, maxDelay time.Duration) CycleStats {
+// NewCycleStats creates a new CycleStats with the specified maximum delay.
+// The maxDelay is used to prevent duplicate queue entries within a short time window.
+func NewCycleStats(maxDelay time.Duration) CycleStats {
 	return CycleStats{
 		trie:     trie.New[bitstr.Key, entry](),
 		queue:    trie.New[bitstr.Key, entry](),
-		ttl:      ttl,
 		maxDelay: maxDelay,
 	}
 }
 
-// Cleanup removes entries that have exceeded their TTL plus maximum delay.
-func (s *CycleStats) Cleanup() {
+// Cleanup removes entries that have exceeded the specified deadline duration.
+func (s *CycleStats) Cleanup(deadline time.Duration) {
 	allEntries := keyspace.AllEntries(s.trie, bit256.ZeroKey())
 	now := time.Now()
 	for _, e := range allEntries {
-		if e.Data.time.Add(s.ttl + s.maxDelay).Before(now) {
+		if e.Data.time.Add(deadline).Before(now) {
 			s.trie.Remove(e.Key)
 			if subtrie, ok := keyspace.FindSubtrie(s.queue, e.Key); ok {
 				for _, qe := range keyspace.AllEntries(subtrie, bit256.ZeroKey()) {

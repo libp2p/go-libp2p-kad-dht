@@ -123,17 +123,30 @@ func (s *SweepingProvider) Stats() stats.Stats {
 
 	// Take snapshots of cycle stats data while holding the lock
 	s.stats.cycleStatsLk.Lock()
-	s.stats.keysPerReprovide.Cleanup()
-	s.stats.reprovideDuration.Cleanup()
-	s.stats.peers.Cleanup()
-	s.stats.reachable.Cleanup()
+
+	// We need to clean up the CycleStats with an appropriate deadline. This
+	// deadline should be reprovideInterval + maxReprovideDelay + reprovideDuration.
+	// But since we don't know reprovideDuration yet, we do a two-step cleanup.
+
+	// First, clean up reprovideDuration with 2*reprovideInterval to get an initial average
+	s.stats.reprovideDuration.Cleanup(2 * s.reprovideInterval)
+	reprovideDurationAvg := s.stats.reprovideDuration.Avg()
+
+	// Now calculate the proper deadline: reprovideInterval + maxReprovideDelay + reprovideDuration
+	statsDeadline := s.reprovideInterval + s.maxReprovideDelay + time.Duration(reprovideDurationAvg)
+
+	// Clean up all CycleStats with the calculated deadline
+	s.stats.reprovideDuration.Cleanup(statsDeadline)
+	s.stats.keysPerReprovide.Cleanup(statsDeadline)
+	s.stats.peers.Cleanup(statsDeadline)
+	s.stats.reachable.Cleanup(statsDeadline)
 
 	// Capture data for calculations outside the lock
 	keysPerProvideSum := s.stats.keysPerProvide.Sum()
 	provideDurationSum := s.stats.provideDuration.Sum()
 	keysPerReprovideSum := s.stats.keysPerReprovide.Sum()
 	reprovideDurationSum := s.stats.reprovideDuration.Sum()
-	reprovideDurationAvg := s.stats.reprovideDuration.Avg()
+	reprovideDurationAvg = s.stats.reprovideDuration.Avg()
 	keysPerReprovideAvg := s.stats.keysPerReprovide.Avg()
 	reprovideDurationCount := int64(s.stats.reprovideDuration.Count())
 	peersSum := s.stats.peers.Sum()
@@ -216,10 +229,10 @@ func newOperationStats(reprovideInterval, maxDelay time.Duration) operationStats
 		regionSize:      timeseries.NewIntTimeSeries(reprovideInterval),
 		avgHolders:      timeseries.NewFloatTimeSeries(reprovideInterval),
 
-		keysPerReprovide:  timeseries.NewCycleStats(reprovideInterval, maxDelay),
-		reprovideDuration: timeseries.NewCycleStats(reprovideInterval, maxDelay),
-		peers:             timeseries.NewCycleStats(reprovideInterval, maxDelay),
-		reachable:         timeseries.NewCycleStats(reprovideInterval, maxDelay),
+		keysPerReprovide:  timeseries.NewCycleStats(maxDelay),
+		reprovideDuration: timeseries.NewCycleStats(maxDelay),
+		peers:             timeseries.NewCycleStats(maxDelay),
+		reachable:         timeseries.NewCycleStats(maxDelay),
 	}
 }
 

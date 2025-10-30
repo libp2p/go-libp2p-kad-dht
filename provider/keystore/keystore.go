@@ -107,6 +107,7 @@ func NewKeystore(d ds.Batching, opts ...Option) (Keystore, error) {
 		requests:   make(chan operation),
 		close:      make(chan struct{}),
 		done:       make(chan struct{}),
+		logger:     log.Logger(cfg.loggerName),
 	}
 	go ks.worker()
 

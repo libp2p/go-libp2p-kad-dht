@@ -16,19 +16,6 @@ import (
 
 var zeroKey = bit256.ZeroKey()
 
-// AllEntries returns all entries (key + value) stored in the trie `t` sorted
-// by their keys in the supplied `order`.
-func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
-	if t == nil || t.IsEmptyLeaf() {
-		return []trie.Entry[K0, D]{}
-	}
-	result := make([]trie.Entry[K0, D], 0, t.Size())
-	for entry := range EntriesIter(t, order) {
-		result = append(result, entry)
-	}
-	return result
-}
-
 // trieIter is a generic helper that iterates over the trie and yields values
 // extracted by the provided extract function. This allows efficient iteration
 // without constructing unnecessary intermediate structures.
@@ -74,19 +61,6 @@ func EntriesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], ord
 	})
 }
 
-// AllValues returns all values stored in the trie `t` sorted by their keys in
-// the supplied `order`.
-func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
-	if t == nil || t.IsEmptyLeaf() {
-		return []D{}
-	}
-	result := make([]D, 0, t.Size())
-	for value := range ValuesIter(t, order) {
-		result = append(result, value)
-	}
-	return result
-}
-
 // ValuesIter returns an iterator over all values stored in the trie `t`
 // sorted by their keys in the supplied `order`.
 // The iterator allows processing values one at a time without loading all of
@@ -105,6 +79,32 @@ func KeysIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order 
 	return trieIter(t, order, func(node *trie.Trie[K0, D]) K0 {
 		return *node.Key()
 	})
+}
+
+// AllEntries returns all entries (key + value) stored in the trie `t` sorted
+// by their keys in the supplied `order`.
+func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
+	if t == nil || t.IsEmptyLeaf() {
+		return []trie.Entry[K0, D]{}
+	}
+	result := make([]trie.Entry[K0, D], 0, t.Size())
+	for entry := range EntriesIter(t, order) {
+		result = append(result, entry)
+	}
+	return result
+}
+
+// AllValues returns all values stored in the trie `t` sorted by their keys in
+// the supplied `order`.
+func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
+	if t == nil || t.IsEmptyLeaf() {
+		return []D{}
+	}
+	result := make([]D, 0, t.Size())
+	for value := range ValuesIter(t, order) {
+		result = append(result, value)
+	}
+	return result
 }
 
 // FindPrefixOfKey checks whether the trie contains a leave whose key is a

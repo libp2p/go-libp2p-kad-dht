@@ -19,96 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAllEntries(t *testing.T) {
-	tr := trie.New[bitstr.Key, string]()
-	entries := []trie.Entry[bitstr.Key, string]{
-		{Key: bitstr.Key("000"), Data: "apple"},
-		{Key: bitstr.Key("010"), Data: "banana"},
-		{Key: bitstr.Key("101"), Data: "cherry"},
-		{Key: bitstr.Key("111"), Data: "durian"},
-	}
-	tr.AddMany(entries...)
-
-	t.Run("forward order (0 -> 1)", func(t *testing.T) {
-		// AllEntries should match EntriesIter collected into a slice
-		result := AllEntries(tr, bitstr.Key("000"))
-		var expected []trie.Entry[bitstr.Key, string]
-		for entry := range EntriesIter(tr, bitstr.Key("000")) {
-			expected = append(expected, entry)
-		}
-		require.Equal(t, expected, result)
-	})
-
-	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
-		// AllEntries should match EntriesIter collected into a slice
-		result := AllEntries(tr, bitstr.Key("111"))
-		var expected []trie.Entry[bitstr.Key, string]
-		for entry := range EntriesIter(tr, bitstr.Key("111")) {
-			expected = append(expected, entry)
-		}
-		require.Equal(t, expected, result)
-	})
-
-	t.Run("empty trie", func(t *testing.T) {
-		emptyTrie := trie.New[bitstr.Key, string]()
-		result := AllEntries(emptyTrie, bitstr.Key("000"))
-		require.Empty(t, result)
-		require.NotNil(t, result) // Should be empty slice, not nil
-	})
-
-	t.Run("nil trie", func(t *testing.T) {
-		var nilTrie *trie.Trie[bitstr.Key, string]
-		result := AllEntries(nilTrie, bitstr.Key("000"))
-		require.Empty(t, result)
-		require.NotNil(t, result) // Should be empty slice, not nil
-	})
-}
-
-func TestAllValues(t *testing.T) {
-	tr := trie.New[bitstr.Key, string]()
-	entries := []trie.Entry[bitstr.Key, string]{
-		{Key: bitstr.Key("000"), Data: "apple"},
-		{Key: bitstr.Key("010"), Data: "banana"},
-		{Key: bitstr.Key("101"), Data: "cherry"},
-		{Key: bitstr.Key("111"), Data: "durian"},
-	}
-	tr.AddMany(entries...)
-
-	t.Run("forward order (0 -> 1)", func(t *testing.T) {
-		// AllValues should match ValuesIter collected into a slice
-		result := AllValues(tr, bitstr.Key("000"))
-		var expected []string
-		for value := range ValuesIter(tr, bitstr.Key("000")) {
-			expected = append(expected, value)
-		}
-		require.Equal(t, expected, result)
-	})
-
-	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
-		// AllValues should match ValuesIter collected into a slice
-		result := AllValues(tr, bitstr.Key("111"))
-		var expected []string
-		for value := range ValuesIter(tr, bitstr.Key("111")) {
-			expected = append(expected, value)
-		}
-		require.Equal(t, expected, result)
-	})
-
-	t.Run("empty trie", func(t *testing.T) {
-		emptyTrie := trie.New[bitstr.Key, string]()
-		result := AllValues(emptyTrie, bitstr.Key("000"))
-		require.Empty(t, result)
-		require.NotNil(t, result) // Should be empty slice, not nil
-	})
-
-	t.Run("nil trie", func(t *testing.T) {
-		var nilTrie *trie.Trie[bitstr.Key, string]
-		result := AllValues(nilTrie, bitstr.Key("000"))
-		require.Empty(t, result)
-		require.NotNil(t, result) // Should be empty slice, not nil
-	})
-}
-
 func TestEntriesIter(t *testing.T) {
 	tr := trie.New[bitstr.Key, string]()
 	entries := []trie.Entry[bitstr.Key, string]{
@@ -315,6 +225,96 @@ func TestKeysIter(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, count)
+	})
+}
+
+func TestAllEntries(t *testing.T) {
+	tr := trie.New[bitstr.Key, string]()
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
+	}
+	tr.AddMany(entries...)
+
+	t.Run("forward order (0 -> 1)", func(t *testing.T) {
+		// AllEntries should match EntriesIter collected into a slice
+		result := AllEntries(tr, bitstr.Key("000"))
+		var expected []trie.Entry[bitstr.Key, string]
+		for entry := range EntriesIter(tr, bitstr.Key("000")) {
+			expected = append(expected, entry)
+		}
+		require.Equal(t, expected, result)
+	})
+
+	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
+		// AllEntries should match EntriesIter collected into a slice
+		result := AllEntries(tr, bitstr.Key("111"))
+		var expected []trie.Entry[bitstr.Key, string]
+		for entry := range EntriesIter(tr, bitstr.Key("111")) {
+			expected = append(expected, entry)
+		}
+		require.Equal(t, expected, result)
+	})
+
+	t.Run("empty trie", func(t *testing.T) {
+		emptyTrie := trie.New[bitstr.Key, string]()
+		result := AllEntries(emptyTrie, bitstr.Key("000"))
+		require.Empty(t, result)
+		require.NotNil(t, result) // Should be empty slice, not nil
+	})
+
+	t.Run("nil trie", func(t *testing.T) {
+		var nilTrie *trie.Trie[bitstr.Key, string]
+		result := AllEntries(nilTrie, bitstr.Key("000"))
+		require.Empty(t, result)
+		require.NotNil(t, result) // Should be empty slice, not nil
+	})
+}
+
+func TestAllValues(t *testing.T) {
+	tr := trie.New[bitstr.Key, string]()
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
+	}
+	tr.AddMany(entries...)
+
+	t.Run("forward order (0 -> 1)", func(t *testing.T) {
+		// AllValues should match ValuesIter collected into a slice
+		result := AllValues(tr, bitstr.Key("000"))
+		var expected []string
+		for value := range ValuesIter(tr, bitstr.Key("000")) {
+			expected = append(expected, value)
+		}
+		require.Equal(t, expected, result)
+	})
+
+	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
+		// AllValues should match ValuesIter collected into a slice
+		result := AllValues(tr, bitstr.Key("111"))
+		var expected []string
+		for value := range ValuesIter(tr, bitstr.Key("111")) {
+			expected = append(expected, value)
+		}
+		require.Equal(t, expected, result)
+	})
+
+	t.Run("empty trie", func(t *testing.T) {
+		emptyTrie := trie.New[bitstr.Key, string]()
+		result := AllValues(emptyTrie, bitstr.Key("000"))
+		require.Empty(t, result)
+		require.NotNil(t, result) // Should be empty slice, not nil
+	})
+
+	t.Run("nil trie", func(t *testing.T) {
+		var nilTrie *trie.Trie[bitstr.Key, string]
+		result := AllValues(nilTrie, bitstr.Key("000"))
+		require.Empty(t, result)
+		require.NotNil(t, result) // Should be empty slice, not nil
 	})
 }
 

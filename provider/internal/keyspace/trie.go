@@ -464,12 +464,17 @@ func sortBitstrKeysByOrder[K kad.Key[K]](keys []bitstr.Key, order K) {
 //
 // Returns a map where each destination value is associated with all items
 // allocated to it. If k is 0 or either trie is empty, returns an empty map.
+//
+// Memory optimization: Pre-allocates slice capacity based on expected average
+// items per destination to minimize allocations during the recursive traversal.
 func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][]V0 {
 	destsSize := dests.Size()
 	itemsSize := items.Size()
 	if destsSize == 0 || itemsSize == 0 || k == 0 {
 		return nil
 	}
+	// Calculate expected slice capacity: each item goes to k destinations
+	// Average items per destination = (total items * k) / number of destinations
 	expectedCap := itemsSize*k/destsSize + 1
 	result := make(map[V1][]V0, destsSize)
 	allocateToKClosestAtDepth(items, dests, k, 0, expectedCap, result)
@@ -485,13 +490,16 @@ func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K,
 // distance) and recursively processes deeper levels when more granular distance
 // calculations are needed to select exactly k destinations.
 //
+// Memory optimization: This function writes directly to the result map passed from
+// the caller, eliminating intermediate map allocations in the recursive calls.
+//
 // Parameters:
 //   - items: trie containing items to be allocated
 //   - dests: trie containing destination candidates
 //   - k: maximum number of destinations to allocate each item to
 //   - depth: current bit depth in the trie traversal
-//
-// Returns a map of destination values to their allocated items.
+//   - expectedCap: pre-calculated expected slice capacity for memory efficiency
+//   - result: output map to write allocations into (modified in-place)
 func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth, expectedCap int, result map[V1][]V0) {
 	if k == 0 {
 		return
@@ -517,7 +525,8 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		destBranches[0].Size(),
 		destBranches[1].Size(),
 	}
-	// Lazy trie enumeration
+	// Lazy evaluation: only traverse destination branches when needed to avoid
+	// unnecessary AllValues calls on empty or unused branches (memory optimization).
 	var destValues [2][]V1
 	getDestValues := func(i int) []V1 {
 		if destValues[i] == nil && destBranches[i] != nil && !destBranches[i].IsEmptyLeaf() {
@@ -526,12 +535,12 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 		return destValues[i]
 	}
 
+	// Process each branch (0 and 1) to find k closest destinations
 	for i := range 2 {
-		// Assign all items from branch i
-		sameBranch := destBranches[i]
-		otherBranch := destBranches[1-i]
-		sameCount := destBranchSize[i]
-		otherCount := destBranchSize[1-i]
+		sameBranch := destBranches[i]     // Destinations in same branch as items
+		otherBranch := destBranches[1-i]  // Destinations in opposite branch
+		sameCount := destBranchSize[i]    // Number of destinations in same branch
+		otherCount := destBranchSize[1-i] // Number of destinations in other branch
 
 		matchingItemsBranch := items.Branch(i)
 		if matchingItemsBranch == nil || matchingItemsBranch.IsEmptyLeaf() {
@@ -548,30 +557,30 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 			if len(matchingItems) == 0 {
 				matchingItems = []V0{items.Data()}
 			}
-			// Allocate matching items to the matching dests branch
+			// Allocate items to all destinations in the same branch
 			for _, dest := range getDestValues(i) {
 				appendToMap(result, dest, matchingItems, expectedCap)
 			}
 			if sameCount == k || otherCount == 0 {
-				// Items were assigned to all k dests, or other branch is empty.
+				// Done: either found k destinations or no more available
 				continue
 			}
 
 			nMissingDests := k - sameCount
 			if otherCount <= nMissingDests {
-				// Other branch contains at most the missing number of dests to be
-				// allocated to. Allocate matching items to the other dests branch.
+				// Need more destinations: allocate items to all destinations in other branch
+				// since there are fewer than needed to reach k total allocations
 				for _, dest := range getDestValues(1 - i) {
 					appendToMap(result, dest, matchingItems, expectedCap)
 				}
 			} else {
-				matchingItems = nil // release reference after use
-				// Other branch contains more than the missing number of dests, go one
-				// level deeper to assign matching items to the closest dests.
+				matchingItems = nil // Release reference to allow GC
+				// Too many destinations in other branch: recurse deeper to find the
+				// nMissingDests closest destinations from the other branch
 				allocateToKClosestAtDepth(matchingItemsBranch, otherBranch, nMissingDests, depth+1, expectedCap, result)
 			}
 		} else {
-			// Number of matching dests is larger than k, go one level deeper.
+			// Too many destinations in same branch: recurse deeper to narrow down to k closest
 			allocateToKClosestAtDepth(matchingItemsBranch, sameBranch, k, depth+1, expectedCap, result)
 		}
 	}

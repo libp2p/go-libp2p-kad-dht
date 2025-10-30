@@ -46,7 +46,7 @@ func TestAllEntries(t *testing.T) {
 	}
 }
 
-func TestAllEntriesIter(t *testing.T) {
+func TestEntriesIter(t *testing.T) {
 	tr := trie.New[bitstr.Key, string]()
 	entries := []trie.Entry[bitstr.Key, string]{
 		{Key: bitstr.Key("000"), Data: "apple"},
@@ -59,7 +59,7 @@ func TestAllEntriesIter(t *testing.T) {
 	t.Run("forward order (0 -> 1)", func(t *testing.T) {
 		expected := AllEntries(tr, bitstr.Key("000"))
 		var iterResult []trie.Entry[bitstr.Key, string]
-		for entry := range AllEntriesIter(tr, bitstr.Key("000")) {
+		for entry := range EntriesIter(tr, bitstr.Key("000")) {
 			iterResult = append(iterResult, entry)
 		}
 		require.Equal(t, expected, iterResult)
@@ -68,7 +68,7 @@ func TestAllEntriesIter(t *testing.T) {
 	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
 		expected := AllEntries(tr, bitstr.Key("111"))
 		var iterResult []trie.Entry[bitstr.Key, string]
-		for entry := range AllEntriesIter(tr, bitstr.Key("111")) {
+		for entry := range EntriesIter(tr, bitstr.Key("111")) {
 			iterResult = append(iterResult, entry)
 		}
 		require.Equal(t, expected, iterResult)
@@ -78,7 +78,7 @@ func TestAllEntriesIter(t *testing.T) {
 		emptyTrie := trie.New[bitstr.Key, string]()
 		expected := AllEntries(emptyTrie, bitstr.Key("000"))
 		var iterResult []trie.Entry[bitstr.Key, string]
-		for entry := range AllEntriesIter(emptyTrie, bitstr.Key("000")) {
+		for entry := range EntriesIter(emptyTrie, bitstr.Key("000")) {
 			iterResult = append(iterResult, entry)
 		}
 		require.Equal(t, expected, iterResult)
@@ -91,7 +91,7 @@ func TestAllEntriesIter(t *testing.T) {
 		singleTrie.Add(singleEntry.Key, singleEntry.Data)
 		expected := AllEntries(singleTrie, bitstr.Key("000"))
 		var iterResult []trie.Entry[bitstr.Key, string]
-		for entry := range AllEntriesIter(singleTrie, bitstr.Key("000")) {
+		for entry := range EntriesIter(singleTrie, bitstr.Key("000")) {
 			iterResult = append(iterResult, entry)
 		}
 		require.Equal(t, expected, iterResult)
@@ -99,7 +99,7 @@ func TestAllEntriesIter(t *testing.T) {
 
 	t.Run("early termination", func(t *testing.T) {
 		count := 0
-		for range AllEntriesIter(tr, bitstr.Key("000")) {
+		for range EntriesIter(tr, bitstr.Key("000")) {
 			count++
 			if count == 2 {
 				break
@@ -109,7 +109,7 @@ func TestAllEntriesIter(t *testing.T) {
 	})
 }
 
-func TestAllValuesIter(t *testing.T) {
+func TestValuesIter(t *testing.T) {
 	tr := trie.New[bitstr.Key, string]()
 	entries := []trie.Entry[bitstr.Key, string]{
 		{Key: bitstr.Key("000"), Data: "apple"},
@@ -122,7 +122,7 @@ func TestAllValuesIter(t *testing.T) {
 	t.Run("forward order (0 -> 1)", func(t *testing.T) {
 		expected := AllValues(tr, bitstr.Key("000"))
 		var iterResult []string
-		for value := range AllValuesIter(tr, bitstr.Key("000")) {
+		for value := range ValuesIter(tr, bitstr.Key("000")) {
 			iterResult = append(iterResult, value)
 		}
 		require.Equal(t, expected, iterResult)
@@ -131,7 +131,7 @@ func TestAllValuesIter(t *testing.T) {
 	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
 		expected := AllValues(tr, bitstr.Key("111"))
 		var iterResult []string
-		for value := range AllValuesIter(tr, bitstr.Key("111")) {
+		for value := range ValuesIter(tr, bitstr.Key("111")) {
 			iterResult = append(iterResult, value)
 		}
 		require.Equal(t, expected, iterResult)
@@ -141,7 +141,7 @@ func TestAllValuesIter(t *testing.T) {
 		emptyTrie := trie.New[bitstr.Key, string]()
 		expected := AllValues(emptyTrie, bitstr.Key("000"))
 		iterResult := []string{}
-		for value := range AllValuesIter(emptyTrie, bitstr.Key("000")) {
+		for value := range ValuesIter(emptyTrie, bitstr.Key("000")) {
 			iterResult = append(iterResult, value)
 		}
 		require.Equal(t, expected, iterResult)
@@ -154,7 +154,7 @@ func TestAllValuesIter(t *testing.T) {
 		singleTrie.Add(singleEntry.Key, singleEntry.Data)
 		expected := AllValues(singleTrie, bitstr.Key("000"))
 		var iterResult []string
-		for value := range AllValuesIter(singleTrie, bitstr.Key("000")) {
+		for value := range ValuesIter(singleTrie, bitstr.Key("000")) {
 			iterResult = append(iterResult, value)
 		}
 		require.Equal(t, expected, iterResult)
@@ -162,7 +162,7 @@ func TestAllValuesIter(t *testing.T) {
 
 	t.Run("early termination", func(t *testing.T) {
 		count := 0
-		for range AllValuesIter(tr, bitstr.Key("000")) {
+		for range ValuesIter(tr, bitstr.Key("000")) {
 			count++
 			if count == 3 {
 				break
@@ -172,7 +172,7 @@ func TestAllValuesIter(t *testing.T) {
 	})
 }
 
-func TestAllKeysIter(t *testing.T) {
+func TestKeysIter(t *testing.T) {
 	tr := trie.New[bitstr.Key, string]()
 	entries := []trie.Entry[bitstr.Key, string]{
 		{Key: bitstr.Key("000"), Data: "apple"},
@@ -189,7 +189,7 @@ func TestAllKeysIter(t *testing.T) {
 			expectedKeys = append(expectedKeys, entry.Key)
 		}
 		var iterResult []bitstr.Key
-		for key := range AllKeysIter(tr, bitstr.Key("000")) {
+		for key := range KeysIter(tr, bitstr.Key("000")) {
 			iterResult = append(iterResult, key)
 		}
 		require.Equal(t, expectedKeys, iterResult)
@@ -202,7 +202,7 @@ func TestAllKeysIter(t *testing.T) {
 			expectedKeys = append(expectedKeys, entry.Key)
 		}
 		var iterResult []bitstr.Key
-		for key := range AllKeysIter(tr, bitstr.Key("111")) {
+		for key := range KeysIter(tr, bitstr.Key("111")) {
 			iterResult = append(iterResult, key)
 		}
 		require.Equal(t, expectedKeys, iterResult)
@@ -211,7 +211,7 @@ func TestAllKeysIter(t *testing.T) {
 	t.Run("empty trie", func(t *testing.T) {
 		emptyTrie := trie.New[bitstr.Key, string]()
 		var iterResult []bitstr.Key
-		for key := range AllKeysIter(emptyTrie, bitstr.Key("000")) {
+		for key := range KeysIter(emptyTrie, bitstr.Key("000")) {
 			iterResult = append(iterResult, key)
 		}
 		require.Empty(t, iterResult)
@@ -227,7 +227,7 @@ func TestAllKeysIter(t *testing.T) {
 			expectedKeys = append(expectedKeys, entry.Key)
 		}
 		var iterResult []bitstr.Key
-		for key := range AllKeysIter(singleTrie, bitstr.Key("000")) {
+		for key := range KeysIter(singleTrie, bitstr.Key("000")) {
 			iterResult = append(iterResult, key)
 		}
 		require.Equal(t, expectedKeys, iterResult)
@@ -235,7 +235,7 @@ func TestAllKeysIter(t *testing.T) {
 
 	t.Run("early termination", func(t *testing.T) {
 		count := 0
-		for range AllKeysIter(tr, bitstr.Key("000")) {
+		for range KeysIter(tr, bitstr.Key("000")) {
 			count++
 			if count == 1 {
 				break

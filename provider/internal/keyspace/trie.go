@@ -1,6 +1,7 @@
 package keyspace
 
 import (
+	"iter"
 	"slices"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -33,6 +34,51 @@ func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D
 		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
 }
 
+// trieIter is a generic helper that iterates over the trie and yields values
+// extracted by the provided extract function. This allows efficient iteration
+// without constructing unnecessary intermediate structures.
+func trieIter[K0 kad.Key[K0], K1 kad.Key[K1], D any, T any](
+	t *trie.Trie[K0, D],
+	order K1,
+	extract func(*trie.Trie[K0, D]) T,
+) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		trieIterAtDepth(t, order, 0, extract, yield)
+	}
+}
+
+func trieIterAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any, T any](
+	t *trie.Trie[K0, D],
+	order K1,
+	depth int,
+	extract func(*trie.Trie[K0, D]) T,
+	yield func(T) bool,
+) bool {
+	if t == nil || t.IsEmptyLeaf() {
+		return true
+	}
+	if t.IsNonEmptyLeaf() {
+		return yield(extract(t))
+	}
+	b := int(order.Bit(depth))
+	// First traverse the branch according to order
+	if !trieIterAtDepth(t.Branch(b), order, depth+1, extract, yield) {
+		return false
+	}
+	// Then traverse the other branch
+	return trieIterAtDepth(t.Branch(1-b), order, depth+1, extract, yield)
+}
+
+// AllEntriesIter returns an iterator over all entries (key + value) stored in
+// the trie `t` sorted by their keys in the supplied `order`.
+// The iterator allows processing entries one at a time without loading all of
+// them into memory.
+func AllEntriesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[trie.Entry[K0, D]] {
+	return trieIter(t, order, func(node *trie.Trie[K0, D]) trie.Entry[K0, D] {
+		return trie.Entry[K0, D]{Key: *node.Key(), Data: node.Data()}
+	})
+}
+
 // AllValues returns all values stored in the trie `t` sorted by their keys in
 // the supplied `order`.
 func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
@@ -42,6 +88,26 @@ func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 		out[i] = entry.Data
 	}
 	return out
+}
+
+// AllValuesIter returns an iterator over all values stored in the trie `t`
+// sorted by their keys in the supplied `order`.
+// The iterator allows processing values one at a time without loading all of
+// them into memory.
+func AllValuesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[D] {
+	return trieIter(t, order, func(node *trie.Trie[K0, D]) D {
+		return node.Data()
+	})
+}
+
+// AllKeysIter returns an iterator over all keys stored in the trie `t`
+// sorted by their keys in the supplied `order`.
+// The iterator allows processing keys one at a time without loading all of
+// them into memory.
+func AllKeysIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[K0] {
+	return trieIter(t, order, func(node *trie.Trie[K0, D]) K0 {
+		return *node.Key()
+	})
 }
 
 // FindPrefixOfKey checks whether the trie contains a leave whose key is a

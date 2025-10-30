@@ -46,6 +46,205 @@ func TestAllEntries(t *testing.T) {
 	}
 }
 
+func TestAllEntriesIter(t *testing.T) {
+	tr := trie.New[bitstr.Key, string]()
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
+	}
+	tr.AddMany(entries...)
+
+	t.Run("forward order (0 -> 1)", func(t *testing.T) {
+		expected := AllEntries(tr, bitstr.Key("000"))
+		var iterResult []trie.Entry[bitstr.Key, string]
+		for entry := range AllEntriesIter(tr, bitstr.Key("000")) {
+			iterResult = append(iterResult, entry)
+		}
+		require.Equal(t, expected, iterResult)
+	})
+
+	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
+		expected := AllEntries(tr, bitstr.Key("111"))
+		var iterResult []trie.Entry[bitstr.Key, string]
+		for entry := range AllEntriesIter(tr, bitstr.Key("111")) {
+			iterResult = append(iterResult, entry)
+		}
+		require.Equal(t, expected, iterResult)
+	})
+
+	t.Run("empty trie", func(t *testing.T) {
+		emptyTrie := trie.New[bitstr.Key, string]()
+		expected := AllEntries(emptyTrie, bitstr.Key("000"))
+		var iterResult []trie.Entry[bitstr.Key, string]
+		for entry := range AllEntriesIter(emptyTrie, bitstr.Key("000")) {
+			iterResult = append(iterResult, entry)
+		}
+		require.Equal(t, expected, iterResult)
+		require.Empty(t, iterResult)
+	})
+
+	t.Run("single entry", func(t *testing.T) {
+		singleTrie := trie.New[bitstr.Key, string]()
+		singleEntry := trie.Entry[bitstr.Key, string]{Key: bitstr.Key("101"), Data: "solo"}
+		singleTrie.Add(singleEntry.Key, singleEntry.Data)
+		expected := AllEntries(singleTrie, bitstr.Key("000"))
+		var iterResult []trie.Entry[bitstr.Key, string]
+		for entry := range AllEntriesIter(singleTrie, bitstr.Key("000")) {
+			iterResult = append(iterResult, entry)
+		}
+		require.Equal(t, expected, iterResult)
+	})
+
+	t.Run("early termination", func(t *testing.T) {
+		count := 0
+		for range AllEntriesIter(tr, bitstr.Key("000")) {
+			count++
+			if count == 2 {
+				break
+			}
+		}
+		require.Equal(t, 2, count)
+	})
+}
+
+func TestAllValuesIter(t *testing.T) {
+	tr := trie.New[bitstr.Key, string]()
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
+	}
+	tr.AddMany(entries...)
+
+	t.Run("forward order (0 -> 1)", func(t *testing.T) {
+		expected := AllValues(tr, bitstr.Key("000"))
+		var iterResult []string
+		for value := range AllValuesIter(tr, bitstr.Key("000")) {
+			iterResult = append(iterResult, value)
+		}
+		require.Equal(t, expected, iterResult)
+	})
+
+	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
+		expected := AllValues(tr, bitstr.Key("111"))
+		var iterResult []string
+		for value := range AllValuesIter(tr, bitstr.Key("111")) {
+			iterResult = append(iterResult, value)
+		}
+		require.Equal(t, expected, iterResult)
+	})
+
+	t.Run("empty trie", func(t *testing.T) {
+		emptyTrie := trie.New[bitstr.Key, string]()
+		expected := AllValues(emptyTrie, bitstr.Key("000"))
+		iterResult := []string{}
+		for value := range AllValuesIter(emptyTrie, bitstr.Key("000")) {
+			iterResult = append(iterResult, value)
+		}
+		require.Equal(t, expected, iterResult)
+		require.Empty(t, iterResult)
+	})
+
+	t.Run("single entry", func(t *testing.T) {
+		singleTrie := trie.New[bitstr.Key, string]()
+		singleEntry := trie.Entry[bitstr.Key, string]{Key: bitstr.Key("101"), Data: "solo"}
+		singleTrie.Add(singleEntry.Key, singleEntry.Data)
+		expected := AllValues(singleTrie, bitstr.Key("000"))
+		var iterResult []string
+		for value := range AllValuesIter(singleTrie, bitstr.Key("000")) {
+			iterResult = append(iterResult, value)
+		}
+		require.Equal(t, expected, iterResult)
+	})
+
+	t.Run("early termination", func(t *testing.T) {
+		count := 0
+		for range AllValuesIter(tr, bitstr.Key("000")) {
+			count++
+			if count == 3 {
+				break
+			}
+		}
+		require.Equal(t, 3, count)
+	})
+}
+
+func TestAllKeysIter(t *testing.T) {
+	tr := trie.New[bitstr.Key, string]()
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
+	}
+	tr.AddMany(entries...)
+
+	t.Run("forward order (0 -> 1)", func(t *testing.T) {
+		expectedEntries := AllEntries(tr, bitstr.Key("000"))
+		var expectedKeys []bitstr.Key
+		for _, entry := range expectedEntries {
+			expectedKeys = append(expectedKeys, entry.Key)
+		}
+		var iterResult []bitstr.Key
+		for key := range AllKeysIter(tr, bitstr.Key("000")) {
+			iterResult = append(iterResult, key)
+		}
+		require.Equal(t, expectedKeys, iterResult)
+	})
+
+	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
+		expectedEntries := AllEntries(tr, bitstr.Key("111"))
+		var expectedKeys []bitstr.Key
+		for _, entry := range expectedEntries {
+			expectedKeys = append(expectedKeys, entry.Key)
+		}
+		var iterResult []bitstr.Key
+		for key := range AllKeysIter(tr, bitstr.Key("111")) {
+			iterResult = append(iterResult, key)
+		}
+		require.Equal(t, expectedKeys, iterResult)
+	})
+
+	t.Run("empty trie", func(t *testing.T) {
+		emptyTrie := trie.New[bitstr.Key, string]()
+		var iterResult []bitstr.Key
+		for key := range AllKeysIter(emptyTrie, bitstr.Key("000")) {
+			iterResult = append(iterResult, key)
+		}
+		require.Empty(t, iterResult)
+	})
+
+	t.Run("single entry", func(t *testing.T) {
+		singleTrie := trie.New[bitstr.Key, string]()
+		singleEntry := trie.Entry[bitstr.Key, string]{Key: bitstr.Key("101"), Data: "solo"}
+		singleTrie.Add(singleEntry.Key, singleEntry.Data)
+		expectedEntries := AllEntries(singleTrie, bitstr.Key("000"))
+		var expectedKeys []bitstr.Key
+		for _, entry := range expectedEntries {
+			expectedKeys = append(expectedKeys, entry.Key)
+		}
+		var iterResult []bitstr.Key
+		for key := range AllKeysIter(singleTrie, bitstr.Key("000")) {
+			iterResult = append(iterResult, key)
+		}
+		require.Equal(t, expectedKeys, iterResult)
+	})
+
+	t.Run("early termination", func(t *testing.T) {
+		count := 0
+		for range AllKeysIter(tr, bitstr.Key("000")) {
+			count++
+			if count == 1 {
+				break
+			}
+		}
+		require.Equal(t, 1, count)
+	})
+}
+
 func TestFindPrefixOfKey(t *testing.T) {
 	tr := trie.New[bitstr.Key, struct{}]()
 

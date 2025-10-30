@@ -509,6 +509,24 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 	if k == 0 {
 		return nil
 	}
+	if dests.IsLeaf() {
+		if !dests.HasKey() {
+			return nil
+		}
+		// Single destination case
+		m := make(map[V1][]V0, 1)
+		dest := dests.Data()
+		m[dest] = make([]V0, 0, expectedCap)
+
+		// Get items and append
+		if items.IsNonEmptyLeaf() {
+			m[dest] = append(m[dest], items.Data())
+		} else {
+			allItems := AllValues(items, zeroKey)
+			m[dest] = append(m[dest], allItems...)
+		}
+		return m
+	}
 	destBranches := []*trie.Trie[K, V1]{
 		dests.Branch(0),
 		dests.Branch(1),
@@ -516,16 +534,6 @@ func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.
 	destValues := [][]V1{
 		AllValues(dests.Branch(0), zeroKey),
 		AllValues(dests.Branch(1), zeroKey),
-	}
-	if dests.IsLeaf() {
-		if !dests.HasKey() {
-			return nil
-		}
-		b := int((*dests.Key()).Bit(depth))
-		destValues[b] = []V1{dests.Data()}
-		destValues[1-b] = nil
-		destBranches[b] = dests
-		destBranches[1-b] = nil
 	}
 	m := make(map[V1][]V0, len(destValues[0])+len(destValues[1]))
 	for i := range destValues {

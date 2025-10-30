@@ -724,11 +724,12 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	prefixLenSum := 0
 	if !s.schedule.IsEmptyLeaf() {
 		// Take average prefix length of all scheduled prefixes.
-		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-		for _, entry := range scheduleEntries {
-			prefixLenSum += len(entry.Key)
+		nScheduleEntries := 0
+		for k := range keyspace.KeysIter(s.schedule, s.order) {
+			prefixLenSum += k.BitLen()
+			nScheduleEntries++
 		}
-		s.cachedAvgPrefixLen = prefixLenSum / len(scheduleEntries)
+		s.cachedAvgPrefixLen = prefixLenSum / nScheduleEntries
 		s.lastAvgPrefixLen = time.Now()
 	}
 	return s.cachedAvgPrefixLen
@@ -1113,19 +1114,26 @@ func (s *SweepingProvider) handleReprovide() {
 			// no regions has been reprovided since. Add all regions to the reprovide
 			// queue. This only happens if the main thread gets blocked for more than
 			// reprovideInterval.
+			var nextEntry trie.Entry[bitstr.Key, time.Duration]
+			firstEntry := true
 			nextKeyFound := false
-			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-			next = &scheduleEntries[0]
-			for _, entry := range scheduleEntries {
+			for entry := range keyspace.EntriesIter(s.schedule, s.order) {
+				if firstEntry {
+					// If no key is found after currentTimeOffset, take the first entry
+					// as nextEntry.
+					nextEntry = entry
+					firstEntry = false
+				}
 				// Add all regions from the schedule to the reprovide queue. The next
 				// region to be scheduled for reprovide is the one immediately
 				// following the current time offset in the schedule.
 				if !nextKeyFound && entry.Data > currentTimeOffset {
-					next = &entry
+					nextEntry = entry
 					nextKeyFound = true
 				}
 				s.reprovideQueue.Enqueue(entry.Key)
 			}
+			next = &nextEntry
 			// Don't reprovide any region now, but schedule the next one. All regions
 			// are expected to be reprovided when the provider is catching up with
 			// failed regions.
@@ -1254,9 +1262,9 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 		if subtrie, ok := keyspace.FindSubtrie(prefixTrie, prefix); ok {
 			// If prefixes already contains superstrings of prefix, consolidate the
 			// keys to prefix.
-			for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-				mhs = append(mhs, prefixes[entry.Key]...)
-				delete(prefixes, entry.Key)
+			for k := range keyspace.KeysIter(subtrie, s.order) {
+				mhs = append(mhs, prefixes[k]...)
+				delete(prefixes, k)
 			}
 			keyspace.PruneSubtrie(prefixTrie, prefix)
 		}
@@ -1320,10 +1328,9 @@ func (s *SweepingProvider) onOnline() {
 			// When skipping bootstrap reprovide, still initialize the schedule timer
 			// to start the normal reprovide cycle from the beginning.
 			s.scheduleLk.Lock()
-			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-			if len(scheduleEntries) > 0 {
-				first := &scheduleEntries[0]
-				s.scheduleNextReprovideNoLock(first.Key, s.timeUntil(first.Data))
+			for entry := range keyspace.EntriesIter(s.schedule, s.order) {
+				s.scheduleNextReprovideNoLock(entry.Key, s.timeUntil(entry.Data))
+				break
 			}
 			s.scheduleLk.Unlock()
 		}
@@ -1340,12 +1347,7 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 	keyspace.CoalesceTrie(recentlyReprovided)
 	// Take a copy of schedule from which we remove recently reprovided regions.
 	toReprovideTrie := keyspace.SubtractTrie(s.schedule, recentlyReprovided)
-	toReprovideEntries := keyspace.AllEntries(toReprovideTrie, s.order)
-	toReprovideKeys := make([]bitstr.Key, len(toReprovideEntries))
-	for i, entry := range toReprovideEntries {
-		toReprovideKeys[i] = entry.Key
-	}
-	s.reprovideQueue.Enqueue(toReprovideKeys...)
+	s.reprovideQueue.Enqueue(keyspace.AllKeys(toReprovideTrie, s.order)...)
 }
 
 // persistSuccessfulReprovide logs a successful reprovide to the datastore for
@@ -2001,9 +2003,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		// records are available in the DHT.
 		// This is a corner case that is required for Kubo, as Keystore.Reset()
 		// takes a while.
-		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {
-			s.reprovideQueue.Enqueue(entry.Key)
-		}
+		s.reprovideQueue.Enqueue(keyspace.AllKeys(s.schedule, s.order)...)
 	}
 	s.scheduleLk.Unlock()
 	return nil

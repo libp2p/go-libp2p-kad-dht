@@ -56,11 +56,10 @@ func (s *SweepingProvider) Stats() stats.Stats {
 	nextPrefix := s.scheduleCursor
 	ok, nextReprovideOffset := trie.Find(s.schedule, nextPrefix)
 	if avgPrefixLenCached >= 0 && !s.schedule.IsEmptyLeaf() {
-		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-		scheduleSize = int64(len(scheduleEntries))
 		prefixSum := 0.
-		for _, e := range scheduleEntries {
-			prefixSum += float64(e.Key.BitLen())
+		for k := range keyspace.KeysIter(s.schedule, s.order) {
+			prefixSum += float64(k.BitLen())
+			scheduleSize++
 		}
 		avgPrefixLen = prefixSum / float64(scheduleSize)
 	} else {

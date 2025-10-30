@@ -9,6 +9,8 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
+var zeroKey = bit256.ZeroKey()
+
 type entry struct {
 	time time.Time
 	val  int64
@@ -37,13 +39,12 @@ func NewCycleStats(maxDelay time.Duration) CycleStats {
 
 // Cleanup removes entries that have exceeded the specified deadline duration.
 func (s *CycleStats) Cleanup(deadline time.Duration) {
-	allEntries := keyspace.AllEntries(s.trie, bit256.ZeroKey())
 	now := time.Now()
-	for _, e := range allEntries {
+	for e := range keyspace.EntriesIter(s.trie, zeroKey) {
 		if e.Data.time.Add(deadline).Before(now) {
 			s.trie.Remove(e.Key)
 			if subtrie, ok := keyspace.FindSubtrie(s.queue, e.Key); ok {
-				for _, qe := range keyspace.AllEntries(subtrie, bit256.ZeroKey()) {
+				for qe := range keyspace.EntriesIter(subtrie, zeroKey) {
 					s.trie.Add(qe.Key, qe.Data)
 				}
 			}
@@ -91,7 +92,7 @@ func (s *CycleStats) Add(prefix bitstr.Key, val int64) {
 	// Target keyspace is fully covered by queue entries. Replace target with
 	// queue entries.
 	keyspace.PruneSubtrie(s.trie, target)
-	for _, e := range keyspace.AllEntries(subtrie, bit256.ZeroKey()) {
+	for e := range keyspace.EntriesIter(subtrie, zeroKey) {
 		s.trie.Add(e.Key, e.Data)
 	}
 }
@@ -99,7 +100,7 @@ func (s *CycleStats) Add(prefix bitstr.Key, val int64) {
 // Sum returns the sum of all values in the trie.
 func (s *CycleStats) Sum() int64 {
 	var sum int64
-	for _, v := range keyspace.AllValues(s.trie, bit256.ZeroKey()) {
+	for v := range keyspace.ValuesIter(s.trie, zeroKey) {
 		sum += v.val
 	}
 	return sum
@@ -107,15 +108,16 @@ func (s *CycleStats) Sum() int64 {
 
 // Avg returns the average of all values in the trie.
 func (s *CycleStats) Avg() float64 {
-	allValues := keyspace.AllValues(s.trie, bit256.ZeroKey())
-	if len(allValues) == 0 {
+	if s.trie == nil || s.trie.IsEmptyLeaf() {
 		return 0
 	}
 	var sum int64
-	for _, v := range allValues {
+	var count float64
+	for v := range keyspace.ValuesIter(s.trie, zeroKey) {
 		sum += v.val
+		count++
 	}
-	return float64(sum) / float64(len(allValues))
+	return float64(sum) / count
 }
 
 // Count returns the number of entries in the trie.

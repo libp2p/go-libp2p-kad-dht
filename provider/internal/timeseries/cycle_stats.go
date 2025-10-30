@@ -40,7 +40,8 @@ func NewCycleStats(maxDelay time.Duration) CycleStats {
 // Cleanup removes entries that have exceeded the specified deadline duration.
 func (s *CycleStats) Cleanup(deadline time.Duration) {
 	now := time.Now()
-	for e := range keyspace.EntriesIter(s.trie, zeroKey) {
+	// Collect all entries first to avoid modifying trie while iterating
+	for _, e := range keyspace.AllEntries(s.trie, zeroKey) {
 		if e.Data.time.Add(deadline).Before(now) {
 			s.trie.Remove(e.Key)
 			if subtrie, ok := keyspace.FindSubtrie(s.queue, e.Key); ok {

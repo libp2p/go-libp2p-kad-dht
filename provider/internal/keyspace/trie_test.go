@@ -318,6 +318,51 @@ func TestAllValues(t *testing.T) {
 	})
 }
 
+func TestAllKeys(t *testing.T) {
+	tr := trie.New[bitstr.Key, string]()
+	entries := []trie.Entry[bitstr.Key, string]{
+		{Key: bitstr.Key("000"), Data: "apple"},
+		{Key: bitstr.Key("010"), Data: "banana"},
+		{Key: bitstr.Key("101"), Data: "cherry"},
+		{Key: bitstr.Key("111"), Data: "durian"},
+	}
+	tr.AddMany(entries...)
+
+	t.Run("forward order (0 -> 1)", func(t *testing.T) {
+		// AllKeys should match KeysIter collected into a slice
+		result := AllKeys(tr, bitstr.Key("000"))
+		var expected []bitstr.Key
+		for key := range KeysIter(tr, bitstr.Key("000")) {
+			expected = append(expected, key)
+		}
+		require.Equal(t, expected, result)
+	})
+
+	t.Run("reverse order (1 -> 0)", func(t *testing.T) {
+		// AllKeys should match KeysIter collected into a slice
+		result := AllKeys(tr, bitstr.Key("111"))
+		var expected []bitstr.Key
+		for key := range KeysIter(tr, bitstr.Key("111")) {
+			expected = append(expected, key)
+		}
+		require.Equal(t, expected, result)
+	})
+
+	t.Run("empty trie", func(t *testing.T) {
+		emptyTrie := trie.New[bitstr.Key, string]()
+		result := AllKeys(emptyTrie, bitstr.Key("000"))
+		require.Empty(t, result)
+		require.NotNil(t, result) // Should be empty slice, not nil
+	})
+
+	t.Run("nil trie", func(t *testing.T) {
+		var nilTrie *trie.Trie[bitstr.Key, string]
+		result := AllKeys(nilTrie, bitstr.Key("000"))
+		require.Empty(t, result)
+		require.NotNil(t, result) // Should be empty slice, not nil
+	})
+}
+
 func TestFindPrefixOfKey(t *testing.T) {
 	tr := trie.New[bitstr.Key, struct{}]()
 

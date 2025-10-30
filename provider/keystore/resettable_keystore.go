@@ -8,6 +8,7 @@ import (
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
+	"github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
@@ -82,6 +83,7 @@ func NewResettableKeystore(d ds.Batching, opts ...Option) (*ResettableKeystore, 
 			requests:   make(chan operation),
 			close:      make(chan struct{}),
 			done:       make(chan struct{}),
+			logger:     log.Logger(cfg.loggerName),
 		},
 		altDs:    namespace.Wrap(d, ds.NewKey(cfg.path+"/1")),
 		resetOps: make(chan resetOp),

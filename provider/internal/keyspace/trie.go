@@ -107,6 +107,19 @@ func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order
 	return result
 }
 
+// AllKeys returns all keys stored in the trie `t` sorted by their keys in
+// the supplied `order`.
+func AllKeys[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []K0 {
+	if t == nil || t.IsEmptyLeaf() {
+		return []K0{}
+	}
+	result := make([]K0, 0, t.Size())
+	for key := range KeysIter(t, order) {
+		result = append(result, key)
+	}
+	return result
+}
+
 // FindPrefixOfKey checks whether the trie contains a leave whose key is a
 // prefix or exact match of `k`.
 //

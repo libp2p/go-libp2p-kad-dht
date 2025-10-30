@@ -1670,6 +1670,148 @@ func TestWithHostOption(t *testing.T) {
 	})
 }
 
+func TestSkipBootstrapReprovide(t *testing.T) {
+	testCases := []struct {
+		name                   string
+		skipBootstrapReprovide *bool // nil means option not set
+		expectBootstrapProvide bool
+	}{
+		{
+			name:                   "Default (option not set)",
+			skipBootstrapReprovide: nil,
+			expectBootstrapProvide: true,
+		},
+		{
+			name:                   "Explicitly set to false",
+			skipBootstrapReprovide: func() *bool { b := false; return &b }(),
+			expectBootstrapProvide: true,
+		},
+		{
+			name:                   "Set to true",
+			skipBootstrapReprovide: func() *bool { b := true; return &b }(),
+			expectBootstrapProvide: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := context.Background()
+				pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka")
+				require.NoError(t, err)
+
+				replicationFactor := 2
+				peerPrefixBitlen := 2
+				require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+				var nPeers byte = 1 << peerPrefixBitlen
+				peers := make([]peer.ID, nPeers)
+				for i := range nPeers {
+					b := i << (bitsPerByte - peerPrefixBitlen)
+					k := [32]byte{b}
+					peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
+					require.NoError(t, err)
+				}
+
+				reprovideInterval := time.Hour
+
+				router := &mockRouter{
+					getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+						sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+						return sortedPeers[:min(replicationFactor, len(peers))], nil
+					},
+				}
+
+				provideCount := atomic.Int32{}
+				msgSender := &mockMsgSender{
+					sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+						provideCount.Add(1)
+						return nil
+					},
+				}
+
+				ds := dssync.MutexWrap(datastore.NewMapDatastore())
+				ks, err := keystore.NewKeystore(ds)
+				require.NoError(t, err)
+				defer ks.Close()
+
+				// Add keys to keystore before starting provider
+				mhs := random.Multihashes(1)
+				ks.Put(ctx, mhs...)
+
+				provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
+
+				// Build options
+				opts := []Option{
+					WithReprovideInterval(reprovideInterval),
+					WithReplicationFactor(replicationFactor),
+					WithMaxWorkers(1),
+					WithDedicatedBurstWorkers(0),
+					WithDedicatedPeriodicWorkers(0),
+					WithPeerID(pid),
+					WithRouter(router),
+					WithMessageSender(msgSender),
+					WithSelfAddrs(getMockAddrs(t)),
+					WithDatastore(provDs),
+					WithKeystore(ks),
+				}
+
+				// Add the skip option if specified in test case
+				if tc.skipBootstrapReprovide != nil {
+					opts = append(opts, WithSkipBootstrapReprovide(*tc.skipBootstrapReprovide))
+				}
+
+				prov, err := New(opts...)
+				require.NoError(t, err)
+				defer prov.Close()
+
+				synctest.Wait()
+				require.True(t, prov.connectivity.IsOnline())
+
+				// Verify schedule was created
+				prov.scheduleLk.Lock()
+				nRegions := prov.schedule.Size()
+				prov.scheduleLk.Unlock()
+				require.Greater(t, nRegions, 0, "schedule should be populated")
+
+				expectedProvides := int32(len(mhs) * replicationFactor)
+
+				if tc.expectBootstrapProvide {
+					// Verify that bootstrap reprovide happened
+					require.Equal(t, expectedProvides, provideCount.Load(),
+						"all keys should have been provided during bootstrap")
+				} else {
+					// Verify that bootstrap reprovide did NOT happen
+					require.Equal(t, int32(0), provideCount.Load(),
+						"no provides should occur when skipBootstrapReprovide is true")
+
+					// Verify that the schedule timer was initialized
+					prov.scheduleLk.Lock()
+					require.False(t, prov.scheduleTimerStartedAt.IsZero(),
+						"schedule timer should have been initialized")
+					require.NotEqual(t, bitstr.Key(""), prov.scheduleCursor,
+						"schedule cursor should have been set")
+					require.Greater(t, prov.schedule.Size(), 0, "schedule should have regions")
+					prov.scheduleLk.Unlock()
+
+					t.Log(prov.schedule.Size())
+
+					// When skipping bootstrap reprovide, the periodic reprovide cycle
+					// starts with regions distributed across the interval. Unlike the
+					// default behavior (which enqueues all regions immediately on
+					// bootstrap), regions are reprovided as their scheduled times arrive
+					// throughout the cycle.
+					time.Sleep(reprovideInterval)
+					synctest.Wait()
+
+					// All keys should have been reprovided at least once
+					require.Equal(t, provideCount.Load(), expectedProvides,
+						"all keys should be reprovided after sufficient time when skipping bootstrap")
+				}
+			})
+		})
+	}
+}
+
 func TestResumeReprovides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()

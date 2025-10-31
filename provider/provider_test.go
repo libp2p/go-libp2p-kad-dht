@@ -152,7 +152,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 	nKeys := 16
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
-	mhs := genMultihashes(nKeys)
+	mhs := [][]mh.Multihash{genMultihashes(nKeys)}
 	pmes := &pb.Message{}
 
 	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
@@ -195,15 +195,22 @@ func TestKeysAllocationsToPeers(t *testing.T) {
 	}
 	peersTrie.AddMany(peerEntries...)
 	keysAllocations := keyspace.AllocateToKClosest(keysTrie, peersTrie, replicationFactor)
+	// Flatten the batches into a single slice per peer
+	flattened := make(map[peer.ID][]mh.Multihash)
+	for dest, batches := range keysAllocations {
+		for _, batch := range batches {
+			flattened[dest] = append(flattened[dest], batch...)
+		}
+	}
 
 	for _, c := range mhs {
 		k := sha256.Sum256(c)
 		closestPeers := kb.SortClosestPeers(peers, k[:])[:replicationFactor]
 		for _, p := range closestPeers[:replicationFactor] {
-			require.Contains(t, keysAllocations[p], c)
+			require.Contains(t, flattened[p], c)
 		}
 		for _, p := range closestPeers[replicationFactor:] {
-			require.NotContains(t, keysAllocations[p], c)
+			require.NotContains(t, flattened[p], c)
 		}
 	}
 }

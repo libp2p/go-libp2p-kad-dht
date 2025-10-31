@@ -12,6 +12,8 @@ import (
 	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
+var zeroKey = bit256.ZeroKey()
+
 // prefixQueue is a non-thread safe queue storing non overlapping, unique
 // prefixes of kademlia keys, in the order they were enqueued.
 type prefixQueue struct {
@@ -85,12 +87,7 @@ func (q *prefixQueue) removeSuperstrings(prefix bitstr.Key) int {
 	if !ok {
 		return -1
 	}
-	entries := keyspace.AllEntries(subtrie, bit256.ZeroKey())
-	toRemove := make([]bitstr.Key, len(entries))
-	for i, e := range entries {
-		toRemove[i] = e.Key
-	}
-	return q.removePrefixesFromQueue(toRemove)
+	return q.removePrefixesFromQueue(keyspace.AllKeys(subtrie, zeroKey))
 }
 
 // removeSubtrieFromQueue removes all keys in the provided subtrie from q.queue

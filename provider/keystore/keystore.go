@@ -138,7 +138,7 @@ func dsKey[K kad.Key[K]](k K, prefixBits int) ds.Key {
 //
 // Returns the reconstructed 256-bit key or an error if base64URL decoding fails.
 func (s *keystore) decodeKey(dsk string) (bit256.Key, error) {
-	bs := make([]byte, 32)
+	var bs [bit256.KeyLen]byte
 	// Extract individual bits from odd positions (skip '/' separators)
 	for i := range s.prefixBits {
 		if dsk[2*i+1] == '1' {
@@ -150,8 +150,11 @@ func (s *keystore) decodeKey(dsk string) (bit256.Key, error) {
 	if err != nil {
 		return bit256.Key{}, err
 	}
+	if len(decoded) != bit256.KeyLen-(s.prefixBits/8) {
+		return bit256.Key{}, fmt.Errorf("invalid decoded length: expected %d, got %d", keyspace.KeyLen-(s.prefixBits/8), len(decoded))
+	}
 	copy(bs[s.prefixBits/8:], decoded)
-	return bit256.NewKey(bs), nil
+	return bit256.NewKeyFromArray(bs), nil
 }
 
 // worker processes operations sequentially in a single goroutine

@@ -1781,12 +1781,21 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			continue
 		}
 		// Add keys to local provider store
+		var keys []mh.Multihash
+		gatherKeys := !reprovide || s.logger.Level() <= zapcore.DebugLevel
 		nKeys := 0
 		for h := range keyspace.ValuesIter(r.Keys, s.order) {
 			s.addLocalRecord(h)
 			nKeys++
+			if gatherKeys {
+				keys = append(keys, h)
+			}
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
+		// Prune keys and peers from region to free memory while records are sent
+		// over the network.
+		keyspace.PruneSubtrie(r.Keys, bitstr.Key(""))
+		keyspace.PruneSubtrie(r.Peers, bitstr.Key(""))
 		reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
 
 		s.stats.cycleStatsLk.Lock()
@@ -1809,14 +1818,12 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			if reprovide {
 				s.failedReprovide(r.Prefix, err)
 			} else { // provide operation
-				s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
+				s.failedProvide(r.Prefix, keys, err)
 			}
 			continue
 		}
 		s.increaseProvideCounter(nKeys)
-		if s.logger.Level() <= zapcore.DebugLevel {
-			s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", keyspace.AllValues(r.Keys, s.order))
-		}
+		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", keys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)

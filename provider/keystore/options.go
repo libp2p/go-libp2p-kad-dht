@@ -81,6 +81,12 @@ func WithBatchSize(size int) Option {
 }
 
 // WithLoggerName sets the logger name for the keystore.
+//
+// Note: We want to use the same logger as the `SweepingProvider` in order to
+// keep the number of loggers to monitor low and consistent. `SweepingProvider`
+// needs to accept custom logger names, because multiple instances can exist
+// concurrently, and we want to distinguish the log outputs. Hence, we may need
+// to pass the logger name from outside.
 func WithLoggerName(name string) Option {
 	return func(cfg *config) error {
 		if len(name) == 0 {

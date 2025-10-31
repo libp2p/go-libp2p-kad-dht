@@ -378,120 +378,116 @@ func sortBitstrKeysByOrder[K kad.Key[K]](keys []bitstr.Key, order K) {
 	})
 }
 
-// mapMerge merges all key-value pairs from the source map into the destination
-// map. Values from the source are appended to existing slices in the
-// destination.
-func mapMerge[K comparable, V any](dst, src map[K][]V) {
-	for k, vs := range src {
-		dst[k] = append(dst[k], vs...)
-	}
-}
-
 // AllocateToKClosest distributes items from the items trie to the k closest
-// destinations in the dests trie based on XOR distance between their keys.
+// destinations in batches based on XOR distance between their keys.
 //
-// The algorithm uses the trie structure to efficiently compute proximity
-// without explicit distance calculations. Items are allocated to destinations
-// by traversing both tries simultaneously and selecting the k destinations
-// with the smallest XOR distance to each item's key.
+// The algorithm uses the trie structure to efficiently compute proximity without
+// explicit distance calculations. Items are allocated to destinations by traversing
+// both tries simultaneously and selecting the k destinations with the smallest XOR
+// distance to each item's key.
 //
-// Returns a map where each destination value is associated with all items
-// allocated to it. If k is 0 or either trie is empty, returns an empty map.
-func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][]V0 {
-	return allocateToKClosestAtDepth(items, dests, k, 0)
+// Memory optimization is achieved by sharing batches of items among
+// destinations instead of duplicating them, reducing overhead when multiple
+// destinations receive the same batches.
+//
+// Returns a map where each destination has a slice of batches. Each batch is a slice
+// of items. To iterate: for each peer, for each batch, for each key.
+func AllocateToKClosest[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k int) map[V1][][]V0 {
+	if dests.IsEmptyLeaf() || items.IsEmptyLeaf() || k == 0 {
+		return nil
+	}
+	// Expected number of batches per destination
+	result := make(map[V1][][]V0, 0)
+	allocateToKClosestAtDepth(items, dests, k, 0, result)
+	return result
 }
 
-// allocateToKClosestAtDepth performs the recursive allocation algorithm at a specific
-// trie depth. At each depth, it processes both branches (0 and 1) of the trie,
-// determining which destinations are closest to the items based on matching bit
-// patterns at the current depth.
-//
-// The algorithm prioritizes destinations in the same branch as items (smaller XOR
-// distance) and recursively processes deeper levels when more granular distance
-// calculations are needed to select exactly k destinations.
+// allocateToKClosestAtDepth performs recursive allocation using batch sharing.
+// Instead of copying individual items, it creates batches at recursion leaves and
+// shares the batch slice across destinations.
 //
 // Parameters:
 //   - items: trie containing items to be allocated
 //   - dests: trie containing destination candidates
 //   - k: maximum number of destinations to allocate each item to
 //   - depth: current bit depth in the trie traversal
-//
-// Returns a map of destination values to their allocated items.
-func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth int) map[V1][]V0 {
+//   - result: output map to write batch allocations into (modified in-place)
+func allocateToKClosestAtDepth[K kad.Key[K], V0 any, V1 comparable](
+	items *trie.Trie[K, V0], dests *trie.Trie[K, V1], k, depth int, result map[V1][][]V0,
+) {
 	if k == 0 {
-		return nil
-	}
-	destBranches := []*trie.Trie[K, V1]{
-		dests.Branch(0),
-		dests.Branch(1),
-	}
-	destValues := [][]V1{
-		AllValues(dests.Branch(0), zeroKey),
-		AllValues(dests.Branch(1), zeroKey),
+		return
 	}
 	if dests.IsLeaf() {
 		if !dests.HasKey() {
-			return nil
+			return
 		}
-		b := int((*dests.Key()).Bit(depth))
-		destValues[b] = []V1{dests.Data()}
-		destValues[1-b] = nil
-		destBranches[b] = dests
-		destBranches[1-b] = nil
+		// Single destination: create batch and add to result
+		dest := dests.Data()
+		batch := AllValues(items, zeroKey)
+		if len(batch) == 0 && items.IsNonEmptyLeaf() {
+			batch = []V0{items.Data()}
+		}
+		result[dest] = append(result[dest], batch)
+		return
 	}
-	m := make(map[V1][]V0, len(destValues[0])+len(destValues[1]))
-	for i := range destValues {
-		// Assign all items from branch i
 
-		matchingDestsBranch := destBranches[i]
-		otherDestsBranch := destBranches[1-i]
-		matchingDests := destValues[i]
-		otherDests := destValues[1-i]
+	destBranches := []*trie.Trie[K, V1]{dests.Branch(0), dests.Branch(1)}
+	destBranchSize := [2]int{destBranches[0].Size(), destBranches[1].Size()}
+
+	// Lazy evaluation of destination values
+	var destValues [2][]V1
+	getDestValues := func(i int) []V1 {
+		if destValues[i] == nil && destBranches[i] != nil && !destBranches[i].IsEmptyLeaf() {
+			destValues[i] = AllValues(destBranches[i], zeroKey)
+		}
+		return destValues[i]
+	}
+
+	// Process each branch
+	for i := range 2 {
+		sameBranch := destBranches[i]
+		otherBranch := destBranches[1-i]
+		sameCount := destBranchSize[i]
+		otherCount := destBranchSize[1-i]
 
 		matchingItemsBranch := items.Branch(i)
 		if matchingItemsBranch == nil || matchingItemsBranch.IsEmptyLeaf() {
-			// No matching items
 			if !items.IsNonEmptyLeaf() || int((*items.Key()).Bit(depth)) != i {
-				// items' current branch is empty, skip it
 				continue
 			}
-			// items' current branch contains a single leaf
 			matchingItemsBranch = items
 		}
-		if nMatchingDests := len(matchingDests); nMatchingDests <= k {
-			matchingItems := AllValues(matchingItemsBranch, zeroKey)
-			if len(matchingItems) == 0 {
-				matchingItems = []V0{items.Data()}
+		if sameCount <= k {
+			// Create batch from matching items
+			batch := AllValues(matchingItemsBranch, zeroKey)
+			if len(batch) == 0 {
+				batch = []V0{items.Data()}
 			}
-			// Allocate matching items to the matching dests branch
-			for _, dest := range matchingDests {
-				m[dest] = append(m[dest], matchingItems...)
+			// Share this batch across all same-branch destinations
+			for _, dest := range getDestValues(i) {
+				result[dest] = append(result[dest], batch)
 			}
-			if nMatchingDests == k || len(otherDests) == 0 {
-				// Items were assigned to all k dests, or other branch is empty.
+
+			if sameCount == k || otherCount == 0 {
 				continue
 			}
 
-			nMissingDests := k - nMatchingDests
-			if len(otherDests) <= nMissingDests {
-				// Other branch contains at most the missing number of dests to be
-				// allocated to. Allocate matching items to the other dests branch.
-				for _, dest := range otherDests {
-					m[dest] = append(m[dest], matchingItems...)
+			nMissingDests := k - sameCount
+			if otherCount <= nMissingDests {
+				// Share batch with other branch destinations too
+				for _, dest := range getDestValues(1 - i) {
+					result[dest] = append(result[dest], batch)
 				}
 			} else {
-				// Other branch contains more than the missing number of dests, go one
-				// level deeper to assign matching items to the closest dests.
-				allocs := allocateToKClosestAtDepth(matchingItemsBranch, otherDestsBranch, nMissingDests, depth+1)
-				mapMerge(m, allocs)
+				// Recurse into other branch
+				allocateToKClosestAtDepth(matchingItemsBranch, otherBranch, nMissingDests, depth+1, result)
 			}
 		} else {
-			// Number of matching dests is larger than k, go one level deeper.
-			allocs := allocateToKClosestAtDepth(matchingItemsBranch, matchingDestsBranch, k, depth+1)
-			mapMerge(m, allocs)
+			// Recurse into same branch
+			allocateToKClosestAtDepth(matchingItemsBranch, sameBranch, k, depth+1, result)
 		}
 	}
-	return m
 }
 
 // KeyspaceCovered checks whether the trie covers the entire keyspace without
@@ -535,8 +531,7 @@ outerLoop:
 //
 //   - Prefix is the identifier of the subtrie.
 //   - Peers contains all the network peers matching this region.
-//   - Keys contains all the keys provided by the local node matching this
-//     region.
+//   - Keys contains all the keys provided by the local node matching this region.
 type Region struct {
 	Prefix bitstr.Key
 	Peers  *trie.Trie[bit256.Key, peer.ID]

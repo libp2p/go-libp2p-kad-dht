@@ -780,9 +780,10 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitst
 	}
 	coveredPrefix, _ := keyspace.ShortestCoveredPrefix(bitstr.Key(key.BitString(keyspace.MhToBit256(k))), peers)
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
-	keysAllocations := make(map[peer.ID][]mh.Multihash)
+	// Create batched allocations (single batch per peer for single-key provide)
+	keysAllocations := make(map[peer.ID][][]mh.Multihash)
 	for _, p := range peers {
-		keysAllocations[p] = keys
+		keysAllocations[p] = [][]mh.Multihash{keys} // Wrap in single batch
 	}
 	reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, 1)
 
@@ -928,8 +929,8 @@ func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 }
 
 type provideJob struct {
-	pid  peer.ID
-	keys []mh.Multihash
+	pid     peer.ID
+	batches [][]mh.Multihash // Batches of keys
 }
 
 // sendProviderRecords manages reprovides for all given peer ids and allocated
@@ -940,7 +941,7 @@ type provideJob struct {
 // reprovide keys to a given threshold of peers. In this case, the region
 // reprovide is considered failed and the caller is responsible for trying
 // again. This allows detecting if we are offline.
-func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) (reachablePeers int, err error) {
+func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) (reachablePeers int, err error) {
 	nPeers := len(keysAllocations)
 	if nPeers == 0 {
 		return reachablePeers, err
@@ -973,12 +974,15 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 			pmes := genProvideMessage(addrInfo)
 			defer wg.Done()
 			for job := range jobChan {
-				err := s.provideKeysToPeer(job.pid, job.keys, pmes)
+				err := s.provideKeysToPeer(job.pid, job.batches, pmes)
 				if err != nil {
 					errCount.Add(1)
 					failedKeysCountLk.Lock()
-					for _, k := range job.keys {
-						failedKeysCount[string(k)]++
+					// Count failures for all keys in all batches
+					for _, batch := range job.batches {
+						for _, k := range batch {
+							failedKeysCount[string(k)]++
+						}
 					}
 					failedKeysCountLk.Unlock()
 					if s.host != nil {
@@ -991,8 +995,8 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 		}()
 	}
 
-	for p, keys := range keysAllocations {
-		jobChan <- provideJob{p, keys}
+	for p, batches := range keysAllocations {
+		jobChan <- provideJob{p, batches}
 	}
 	close(jobChan)
 	wg.Wait()
@@ -1039,31 +1043,40 @@ func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 	return pmes
 }
 
-// provideKeysToPeer performs the network operation to advertise to the given
-// DHT server (p) that we serve all the given keys.
-func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
+// provideKeyToPeer performs network operations to advertise batches of keys
+// to the given DHT server. This is the batched version that processes key batches
+// created by AllocateToKClosestBatched, providing significant memory savings.
+func (s *SweepingProvider) provideKeysToPeer(p peer.ID, batches [][]mh.Multihash, pmes *pb.Message) error {
 	if s.host != nil {
 		s.host.ConnManager().Protect(p, connMgrTag)
 		defer s.host.ConnManager().Unprotect(p, connMgrTag)
 	}
-	var errCount, errStreak int
-	for i, mh := range keys {
-		pmes.Key = mh
-		err := s.msgSender.SendMessage(s.ctx, p, pmes)
-		if err != nil {
-			errStreak++
-			errCount++
 
-			if errStreak == len(keys) || errStreak > maxConsecutiveProvideFailuresAllowed {
-				s.stats.addProvidedRecords(i + 1 - errCount)
-				return fmt.Errorf("failed to provide to %s: %s", p, err.Error())
+	sentKeys := 0
+	var errCount, errStreak int
+	// Process each batch
+	for batchIdx, batch := range batches {
+		for mhIdx, mh := range batch {
+			pmes.Key = mh
+			err := s.msgSender.SendMessage(s.ctx, p, pmes)
+			sentKeys++
+			if err != nil {
+				errStreak++
+				errCount++
+				if errStreak > maxConsecutiveProvideFailuresAllowed ||
+					errStreak == sentKeys && batchIdx == len(batches)-1 && mhIdx == len(batch)-1 {
+
+					s.stats.addProvidedRecords(sentKeys - errCount)
+					return fmt.Errorf("failed to provide to %s: %s", p, err.Error())
+				}
+			} else if errStreak > 0 {
+				// Reset error streak
+				errStreak = 0
 			}
-		} else if errStreak > 0 {
-			// Reset error count
-			errStreak = 0
 		}
 	}
-	s.stats.addProvidedRecords(len(keys) - errCount)
+
+	s.stats.addProvidedRecords(sentKeys - errCount)
 	return nil
 }
 

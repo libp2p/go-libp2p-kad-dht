@@ -246,19 +246,20 @@ func (s *keystore) worker() {
 // running, and ensures the metadata key itself doesn't count toward the size.
 func (s *keystore) loadSize() {
 	sizeBytes, err := s.ds.Get(context.Background(), sizeKey)
-	if err == nil && len(sizeBytes) == 8 {
-		s.size = int(binary.BigEndian.Uint64(sizeBytes))
-		// Delete immediately to keep the key ephemeral.
+	if err != nil || len(sizeBytes) != 8 {
+		// Size unavailable or corrupt, delete any stale metadata and perform full refresh.
 		s.ds.Delete(context.Background(), sizeKey)
+		if size, err := refreshSize(context.Background(), s.ds); err == nil {
+			s.size = size
+		} else {
+			s.logger.Error("keystore: failed to refresh size during load: ", err)
+		}
 		return
 	}
-	// Size unavailable or corrupt, delete any stale metadata and perform full refresh.
+
+	s.size = int(binary.BigEndian.Uint64(sizeBytes))
+	// Delete immediately to keep the key ephemeral.
 	s.ds.Delete(context.Background(), sizeKey)
-	if size, err := refreshSize(context.Background(), s.ds); err == nil {
-		s.size = size
-	} else {
-		s.logger.Error("keystore: failed to refresh size during load: ", err)
-	}
 }
 
 // persistSize saves the current size to the datastore as a startup optimization.

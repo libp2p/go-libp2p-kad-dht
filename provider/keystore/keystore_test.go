@@ -557,11 +557,11 @@ func TestDsKey(t *testing.T) {
 
 	s.prefixBits = 16
 
-	b := [32]byte{}
+	b := [bit256.KeyLen]byte{}
 	for range 1024 {
 		_, err := rand.Read(b[:])
 		require.NoError(t, err)
-		k := bit256.NewKey(b[:])
+		k := bit256.NewKeyFromArray(b)
 
 		sdk := dsKey(k, s.prefixBits)
 		require.Equal(t, s.prefixBits+1, strings.Count(sdk.String(), "/"))

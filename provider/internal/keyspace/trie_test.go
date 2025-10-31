@@ -243,12 +243,12 @@ func TestNextNonEmptyLeafRandom(t *testing.T) {
 	tr := trie.New[bit256.Key, struct{}]()
 	keys := make([]bit256.Key, 0, nKeys)
 
-	var b [32]byte
+	var b [bit256.KeyLen]byte
 	for range nKeys {
 		if _, err := rand.Read(b[:]); err != nil {
 			require.NoError(t, err)
 		}
-		k := bit256.NewKey(b[:])
+		k := bit256.NewKeyFromArray(b)
 		tr.Add(k, struct{}{})
 		keys = append(keys, k)
 
@@ -986,11 +986,11 @@ func TestAllocateToKClosestSingleDest(t *testing.T) {
 }
 
 func genRandBit256() bit256.Key {
-	var b [32]byte
+	var b [bit256.KeyLen]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic(err)
 	}
-	return bit256.NewKey(b[:])
+	return bit256.NewKeyFromArray(b)
 }
 
 func TestAllocateToKClosest(t *testing.T) {
@@ -1166,8 +1166,8 @@ func TestRegionsFromPeersSplitting(t *testing.T) {
 
 func TestExtractMinimalRegions(t *testing.T) {
 	replicationFactor := 3
-	selfID := [32]byte{}
-	order := bit256.NewKey(selfID[:])
+	selfID := [bit256.KeyLen]byte{}
+	order := bit256.NewKeyFromArray(selfID)
 
 	prefixes := []bitstr.Key{
 		"00000",

@@ -899,12 +899,19 @@ func TestAllocateToKClosestSingle(t *testing.T) {
 	allocs := AllocateToKClosest(items, dests, 3)
 
 	// "0000" should be assigned to ["0000", "0001", "0011"]
+	// Flatten batches for comparison
+	flattened := make(map[bitstr.Key][]bitstr.Key)
+	for dest, batches := range allocs {
+		for _, batch := range batches {
+			flattened[dest] = append(flattened[dest], batch...)
+		}
+	}
 	expected := map[bitstr.Key][]bitstr.Key{
 		"0000": {"0000"},
 		"0001": {"0000"},
 		"0011": {"0000"},
 	}
-	require.Equal(t, expected, allocs)
+	require.Equal(t, expected, flattened)
 }
 
 func TestAllocateToKClosestBasic(t *testing.T) {
@@ -941,6 +948,13 @@ func TestAllocateToKClosestBasic(t *testing.T) {
 	items.AddMany(itemEntries...)
 	allocs := AllocateToKClosest(items, dests, 3)
 
+	// Flatten batches for comparison
+	flattened := make(map[bitstr.Key][]bitstr.Key)
+	for dest, batches := range allocs {
+		for _, batch := range batches {
+			flattened[dest] = append(flattened[dest], batch...)
+		}
+	}
 	expected := map[bitstr.Key][]bitstr.Key{
 		"0000": {"0000", "0011"},
 		"0001": {"0000", "0011"},
@@ -951,7 +965,7 @@ func TestAllocateToKClosestBasic(t *testing.T) {
 		"1101": {"1001", "1011", "1100", "1101"},
 		"1110": {"1001", "1011", "1100", "1101"},
 	}
-	require.Equal(t, expected, allocs)
+	require.Equal(t, expected, flattened)
 }
 
 func TestAllocateToKClosestSingleDest(t *testing.T) {
@@ -982,7 +996,12 @@ func TestAllocateToKClosestSingleDest(t *testing.T) {
 	allocs := AllocateToKClosest(items, dests, 3)
 
 	require.Len(t, allocs, 1)
-	require.ElementsMatch(t, allocs[destKeys[0]], itemKeys)
+	// Flatten batches for comparison
+	var flattened []bitstr.Key
+	for _, batch := range allocs[destKeys[0]] {
+		flattened = append(flattened, batch...)
+	}
+	require.ElementsMatch(t, flattened, itemKeys)
 }
 
 func genRandBit256() bit256.Key {
@@ -1014,13 +1033,20 @@ func TestAllocateToKClosest(t *testing.T) {
 	dests.AddMany(destEntries...)
 
 	allocs := AllocateToKClosest(items, dests, replication)
+	// Flatten batches for comparison
+	flattened := make(map[bit256.Key][]bit256.Key)
+	for dest, batches := range allocs {
+		for _, batch := range batches {
+			flattened[dest] = append(flattened[dest], batch...)
+		}
+	}
 
 	for _, itemEntry := range AllEntries(items, bit256.ZeroKey()) {
 		i := itemEntry.Key
 		closest := trie.Closest(dests, i, replication)
 		for _, closestEntry := range closest {
 			d := closestEntry.Key
-			require.Contains(t, allocs[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
+			require.Contains(t, flattened[d], i, "Item %s should be allocated to destination %s", key.BitString(i), key.BitString(d))
 		}
 	}
 }

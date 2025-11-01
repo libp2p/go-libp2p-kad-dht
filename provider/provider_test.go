@@ -2000,3 +2000,125 @@ func TestResumeReprovides(t *testing.T) {
 		requireNoPendingReprovides()
 	})
 }
+
+func TestConnectivityCallbacks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Connectivity state tracked by callbacks
+		type ConnectivityState int
+		const (
+			StateOffline ConnectivityState = iota
+			StateDisconnected
+			StateOnline
+		)
+
+		var stateLk sync.Mutex
+		trackedState := StateOffline
+		onlineChan := make(chan struct{}, 10)
+		disconnectedChan := make(chan struct{}, 10)
+		offlineChan := make(chan struct{}, 10)
+
+		// Define callbacks that update shared state
+		onOnline := func() {
+			stateLk.Lock()
+			trackedState = StateOnline
+			stateLk.Unlock()
+			onlineChan <- struct{}{}
+		}
+
+		onDisconnected := func() {
+			stateLk.Lock()
+			trackedState = StateDisconnected
+			stateLk.Unlock()
+			disconnectedChan <- struct{}{}
+		}
+
+		onOffline := func() {
+			stateLk.Lock()
+			trackedState = StateOffline
+			stateLk.Unlock()
+			offlineChan <- struct{}{}
+		}
+
+		// Control connectivity through router
+		online := atomic.Bool{}
+		online.Store(true) // Start online
+		checkInterval := time.Second
+		offlineDelay := time.Minute
+
+		pid, err := peer.Decode("12BoooooPEER")
+		require.NoError(t, err)
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				if !online.Load() {
+					return nil, errors.New("offline")
+				}
+				return []peer.ID{peer.ID("12BoooooPEER1")}, nil
+			},
+		}
+
+		prov, err := New(
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(&mockMsgSender{}),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithReplicationFactor(1),
+			WithOfflineDelay(offlineDelay),
+			WithConnectivityCheckOnlineInterval(checkInterval),
+			WithConnectivityCallbacks(onOnline, onDisconnected, onOffline),
+		)
+		require.NoError(t, err)
+		defer prov.Close()
+
+		// Wait for initial ONLINE state
+		<-onlineChan
+		synctest.Wait()
+
+		stateLk.Lock()
+		require.Equal(t, StateOnline, trackedState)
+		stateLk.Unlock()
+		require.True(t, prov.connectivity.IsOnline())
+		require.Equal(t, "online", prov.Stats().Connectivity.Status)
+
+		// Transition to DISCONNECTED
+		time.Sleep(checkInterval)
+		online.Store(false)
+		prov.connectivity.TriggerCheck()
+
+		<-disconnectedChan
+		synctest.Wait()
+
+		stateLk.Lock()
+		require.Equal(t, StateDisconnected, trackedState)
+		stateLk.Unlock()
+		require.False(t, prov.connectivity.IsOnline())
+		require.Equal(t, "disconnected", prov.Stats().Connectivity.Status)
+
+		// Transition to OFFLINE after offlineDelay
+		time.Sleep(offlineDelay)
+
+		<-offlineChan
+		synctest.Wait()
+
+		stateLk.Lock()
+		require.Equal(t, StateOffline, trackedState)
+		stateLk.Unlock()
+		require.False(t, prov.connectivity.IsOnline())
+		require.Equal(t, "offline", prov.Stats().Connectivity.Status)
+
+		// Transition back to ONLINE
+		online.Store(true)
+
+		<-onlineChan
+		synctest.Wait()
+
+		stateLk.Lock()
+		require.Equal(t, StateOnline, trackedState)
+		stateLk.Unlock()
+		require.True(t, prov.connectivity.IsOnline())
+		require.Equal(t, "online", prov.Stats().Connectivity.Status)
+	})
+}

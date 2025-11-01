@@ -356,9 +356,24 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	// before first provide
 	prov.increaseProvideCounter(0)
 
-	// Set up callbacks after both provider and connectivity checker are initialized
-	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
-	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
+	// Set up callbacks after both provider and connectivity checker are
+	// initialized. This breaks the circular dependency between connectivity, onOnline, and
+	// approxPrefixLen.
+	// Add user-defined callbacks if any.
+	prov.connectivity.SetCallbacks(
+		func() {
+			if cfg.connectivityCallbacks[0] != nil {
+				cfg.connectivityCallbacks[0]()
+			}
+			prov.onOnline()
+		},
+		cfg.connectivityCallbacks[1],
+		func() {
+			if cfg.connectivityCallbacks[2] != nil {
+				cfg.connectivityCallbacks[2]()
+			}
+			prov.onOffline()
+		})
 	prov.connectivity.Start()
 
 	prov.wg.Add(1)

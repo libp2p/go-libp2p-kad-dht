@@ -346,9 +346,10 @@ func (s *ResettableKeystore) ResetCids(ctx context.Context, keysChan <-chan cid.
 		case s.resetOps <- resetOp{op: opCleanup, success: success, response: opsChan}:
 			<-opsChan
 		case <-s.done:
-			// Safe not to go through the worker since we are done, and we need to
-			// cleanup
-			s.empty(context.Background(), s.altDs)
+			// Worker is done, which means the keystore is closing or has closed.
+			// The underlying datastore may already be closed, so attempting to
+			// empty it could cause a panic. Skip cleanup since the datastore
+			// will be cleaned up during normal shutdown.
 		}
 	}()
 

@@ -2004,7 +2004,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	var reprovideAll bool
 	// Insert prefixes into the schedule
 	s.scheduleLk.Lock()
-	if len(gaps) > 1 || gaps[0] != bitstr.Key("") {
+	if s.bootstrapped.Load() {
 		_, resettableKeystore := s.keystore.(*keystore.ResettableKeystore)
 		if resettableKeystore && len(toInsert) > s.schedule.Size() {
 			// Schedule size is about to double
@@ -2024,6 +2024,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		// This is a corner case that is required for Kubo, as Keystore.Reset()
 		// takes a while.
 		s.reprovideQueue.Enqueue(keyspace.AllKeys(s.schedule, s.order)...)
+		s.catchupPendingWork()
 	}
 	s.scheduleLk.Unlock()
 	return nil

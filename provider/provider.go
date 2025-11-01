@@ -1366,6 +1366,11 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 // persistSuccessfulReprovide logs a successful reprovide to the datastore for
 // resumption after restarts.
 func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
+	// Don't persist if the provider is shutting down. The datastore may already
+	// be closed, which would cause a panic.
+	if s.closed() {
+		return
+	}
 	now := time.Now()
 	k := datastore.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
 	if err := s.datastore.Put(s.ctx, k, []byte{}); err != nil {
@@ -1409,6 +1414,11 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 // gcReprovideHistoryIfNeeded removes reprovide log entries older than the
 // reprovide interval. GC runs at most once per reprovide interval.
 func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
+	// Don't run GC if the provider is shutting down. The datastore may already
+	// be closed, which would cause a panic.
+	if s.closed() {
+		return
+	}
 	lastGC := time.Unix(s.lastReprovideHistoryGC.Load(), 0)
 	if now.Sub(lastGC) < s.reprovideInterval {
 		// Only run GC once per reprovide interval.

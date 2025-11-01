@@ -1979,7 +1979,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	var reprovideAll bool
 	// Insert prefixes into the schedule
 	s.scheduleLk.Lock()
-	if len(gaps) > 1 || gaps[0] != bitstr.Key("") {
+	if s.bootstrapped.Load() {
 		_, resettableKeystore := s.keystore.(*keystore.ResettableKeystore)
 		if resettableKeystore && len(toInsert) > s.schedule.Size() {
 			// Schedule size is about to double
@@ -2001,6 +2001,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {
 			s.reprovideQueue.Enqueue(entry.Key)
 		}
+		s.catchupPendingWork()
 	}
 	s.scheduleLk.Unlock()
 	return nil

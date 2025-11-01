@@ -3,6 +3,7 @@ package keystore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/ipfs/go-cid"
@@ -22,6 +23,9 @@ const (
 	opCleanup
 )
 
+// activeNamespaceKey is the key used to persist which namespace (0 or 1) is currently active
+var activeNamespaceKey = ds.NewKey("active")
+
 type resetOp struct {
 	op       opType
 	success  bool
@@ -38,13 +42,15 @@ type resetOp struct {
 //   - Primary datastore: Currently active storage for all read/write operations
 //   - Alternate datastore: Standby storage used during reset operations
 //   - The datastores use "/0" and "/1" namespace suffixes and can be swapped
+//   - Active namespace is persisted to survive restarts
 //
 // Reset Operation Flow:
 //  1. New keys from reset are written to the alternate (inactive) datastore
 //  2. Concurrent Put operations are automatically duplicated to both datastores
 //     to maintain consistency during the transition
 //  3. Once all reset keys are written, the datastores are atomically swapped
-//  4. The old datastore (now alternate) is cleaned up
+//  4. The active namespace marker is updated to persist the swap
+//  5. The old datastore (now alternate) is cleaned up
 //
 // Thread Safety:
 //   - All operations are processed sequentially by a single worker goroutine
@@ -57,9 +63,11 @@ type resetOp struct {
 type ResettableKeystore struct {
 	keystore
 
+	baseDs          ds.Batching // Unwrapped datastore for storing active namespace marker
 	altDs           ds.Batching
 	altSize         atomic.Int64
 	resetInProgress bool
+	activeNamespace byte
 	resetOps        chan resetOp // reset operations that must be run in main go routine
 }
 
@@ -69,15 +77,49 @@ var _ Keystore = (*ResettableKeystore)(nil)
 // provided datastore. It automatically adds "/0" and "/1" suffixes to the
 // configured datastore path to create two alternate storage locations for
 // atomic reset operations.
+//
+// On initialization, it checks for a persisted active namespace marker to
+// determine which namespace was active during the previous session. This
+// ensures keystore data persists correctly across restarts.
 func NewResettableKeystore(d ds.Batching, opts ...Option) (*ResettableKeystore, error) {
 	cfg, err := getOpts(opts)
 	if err != nil {
 		return nil, err
 	}
 
+	// Create namespaced datastores
+	baseDs := namespace.Wrap(d, ds.NewKey(cfg.path))
+	datastores := []ds.Batching{
+		namespace.Wrap(d, ds.NewKey(cfg.path+"/0")),
+		namespace.Wrap(d, ds.NewKey(cfg.path+"/1")),
+	}
+
+	// Check if there's a persisted active namespace marker
+	ctx := context.Background()
+	activeDs, err := baseDs.Get(ctx, activeNamespaceKey)
+	var primaryDs, altDs ds.Batching
+	var activeIdx byte
+	if err != nil {
+		if err != ds.ErrNotFound {
+			return nil, err
+		}
+		// No marker found, default to namespace 0 as primary
+		primaryDs = datastores[0]
+		altDs = datastores[1]
+		activeIdx = 0
+	} else {
+		// Marker found, use it to determine active namespace
+		if len(activeDs) != 1 {
+			return nil, fmt.Errorf("invalid active namespace marker length: %d", len(activeDs))
+		}
+		activeIdx = activeDs[0]
+		primaryDs = datastores[activeIdx]
+		altDs = datastores[1-activeIdx]
+	}
+
 	rks := &ResettableKeystore{
 		keystore: keystore{
-			ds:         namespace.Wrap(d, ds.NewKey(cfg.path+"/0")),
+			ds:         primaryDs,
 			prefixBits: cfg.prefixBits,
 			batchSize:  cfg.batchSize,
 			requests:   make(chan operation),
@@ -85,8 +127,10 @@ func NewResettableKeystore(d ds.Batching, opts ...Option) (*ResettableKeystore, 
 			done:       make(chan struct{}),
 			logger:     log.Logger(cfg.loggerName),
 		},
-		altDs:    namespace.Wrap(d, ds.NewKey(cfg.path+"/1")),
-		resetOps: make(chan resetOp),
+		baseDs:          baseDs,
+		altDs:           altDs,
+		activeNamespace: activeIdx,
+		resetOps:        make(chan resetOp),
 	}
 
 	// start worker goroutine
@@ -137,7 +181,7 @@ func (s *ResettableKeystore) worker() {
 				}
 
 			case opEmpty:
-				err := empty(op.ctx, s.ds, s.batchSize)
+				err := s.empty(op.ctx, s.ds)
 				op.response <- operationResponse{err: err}
 				if err == nil {
 					s.size = 0
@@ -204,18 +248,25 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 		}
 	}
 	s.altSize.Add(added)
-	return b.Commit(ctx)
+	if err := b.Commit(ctx); err != nil {
+		return fmt.Errorf("cannot commit keystore updates: %w", err)
+	}
+	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
+		s.logger.Warn("keystore: failed to sync datastore after alt put: ", err)
+	}
+	return nil
 }
 
 // handleResetOp processes reset operations that need to happen synchronously.
 func (s *ResettableKeystore) handleResetOp(op resetOp) {
+	ctx := context.Background()
 	if op.op == opStart {
 		if s.resetInProgress {
 			op.response <- ErrResetInProgress
 			return
 		}
 		s.altSize.Store(0)
-		if err := empty(context.Background(), s.altDs, s.batchSize); err != nil {
+		if err := s.empty(ctx, s.altDs); err != nil {
 			op.response <- err
 			return
 		}
@@ -231,10 +282,24 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 		s.ds = s.altDs
 		s.altDs = oldDs
 		s.size = int(s.altSize.Load())
+
+		// Toggle the active namespace index
+		s.activeNamespace = 1 - s.activeNamespace
+		// Persist the new active namespace
+		activeValue := []byte{s.activeNamespace}
+
+		// Write the active namespace marker
+		if err := s.baseDs.Put(ctx, activeNamespaceKey, activeValue); err != nil {
+			s.logger.Error("keystore: failed to persist active namespace marker: ", err)
+		}
+		// Sync to ensure marker is persisted
+		if err := s.baseDs.Sync(ctx, activeNamespaceKey); err != nil {
+			s.logger.Warn("keystore: failed to sync active namespace marker: ", err)
+		}
 	}
 	// Empty the unused datastore.
 	s.resetInProgress = false
-	op.response <- empty(context.Background(), s.altDs, s.batchSize)
+	op.response <- s.empty(ctx, s.altDs)
 }
 
 // ResetCids atomically replaces all stored keys with the CIDs received from
@@ -283,7 +348,7 @@ func (s *ResettableKeystore) ResetCids(ctx context.Context, keysChan <-chan cid.
 		case <-s.done:
 			// Safe not to go through the worker since we are done, and we need to
 			// cleanup
-			empty(context.Background(), s.altDs, s.batchSize)
+			s.empty(context.Background(), s.altDs)
 		}
 	}()
 

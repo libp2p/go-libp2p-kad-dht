@@ -444,3 +444,56 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 		}
 	}
 }
+
+// TestKeystoreCloseDuringReset tests that closing the keystore during a
+// ResetCids operation does not cause a panic. This reproduces the race
+// condition where the underlying datastore is closed while ResetCids is
+// still running.
+func TestKeystoreCloseDuringReset(t *testing.T) {
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+
+	store, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create a slow channel that will feed keys gradually
+	const resetKeys = 1000
+	resetChan := make(chan cid.Cid)
+
+	// Start reset in background
+	resetDone := make(chan error, 1)
+	go func() {
+		resetDone <- store.ResetCids(ctx, resetChan)
+	}()
+
+	// Feed some keys, then close the keystore
+	go func() {
+		resetMhs := random.Multihashes(resetKeys)
+		for i, h := range resetMhs {
+			resetChan <- cid.NewCidV1(cid.Raw, h)
+			// Close the keystore partway through
+			if i == 100 {
+				// Give it a moment to process some keys
+				go func() {
+					err := store.Close()
+					// Close might return an error if operations are still running,
+					// but it shouldn't panic
+					if err != nil {
+						t.Logf("Close returned error (expected): %v", err)
+					}
+				}()
+			}
+		}
+		close(resetChan)
+	}()
+
+	// Wait for reset to complete or fail
+	err = <-resetDone
+	// ResetCids should return ErrClosed when the keystore is closed
+	if err != nil && err != ErrClosed {
+		t.Logf("ResetCids returned error (may be expected during close): %v", err)
+	}
+	// The important thing is we didn't panic
+}

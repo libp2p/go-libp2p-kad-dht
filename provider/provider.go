@@ -852,6 +852,9 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	i, noFreshPeersFoundCount := 0, 0
 	// Go down the trie to fully cover prefix.
 	for ; i < maxExplorationPrefixSearches; i++ {
+		if s.closed() {
+			return nil, ErrClosed
+		}
 		if !s.connectivity.IsOnline() {
 			return nil, errors.New("node is offline")
 		}
@@ -976,6 +979,9 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]m
 			pmes := genProvideMessage(addrInfo)
 			defer wg.Done()
 			for job := range jobChan {
+				if s.closed() {
+					return
+				}
 				err := s.provideKeysToPeer(job.pid, job.batches, pmes)
 				if err != nil {
 					errCount.Add(1)
@@ -997,8 +1003,13 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]m
 		}()
 	}
 
+loop:
 	for p, batches := range keysAllocations {
-		jobChan <- provideJob{p, batches}
+		select {
+		case jobChan <- provideJob{p, batches}:
+		case <-s.done:
+			break loop
+		}
 	}
 	close(jobChan)
 	wg.Wait()
@@ -1059,6 +1070,9 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, batches [][]mh.Multihash
 	// Process each batch
 	for batchIdx, batch := range batches {
 		for mhIdx, mh := range batch {
+			if s.closed() {
+				return ErrClosed
+			}
 			pmes.Key = mh
 			err := s.msgSender.SendMessage(s.ctx, p, pmes)
 			sentKeys++
@@ -1382,6 +1396,11 @@ func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
 // loadRecentlyReprovidedRegions loads all regions that have been successfully
 // reprovided within the last reprovide interval from the datastore.
 func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.Trie[bitstr.Key, struct{}], error) {
+	// Don't load if the provider is shutting down. The datastore may already
+	// be closed, which would cause a panic.
+	if s.closed() {
+		return trie.New[bitstr.Key, struct{}](), nil
+	}
 	s.gcReprovideHistoryIfNeeded(now)
 
 	q := query.Query{
@@ -1624,6 +1643,11 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 }
 
 func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
+	// Check if provider is shutting down before accessing keystore/datastore.
+	// The underlying datastores may be closed externally during shutdown.
+	if s.closed() {
+		return
+	}
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the

@@ -555,7 +555,7 @@ func (s *keystore) Close() error {
 		// Already closed
 	default:
 		close(s.close)
-		<-s.done              // Wait for worker to exit
+		<-s.done // Wait for worker to exit
 		if err = s.persistSize(); err != nil {
 			return fmt.Errorf("error persisting size on close: %w", err)
 		}

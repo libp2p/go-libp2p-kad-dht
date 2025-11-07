@@ -123,14 +123,16 @@ func TestStateTransitions(t *testing.T) {
 			online.Store(true)
 			checkFunc := func() bool { return online.Load() }
 
-			onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+			onlineChan, disconnectedChan, offlineChan := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			onOnline := func() { close(onlineChan) }
+			onDisconnected := func() { close(disconnectedChan) }
 			onOffline := func() { close(offlineChan) }
 
 			connChecker, err := New(checkFunc,
 				WithOfflineDelay(offlineDelay),
 				WithOnlineCheckInterval(checkInterval),
 				WithOnOnline(onOnline),
+				WithOnDisconnected(onDisconnected),
 				WithOnOffline(onOffline),
 			)
 			require.NoError(t, err)
@@ -161,6 +163,7 @@ func TestStateTransitions(t *testing.T) {
 			connChecker.TriggerCheck()
 			require.False(t, connChecker.mutex.TryLock())
 
+			<-disconnectedChan // wait for onDisconnected to be run
 			synctest.Wait()
 
 			require.False(t, connChecker.IsOnline())
@@ -182,6 +185,51 @@ func TestStateTransitions(t *testing.T) {
 
 			connChecker.TriggerCheck() // noop since Offline
 			require.False(t, connChecker.mutex.TryLock())
+		})
+	})
+
+	t.Run("online to offline immediately (offlineDelay=0)", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			checkInterval := time.Second
+
+			online := atomic.Bool{}
+			online.Store(true)
+			checkFunc := func() bool { return online.Load() }
+
+			onlineChan, disconnectedChan, offlineChan := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			onOnline := func() { close(onlineChan) }
+			onDisconnected := func() { close(disconnectedChan) }
+			onOffline := func() { close(offlineChan) }
+
+			connChecker, err := New(checkFunc,
+				WithOfflineDelay(0), // immediate offline transition
+				WithOnlineCheckInterval(checkInterval),
+				WithOnOnline(onOnline),
+				WithOnDisconnected(onDisconnected),
+				WithOnOffline(onOffline),
+			)
+			require.NoError(t, err)
+			defer connChecker.Close()
+
+			require.False(t, connChecker.IsOnline())
+			connChecker.Start()
+
+			<-onlineChan // wait for onOnline to be run
+			synctest.Wait()
+			require.True(t, connChecker.IsOnline())
+
+			// Wait until we can perform a new check
+			time.Sleep(checkInterval)
+
+			// Go offline
+			online.Store(false)
+			connChecker.TriggerCheck()
+
+			<-disconnectedChan // wait for onDisconnected to be called
+			<-offlineChan      // wait for onOffline to be called immediately after
+			synctest.Wait()
+
+			require.False(t, connChecker.IsOnline())
 		})
 	})
 
@@ -248,14 +296,16 @@ func TestStateTransitions(t *testing.T) {
 func TestSetCallbacks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// Callbacks MUST be set before calling Start()
-		oldOnlineCount, oldOfflineCount, newOnlineCount, newOfflineCount := atomic.Int32{}, atomic.Int32{}, atomic.Int32{}, atomic.Int32{}
-		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+		oldOnlineCount, oldOfflineCount, newOnlineCount, newDisconnectedCount, newOfflineCount := atomic.Int32{}, atomic.Int32{}, atomic.Int32{}, atomic.Int32{}, atomic.Int32{}
+		onlineChan, disconnectedChan, offlineChan := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		oldOnOnline := func() { oldOnlineCount.Add(1); close(onlineChan) }
 		oldOnOffline := func() { oldOfflineCount.Add(1); close(offlineChan) }
 		newOnOnline := func() { newOnlineCount.Add(1); close(onlineChan) }
+		newOnDisconnected := func() { newDisconnectedCount.Add(1); close(disconnectedChan) }
 		newOnOffline := func() { newOfflineCount.Add(1); close(offlineChan) }
 
 		checkInterval := time.Second
+		offlineDelay := time.Minute
 		online := atomic.Bool{}
 		online.Store(true)
 		checkFunc := func() bool { return online.Load() }
@@ -263,13 +313,13 @@ func TestSetCallbacks(t *testing.T) {
 		connChecker, err := New(checkFunc,
 			WithOnOnline(oldOnOnline),
 			WithOnOffline(oldOnOffline),
-			WithOfflineDelay(0),
+			WithOfflineDelay(offlineDelay),
 			WithOnlineCheckInterval(checkInterval),
 		)
 		require.NoError(t, err)
 		defer connChecker.Close()
 
-		connChecker.SetCallbacks(newOnOnline, newOnOffline)
+		connChecker.SetCallbacks(newOnOnline, newOnDisconnected, newOnOffline)
 
 		connChecker.Start()
 
@@ -278,20 +328,39 @@ func TestSetCallbacks(t *testing.T) {
 		require.True(t, connChecker.IsOnline())
 		require.Equal(t, int32(0), oldOnlineCount.Load())
 		require.Equal(t, int32(1), newOnlineCount.Load())
+		onlineSince := connChecker.LastStateChange()
 
 		// Wait until we can perform a new check
 		time.Sleep(checkInterval)
 
-		// Go offline
+		// Go disconnected
 		online.Store(false)
 		connChecker.TriggerCheck()
-		require.False(t, connChecker.mutex.TryLock()) // node probing until it comes online
+
+		<-disconnectedChan // wait for newOnDisconnected to be called
+		synctest.Wait()
+		require.False(t, connChecker.IsOnline())
+		require.Equal(t, int32(1), newDisconnectedCount.Load())
+		disconnectedSince := connChecker.LastStateChange()
+		require.True(t, disconnectedSince.After(onlineSince))
+
+		// Verify we're in DISCONNECTED state (not yet OFFLINE)
+		select {
+		case <-offlineChan:
+			require.FailNow(t, "onOffline shouldn't have been called yet")
+		default:
+		}
+
+		// After offlineDelay, should transition to OFFLINE
+		time.Sleep(offlineDelay)
 
 		<-offlineChan // wait for newOnOffline to be called
 		synctest.Wait()
 		require.False(t, connChecker.IsOnline())
 		require.Equal(t, int32(0), oldOfflineCount.Load())
 		require.Equal(t, int32(1), newOfflineCount.Load())
+		offlineSince := connChecker.LastStateChange()
+		require.True(t, offlineSince.After(disconnectedSince))
 	})
 }
 
@@ -419,8 +488,9 @@ func TestClose(t *testing.T) {
 	})
 
 	t.Run("SetCallbacks after Close", func(t *testing.T) {
-		onlineChan, offlineChan := make(chan struct{}), make(chan struct{})
+		onlineChan, disconnectedChan, offlineChan := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		onOnline := func() { close(onlineChan) }
+		onDisconnected := func() { close(disconnectedChan) }
 		onOffline := func() { close(offlineChan) }
 
 		connChecker, err := New(offlineCheckFunc)
@@ -429,13 +499,15 @@ func TestClose(t *testing.T) {
 
 		require.Nil(t, connChecker.onOffline)
 		require.Nil(t, connChecker.onOnline)
+		require.Nil(t, connChecker.onDisconnected)
 
 		connChecker.Close()
-		connChecker.SetCallbacks(onOnline, onOffline)
+		connChecker.SetCallbacks(onOnline, onDisconnected, onOffline)
 
 		// Assert that callbacks were NOT set
 		require.Nil(t, connChecker.onOffline)
 		require.Nil(t, connChecker.onOnline)
+		require.Nil(t, connChecker.onDisconnected)
 	})
 
 	t.Run("TriggerCheck after Close", func(t *testing.T) {

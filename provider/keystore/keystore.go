@@ -443,7 +443,7 @@ func (s *keystore) delete(ctx context.Context, keys []mh.Multihash) error {
 	}
 	s.size -= removedCount
 	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
-		s.logger.Warnf("keystore: cannot sync datastore after delete: %v", err)
+		return fmt.Errorf("cannot sync datastore after delete: %w", err)
 	}
 	return nil
 }

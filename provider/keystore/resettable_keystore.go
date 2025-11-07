@@ -252,7 +252,7 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 		return fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
 	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
-		s.logger.Warn("keystore: failed to sync datastore after alt put: ", err)
+		return fmt.Errorf("failed to sync datastore after alt put: %w", err)
 	}
 	return nil
 }

@@ -1912,7 +1912,7 @@ func (s *SweepingProvider) claimRegionReprovide(regions []keyspace.Region) []key
 func (s *SweepingProvider) releaseRegionReprovide(prefix bitstr.Key) {
 	s.activeReprovidesLk.Lock()
 	defer s.activeReprovidesLk.Unlock()
-	s.activeReprovides.Remove(prefix)
+	keyspace.PruneSubtrie(s.activeReprovides, prefix)
 }
 
 // ProvideOnce only sends provider records for the given keys out to the DHT

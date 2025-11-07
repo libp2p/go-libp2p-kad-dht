@@ -1,6 +1,7 @@
 package keyspace
 
 import (
+	"iter"
 	"slices"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -15,33 +16,108 @@ import (
 
 var zeroKey = bit256.ZeroKey()
 
+// trieIter is a generic helper that iterates over the trie and yields values
+// extracted by the provided extract function. This allows efficient iteration
+// without constructing unnecessary intermediate structures.
+func trieIter[K0 kad.Key[K0], K1 kad.Key[K1], D any, T any](
+	t *trie.Trie[K0, D],
+	order K1,
+	extract func(*trie.Trie[K0, D]) T,
+) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		trieIterAtDepth(t, order, 0, extract, yield)
+	}
+}
+
+func trieIterAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any, T any](
+	t *trie.Trie[K0, D],
+	order K1,
+	depth int,
+	extract func(*trie.Trie[K0, D]) T,
+	yield func(T) bool,
+) bool {
+	if t == nil || t.IsEmptyLeaf() {
+		return true
+	}
+	if t.IsNonEmptyLeaf() {
+		return yield(extract(t))
+	}
+	b := int(order.Bit(depth))
+	// First traverse the branch according to order
+	if !trieIterAtDepth(t.Branch(b), order, depth+1, extract, yield) {
+		return false
+	}
+	// Then traverse the other branch
+	return trieIterAtDepth(t.Branch(1-b), order, depth+1, extract, yield)
+}
+
+// EntriesIter returns an iterator over all entries (key + value) stored in
+// the trie `t` sorted by their keys in the supplied `order`.
+// The iterator allows processing entries one at a time without loading all of
+// them into memory.
+func EntriesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[trie.Entry[K0, D]] {
+	return trieIter(t, order, func(node *trie.Trie[K0, D]) trie.Entry[K0, D] {
+		return trie.Entry[K0, D]{Key: *node.Key(), Data: node.Data()}
+	})
+}
+
+// ValuesIter returns an iterator over all values stored in the trie `t`
+// sorted by their keys in the supplied `order`.
+// The iterator allows processing values one at a time without loading all of
+// them into memory.
+func ValuesIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[D] {
+	return trieIter(t, order, func(node *trie.Trie[K0, D]) D {
+		return node.Data()
+	})
+}
+
+// KeysIter returns an iterator over all keys stored in the trie `t`
+// sorted by their keys in the supplied `order`.
+// The iterator allows processing keys one at a time without loading all of
+// them into memory.
+func KeysIter[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) iter.Seq[K0] {
+	return trieIter(t, order, func(node *trie.Trie[K0, D]) K0 {
+		return *node.Key()
+	})
+}
+
 // AllEntries returns all entries (key + value) stored in the trie `t` sorted
 // by their keys in the supplied `order`.
 func AllEntries[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []trie.Entry[K0, D] {
-	return allEntriesAtDepth(t, order, 0)
-}
-
-func allEntriesAtDepth[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1, depth int) []trie.Entry[K0, D] {
 	if t == nil || t.IsEmptyLeaf() {
-		return nil
+		return []trie.Entry[K0, D]{}
 	}
-	if t.IsNonEmptyLeaf() {
-		return []trie.Entry[K0, D]{{Key: *t.Key(), Data: t.Data()}}
+	result := make([]trie.Entry[K0, D], 0, t.Size())
+	for entry := range EntriesIter(t, order) {
+		result = append(result, entry)
 	}
-	b := int(order.Bit(depth))
-	return append(allEntriesAtDepth(t.Branch(b), order, depth+1),
-		allEntriesAtDepth(t.Branch(1-b), order, depth+1)...)
+	return result
 }
 
 // AllValues returns all values stored in the trie `t` sorted by their keys in
 // the supplied `order`.
 func AllValues[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []D {
-	entries := AllEntries(t, order)
-	out := make([]D, len(entries))
-	for i, entry := range entries {
-		out[i] = entry.Data
+	if t == nil || t.IsEmptyLeaf() {
+		return []D{}
 	}
-	return out
+	result := make([]D, 0, t.Size())
+	for value := range ValuesIter(t, order) {
+		result = append(result, value)
+	}
+	return result
+}
+
+// AllKeys returns all keys stored in the trie `t` sorted by their keys in
+// the supplied `order`.
+func AllKeys[K0 kad.Key[K0], K1 kad.Key[K1], D any](t *trie.Trie[K0, D], order K1) []K0 {
+	if t == nil || t.IsEmptyLeaf() {
+		return []K0{}
+	}
+	result := make([]K0, 0, t.Size())
+	for key := range KeysIter(t, order) {
+		result = append(result, key)
+	}
+	return result
 }
 
 // FindPrefixOfKey checks whether the trie contains a leave whose key is a
@@ -247,7 +323,7 @@ func subtractTrieAtDepth[D0, D1 any](t0 *trie.Trie[bitstr.Key, D0],
 	}
 	if t1 == nil || t1.IsEmptyLeaf() {
 		// t1 is empty, nothing to subtract, add all t0 to result.
-		res.AddMany(AllEntries(t0, bit256.ZeroKey())...)
+		res.AddMany(AllEntries(t0, zeroKey)...)
 		return
 	}
 
@@ -280,7 +356,7 @@ func subtractTrieAtDepth[D0, D1 any](t0 *trie.Trie[bitstr.Key, D0],
 		}
 		b := int(k1.Bit(depth))
 		// Add all entries in t0's branch that is not covered by t1.
-		res.AddMany(AllEntries(t0.Branch(1-b), bit256.ZeroKey())...)
+		res.AddMany(AllEntries(t0.Branch(1-b), zeroKey)...)
 		// Go deeper in the branch covered by t1.
 		subtractTrieAtDepth(t0.Branch(b), t1, res, depth+1)
 		return
@@ -502,8 +578,7 @@ func KeyspaceCovered[D any](t *trie.Trie[bitstr.Key, D]) bool {
 
 	stack := []bitstr.Key{"1", "0"}
 outerLoop:
-	for _, entry := range AllEntries(t, bit256.ZeroKey()) {
-		p := entry.Key
+	for p := range KeysIter(t, zeroKey) {
 		stackTop := stack[len(stack)-1]
 		stackTopLen := len(stackTop)
 		if len(p) < stackTopLen {

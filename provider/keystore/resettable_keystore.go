@@ -252,7 +252,7 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 		return fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
 	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
-		return fmt.Errorf("failed to sync datastore after alt put: %w", err)
+		s.logger.Warnf("keystore: failed to sync datastore after alt put: %v", err)
 	}
 	return nil
 }
@@ -290,11 +290,11 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 
 		// Write the active namespace marker
 		if err := s.baseDs.Put(ctx, activeNamespaceKey, activeValue); err != nil {
-			s.logger.Error("keystore: failed to persist active namespace marker: ", err)
+			s.logger.Errorf("keystore: failed to persist active namespace marker: %v", err)
 		}
 		// Sync to ensure marker is persisted
 		if err := s.baseDs.Sync(ctx, activeNamespaceKey); err != nil {
-			s.logger.Error("keystore: failed to sync active namespace marker: %w", err)
+			s.logger.Warnf("keystore: failed to sync active namespace marker: %v", err)
 		}
 	}
 	// Empty the unused datastore.

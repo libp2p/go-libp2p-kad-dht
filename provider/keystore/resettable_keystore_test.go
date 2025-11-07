@@ -280,7 +280,7 @@ func TestKeystoreResetSizePersistence(t *testing.T) {
 	require.Equal(t, numKeys, size2, "size should persist correctly after restart (without reset)")
 }
 
-func TestKeystoreActiveNamespacePersistence(t *testing.T) {
+func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 

@@ -310,7 +310,6 @@ func (s *keystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
 		s.logger.Warnf("keystore: cannot sync datastore after put: %v", err)
 	}
-	s.size += len(newKeys)
 	return newKeys, nil
 }
 
@@ -444,7 +443,7 @@ func (s *keystore) delete(ctx context.Context, keys []mh.Multihash) error {
 	}
 	s.size -= removedCount
 	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
-		return fmt.Errorf("cannot sync datastore after delete: %w", err)
+		s.logger.Warnf("keystore: cannot sync datastore after delete: %v", err)
 	}
 	return nil
 }

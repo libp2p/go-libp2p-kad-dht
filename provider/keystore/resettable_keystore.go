@@ -294,7 +294,7 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 		}
 		// Sync to ensure marker is persisted
 		if err := s.baseDs.Sync(ctx, activeNamespaceKey); err != nil {
-			s.logger.Warn("keystore: failed to sync active namespace marker: ", err)
+			return fmt.Errorf("failed to sync active namespace marker: %w", err)
 		}
 	}
 	// Empty the unused datastore.

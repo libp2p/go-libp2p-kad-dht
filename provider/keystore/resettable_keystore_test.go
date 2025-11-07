@@ -279,3 +279,221 @@ func TestKeystoreResetSizePersistence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, numKeys, size2, "size should persist correctly after restart (without reset)")
 }
+
+func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+
+	ctx := context.Background()
+
+	// Create initial keystore
+	store, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+
+	// Add initial keys
+	const initialKeys = 50
+	initialMhs := random.Multihashes(initialKeys)
+	_, err = store.Put(ctx, initialMhs...)
+	require.NoError(t, err)
+
+	// Verify initial size
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initialKeys, size, "initial size should be %d", initialKeys)
+
+	// Perform reset with different keys
+	const resetKeys = 75
+	resetMhs := random.Multihashes(resetKeys)
+	resetChan := make(chan cid.Cid, resetKeys)
+	for _, h := range resetMhs {
+		resetChan <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(resetChan)
+
+	err = store.ResetCids(ctx, resetChan)
+	require.NoError(t, err)
+
+	// Verify size after reset
+	size, err = store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, resetKeys, size, "size after reset should be %d", resetKeys)
+
+	// Close the keystore
+	err = store.Close()
+	require.NoError(t, err)
+
+	// Reopen keystore - it should restore from the active namespace (post-reset)
+	store2, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+	defer store2.Close()
+
+	// Verify size is correctly restored from the active datastore
+	size2, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, resetKeys, size2, "size should persist correctly after restart (with reset)")
+
+	// Verify that the reset keys are still present
+	const prefixBits = 6
+	for _, h := range resetMhs {
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixBits])
+		got, err := store2.Get(ctx, prefix)
+		require.NoError(t, err)
+		found := false
+		for _, m := range got {
+			if string(m) == string(h) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "reset key %v should be present after restart", h)
+	}
+
+	// Verify that the initial keys (before reset) are NOT present
+	for _, h := range initialMhs {
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixBits])
+		got, err := store2.Get(ctx, prefix)
+		require.NoError(t, err)
+		for _, m := range got {
+			require.NotEqual(t, string(m), string(h), "initial key %v should not be present after restart", h)
+		}
+	}
+}
+
+func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+
+	ctx := context.Background()
+
+	// Create initial keystore
+	store, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+
+	// Perform first reset
+	const firstResetKeys = 100
+	firstResetMhs := random.Multihashes(firstResetKeys)
+	resetChan1 := make(chan cid.Cid, firstResetKeys)
+	for _, h := range firstResetMhs {
+		resetChan1 <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(resetChan1)
+
+	err = store.ResetCids(ctx, resetChan1)
+	require.NoError(t, err)
+
+	// Close and reopen
+	err = store.Close()
+	require.NoError(t, err)
+
+	store2, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+
+	// Verify first reset keys are present
+	size, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, firstResetKeys, size, "size after first reset and restart should be %d", firstResetKeys)
+
+	// Perform second reset
+	const secondResetKeys = 50
+	secondResetMhs := random.Multihashes(secondResetKeys)
+	resetChan2 := make(chan cid.Cid, secondResetKeys)
+	for _, h := range secondResetMhs {
+		resetChan2 <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(resetChan2)
+
+	err = store2.ResetCids(ctx, resetChan2)
+	require.NoError(t, err)
+
+	// Close and reopen again
+	err = store2.Close()
+	require.NoError(t, err)
+
+	store3, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+	defer store3.Close()
+
+	// Verify second reset keys are present and first reset keys are gone
+	size, err = store3.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, secondResetKeys, size, "size after second reset and restart should be %d", secondResetKeys)
+
+	// Verify that the second reset keys are present
+	const prefixBits = 6
+	for _, h := range secondResetMhs {
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixBits])
+		got, err := store3.Get(ctx, prefix)
+		require.NoError(t, err)
+		found := false
+		for _, m := range got {
+			if string(m) == string(h) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "second reset key %v should be present after restart", h)
+	}
+
+	// Verify that the first reset keys are NOT present
+	for _, h := range firstResetMhs {
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixBits])
+		got, err := store3.Get(ctx, prefix)
+		require.NoError(t, err)
+		for _, m := range got {
+			require.NotEqual(t, string(m), string(h), "first reset key %v should not be present after second reset and restart", h)
+		}
+	}
+}
+
+// TestKeystoreCloseDuringReset tests that closing the keystore during a
+// ResetCids operation does not cause a panic. This reproduces the race
+// condition where the underlying datastore is closed while ResetCids is
+// still running.
+func TestKeystoreCloseDuringReset(t *testing.T) {
+	ds := ds.NewMapDatastore()
+	defer ds.Close()
+
+	store, err := NewResettableKeystore(ds)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create a slow channel that will feed keys gradually
+	const resetKeys = 1000
+	resetChan := make(chan cid.Cid)
+
+	// Start reset in background
+	resetDone := make(chan error, 1)
+	go func() {
+		resetDone <- store.ResetCids(ctx, resetChan)
+	}()
+
+	// Feed some keys, then close the keystore
+	go func() {
+		resetMhs := random.Multihashes(resetKeys)
+		for i, h := range resetMhs {
+			resetChan <- cid.NewCidV1(cid.Raw, h)
+			// Close the keystore partway through
+			if i == 100 {
+				// Give it a moment to process some keys
+				go func() {
+					err := store.Close()
+					// Close might return an error if operations are still running,
+					// but it shouldn't panic
+					if err != nil {
+						t.Logf("Close returned error (expected): %v", err)
+					}
+				}()
+			}
+		}
+		close(resetChan)
+	}()
+
+	// Wait for reset to complete or fail
+	err = <-resetDone
+	// ResetCids should return ErrClosed when the keystore is closed
+	if err != nil && err != ErrClosed {
+		t.Logf("ResetCids returned error (may be expected during close): %v", err)
+	}
+	// The important thing is we didn't panic
+}

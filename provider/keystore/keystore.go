@@ -219,7 +219,7 @@ func (s *keystore) worker() {
 				}
 
 			case opEmpty:
-				err := empty(op.ctx, s.ds, s.batchSize)
+				err := s.empty(op.ctx, s.ds)
 				op.response <- operationResponse{err: err}
 				if err == nil {
 					s.size = 0
@@ -298,15 +298,18 @@ func (s *keystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 		}
 		if !ok {
 			if err := b.Put(ctx, dsk, h); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("cannot put to batch: %w", err)
 			}
 			newKeys = append(newKeys, h)
 		}
 	}
 	if err := b.Commit(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
 	s.size += len(newKeys)
+	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
+		s.logger.Warnf("keystore: cannot sync datastore after put: %v", err)
+	}
 	return newKeys, nil
 }
 
@@ -367,8 +370,8 @@ func (s *keystore) containsPrefix(ctx context.Context, prefix bitstr.Key) (bool,
 	return false, nil
 }
 
-// empty deletes all entries under the datastore prefix
-func empty(ctx context.Context, d ds.Batching, batchSize int) error {
+// empty deletes all entries in the supplied datastore.
+func (s *keystore) empty(ctx context.Context, d ds.Batching) error {
 	batch, err := d.Batch(ctx)
 	if err != nil {
 		return err
@@ -379,7 +382,7 @@ func empty(ctx context.Context, d ds.Batching, batchSize int) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if writeCount >= batchSize {
+		if writeCount >= s.batchSize {
 			writeCount = 0
 			if err = batch.Commit(ctx); err != nil {
 				return fmt.Errorf("cannot commit keystore updates: %w", err)
@@ -404,7 +407,7 @@ func empty(ctx context.Context, d ds.Batching, batchSize int) error {
 		}
 	}
 	if err = d.Sync(ctx, ds.NewKey("")); err != nil {
-		return fmt.Errorf("cannot sync datastore: %w", err)
+		s.logger.Warnf("keystore: cannot sync datastore after put: %v", err)
 	}
 	return nil
 }
@@ -435,8 +438,14 @@ func (s *keystore) delete(ctx context.Context, keys []mh.Multihash) error {
 			removedCount++
 		}
 	}
+	if err := b.Commit(ctx); err != nil {
+		return fmt.Errorf("cannot commit keystore updates: %w", err)
+	}
 	s.size -= removedCount
-	return b.Commit(ctx)
+	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
+		s.logger.Warnf("keystore: cannot sync datastore after delete: %v", err)
+	}
+	return nil
 }
 
 // refreshSize iterates over all keys in the supplied datastore to count the
@@ -543,11 +552,15 @@ func (s *keystore) Close() error {
 	select {
 	case <-s.close:
 		// Already closed
-		return nil
 	default:
 		close(s.close)
-		<-s.done              // Wait for worker to exit
-		err = s.persistSize() // Safe to access s.size after worker exits
+		<-s.done // Wait for worker to exit
+		if err = s.persistSize(); err != nil {
+			return fmt.Errorf("error persisting size on close: %w", err)
+		}
+		if err = s.ds.Sync(context.Background(), sizeKey); err != nil {
+			return fmt.Errorf("error syncing size on close: %w", err)
+		}
 	}
 	return err
 }

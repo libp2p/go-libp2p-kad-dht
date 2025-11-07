@@ -867,6 +867,9 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	i, noFreshPeersFoundCount := 0, 0
 	// Go down the trie to fully cover prefix.
 	for ; i < maxExplorationPrefixSearches; i++ {
+		if s.closed() {
+			return nil, ErrClosed
+		}
 		if !s.connectivity.IsOnline() {
 			return nil, errors.New("node is offline")
 		}
@@ -991,6 +994,9 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]m
 			pmes := genProvideMessage(addrInfo)
 			defer wg.Done()
 			for job := range jobChan {
+				if s.closed() {
+					return
+				}
 				err := s.provideKeysToPeer(job.pid, job.batches, pmes)
 				if err != nil {
 					errCount.Add(1)
@@ -1012,8 +1018,13 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]m
 		}()
 	}
 
+loop:
 	for p, batches := range keysAllocations {
-		jobChan <- provideJob{p, batches}
+		select {
+		case jobChan <- provideJob{p, batches}:
+		case <-s.done:
+			break loop
+		}
 	}
 	close(jobChan)
 	wg.Wait()
@@ -1381,6 +1392,11 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 // persistSuccessfulReprovide logs a successful reprovide to the datastore for
 // resumption after restarts.
 func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
+	// Don't persist if the provider is shutting down. The datastore may already
+	// be closed, which would cause a panic.
+	if s.closed() {
+		return
+	}
 	now := time.Now()
 	k := datastore.NewKey(path.Join(reprovideHistoryKeyPrefix, formatTimestampHex(now), string(prefix)))
 	if err := s.datastore.Put(s.ctx, k, []byte{}); err != nil {
@@ -1392,6 +1408,11 @@ func (s *SweepingProvider) persistSuccessfulReprovide(prefix bitstr.Key) {
 // loadRecentlyReprovidedRegions loads all regions that have been successfully
 // reprovided within the last reprovide interval from the datastore.
 func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.Trie[bitstr.Key, struct{}], error) {
+	// Don't load if the provider is shutting down. The datastore may already
+	// be closed, which would cause a panic.
+	if s.closed() {
+		return trie.New[bitstr.Key, struct{}](), nil
+	}
 	s.gcReprovideHistoryIfNeeded(now)
 
 	q := query.Query{
@@ -1424,6 +1445,11 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 // gcReprovideHistoryIfNeeded removes reprovide log entries older than the
 // reprovide interval. GC runs at most once per reprovide interval.
 func (s *SweepingProvider) gcReprovideHistoryIfNeeded(now time.Time) {
+	// Don't run GC if the provider is shutting down. The datastore may already
+	// be closed, which would cause a panic.
+	if s.closed() {
+		return
+	}
 	lastGC := time.Unix(s.lastReprovideHistoryGC.Load(), 0)
 	if now.Sub(lastGC) < s.reprovideInterval {
 		// Only run GC once per reprovide interval.
@@ -1629,6 +1655,11 @@ func (s *SweepingProvider) batchProvide(prefix bitstr.Key, keys []mh.Multihash) 
 }
 
 func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
+	// Check if provider is shutting down before accessing keystore/datastore.
+	// The underlying datastores may be closed externally during shutdown.
+	if s.closed() {
+		return
+	}
 	addrInfo, ok := s.selfAddrInfo()
 	if !ok {
 		// Don't provide if the node doesn't have a valid address to include in the
@@ -2019,7 +2050,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 	var reprovideAll bool
 	// Insert prefixes into the schedule
 	s.scheduleLk.Lock()
-	if len(gaps) > 1 || gaps[0] != bitstr.Key("") {
+	if s.bootstrapped.Load() {
 		_, resettableKeystore := s.keystore.(*keystore.ResettableKeystore)
 		if resettableKeystore && len(toInsert) > s.schedule.Size() {
 			// Schedule size is about to double

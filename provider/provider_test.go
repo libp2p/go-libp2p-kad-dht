@@ -387,7 +387,7 @@ func noopConnectivityChecker() *connectivity.ConnectivityChecker {
 func provideCounter() metric.Int64Counter {
 	meter := otel.Meter("github.com/libp2p/go-libp2p-kad-dht/provider")
 	provideCounter, err := meter.Int64Counter(
-		"total_provide_count",
+		"provider.provides",
 		metric.WithDescription("Number of successful provides since node is running"),
 	)
 	if err != nil {

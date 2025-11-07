@@ -555,9 +555,11 @@ func (s *keystore) Close() error {
 	default:
 		close(s.close)
 		<-s.done              // Wait for worker to exit
-		err = s.persistSize() // Safe to access s.size after worker exits
-		if syncErr := s.ds.Sync(context.Background(), ds.NewKey("")); syncErr != nil {
-			s.logger.Warnf("error syncing datastore on close: %v", syncErr)
+		if err = s.persistSize(); err != nil {
+			return fmt.Errorf("error persisting size on close: %w", err)
+		}
+		if err = s.ds.Sync(context.Background(), sizeKey); err != nil {
+			return fmt.Errorf("error syncing size on close: %w", err)
 		}
 	}
 	return err

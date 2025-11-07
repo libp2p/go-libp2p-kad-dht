@@ -68,7 +68,8 @@ type ResettableKeystore struct {
 	altSize         atomic.Int64
 	resetInProgress bool
 	activeNamespace byte
-	resetOps        chan resetOp // reset operations that must be run in main go routine
+	resetOps        chan resetOp  // reset operations that must be run in main go routine
+	altPutSem       chan struct{} // binary semaphore: empty when altPut running, has token when idle
 }
 
 var _ Keystore = (*ResettableKeystore)(nil)
@@ -131,7 +132,10 @@ func NewResettableKeystore(d ds.Batching, opts ...Option) (*ResettableKeystore, 
 		altDs:           altDs,
 		activeNamespace: activeIdx,
 		resetOps:        make(chan resetOp),
+		altPutSem:       make(chan struct{}, 1),
 	}
+	// Initialize semaphore with token (altPut not running)
+	rks.altPutSem <- struct{}{}
 
 	// start worker goroutine
 	go rks.worker()
@@ -257,6 +261,36 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 	return nil
 }
 
+// tryAltPut is a concurrency-safe wrapper around altPut that coordinates with
+// Close() to prevent data races during reset operations.
+//
+// This method is called exclusively by ResetCids(), which runs outside the
+// worker goroutine. Since only one reset can be active at a time (enforced by
+// resetInProgress) and altPut calls within a reset are sequential, only one
+// tryAltPut executes at any given time. In contrast, regular Put operations
+// call altPut directly from within the worker goroutine, which Close() already
+// waits for via <-s.done.
+//
+// The binary semaphore (altPutSem) coordinates mutual exclusion with Close():
+//   - tryAltPut attempts a non-blocking acquire of the semaphore token
+//   - If successful, it proceeds with altPut and releases the token when done
+//   - If the token is unavailable, Close() must have acquired it, so this
+//     returns ErrClosed immediately
+//   - Close() blocks on acquiring the token until tryAltPut completes
+//
+// This prevents a TOCTOU race where Close() could begin persisting state
+// (via persistSize()) while altPut is concurrently accessing the datastore.
+func (s *ResettableKeystore) tryAltPut(ctx context.Context, keys []mh.Multihash) error {
+	select {
+	case <-s.altPutSem:
+	default: // Close took the token
+		return ErrClosed
+	}
+	err := s.altPut(ctx, keys)
+	s.altPutSem <- struct{}{}
+	return err
+}
+
 // handleResetOp processes reset operations that need to happen synchronously.
 func (s *ResettableKeystore) handleResetOp(op resetOp) {
 	ctx := context.Background()
@@ -369,7 +403,7 @@ loop:
 			}
 			keys = append(keys, c.Hash())
 			if len(keys) >= s.batchSize {
-				if err := s.altPut(ctx, keys); err != nil {
+				if err := s.tryAltPut(ctx, keys); err != nil {
 					return err
 				}
 				keys = keys[:0]
@@ -377,10 +411,34 @@ loop:
 		}
 	}
 	// Put final batch
-	if err := s.altPut(ctx, keys); err != nil {
+	if err := s.tryAltPut(ctx, keys); err != nil {
 		return err
 	}
 	success = true
 
 	return nil
+}
+
+// Close shuts down the ResettableKeystore. It waits for any ongoing altPut
+// operations to complete before persisting state to avoid race conditions.
+func (s *ResettableKeystore) Close() error {
+	var err error
+	select {
+	case <-s.close:
+		// Already closed
+	default:
+		close(s.close)
+		<-s.done // Wait for worker to exit
+		// Wait for any ongoing altPut operations to complete by acquiring the
+		// semaphore token. This blocks if altPut is running, succeeds immediately
+		// if idle.
+		<-s.altPutSem
+		if err = s.persistSize(); err != nil {
+			return fmt.Errorf("error persisting size on close: %w", err)
+		}
+		if err = s.ds.Sync(context.Background(), sizeKey); err != nil {
+			return fmt.Errorf("error syncing size on close: %w", err)
+		}
+	}
+	return err
 }

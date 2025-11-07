@@ -1018,9 +1018,10 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]m
 		}()
 	}
 
+loop:
 	for p, batches := range keysAllocations {
 		select {
-		case jobChan <- provideJob{p, batches}
+		case jobChan <- provideJob{p, batches}:
 		case <-s.done:
 			break loop
 		}

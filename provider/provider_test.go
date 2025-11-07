@@ -18,11 +18,9 @@ import (
 	"time"
 
 	"github.com/guillaumemichel/reservedpool"
-	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	dssync "github.com/ipfs/go-datastore/sync"
-	pebble "github.com/ipfs/go-ds-pebble"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/peer"

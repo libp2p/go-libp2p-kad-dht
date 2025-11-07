@@ -150,6 +150,7 @@ type SweepingProvider struct {
 	cancelCtx    context.CancelFunc
 	closeOnce    sync.Once
 	wg           sync.WaitGroup
+	wgLk         sync.RWMutex // Protects wg.Add() from racing with Close()
 	cleanupFuncs []func() error
 
 	peerid peer.ID
@@ -488,7 +489,11 @@ func (s *SweepingProvider) run() {
 func (s *SweepingProvider) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
+		// Acquire write lock to prevent new wg.Add() calls during shutdown
+		s.wgLk.Lock()
 		close(s.done)
+		s.wgLk.Unlock()
+
 		s.cancelCtx()
 		s.wg.Wait()
 		s.approxPrefixLenRunning.Lock()
@@ -1212,7 +1217,14 @@ func (s *SweepingProvider) handleReprovide() {
 	// present.
 	s.reprovideQueue.Remove(currentPrefix)
 
+	s.wgLk.RLock()
+	if s.closed() {
+		s.wgLk.RUnlock()
+		return
+	}
 	s.wg.Add(1)
+	s.wgLk.RUnlock()
+
 	go func() {
 		if err := s.workerPool.Acquire(periodicWorker); err == nil {
 			s.batchReprovide(currentPrefix)
@@ -1255,7 +1267,14 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 		s.provideQueue.Enqueue(prefixAndKeys.Prefix, prefixAndKeys.Keys...)
 	}
 
+	s.wgLk.RLock()
+	if s.closed() {
+		s.wgLk.RUnlock()
+		return
+	}
 	s.wg.Add(1)
+	s.wgLk.RUnlock()
+
 	go s.provideLoop()
 }
 
@@ -1513,10 +1532,19 @@ func parseReprovideHistoryKey(k string) (time.Time, bitstr.Key, error) {
 // This function is guarded by s.lateReprovideRunning, ensuring the function
 // cannot be called again while it is working on reproviding late regions.
 func (s *SweepingProvider) catchupPendingWork() {
-	if s.closed() || !s.lateReprovideRunning.TryLock() {
+	if !s.lateReprovideRunning.TryLock() {
+		return
+	}
+
+	s.wgLk.RLock()
+	if s.closed() {
+		s.wgLk.RUnlock()
+		s.lateReprovideRunning.Unlock()
 		return
 	}
 	s.wg.Add(2)
+	s.wgLk.RUnlock()
+
 	go func() {
 		// Reprovide late regions if any.
 		s.reprovideLateRegions()
@@ -1561,7 +1589,15 @@ func (s *SweepingProvider) provideLoop() {
 		}
 		prefix, keys, ok := s.provideQueue.Dequeue()
 		if ok {
+			s.wgLk.RLock()
+			if s.closed() {
+				s.wgLk.RUnlock()
+				s.workerPool.Release(burstWorker)
+				return
+			}
 			s.wg.Add(1)
+			s.wgLk.RUnlock()
+
 			go func(prefix bitstr.Key, keys []mh.Multihash) {
 				s.batchProvide(prefix, keys)
 				s.workerPool.Release(burstWorker)
@@ -1594,7 +1630,15 @@ func (s *SweepingProvider) reprovideLateRegions() {
 		}
 		prefix, ok := s.reprovideQueue.Dequeue()
 		if ok {
+			s.wgLk.RLock()
+			if s.closed() {
+				s.wgLk.RUnlock()
+				s.workerPool.Release(burstWorker)
+				return
+			}
 			s.wg.Add(1)
+			s.wgLk.RUnlock()
+
 			go func(prefix bitstr.Key) {
 				s.batchReprovide(prefix)
 				s.workerPool.Release(burstWorker)

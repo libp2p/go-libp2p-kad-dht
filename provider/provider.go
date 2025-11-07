@@ -1085,6 +1085,9 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, batches [][]mh.Multihash
 	// Process each batch
 	for batchIdx, batch := range batches {
 		for mhIdx, mh := range batch {
+			if s.closed() {
+				return ErrClosed
+			}
 			pmes.Key = mh
 			err := s.msgSender.SendMessage(s.ctx, p, pmes)
 			sentKeys++
@@ -2070,6 +2073,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		// This is a corner case that is required for Kubo, as Keystore.Reset()
 		// takes a while.
 		s.reprovideQueue.Enqueue(keyspace.AllKeys(s.schedule, s.order)...)
+		s.catchupPendingWork()
 	}
 	s.scheduleLk.Unlock()
 	return nil

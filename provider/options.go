@@ -43,6 +43,7 @@ type config struct {
 
 	offlineDelay                    time.Duration
 	connectivityCheckOnlineInterval time.Duration
+	connectivityCallbacks           [3]func()
 
 	peerid peer.ID
 	host   host.Host
@@ -376,6 +377,38 @@ func WithDhtType(dhtType string) Option {
 func WithSkipBootstrapReprovide(skip bool) Option {
 	return func(cfg *config) error {
 		cfg.skipBootstrapReprovide = skip
+		return nil
+	}
+}
+
+// WithConnectivityCallbacks sets the connectivity state change callbacks for
+// the provider's internal connectivity checker state machine.
+//
+// The connectivity checker tracks three states: OFFLINE, DISCONNECTED, and
+// ONLINE. The callbacks are invoked during state transitions:
+//
+//   - onOnline: Called when the node transitions to ONLINE state (from either
+//     OFFLINE or DISCONNECTED). After this callback, the provider measures the
+//     network prefix length and refreshes the reprovide schedule.
+//
+//   - onDisconnected: Called when the node transitions from ONLINE to
+//     DISCONNECTED state (i.e., connectivity check failed while online). No
+//     provider action is triggered for this transition.
+//
+//   - onOffline: Called when the node transitions from DISCONNECTED to OFFLINE
+//     state (after remaining disconnected for OfflineDelay duration). After
+//     this callback, the provider clears the provide queue and invalidates
+//     cached metrics.
+//
+// User-supplied callbacks are invoked before the provider's internal actions.
+// All callbacks should be fast and non-blocking to avoid delaying state
+// transitions and provider operations. Long-running operations should be
+// dispatched to separate goroutines.
+func WithConnectivityCallbacks(onOnline, onDisconnected, onOffline func()) Option {
+	return func(cfg *config) error {
+		cfg.connectivityCallbacks[0] = onOnline
+		cfg.connectivityCallbacks[1] = onDisconnected
+		cfg.connectivityCallbacks[2] = onOffline
 		return nil
 	}
 }

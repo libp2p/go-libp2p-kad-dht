@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -356,9 +357,24 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	// before first provide
 	prov.increaseProvideCounter(0)
 
-	// Set up callbacks after both provider and connectivity checker are initialized
-	// This breaks the circular dependency between connectivity, onOnline, and approxPrefixLen
-	prov.connectivity.SetCallbacks(prov.onOnline, prov.onOffline)
+	// Set up callbacks after both provider and connectivity checker are
+	// initialized. This breaks the circular dependency between connectivity, onOnline, and
+	// approxPrefixLen.
+	// Add user-defined callbacks if any.
+	prov.connectivity.SetCallbacks(
+		func() {
+			if cfg.connectivityCallbacks[0] != nil {
+				cfg.connectivityCallbacks[0]()
+			}
+			prov.onOnline()
+		},
+		cfg.connectivityCallbacks[1],
+		func() {
+			if cfg.connectivityCallbacks[2] != nil {
+				cfg.connectivityCallbacks[2]()
+			}
+			prov.onOffline()
+		})
 	prov.connectivity.Start()
 
 	prov.wg.Add(1)
@@ -723,11 +739,12 @@ func (s *SweepingProvider) getAvgPrefixLenNoLock() int {
 	prefixLenSum := 0
 	if !s.schedule.IsEmptyLeaf() {
 		// Take average prefix length of all scheduled prefixes.
-		scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-		for _, entry := range scheduleEntries {
-			prefixLenSum += len(entry.Key)
+		nScheduleEntries := 0
+		for k := range keyspace.KeysIter(s.schedule, s.order) {
+			prefixLenSum += k.BitLen()
+			nScheduleEntries++
 		}
-		s.cachedAvgPrefixLen = prefixLenSum / len(scheduleEntries)
+		s.cachedAvgPrefixLen = prefixLenSum / nScheduleEntries
 		s.lastAvgPrefixLen = time.Now()
 	}
 	return s.cachedAvgPrefixLen
@@ -780,9 +797,10 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitst
 	}
 	coveredPrefix, _ := keyspace.ShortestCoveredPrefix(bitstr.Key(key.BitString(keyspace.MhToBit256(k))), peers)
 	addrInfo := peer.AddrInfo{ID: s.peerid, Addrs: s.getSelfAddrs()}
-	keysAllocations := make(map[peer.ID][]mh.Multihash)
+	// Create batched allocations (single batch per peer for single-key provide)
+	keysAllocations := make(map[peer.ID][][]mh.Multihash)
 	for _, p := range peers {
-		keysAllocations[p] = keys
+		keysAllocations[p] = [][]mh.Multihash{keys} // Wrap in single batch
 	}
 	reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, 1)
 
@@ -931,8 +949,8 @@ func (s *SweepingProvider) closestPeersToKey(k bitstr.Key) ([]peer.ID, error) {
 }
 
 type provideJob struct {
-	pid  peer.ID
-	keys []mh.Multihash
+	pid     peer.ID
+	batches [][]mh.Multihash // Batches of keys
 }
 
 // sendProviderRecords manages reprovides for all given peer ids and allocated
@@ -943,7 +961,7 @@ type provideJob struct {
 // reprovide keys to a given threshold of peers. In this case, the region
 // reprovide is considered failed and the caller is responsible for trying
 // again. This allows detecting if we are offline.
-func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) (reachablePeers int, err error) {
+func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][][]mh.Multihash, addrInfo peer.AddrInfo, nKeys int) (reachablePeers int, err error) {
 	nPeers := len(keysAllocations)
 	if nPeers == 0 {
 		return reachablePeers, err
@@ -979,12 +997,15 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 				if s.closed() {
 					return
 				}
-				err := s.provideKeysToPeer(job.pid, job.keys, pmes)
+				err := s.provideKeysToPeer(job.pid, job.batches, pmes)
 				if err != nil {
 					errCount.Add(1)
 					failedKeysCountLk.Lock()
-					for _, k := range job.keys {
-						failedKeysCount[string(k)]++
+					// Count failures for all keys in all batches
+					for _, batch := range job.batches {
+						for _, k := range batch {
+							failedKeysCount[string(k)]++
+						}
 					}
 					failedKeysCountLk.Unlock()
 					if s.host != nil {
@@ -997,10 +1018,9 @@ func (s *SweepingProvider) sendProviderRecords(keysAllocations map[peer.ID][]mh.
 		}()
 	}
 
-loop:
-	for p, keys := range keysAllocations {
+	for p, batches := range keysAllocations {
 		select {
-		case jobChan <- provideJob{p, keys}:
+		case jobChan <- provideJob{p, batches}
 		case <-s.done:
 			break loop
 		}
@@ -1050,34 +1070,40 @@ func genProvideMessage(addrInfo peer.AddrInfo) *pb.Message {
 	return pmes
 }
 
-// provideKeysToPeer performs the network operation to advertise to the given
-// DHT server (p) that we serve all the given keys.
-func (s *SweepingProvider) provideKeysToPeer(p peer.ID, keys []mh.Multihash, pmes *pb.Message) error {
+// provideKeyToPeer performs network operations to advertise batches of keys
+// to the given DHT server. This is the batched version that processes key batches
+// created by AllocateToKClosestBatched, providing significant memory savings.
+func (s *SweepingProvider) provideKeysToPeer(p peer.ID, batches [][]mh.Multihash, pmes *pb.Message) error {
 	if s.host != nil {
 		s.host.ConnManager().Protect(p, connMgrTag)
 		defer s.host.ConnManager().Unprotect(p, connMgrTag)
 	}
-	var errCount, errStreak int
-	for i, mh := range keys {
-		if s.closed() {
-			return ErrClosed
-		}
-		pmes.Key = mh
-		err := s.msgSender.SendMessage(s.ctx, p, pmes)
-		if err != nil {
-			errStreak++
-			errCount++
 
-			if errStreak == len(keys) || errStreak > maxConsecutiveProvideFailuresAllowed {
-				s.stats.addProvidedRecords(i + 1 - errCount)
-				return fmt.Errorf("failed to provide to %s: %s", p, err.Error())
+	sentKeys := 0
+	var errCount, errStreak int
+	// Process each batch
+	for batchIdx, batch := range batches {
+		for mhIdx, mh := range batch {
+			pmes.Key = mh
+			err := s.msgSender.SendMessage(s.ctx, p, pmes)
+			sentKeys++
+			if err != nil {
+				errStreak++
+				errCount++
+				if errStreak > maxConsecutiveProvideFailuresAllowed ||
+					errStreak == sentKeys && batchIdx == len(batches)-1 && mhIdx == len(batch)-1 {
+
+					s.stats.addProvidedRecords(sentKeys - errCount)
+					return fmt.Errorf("failed to provide to %s: %s", p, err.Error())
+				}
+			} else if errStreak > 0 {
+				// Reset error streak
+				errStreak = 0
 			}
-		} else if errStreak > 0 {
-			// Reset error count
-			errStreak = 0
 		}
 	}
-	s.stats.addProvidedRecords(len(keys) - errCount)
+
+	s.stats.addProvidedRecords(sentKeys - errCount)
 	return nil
 }
 
@@ -1126,19 +1152,26 @@ func (s *SweepingProvider) handleReprovide() {
 			// no regions has been reprovided since. Add all regions to the reprovide
 			// queue. This only happens if the main thread gets blocked for more than
 			// reprovideInterval.
+			var nextEntry trie.Entry[bitstr.Key, time.Duration]
+			firstEntry := true
 			nextKeyFound := false
-			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-			next = &scheduleEntries[0]
-			for _, entry := range scheduleEntries {
+			for entry := range keyspace.EntriesIter(s.schedule, s.order) {
+				if firstEntry {
+					// If no key is found after currentTimeOffset, take the first entry
+					// as nextEntry.
+					nextEntry = entry
+					firstEntry = false
+				}
 				// Add all regions from the schedule to the reprovide queue. The next
 				// region to be scheduled for reprovide is the one immediately
 				// following the current time offset in the schedule.
 				if !nextKeyFound && entry.Data > currentTimeOffset {
-					next = &entry
+					nextEntry = entry
 					nextKeyFound = true
 				}
 				s.reprovideQueue.Enqueue(entry.Key)
 			}
+			next = &nextEntry
 			// Don't reprovide any region now, but schedule the next one. All regions
 			// are expected to be reprovided when the provider is catching up with
 			// failed regions.
@@ -1267,9 +1300,9 @@ func (s *SweepingProvider) groupAndScheduleKeysByPrefix(keys []mh.Multihash, sch
 		if subtrie, ok := keyspace.FindSubtrie(prefixTrie, prefix); ok {
 			// If prefixes already contains superstrings of prefix, consolidate the
 			// keys to prefix.
-			for _, entry := range keyspace.AllEntries(subtrie, s.order) {
-				mhs = append(mhs, prefixes[entry.Key]...)
-				delete(prefixes, entry.Key)
+			for k := range keyspace.KeysIter(subtrie, s.order) {
+				mhs = append(mhs, prefixes[k]...)
+				delete(prefixes, k)
 			}
 			keyspace.PruneSubtrie(prefixTrie, prefix)
 		}
@@ -1333,10 +1366,9 @@ func (s *SweepingProvider) onOnline() {
 			// When skipping bootstrap reprovide, still initialize the schedule timer
 			// to start the normal reprovide cycle from the beginning.
 			s.scheduleLk.Lock()
-			scheduleEntries := keyspace.AllEntries(s.schedule, s.order)
-			if len(scheduleEntries) > 0 {
-				first := &scheduleEntries[0]
-				s.scheduleNextReprovideNoLock(first.Key, s.timeUntil(first.Data))
+			for entry := range keyspace.EntriesIter(s.schedule, s.order) {
+				s.scheduleNextReprovideNoLock(entry.Key, s.timeUntil(entry.Data))
+				break
 			}
 			s.scheduleLk.Unlock()
 		}
@@ -1353,12 +1385,7 @@ func (s *SweepingProvider) enqueueExpiredRegionsNoLock(recentlyReprovided *trie.
 	keyspace.CoalesceTrie(recentlyReprovided)
 	// Take a copy of schedule from which we remove recently reprovided regions.
 	toReprovideTrie := keyspace.SubtractTrie(s.schedule, recentlyReprovided)
-	toReprovideEntries := keyspace.AllEntries(toReprovideTrie, s.order)
-	toReprovideKeys := make([]bitstr.Key, len(toReprovideEntries))
-	for i, entry := range toReprovideEntries {
-		toReprovideKeys[i] = entry.Key
-	}
-	s.reprovideQueue.Enqueue(toReprovideKeys...)
+	s.reprovideQueue.Enqueue(keyspace.AllKeys(toReprovideTrie, s.order)...)
 }
 
 // persistSuccessfulReprovide logs a successful reprovide to the datastore for
@@ -1805,19 +1832,28 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo peer.AddrInfo, reprovide bool) bool {
 	errCount := 0
 	for _, r := range regions {
-		allKeys := keyspace.AllValues(r.Keys, s.order)
-		nKeys := len(allKeys)
-		if nKeys == 0 {
+		if r.Keys == nil || r.Keys.IsEmptyLeaf() {
 			if reprovide {
 				s.releaseRegionReprovide(r.Prefix)
 			}
 			continue
 		}
 		// Add keys to local provider store
-		for _, h := range allKeys {
+		var keys []mh.Multihash
+		gatherKeys := !reprovide || s.logger.Level() <= zapcore.DebugLevel
+		nKeys := 0
+		for h := range keyspace.ValuesIter(r.Keys, s.order) {
 			s.addLocalRecord(h)
+			nKeys++
+			if gatherKeys {
+				keys = append(keys, h)
+			}
 		}
 		keysAllocations := keyspace.AllocateToKClosest(r.Keys, r.Peers, s.replicationFactor)
+		// Prune keys and peers from region to free memory while records are sent
+		// over the network.
+		keyspace.PruneSubtrie(r.Keys, bitstr.Key(""))
+		keyspace.PruneSubtrie(r.Peers, bitstr.Key(""))
 		reachablePeers, err := s.sendProviderRecords(keysAllocations, addrInfo, nKeys)
 
 		s.stats.cycleStatsLk.Lock()
@@ -1840,12 +1876,12 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 			if reprovide {
 				s.failedReprovide(r.Prefix, err)
 			} else { // provide operation
-				s.failedProvide(r.Prefix, keyspace.AllValues(r.Keys, s.order), err)
+				s.failedProvide(r.Prefix, keys, err)
 			}
 			continue
 		}
 		s.increaseProvideCounter(nKeys)
-		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", allKeys)
+		s.logger.Debugw("sent provider records", "prefix", r.Prefix, "count", nKeys, "keys", keys)
 	}
 	// If at least 1 regions was provided, we don't consider it a failure.
 	return errCount < len(regions)
@@ -2032,10 +2068,7 @@ func (s *SweepingProvider) RefreshSchedule() error {
 		// records are available in the DHT.
 		// This is a corner case that is required for Kubo, as Keystore.Reset()
 		// takes a while.
-		for _, entry := range keyspace.AllEntries(s.schedule, s.order) {
-			s.reprovideQueue.Enqueue(entry.Key)
-		}
-		s.catchupPendingWork()
+		s.reprovideQueue.Enqueue(keyspace.AllKeys(s.schedule, s.order)...)
 	}
 	s.scheduleLk.Unlock()
 	return nil

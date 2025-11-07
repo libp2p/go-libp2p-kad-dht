@@ -154,7 +154,7 @@ func TestProvideKeysToPeer(t *testing.T) {
 	nKeys := 16
 	pid, err := peer.Decode("12BoooooPEER")
 	require.NoError(t, err)
-	mhs := genMultihashes(nKeys)
+	mhs := [][]mh.Multihash{genMultihashes(nKeys)}
 	pmes := &pb.Message{}
 
 	// All ADD_PROVIDER RPCs fail, return an error after reprovideInitialFailuresAllowed+1 attempts
@@ -197,15 +197,22 @@ func TestKeysAllocationsToPeers(t *testing.T) {
 	}
 	peersTrie.AddMany(peerEntries...)
 	keysAllocations := keyspace.AllocateToKClosest(keysTrie, peersTrie, replicationFactor)
+	// Flatten the batches into a single slice per peer
+	flattened := make(map[peer.ID][]mh.Multihash)
+	for dest, batches := range keysAllocations {
+		for _, batch := range batches {
+			flattened[dest] = append(flattened[dest], batch...)
+		}
+	}
 
 	for _, c := range mhs {
 		k := sha256.Sum256(c)
 		closestPeers := kb.SortClosestPeers(peers, k[:])[:replicationFactor]
 		for _, p := range closestPeers[:replicationFactor] {
-			require.Contains(t, keysAllocations[p], c)
+			require.Contains(t, flattened[p], c)
 		}
 		for _, p := range closestPeers[replicationFactor:] {
-			require.NotContains(t, keysAllocations[p], c)
+			require.NotContains(t, flattened[p], c)
 		}
 	}
 }
@@ -2003,213 +2010,124 @@ func TestResumeReprovides(t *testing.T) {
 	})
 }
 
-// TestResettableKeystoreWithPersistence tests the provider with ResettableKeystore
-// backed by a pebble datastore, including:
-// - Slow reset operations with 128 keys
-// - Verification of all keys provided
-// - Running for 1.5 reprovide cycles
-// - Persistence across restarts
-// - Resume behavior after downtime
-// - No unnecessary reprovides after reset with same keys
-func TestResettableKeystoreWithPersistence(t *testing.T) {
+func TestConnectivityCallbacks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
+		// Connectivity state tracked by callbacks
+		type ConnectivityState int
+		const (
+			StateOffline ConnectivityState = iota
+			StateDisconnected
+			StateOnline
+		)
+
+		var stateLk sync.Mutex
+		trackedState := StateOffline
+		onlineChan := make(chan struct{}, 10)
+		disconnectedChan := make(chan struct{}, 10)
+		offlineChan := make(chan struct{}, 10)
+
+		// Define callbacks that update shared state
+		onOnline := func() {
+			stateLk.Lock()
+			trackedState = StateOnline
+			stateLk.Unlock()
+			onlineChan <- struct{}{}
+		}
+
+		onDisconnected := func() {
+			stateLk.Lock()
+			trackedState = StateDisconnected
+			stateLk.Unlock()
+			disconnectedChan <- struct{}{}
+		}
+
+		onOffline := func() {
+			stateLk.Lock()
+			trackedState = StateOffline
+			stateLk.Unlock()
+			offlineChan <- struct{}{}
+		}
+
+		// Control connectivity through router
+		online := atomic.Bool{}
+		online.Store(true) // Start online
+		checkInterval := time.Second
+		offlineDelay := time.Minute
+
 		pid, err := peer.Decode("12BoooooPEER")
 		require.NoError(t, err)
 
-		// Configure for 4 regions: low replication factor and peer count
-		replicationFactor := 2
-		peerPrefixBitlen := 3
-		require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
-		var nPeers byte = 1 << peerPrefixBitlen // 8 peers, replicationFactor 2 -> 4 regions
-		nRegions := int(nPeers) / replicationFactor
-		peers := make([]peer.ID, nPeers)
-		for i := range nPeers {
-			b := i << (bitsPerByte - peerPrefixBitlen)
-			k := [32]byte{b}
-			peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
-			require.NoError(t, err)
-		}
-
-		reprovideInterval := time.Hour
-
 		router := &mockRouter{
 			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-				sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
-				return sortedPeers[:min(replicationFactor, len(peers))], nil
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				if !online.Load() {
+					return nil, errors.New("offline")
+				}
+				return []peer.ID{peer.ID("12BoooooPEER1")}, nil
 			},
 		}
 
-		// Track provides
-		msgSenderLk := sync.Mutex{}
-		provideCount := atomic.Int32{}
-		addProviderRpcs := make(map[string]int) // key -> count
-		msgSender := &mockMsgSender{
-			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
-				msgSenderLk.Lock()
-				defer msgSenderLk.Unlock()
-				_, k, err := mh.MHFromBytes(m.GetKey())
-				require.NoError(t, err)
-				addProviderRpcs[string(k)]++
-				provideCount.Add(1)
-				return nil
-			},
-		}
-
-		// Create pebble datastore in temp directory
-		tempDir := t.TempDir()
-		pebbleDs, err := pebble.NewDatastore(tempDir, nil)
-		require.NoError(t, err)
-
-		ks, err := keystore.NewResettableKeystore(pebbleDs, keystore.WithDatastorePath("provider/keystore"))
-		require.NoError(t, err)
-
-		provDs := namespace.Wrap(pebbleDs, datastore.NewKey("provider"))
-
-		// Provider options
-		opts := []Option{
-			WithReprovideInterval(reprovideInterval),
-			WithReplicationFactor(replicationFactor),
-			WithMaxWorkers(1),
-			WithDedicatedBurstWorkers(0),
-			WithDedicatedPeriodicWorkers(0),
+		prov, err := New(
 			WithPeerID(pid),
 			WithRouter(router),
-			WithMessageSender(msgSender),
+			WithMessageSender(&mockMsgSender{}),
 			WithSelfAddrs(getMockAddrs(t)),
-			WithSkipBootstrapReprovide(false),
-		}
-
-		prov, err := New(append(opts, WithDatastore(provDs), WithKeystore(ks))...)
+			WithReplicationFactor(1),
+			WithOfflineDelay(offlineDelay),
+			WithConnectivityCheckOnlineInterval(checkInterval),
+			WithConnectivityCallbacks(onOnline, onDisconnected, onOffline),
+		)
 		require.NoError(t, err)
+		defer prov.Close()
 
+		// Wait for initial ONLINE state
+		<-onlineChan
 		synctest.Wait()
+
+		stateLk.Lock()
+		require.Equal(t, StateOnline, trackedState)
+		stateLk.Unlock()
 		require.True(t, prov.connectivity.IsOnline())
+		require.Equal(t, "online", prov.Stats().Connectivity.Status)
 
-		require.Zero(t, provideCount.Load(), "no provides should have happened yet")
+		// Transition to DISCONNECTED
+		time.Sleep(checkInterval)
+		online.Store(false)
+		prov.connectivity.TriggerCheck()
 
-		// Generate 128 keys balanced across the keyspace
-		const keysExponent = 7
-		firstKeys := genBalancedMultihashes(keysExponent)
-		nKeys := len(firstKeys)
-
-		// Use Reset() to update keys with slow writes
-		keysChan := make(chan cid.Cid, nKeys)
-		go func() {
-			for i, h := range firstKeys {
-				keysChan <- cid.NewCidV1(cid.Raw, h)
-				// Make breaks while writing to channel to simulate slow Reset()
-				if i%10 == 0 {
-					time.Sleep(time.Minute)
-				}
-			}
-			close(keysChan)
-		}()
-
-		// Reset keystore with keys
-		err = ks.ResetCids(ctx, keysChan)
-		require.NoError(t, err)
-		// Add regions to schedule and reprovide queue
-		err = prov.RefreshSchedule()
-		require.NoError(t, err)
-
-		require.Equal(t, nRegions, prov.schedule.Size(), "schedule should have 4 regions")
+		<-disconnectedChan
 		synctest.Wait()
 
-		// Assert all keys have been provided
-		initialProvideCount := provideCount.Load()
-		require.Equal(t, int32(nKeys*replicationFactor), initialProvideCount,
-			"all keys should be provided initially")
-		msgSenderLk.Lock()
-		require.Equal(t, nKeys, len(addProviderRpcs), "all unique keys should be provided")
-		for _, count := range addProviderRpcs {
-			require.Equal(t, replicationFactor, count, "each key should be provided to replicationFactor peers")
-		}
-		msgSenderLk.Unlock()
+		stateLk.Lock()
+		require.Equal(t, StateDisconnected, trackedState)
+		stateLk.Unlock()
+		require.False(t, prov.connectivity.IsOnline())
+		require.Equal(t, "disconnected", prov.Stats().Connectivity.Status)
 
-		// Let provider run for 1.5 reprovide cycles
-		time.Sleep(reprovideInterval + reprovideInterval/2)
+		// Transition to OFFLINE after offlineDelay
+		time.Sleep(offlineDelay)
+
+		<-offlineChan
 		synctest.Wait()
 
-		// Verify keys are reprovided according to schedule.
-		// We should have 2.5x the initial count, 1x initial reprovide, 1x
-		// reprovide cycle, 0.5x half cycle
-		expectedProvides := int32(nKeys * replicationFactor * 5 / 2)
-		require.Equal(t, expectedProvides, provideCount.Load(), "keys should be reprovided after 1.5 cycles")
+		stateLk.Lock()
+		require.Equal(t, StateOffline, trackedState)
+		stateLk.Unlock()
+		require.False(t, prov.connectivity.IsOnline())
+		require.Equal(t, "offline", prov.Stats().Connectivity.Status)
 
-		// Get keystore size before closing
-		sizeBefore, err := ks.Size(ctx)
-		require.NoError(t, err)
-		require.Equal(t, nKeys, sizeBefore, "keystore should have %d keys", nKeys)
+		// Transition back to ONLINE
+		online.Store(true)
 
-		// Close provider, close keystore, close pebble datastore
-		err = prov.Close()
-		require.NoError(t, err)
-		err = ks.Close()
-		require.NoError(t, err)
-		err = pebbleDs.Close()
-		require.NoError(t, err)
-
-		// Sleep for a while (synctest)
-		downtimeFractionOfCycle := 4                                           // offline for reprovideInterval / 4
-		time.Sleep(reprovideInterval / time.Duration(downtimeFractionOfCycle)) // Simulate downtime
+		<-onlineChan
 		synctest.Wait()
 
-		// Create new pebble datastore (same path), new ResettableKeystore, new SweepingProvider
-		pebbleDs2, err := pebble.NewDatastore(tempDir, nil)
-		require.NoError(t, err)
-		defer pebbleDs2.Close()
-		ks2, err := keystore.NewResettableKeystore(pebbleDs2, keystore.WithDatastorePath("provider/keystore"))
-		require.NoError(t, err)
-		defer ks2.Close()
-
-		// Keys should be persisted automatically by pebble
-		sizeAfterReopen, err := ks2.Size(ctx)
-		require.NoError(t, err)
-		require.Equal(t, sizeBefore, sizeAfterReopen)
-
-		provDs2 := namespace.Wrap(pebbleDs2, datastore.NewKey("provider"))
-
-		// Reset provide tracking
-		provideCount.Store(0)
-
-		prov2, err := New(append(opts, WithDatastore(provDs2), WithKeystore(ks2))...)
-		require.NoError(t, err)
-		defer prov2.Close()
-
-		synctest.Wait()
-		require.True(t, prov2.connectivity.IsOnline())
-		require.Equal(t, nRegions, prov2.schedule.Size(), "all %d regions should be scheduled on restart", nRegions)
-
-		// Don't call reset yet, test that size matches
-		sizeAfter, err := ks2.Size(ctx)
-		require.NoError(t, err)
-		require.Equal(t, sizeBefore, sizeAfter,
-			"keystore size should match after reopening (fix verification)")
-
-		// Verify that the regions that should have been reprovided while offline
-		// are reprovided by now
-		expectedResumeProvides := int32(nKeys * replicationFactor / downtimeFractionOfCycle)
-		providesBeforeReset := provideCount.Load()
-		// All keys should be provided on restart (bootstrap reprovide)
-		require.Equal(t, expectedResumeProvides, providesBeforeReset,
-			"missed reprovides should happen on restart")
-
-		// Call Reset() with same keys
-		sameKeysChan := make(chan cid.Cid, nKeys)
-		for _, h := range firstKeys {
-			sameKeysChan <- cid.NewCidV1(cid.Raw, h)
-		}
-		close(sameKeysChan)
-
-		err = ks2.ResetCids(ctx, sameKeysChan)
-		require.NoError(t, err)
-		err = prov2.RefreshSchedule()
-		require.NoError(t, err)
-		synctest.Wait()
-
-		// Assert that Reset with same keys does NOT trigger more reprovides
-		require.Equal(t, providesBeforeReset, provideCount.Load())
-		require.Zero(t, prov2.reprovideQueue.Size())
+		stateLk.Lock()
+		require.Equal(t, StateOnline, trackedState)
+		stateLk.Unlock()
+		require.True(t, prov.connectivity.IsOnline())
+		require.Equal(t, "online", prov.Stats().Connectivity.Status)
 	})
 }

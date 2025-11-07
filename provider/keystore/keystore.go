@@ -310,6 +310,7 @@ func (s *keystore) put(ctx context.Context, keys []mh.Multihash) ([]mh.Multihash
 	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
 		s.logger.Warnf("keystore: cannot sync datastore after put: %v", err)
 	}
+	s.size += len(newKeys)
 	return newKeys, nil
 }
 

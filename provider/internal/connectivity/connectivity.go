@@ -54,9 +54,10 @@ type ConnectivityChecker struct {
 
 	checkFunc func() bool // function to check whether node is online
 
-	onOffline    func()
-	onOnline     func()
-	offlineDelay time.Duration
+	onOnline       func()
+	onDisconnected func()
+	onOffline      func()
+	offlineDelay   time.Duration
 }
 
 // New creates a new ConnectivityChecker instance.
@@ -70,8 +71,9 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 		checkFunc:           checkFunc,
 		startDisconnected:   cfg.startDisconnected,
 		onlineCheckInterval: cfg.onlineCheckInterval,
-		onOffline:           cfg.onOffline,
 		onOnline:            cfg.onOnline,
+		onDisconnected:      cfg.onDisconnected,
+		onOffline:           cfg.onOffline,
 		offlineDelay:        cfg.offlineDelay,
 	}
 	return c, nil
@@ -81,13 +83,14 @@ func New(checkFunc func() bool, opts ...Option) (*ConnectivityChecker, error) {
 // This allows breaking circular dependencies during initialization.
 //
 // SetCallbacks must be called before Start().
-func (c *ConnectivityChecker) SetCallbacks(onOnline, onOffline func()) {
+func (c *ConnectivityChecker) SetCallbacks(onOnline, onDisconnected, onOffline func()) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if c.closed {
 		return
 	}
 	c.onOnline = onOnline
+	c.onDisconnected = onDisconnected
 	c.onOffline = onOffline
 }
 
@@ -173,6 +176,9 @@ func (c *ConnectivityChecker) TriggerCheck() {
 		// Online -> Disconnected
 		c.stateChanged()
 		c.online.Store(false)
+		if c.onDisconnected != nil {
+			c.onDisconnected()
+		}
 
 		// Start periodic checks until node comes back Online
 		c.probeLoop(true)

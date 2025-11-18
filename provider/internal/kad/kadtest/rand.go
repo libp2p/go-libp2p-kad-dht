@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"strconv"
 
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bit256"
 )
 
 var rng = rand.New(rand.NewSource(299792458))

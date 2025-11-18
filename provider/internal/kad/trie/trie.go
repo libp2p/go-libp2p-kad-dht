@@ -4,8 +4,8 @@ package trie
 import (
 	"slices"
 
-	"github.com/probe-lab/go-libdht/kad"
-	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key"
 )
 
 // Trie is a trie for equal-length bit vectors, which stores values only in the leaves.

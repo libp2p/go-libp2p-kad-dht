@@ -4,9 +4,9 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/probe-lab/go-libdht/kad"
-	"github.com/probe-lab/go-libdht/kad/kadtest"
-	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/kadtest"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key"
 
 	"github.com/stretchr/testify/require"
 )

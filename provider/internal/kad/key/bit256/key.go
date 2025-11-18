@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"math"
 
-	"github.com/probe-lab/go-libdht/kad"
-	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key"
 )
 
 // KeyLen is the length of a 256-bit key in bytes.

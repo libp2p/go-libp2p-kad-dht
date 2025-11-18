@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/probe-lab/go-libdht/kad/key"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bit256"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bitstr"
 	"github.com/stretchr/testify/require"
 )
 

@@ -1,0 +1,20 @@
+name: Go Test
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    uses: ipdxco/unified-github-workflows/.github/workflows/go-test.yml@v1.0
+    with:
+      go-versions: '["this"]'

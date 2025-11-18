@@ -1,0 +1,18 @@
+name: Go Checks
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-check:
+    uses: ipdxco/unified-github-workflows/.github/workflows/go-check.yml@v1.0

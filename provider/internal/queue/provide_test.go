@@ -10,8 +10,8 @@ import (
 	"github.com/ipfs/go-test/random"
 	mh "github.com/multiformats/go-multihash"
 
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
-	"github.com/probe-lab/go-libdht/kad/trie"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bitstr"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/trie"
 	"github.com/stretchr/testify/require"
 
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"

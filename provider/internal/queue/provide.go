@@ -10,9 +10,9 @@ import (
 	"github.com/ipfs/go-datastore/query"
 	mh "github.com/multiformats/go-multihash"
 
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
-	"github.com/probe-lab/go-libdht/kad/trie"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bit256"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bitstr"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/trie"
 
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 )

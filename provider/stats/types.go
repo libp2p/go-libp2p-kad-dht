@@ -5,7 +5,7 @@ package stats
 import (
 	"time"
 
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bitstr"
 )
 
 type Stats struct {

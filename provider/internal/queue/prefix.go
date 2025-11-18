@@ -6,10 +6,10 @@ import (
 	"slices"
 
 	"github.com/gammazero/deque"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bit256"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/key/bitstr"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/kad/trie"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
-	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
 var zeroKey = bit256.ZeroKey()

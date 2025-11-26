@@ -56,6 +56,7 @@ func (m *mockConn) RemotePeer() peer.ID                        { return m.remote
 func (m *mockConn) RemotePublicKey() ic.PubKey                 { return nil }
 func (m *mockConn) ConnState() network.ConnectionState         { return network.ConnectionState{} }
 func (m *mockConn) IsClosed() bool                             { return m.isClosed.Load() }
+func (m *mockConn) As(any) bool                                { return false }
 func (m *mockConn) CloseWithError(network.ConnErrorCode) error { return m.Close() }
 
 func TestFilterCaching(t *testing.T) {

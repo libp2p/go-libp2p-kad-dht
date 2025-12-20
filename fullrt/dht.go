@@ -1371,7 +1371,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		// NOTE: Assuming that this list of peers is unique
 		if psTryAdd(p.ID) {
 			select {
-			case peerOut <- p:
+			case peerOut <- internal.CloneAddrInfo(p):
 				span.AddEvent("found provider", trace.WithAttributes(
 					attribute.Stringer("peer", p.ID),
 					attribute.Stringer("from", dht.self),
@@ -1417,7 +1417,7 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 			if psTryAdd(prov.ID) {
 				logger.Debugf("using provider: %s", prov)
 				select {
-				case peerOut <- *prov:
+				case peerOut <- internal.CloneAddrInfo(*prov):
 					span.AddEvent("found provider", trace.WithAttributes(
 						attribute.Stringer("peer", prov.ID),
 						attribute.Stringer("from", p),

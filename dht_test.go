@@ -1331,7 +1331,7 @@ func TestConnectCollision(t *testing.T) {
 
 	runTimes := 10
 
-	for rtime := 0; rtime < runTimes; rtime++ {
+	for rtime := range runTimes {
 		logger.Info("Running Time: ", rtime)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1345,7 +1345,8 @@ func TestConnectCollision(t *testing.T) {
 		peerA := dhtA.self
 		peerB := dhtB.self
 
-		errs := make(chan error)
+		// Use buffered channel to prevent goroutines from blocking on send
+		errs := make(chan error, 2)
 		go func() {
 			dhtA.peerstore.AddAddr(peerB, addrB, peerstore.TempAddrTTL)
 			pi := peer.AddrInfo{ID: peerB}
@@ -1359,22 +1360,20 @@ func TestConnectCollision(t *testing.T) {
 			errs <- err
 		}()
 
-		timeout := time.After(5 * time.Second)
-		select {
-		case e := <-errs:
-			if e != nil {
-				t.Fatal(e)
+		// Wait for both connections to complete or timeout
+		// Use a single timeout context for both attempts
+		timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer timeoutCancel()
+
+		for i := range 2 {
+			select {
+			case e := <-errs:
+				if e != nil {
+					t.Fatal(e)
+				}
+			case <-timeoutCtx.Done():
+				t.Fatalf("Timeout waiting for connection %d to complete", i+1)
 			}
-		case <-timeout:
-			t.Fatal("Timeout received!")
-		}
-		select {
-		case e := <-errs:
-			if e != nil {
-				t.Fatal(e)
-			}
-		case <-timeout:
-			t.Fatal("Timeout received!")
 		}
 
 		dhtA.Close()

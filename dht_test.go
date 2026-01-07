@@ -808,6 +808,25 @@ func checkForWellFormedTablesOnce(t *testing.T, dhts []*IpfsDHT, minPeers, avgPe
 	return true
 }
 
+// waitForEmptyRoutingTable waits until the given DHT's routing table is empty.
+// This is needed to avoid race conditions where we check for eviction completion
+// before proceeding with operations that depend on the eviction being done.
+func waitForEmptyRoutingTable(t *testing.T, dht *IpfsDHT, timeout time.Duration) {
+	t.Helper()
+	timeoutCh := time.After(timeout)
+	for {
+		select {
+		case <-timeoutCh:
+			t.Errorf("routing table not empty after %s, has %d peers", timeout, dht.routingTable.Size())
+			return
+		case <-time.After(5 * time.Millisecond):
+			if dht.routingTable.Size() == 0 {
+				return
+			}
+		}
+	}
+}
+
 func printRoutingTables(dhts []*IpfsDHT) {
 	// the routing tables should be full now. let's inspect them.
 	fmt.Printf("checking routing table of %d\n", len(dhts))
@@ -1911,7 +1930,9 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	require.NoError(t, dhtB.setMode(modeClient))
 
 	// which means that dhtA should evict it from it's RT
-	waitForWellFormedTables(t, []*IpfsDHT{dhtA}, 0, 0, 10*time.Second)
+	// We must wait for the routing table to actually be empty before
+	// dhtB becomes a server again.
+	waitForEmptyRoutingTable(t, dhtA, 10*time.Second)
 
 	// dhtB becomes a server
 	require.NoError(t, dhtB.setMode(modeServer))

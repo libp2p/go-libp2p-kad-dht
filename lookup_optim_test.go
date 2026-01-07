@@ -30,14 +30,14 @@ func TestOptimisticProvide(t *testing.T) {
 	// 5. perform provides
 	// 6. let all other DHTs perform the lookup for all provided CIDs
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	dhtCount := 21
+	nInitialConnections := 3
 
 	dhts := setupDHTS(t, ctx, dhtCount, EnableOptimisticProvide())
 	defer func() {
-		for i := 0; i < dhtCount; i++ {
+		for i := range dhtCount {
 			dhts[i].Close()
 			defer dhts[i].host.Close()
 		}
@@ -45,18 +45,23 @@ func TestOptimisticProvide(t *testing.T) {
 
 	// connect each DHT with three random others
 	for i, dht := range dhts {
-		for j := 0; j < 3; j++ {
+		for range nInitialConnections {
 			r := randInt(rng, dhtCount, i)
 			connect(t, ctx, dhts[r], dht)
 		}
 	}
 
+	// bootstrap to ensure routing tables are well-populated
+	// This is necessary because with a sparse random topology, lookups may
+	// not converge to the closest peers without proper routing table entries.
+	bootstrap(t, ctx, dhts)
+
 	// select privileged DHT that will perform the provide operation
 	privIdx := rng.Intn(dhtCount)
 	privDHT := dhts[privIdx]
 
-	peerIDs := make([]peer.ID, 20)
-	for i := 0; i < dhtCount; i++ {
+	peerIDs := make([]peer.ID, dhtCount-1)
+	for i := range dhtCount {
 		if i == privIdx {
 			continue
 		}
@@ -69,7 +74,7 @@ func TestOptimisticProvide(t *testing.T) {
 	}
 	nse := netsize.NewEstimator(privDHT.self, privDHT.routingTable, privDHT.bucketSize)
 
-	for i := 0; i < 20; i++ {
+	for i := range dhtCount - 1 {
 		err := nse.Track(string(testCaseCids[i].Bytes()), peerIDs)
 		if err != nil {
 			t.Fatal(err)

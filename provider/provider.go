@@ -275,6 +275,9 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 	connChecker, err := connectivity.New(
 		func() bool {
+			// When using fullrt (Accelerated DHT Client), wait for the initial
+			// crawl to complete before providing. Otherwise, GetClosestPeers
+			// returns no peers and prefix length estimation is incorrect.
 			if readyRouter, ok := cfg.router.(readyKadClosestPeersRouter); ok {
 				if !readyRouter.Ready() {
 					return false

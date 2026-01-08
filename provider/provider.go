@@ -135,6 +135,11 @@ type KadClosestPeersRouter interface {
 	GetClosestPeers(context.Context, string) ([]peer.ID, error)
 }
 
+type readyKadClosestPeersRouter interface {
+	KadClosestPeersRouter
+	Ready() bool
+}
+
 type workerType uint8
 
 const (
@@ -270,6 +275,11 @@ func New(opts ...Option) (*SweepingProvider, error) {
 
 	connChecker, err := connectivity.New(
 		func() bool {
+			if readyRouter, ok := cfg.router.(readyKadClosestPeersRouter); ok {
+				if !readyRouter.Ready() {
+					return false
+				}
+			}
 			_, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))
 			return err == nil
 		},

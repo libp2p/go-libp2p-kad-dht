@@ -273,6 +273,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		}
 	}
 
+	var loggedWaiting, loggedReady bool
 	connChecker, err := connectivity.New(
 		func() bool {
 			// When using fullrt (Accelerated DHT Client), wait for the initial
@@ -280,7 +281,15 @@ func New(opts ...Option) (*SweepingProvider, error) {
 			// returns no peers and prefix length estimation is incorrect.
 			if readyRouter, ok := cfg.router.(readyKadClosestPeersRouter); ok {
 				if !readyRouter.Ready() {
+					if !loggedWaiting {
+						logger.Info("waiting for router to be Ready() before providing")
+						loggedWaiting = true
+					}
 					return false
+				}
+				if loggedWaiting && !loggedReady {
+					logger.Info("router is Ready(), starting to provide")
+					loggedReady = true
 				}
 			}
 			_, err := cfg.router.GetClosestPeers(ctx, string(cfg.peerid))

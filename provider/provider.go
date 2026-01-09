@@ -889,6 +889,26 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 			return nil, errors.New("dht lookup did not return any peers")
 		}
 		coveredPrefix, coveredPeers := keyspace.ShortestCoveredPrefix(fullKey, closestPeers)
+
+		// When coveredPeers is empty but closestPeers is not, all peers share the
+		// same CPL with fullKey. This means they all reside in the sibling subtree
+		// of coveredPrefix (i.e., they match FlipLastBit(coveredPrefix) but not
+		// coveredPrefix itself). We record coveredPrefix as empty/explored in the
+		// trie, then re-query from the sibling subtree's perspective.
+		//
+		// By flipping into the subtree where peers actually reside, we guarantee
+		// they'll have longer CPLs with newTargetKey, and their individual
+		// differences will produce variation in CPL, yielding non-empty coveredPeers.
+		for len(coveredPeers) == 0 && len(closestPeers) > 0 {
+			// Record that coveredPrefix subtree is empty (no peers found there).
+			if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); !ok {
+				keyspace.PruneSubtrie(coverageTrie, coveredPrefix)
+				coverageTrie.Add(coveredPrefix, struct{}{})
+			}
+			// Build a new target key in the sibling subtree where peers reside.
+			newTargetKey := keyspace.FlipLastBit(coveredPrefix) + fullKey[len(coveredPrefix):]
+			coveredPrefix, coveredPeers = keyspace.ShortestCoveredPrefix(newTargetKey, closestPeers)
+		}
 		// Track whether we discovered any new peers. If too many consecutive
 		// lookups find no new peers, break early as we've likely found all peers
 		// in the region.

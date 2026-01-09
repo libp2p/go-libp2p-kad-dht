@@ -299,6 +299,53 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 	})
 }
 
+func TestClosestPeersToPrefixSameCPL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		replFactor := 20
+		cpl := 4
+		zeroID := [32]byte{}
+		peers := make([]peer.ID, 0, replFactor)
+		seen := make(map[peer.ID]struct{}, replFactor)
+		for len(peers) < replFactor {
+			// Generate peers that all share the same CPL with the zero key.
+			p, err := kb.GenRandPeerIDWithCPL(zeroID[:], uint(cpl))
+			require.NoError(t, err)
+			if _, ok := seen[p]; !ok {
+				seen[p] = struct{}{}
+				peers = append(peers, p)
+			}
+		}
+
+		router := &mockRouter{
+			// GetClosestPeers always return the same set of peers, all sharing the
+			// same CPL with the zero key.
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return peers, nil
+			},
+		}
+
+		prov := SweepingProvider{
+			router:            router,
+			logger:            defaultLogger,
+			connectivity:      noopConnectivityChecker(),
+			replicationFactor: replFactor,
+		}
+		prov.connectivity.Start()
+		defer prov.connectivity.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		// No matter what the requested prefix is, the returned closest peers
+		// should be the ones supplied by the GetClosestPeers function.
+		for _, prefix := range []bitstr.Key{"1111", "0111", "0011", "0001", "0000", "1", ""} {
+			closestPeers, err := prov.closestPeersToPrefix(prefix)
+			require.NoError(t, err)
+			require.ElementsMatch(t, peers, closestPeers)
+		}
+	})
+}
+
 func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	prov := SweepingProvider{
 		order:             bit256.ZeroKey(),

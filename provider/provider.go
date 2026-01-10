@@ -900,6 +900,10 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		// they'll have longer CPLs with newTargetKey, and their individual
 		// differences will produce variation in CPL, yielding non-empty coveredPeers.
 		for len(coveredPeers) == 0 && len(closestPeers) > 0 {
+			// Check for shutdown to ensure this loop doesn't block Close().
+			if s.closed() {
+				return nil, ErrClosed
+			}
 			// Record that coveredPrefix subtree is empty (no peers found there).
 			if _, ok := keyspace.FindPrefixOfKey(coverageTrie, coveredPrefix); !ok {
 				keyspace.PruneSubtrie(coverageTrie, coveredPrefix)

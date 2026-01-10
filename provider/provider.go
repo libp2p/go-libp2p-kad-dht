@@ -334,7 +334,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 	pqueueDs := namespace.Wrap(cfg.datastore, datastore.NewKey("pqueue"))
 	batchSize := prov.keystore.BatchSize()
 	persistProvideQueue := func() error { return prov.provideQueue.Persist(ctx, pqueueDs, batchSize) }
-	prov.cleanupFuncs = append(prov.cleanupFuncs, prov.workerPool.Close, persistProvideQueue, prov.persistAvgPrefixLen)
+	prov.cleanupFuncs = append(prov.cleanupFuncs, persistProvideQueue, prov.persistAvgPrefixLen)
 
 	// Restore reprovide cycle start time from datastore or initialize it.
 	prov.setCycleStart(cfg.resumeCycle)
@@ -495,6 +495,9 @@ func (s *SweepingProvider) Close() error {
 		s.wgLk.Unlock()
 
 		s.cancelCtx()
+		// Close worker pool before waiting for goroutines, so any goroutines
+		// blocked on workerPool.Acquire() will be woken and can exit.
+		s.workerPool.Close()
 		s.wg.Wait()
 		s.approxPrefixLenRunning.Lock()
 		_ = struct{}{} // cannot have empty critical section

@@ -2289,7 +2289,9 @@ func TestResettableKeystoreWithPersistence(t *testing.T) {
 		err = prov.RefreshSchedule()
 		require.NoError(t, err)
 
+		prov.scheduleLk.Lock()
 		require.Equal(t, nRegions, prov.schedule.Size(), "schedule should have 4 regions")
+		prov.scheduleLk.Unlock()
 		synctest.Wait()
 
 		// Assert all keys have been provided
@@ -2355,7 +2357,9 @@ func TestResettableKeystoreWithPersistence(t *testing.T) {
 
 		synctest.Wait()
 		require.True(t, prov2.connectivity.IsOnline())
+		prov2.scheduleLk.Lock()
 		require.Equal(t, nRegions, prov2.schedule.Size(), "all %d regions should be scheduled on restart", nRegions)
+		prov2.scheduleLk.Unlock()
 
 		// Don't call reset yet, test that size matches
 		sizeAfter, err := ks2.Size(ctx)

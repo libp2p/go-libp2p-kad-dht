@@ -198,7 +198,36 @@ func TestShortestCoveredPrefix(t *testing.T) {
 	// Test without supplying peers
 	bstrTarget := bitstr.Key("110101111")
 	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget, nil)
+	require.Equal(t, bitstr.Key(""), prefix)
+	require.Empty(t, coveredPeers)
+
+	// Supply a single peer exactly matching the target, it should be returned
+	// and covered prefix should match the target.
+	p := random.Peers(1)[0]
+	bstrTarget = bitstr.Key(key.BitString(PeerIDToBit256(p)))
+	peers = []peer.ID{p}
+	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget, peers)
 	require.Equal(t, bstrTarget, prefix)
+	require.Equal(t, peers, coveredPeers)
+
+	// Supply a single peer matching a 255 bit target should return the peer and
+	// covered prefix should be full 256 bit key
+	bstrTarget255 := bstrTarget[:len(bstrTarget)-1]
+	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget255, peers)
+	require.Equal(t, bstrTarget, prefix)
+	require.Equal(t, peers, coveredPeers)
+
+	// If empty prefix is targetted and a single peer is supplied, it always
+	// matches and the covered prefix is the full key of the peer.
+	prefix, coveredPeers = ShortestCoveredPrefix("", peers)
+	require.Equal(t, bstrTarget, prefix)
+	require.Equal(t, peers, coveredPeers)
+
+	// Supply a single peer not matching the target, should return empty covered
+	// prefix and no covered peers.
+	bstrTarget = FlipLastBit(bstrTarget)
+	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget, peers)
+	require.Equal(t, bitstr.Key(""), prefix)
 	require.Empty(t, coveredPeers)
 }
 

@@ -346,6 +346,49 @@ func TestClosestPeersToPrefixSameCPL(t *testing.T) {
 	})
 }
 
+func TestClosestPeersToPrefixSinglePeer(t *testing.T) {
+	// Assert that closestPeersToPrefix works as expected when GetClosestPeers
+	// only returns a single peer.
+	timeout := time.Second
+	timer := time.AfterFunc(timeout, func() {
+		panic("closestPeersToPrefix timed out")
+	})
+	synctest.Test(t, func(t *testing.T) {
+		defer timer.Stop()
+		replFactor := 20
+		p := random.Peers(1)[0]
+
+		router := &mockRouter{
+			// Simulate a network with only 1 other peer. GetClosestPeers always
+			// return this peer.
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return []peer.ID{p}, nil
+			},
+		}
+
+		prov := SweepingProvider{
+			router:            router,
+			logger:            defaultLogger,
+			connectivity:      noopConnectivityChecker(),
+			replicationFactor: replFactor,
+		}
+		prov.connectivity.Start()
+		defer prov.connectivity.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		// No matter what the requested prefix is, the closest peers to prefix
+		// should always be the only peer.
+		for _, prefix := range []bitstr.Key{"1111", "0111", "0011", "0001", "0000", "1", ""} {
+			closestPeers, err := prov.closestPeersToPrefix(prefix)
+			require.NoError(t, err)
+			require.Len(t, closestPeers, 1)
+			require.Contains(t, closestPeers, p)
+		}
+	})
+}
+
 func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	prov := SweepingProvider{
 		order:             bit256.ZeroKey(),

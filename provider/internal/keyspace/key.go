@@ -111,10 +111,22 @@ func KeyToBytes[K kad.Key[K]](k K) []byte {
 // If every peer shares the same CPL to `target`, then no deeper zone is
 // covered, we learn that the adjacent sibling branch is empty. In this case we
 // return the prefix one bit deeper (`minCPL+1`) and an empty peer list.
+//
+// If a single peer is supplied and matches the target, the covered prefix is the
+// full key of the peer. If it does not match, the covered prefix is empty and
+// no peers are returned.
 func ShortestCoveredPrefix(target bitstr.Key, peers []peer.ID) (bitstr.Key, []peer.ID) {
 	if len(peers) == 0 {
-		return target, peers
+		return "", peers
 	}
+	if len(peers) == 1 {
+		b256 := PeerIDToBit256(peers[0])
+		if IsPrefix(target, b256) {
+			return bitstr.Key(key.BitString(b256)), peers
+		}
+		return "", nil
+	}
+
 	// Sort the peers by their distance to the requested key.
 	peers = kb.SortClosestPeers(peers, KeyToBytes(target))
 

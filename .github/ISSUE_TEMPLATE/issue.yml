@@ -1,0 +1,17 @@
+name: Issue
+description: Report a bug, request a feature, or ask a question.
+labels:
+  - need/triage
+body:
+  - type: checkboxes
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched the [issue tracker](https://github.com/libp2p/go-libp2p-kad-dht/issues?q=is%3Aissue) for existing issues.
+          required: true
+  - type: textarea
+    attributes:
+      label: Description
+      description: Please describe your issue, feature request, or question.
+    validations:
+      required: true

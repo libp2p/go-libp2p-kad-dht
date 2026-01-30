@@ -334,6 +334,7 @@ func (q *ProvideQueue) DrainDatastore(ctx context.Context, d ds.Batching) error 
 	if err != nil {
 		return fmt.Errorf("failed to query datastore: %w", err)
 	}
+	defer results.Close()
 
 	// Create a batch for deletes
 	batch, err := d.Batch(ctx)
@@ -367,10 +368,6 @@ func (q *ProvideQueue) DrainDatastore(ctx context.Context, d ds.Batching) error 
 
 		// Delete key from datastore
 		batch.Delete(ctx, ds.NewKey(result.Key))
-	}
-
-	if err := results.Close(); err != nil {
-		return fmt.Errorf("failed to close query results: %w", err)
 	}
 
 	// Commit deletions

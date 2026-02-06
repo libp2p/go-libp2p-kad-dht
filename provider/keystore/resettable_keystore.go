@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -65,6 +67,7 @@ type ResettableKeystore struct {
 
 	baseDs          ds.Batching // Unwrapped datastore for storing active namespace marker
 	altDs           ds.Batching
+	altMu           sync.Mutex // serializes altPut calls between worker and ResetCids goroutines
 	altSize         atomic.Int64
 	resetInProgress bool
 	activeNamespace byte
@@ -212,18 +215,22 @@ func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 	if s.resetInProgress {
 		// Reset is in progress, write to alternate datastore in addition to
 		// current datastore
-		if err := s.altPut(ctx, keys); err != nil {
+		s.altMu.Lock()
+		err := s.altPut(ctx, keys)
+		if err != nil {
 			if size, err := refreshSize(ctx, s.altDs); err == nil {
 				s.altSize.Store(int64(size))
 			} else {
 				s.logger.Error("keystore: failed to refresh size after alt put: ", err)
 			}
 		}
+		s.altMu.Unlock()
 	}
 	return s.keystore.put(ctx, keys)
 }
 
 // altPut writes the given multihashes to the alternate datastore.
+// The caller must hold s.altMu.
 func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) error {
 	b, err := s.altDs.Batch(ctx)
 	if err != nil {
@@ -251,25 +258,26 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 			added++
 		}
 	}
-	s.altSize.Add(added)
 	if err := b.Commit(ctx); err != nil {
 		return fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
-	if err = s.ds.Sync(ctx, ds.NewKey("")); err != nil {
+	s.altSize.Add(added)
+	if err = s.altDs.Sync(ctx, ds.NewKey("")); err != nil {
 		s.logger.Warnf("keystore: failed to sync datastore after alt put: %v", err)
 	}
 	return nil
 }
 
 // tryAltPut is a concurrency-safe wrapper around altPut that coordinates with
-// Close() to prevent data races during reset operations.
+// both the worker goroutine and Close() to prevent data races during reset
+// operations.
 //
 // This method is called exclusively by ResetCids(), which runs outside the
 // worker goroutine. Since only one reset can be active at a time (enforced by
 // resetInProgress) and altPut calls within a reset are sequential, only one
-// tryAltPut executes at any given time. In contrast, regular Put operations
-// call altPut directly from within the worker goroutine, which Close() already
-// waits for via <-s.done.
+// tryAltPut executes at any given time. Regular Put operations call altPut
+// from within the worker goroutine; altMu serializes these concurrent accesses
+// to prevent double-counting keys in altSize.
 //
 // The binary semaphore (altPutSem) coordinates mutual exclusion with Close():
 //   - tryAltPut attempts a non-blocking acquire of the semaphore token
@@ -286,7 +294,9 @@ func (s *ResettableKeystore) tryAltPut(ctx context.Context, keys []mh.Multihash)
 	default: // Close took the token
 		return ErrClosed
 	}
+	s.altMu.Lock()
 	err := s.altPut(ctx, keys)
+	s.altMu.Unlock()
 	s.altPutSem <- struct{}{}
 	return err
 }
@@ -355,6 +365,18 @@ func (s *ResettableKeystore) ResetCids(ctx context.Context, keysChan <-chan cid.
 		return nil
 	}
 
+	var success bool
+
+	start := time.Now()
+	s.logger.Info("keystore: ResetCids started")
+	defer func() {
+		if success {
+			s.logger.Infof("keystore: ResetCids finished in %s", time.Since(start))
+		} else {
+			s.logger.Infof("keystore: ResetCids failed after %s", time.Since(start))
+		}
+	}()
+
 	opsChan := make(chan error)
 	select {
 	case <-ctx.Done():
@@ -371,8 +393,6 @@ func (s *ResettableKeystore) ResetCids(ctx context.Context, keysChan <-chan cid.
 			return ctx.Err()
 		}
 	}
-
-	var success bool
 
 	defer func() {
 		// Cleanup before returning on success and failure

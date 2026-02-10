@@ -3,8 +3,8 @@ package queue
 import (
 	"testing"
 
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
-	"github.com/probe-lab/go-libdht/kad/trie"
+	"github.com/ipfs/go-libdht/kad/key/bitstr"
+	"github.com/ipfs/go-libdht/kad/trie"
 	"github.com/stretchr/testify/require"
 )
 

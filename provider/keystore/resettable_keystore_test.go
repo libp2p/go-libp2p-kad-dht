@@ -9,8 +9,8 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
-	"github.com/probe-lab/go-libdht/kad/key"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/ipfs/go-libdht/kad/key"
+	"github.com/ipfs/go-libdht/kad/key/bitstr"
 
 	"github.com/ipfs/go-test/random"
 	"github.com/stretchr/testify/require"

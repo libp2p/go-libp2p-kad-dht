@@ -14,6 +14,7 @@ require (
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ds-pebble v0.5.9
 	github.com/ipfs/go-dsqueue v0.1.2
+	github.com/ipfs/go-libdht v0.5.0
 	github.com/ipfs/go-log/v2 v2.9.1
 	github.com/ipfs/go-test v0.2.3
 	github.com/libp2p/go-libp2p v0.47.0
@@ -29,7 +30,6 @@ require (
 	github.com/multiformats/go-multibase v0.2.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-multistream v0.6.1
-	github.com/probe-lab/go-libdht v0.4.0
 	github.com/stretchr/testify v1.11.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opentelemetry.io/otel v1.39.0

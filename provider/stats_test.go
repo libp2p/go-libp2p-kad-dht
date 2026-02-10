@@ -12,11 +12,11 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/ipfs/go-libdht/kad/key"
+	"github.com/ipfs/go-libdht/kad/key/bit256"
+	"github.com/ipfs/go-libdht/kad/key/bitstr"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multihash"
-	"github.com/probe-lab/go-libdht/kad/key"
-	"github.com/probe-lab/go-libdht/kad/key/bit256"
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"

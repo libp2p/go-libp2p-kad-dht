@@ -8,7 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/probe-lab/go-libdht/kad/key/bitstr"
+	"github.com/ipfs/go-libdht/kad/key/bitstr"
 	"github.com/stretchr/testify/require"
 )
 

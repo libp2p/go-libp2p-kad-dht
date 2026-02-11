@@ -1,19 +1,19 @@
 module github.com/libp2p/go-libp2p-kad-dht
 
-go 1.24.6
+go 1.25
 
 require (
-	github.com/gammazero/deque v1.2.0
+	github.com/gammazero/deque v1.2.1
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/guillaumemichel/reservedpool v0.3.0
 	github.com/hashicorp/golang-lru v1.0.2
-	github.com/ipfs/boxo v0.35.2
+	github.com/ipfs/boxo v0.36.0
 	github.com/ipfs/go-cid v0.6.0
 	github.com/ipfs/go-datastore v0.9.0
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ds-pebble v0.5.9
-	github.com/ipfs/go-dsqueue v0.1.2
+	github.com/ipfs/go-dsqueue v0.2.0
 	github.com/ipfs/go-libdht v0.5.0
 	github.com/ipfs/go-log/v2 v2.9.1
 	github.com/ipfs/go-test v0.2.3
@@ -32,9 +32,9 @@ require (
 	github.com/multiformats/go-multistream v0.6.1
 	github.com/stretchr/testify v1.11.1
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
-	go.opentelemetry.io/otel v1.39.0
-	go.opentelemetry.io/otel/metric v1.39.0
-	go.opentelemetry.io/otel/trace v1.39.0
+	go.opentelemetry.io/otel v1.40.0
+	go.opentelemetry.io/otel/metric v1.40.0
+	go.opentelemetry.io/otel/trace v1.40.0
 	go.uber.org/zap v1.27.1
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/protobuf v1.36.11
@@ -86,7 +86,7 @@ require (
 	github.com/libp2p/go-yamux/v5 v5.0.1 // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/miekg/dns v1.1.68 // indirect
+	github.com/miekg/dns v1.1.72 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
 	github.com/minio/minlz v1.0.1-0.20250507153514-87eb42fe8882 // indirect

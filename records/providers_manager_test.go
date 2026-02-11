@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
@@ -119,7 +120,7 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pset, err := loadProviderSet(context.Background(), dstore, k)
+	pset, err := loadProviderSet(context.Background(), dstore, amino.DefaultProvideValidity, k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,14 +145,8 @@ func TestProvidersSerialization(t *testing.T) {
 }
 
 func TestProvidesExpire(t *testing.T) {
-	pval := ProvideValidity
-	cleanup := defaultCleanupInterval
-	ProvideValidity = time.Second / 2
-	defaultCleanupInterval = time.Second / 10
-	defer func() {
-		ProvideValidity = pval
-		defaultCleanupInterval = cleanup
-	}()
+	provideValidity := time.Second / 2
+	cleanupInterval := time.Second / 10
 
 	ctx := t.Context()
 
@@ -161,7 +156,7 @@ func TestProvidesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(ctx, mid, ps, ds)
+	p, err := NewProviderManager(ctx, mid, ps, ds, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +173,7 @@ func TestProvidesExpire(t *testing.T) {
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]})
 	}
 
-	time.Sleep(ProvideValidity / 2)
+	time.Sleep(provideValidity / 2)
 
 	for _, h := range mhs[5:] {
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
@@ -196,7 +191,7 @@ func TestProvidesExpire(t *testing.T) {
 	// First batch: added at t=0, expires at t=500ms (ProvideValidity)
 	// Second batch: added at t=250ms, expires at t=750ms
 	// We sleep 350ms (total 600ms) to provide 150ms margin before second batch expires
-	time.Sleep(ProvideValidity/2 + defaultCleanupInterval)
+	time.Sleep(provideValidity/2 + cleanupInterval)
 
 	for _, h := range mhs[:5] {
 		out, _ := p.GetProviders(ctx, h)
@@ -212,7 +207,7 @@ func TestProvidesExpire(t *testing.T) {
 		}
 	}
 
-	time.Sleep(ProvideValidity)
+	time.Sleep(provideValidity)
 
 	// Stop to prevent data races
 	p.Close()

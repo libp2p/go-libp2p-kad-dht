@@ -36,14 +36,14 @@ type customRtHelper struct {
 	allow peer.ID
 }
 
-func MkFilterForPeer() (func(_ interface{}, p peer.ID) bool, *customRtHelper) {
+func MkFilterForPeer() (func(_ any, p peer.ID) bool, *customRtHelper) {
 	helper := customRtHelper{}
 
 	type hasHost interface {
 		Host() host.Host
 	}
 
-	f := func(dht interface{}, p peer.ID) bool {
+	f := func(dht any, p peer.ID) bool {
 		d := dht.(hasHost)
 		conns := d.Host().Network().ConnsToPeer(p)
 
@@ -326,7 +326,7 @@ func TestSearchValue(t *testing.T) {
 	maxAttempts := 5
 	success := false
 	// if value not propagated yet, try again to avoid flakiness
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		valCh, err = d.SearchValue(ctx, "/v/hello", dht.Quorum(0))
 		if err != nil {
 			t.Fatal(err)

@@ -117,8 +117,7 @@ func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 }
 
 func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 	require.NoError(t, err)

@@ -65,8 +65,8 @@ type ResettableKeystore struct {
 	keystore
 
 	baseDs          ds.Batching // Unwrapped datastore for storing active namespace marker
-	altDs   ds.Batching
-	altSize atomic.Int64
+	altDs           ds.Batching
+	altSize         atomic.Int64
 	resetInProgress bool
 	activeNamespace byte
 	resetOps        chan resetOp  // reset operations that must be run in main go routine
@@ -214,8 +214,7 @@ func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 		// Reset is in progress, write to alternate datastore in addition to
 		// current datastore
 		<-s.altPutSem
-		err := s.altPut(ctx, keys)
-		if err != nil {
+		if err := s.altPut(ctx, keys); err != nil {
 			if size, err := refreshSize(ctx, s.altDs); err == nil {
 				s.altSize.Store(int64(size))
 			} else {

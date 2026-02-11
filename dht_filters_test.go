@@ -60,8 +60,7 @@ func (m *mockConn) As(any) bool                                { return false }
 func (m *mockConn) CloseWithError(network.ConnErrorCode) error { return m.Close() }
 
 func TestFilterCaching(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	d := setupDHT(ctx, t, true)
 
 	remote, _ := manet.FromIP(net.IPv4(8, 8, 8, 8))

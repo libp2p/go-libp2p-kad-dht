@@ -282,12 +282,11 @@ func TestPubkeyGoodKeyFromDHTGoodKeyDirect(t *testing.T) {
 }
 
 func TestValuesDisabled(t *testing.T) {
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		enabledA := (i & 0x1) > 0
 		enabledB := (i & 0x2) > 0
 		t.Run(fmt.Sprintf("a=%v/b=%v", enabledA, enabledB), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			var optsA, optsB []Option
 			optsA = append(optsA, ProtocolPrefix("/valuesMaybeDisabled"))

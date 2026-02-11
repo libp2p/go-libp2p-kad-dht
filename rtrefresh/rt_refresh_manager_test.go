@@ -15,8 +15,7 @@ import (
 )
 
 func TestSkipRefreshOnGapCpls(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	local := test.RandPeerIDFatal(t)
 
 	// adds a peer for a cpl.
@@ -92,7 +91,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
 	require.NoError(t, r.doRefresh(ctx, true))
 
-	for i := uint(0); i < 10; i++ {
+	for i := range uint(10) {
 		if i == icpl {
 			require.Equal(t, 0, rt.NPeersForCpl(i))
 			continue

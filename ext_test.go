@@ -1,7 +1,6 @@
 package dht
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -12,8 +11,7 @@ import (
 )
 
 func TestInvalidRemotePeers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mn, err := mocknet.FullMeshLinked(5)
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -66,9 +65,8 @@ type ResettableKeystore struct {
 	keystore
 
 	baseDs          ds.Batching // Unwrapped datastore for storing active namespace marker
-	altDs           ds.Batching
-	altMu           sync.Mutex // serializes altPut calls between worker and ResetCids goroutines
-	altSize         atomic.Int64
+	altDs   ds.Batching
+	altSize atomic.Int64
 	resetInProgress bool
 	activeNamespace byte
 	resetOps        chan resetOp  // reset operations that must be run in main go routine
@@ -215,7 +213,7 @@ func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 	if s.resetInProgress {
 		// Reset is in progress, write to alternate datastore in addition to
 		// current datastore
-		s.altMu.Lock()
+		<-s.altPutSem
 		err := s.altPut(ctx, keys)
 		if err != nil {
 			if size, err := refreshSize(ctx, s.altDs); err == nil {
@@ -224,13 +222,13 @@ func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 				s.logger.Error("keystore: failed to refresh size after alt put: ", err)
 			}
 		}
-		s.altMu.Unlock()
+		s.altPutSem <- struct{}{}
 	}
 	return s.keystore.put(ctx, keys)
 }
 
 // altPut writes the given multihashes to the alternate datastore.
-// The caller must hold s.altMu.
+// The caller must hold the altPutSem token.
 func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) error {
 	b, err := s.altDs.Batch(ctx)
 	if err != nil {
@@ -273,30 +271,20 @@ func (s *ResettableKeystore) altPut(ctx context.Context, keys []mh.Multihash) er
 // operations.
 //
 // This method is called exclusively by ResetCids(), which runs outside the
-// worker goroutine. Since only one reset can be active at a time (enforced by
-// resetInProgress) and altPut calls within a reset are sequential, only one
-// tryAltPut executes at any given time. Regular Put operations call altPut
-// from within the worker goroutine; altMu serializes these concurrent accesses
-// to prevent double-counting keys in altSize.
-//
-// The binary semaphore (altPutSem) coordinates mutual exclusion with Close():
-//   - tryAltPut attempts a non-blocking acquire of the semaphore token
-//   - If successful, it proceeds with altPut and releases the token when done
-//   - If the token is unavailable, Close() must have acquired it, so this
-//     returns ErrClosed immediately
-//   - Close() blocks on acquiring the token until tryAltPut completes
-//
-// This prevents a TOCTOU race where Close() could begin persisting state
-// (via persistSize()) while altPut is concurrently accessing the datastore.
+// worker goroutine. The binary semaphore (altPutSem) provides mutual exclusion
+// between this method, the worker's put() (which also acquires the semaphore
+// during reset), and Close():
+//   - tryAltPut blocks until the semaphore token is available or the worker
+//     exits (s.done closed), in which case it returns ErrClosed
+//   - Close() acquires the token after the worker exits, ensuring no
+//     concurrent altPut during persistSize()
 func (s *ResettableKeystore) tryAltPut(ctx context.Context, keys []mh.Multihash) error {
 	select {
 	case <-s.altPutSem:
-	default: // Close took the token
+	case <-s.done:
 		return ErrClosed
 	}
-	s.altMu.Lock()
 	err := s.altPut(ctx, keys)
-	s.altMu.Unlock()
 	s.altPutSem <- struct{}{}
 	return err
 }

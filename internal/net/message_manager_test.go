@@ -1,7 +1,6 @@
 package net
 
 import (
-	"context"
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -14,8 +13,7 @@ import (
 )
 
 func TestInvalidMessageSenderTracking(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	foo := peer.ID("asdasd")
 

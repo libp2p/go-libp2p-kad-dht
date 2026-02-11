@@ -24,7 +24,7 @@ func TestRTEvictionOnFailedQuery(t *testing.T) {
 	d1 := setupDHT(ctx, t, false)
 	d2 := setupDHT(ctx, t, false)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		connect(t, ctx, d1, d2)
 		for _, conn := range d1.host.Network().ConnsToPeer(d2.self) {
 			conn.Close()

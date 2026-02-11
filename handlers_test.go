@@ -2,7 +2,6 @@ package dht
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -68,8 +67,7 @@ func TestCleanRecord(t *testing.T) {
 }
 
 func TestBadMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	dht := setupDHT(ctx, t, false)
 
@@ -89,8 +87,7 @@ func TestBadMessage(t *testing.T) {
 }
 
 func BenchmarkHandleFindPeer(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	h, err := libp2p.New()
 	if err != nil {
 		b.Fatal(err)
@@ -104,7 +101,7 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 
 	rng := rand.New(rand.NewSource(150))
 	var peers []peer.ID
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		_, pubk, _ := crypto.GenerateEd25519Key(rng)
 		id, err := peer.IDFromPublicKey(pubk)
 		if err != nil {

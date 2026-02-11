@@ -23,8 +23,7 @@ import (
 )
 
 func TestProviderManager(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mid := peer.ID("testing")
 	ps, err := pstoremem.NewPeerstore()
@@ -68,8 +67,7 @@ func TestProvidersDatastore(t *testing.T) {
 	lruCacheSize = 10
 	defer func() { lruCacheSize = old }()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mid := peer.ID("testing")
 	ps, err := pstoremem.NewPeerstore()
@@ -85,8 +83,8 @@ func TestProvidersDatastore(t *testing.T) {
 
 	friend := peer.ID("friend")
 	var mhs []mh.Multihash
-	for i := 0; i < 100; i++ {
-		h := internal.Hash([]byte(fmt.Sprint(i)))
+	for i := range 100 {
+		h := internal.Hash(fmt.Append(nil, i))
 		mhs = append(mhs, h)
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: friend})
 	}
@@ -155,8 +153,7 @@ func TestProvidesExpire(t *testing.T) {
 		defaultCleanupInterval = cleanup
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
 	mid := peer.ID("testing")
@@ -171,8 +168,8 @@ func TestProvidesExpire(t *testing.T) {
 
 	peers := []peer.ID{"a", "b"}
 	var mhs []mh.Multihash
-	for i := 0; i < 10; i++ {
-		h := internal.Hash([]byte(fmt.Sprint(i)))
+	for i := range 10 {
+		h := internal.Hash(fmt.Append(nil, i))
 		mhs = append(mhs, h)
 	}
 
@@ -272,7 +269,7 @@ func TestLargeProvidersSet(t *testing.T) {
 
 	ctx := context.Background()
 	var peers []peer.ID
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		peers = append(peers, peer.ID(fmt.Sprint(i)))
 	}
 
@@ -289,15 +286,15 @@ func TestLargeProvidersSet(t *testing.T) {
 	defer p.Close()
 
 	var mhs []mh.Multihash
-	for i := 0; i < 1000; i++ {
-		h := internal.Hash([]byte(fmt.Sprint(i)))
+	for i := range 1000 {
+		h := internal.Hash(fmt.Append(nil, i))
 		mhs = append(mhs, h)
 		for _, pid := range peers {
 			p.AddProvider(ctx, h, peer.AddrInfo{ID: pid})
 		}
 	}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		start := time.Now()
 		for _, h := range mhs {
 			_, _ = p.GetProviders(ctx, h)
@@ -311,8 +308,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 1
 	defer func() { lruCacheSize = old }()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
 	h1 := internal.Hash([]byte("1"))
@@ -341,8 +337,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 }
 
 func TestWriteUpdatesCache(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p1, p2 := peer.ID("a"), peer.ID("b")
 	h1 := internal.Hash([]byte("1"))

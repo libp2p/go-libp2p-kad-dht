@@ -110,8 +110,11 @@ func KeystoreOption(opts ...Option) ResettableKeystoreOption {
 }
 
 // WithDatastore configures the ResettableKeystore to use a single shared
-// datastore. The datastore stores both the active-namespace marker and both
-// "/0" and "/1" namespaces via namespace.Wrap.
+// datastore. The keystore creates "/0" and "/1" sub-namespaces and stores
+// the active-namespace marker directly inside the provided datastore.
+//
+// If you need the keystore data to live under a specific prefix, wrap the
+// datastore with namespace.Wrap before passing it here.
 func WithDatastore(d ds.Batching) ResettableKeystoreOption {
 	return func(c *resettableKeystoreConfig) error {
 		if d == nil {

@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/ipfs/boxo v0.36.0
 	github.com/ipfs/go-cid v0.6.0
-	github.com/ipfs/go-datastore v0.9.0
+	github.com/ipfs/go-datastore v0.9.1
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ds-pebble v0.5.9
 	github.com/ipfs/go-dsqueue v0.2.0

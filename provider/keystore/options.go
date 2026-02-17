@@ -88,8 +88,6 @@ func WithLoggerName(name string) Option {
 type resettableKeystoreConfig struct {
 	config // base keystore config (prefixBits, batchSize, loggerName)
 
-	datastore ds.Batching // WithDatastore mode
-
 	createDs  func(string) (ds.Batching, error) // factory to create per-namespace datastores
 	destroyDs func(string) error                // destroys a per-namespace datastore on disk
 }
@@ -109,31 +107,17 @@ func KeystoreOption(opts ...Option) ResettableKeystoreOption {
 	}
 }
 
-// WithDatastore configures the ResettableKeystore to use a single shared
-// datastore. The keystore creates "/0" and "/1" sub-namespaces and stores
-// the active-namespace marker directly inside the provided datastore.
-//
-// If you need the keystore data to live under a specific prefix, wrap the
-// datastore with namespace.Wrap before passing it here.
-func WithDatastore(d ds.Batching) ResettableKeystoreOption {
-	return func(c *resettableKeystoreConfig) error {
-		if d == nil {
-			return fmt.Errorf("datastore cannot be nil")
-		}
-		c.datastore = d
-		return nil
-	}
-}
-
 // WithDatastoreFactory configures the ResettableKeystore to use independent
 // datastores per namespace. create produces a new datastore for a given
-// namespace suffix ("0", "1", or "meta"), and destroy removes it entirely
-// from disk (e.g. os.RemoveAll). The constructor calls create("meta") for
-// the active-namespace marker and create for the active data namespace only.
-// The alternate datastore is created on demand when ResetCids is called and
-// destroyed after the reset completes. This enables full disk reclamation
-// because the old datastore is deleted from disk rather than emptied
-// key-by-key.
+// namespace suffix ("0" or "1"), and destroy removes it entirely from disk
+// (e.g. os.RemoveAll). The constructor calls create for the active data
+// namespace only. The alternate datastore is created on demand when ResetCids
+// is called and destroyed after the reset completes. This enables full disk
+// reclamation because the old datastore is deleted from disk rather than
+// emptied key-by-key.
+//
+// The meta datastore (for the active-namespace marker) is the positional
+// datastore argument passed to NewResettableKeystore.
 func WithDatastoreFactory(create func(string) (ds.Batching, error), destroy func(string) error) ResettableKeystoreOption {
 	return func(c *resettableKeystoreConfig) error {
 		if create == nil {
@@ -148,9 +132,8 @@ func WithDatastoreFactory(create func(string) (ds.Batching, error), destroy func
 	}
 }
 
-// getResettableOpts applies ResettableKeystoreOptions and validates the
-// resulting configuration. Exactly one of WithDatastore or
-// WithDatastoreFactory must be provided.
+// getResettableOpts applies ResettableKeystoreOptions and returns the
+// resulting configuration.
 func getResettableOpts(opts []ResettableKeystoreOption) (resettableKeystoreConfig, error) {
 	cfg := resettableKeystoreConfig{
 		config: config{
@@ -163,15 +146,6 @@ func getResettableOpts(opts []ResettableKeystoreOption) (resettableKeystoreConfi
 		if err := opt(&cfg); err != nil {
 			return resettableKeystoreConfig{}, fmt.Errorf("resettable option %d error: %s", i, err)
 		}
-	}
-
-	hasDatastore := cfg.datastore != nil
-	hasFactory := cfg.createDs != nil
-	if hasDatastore && hasFactory {
-		return resettableKeystoreConfig{}, fmt.Errorf("WithDatastore and WithDatastoreFactory are mutually exclusive")
-	}
-	if !hasDatastore && !hasFactory {
-		return resettableKeystoreConfig{}, fmt.Errorf("one of WithDatastore or WithDatastoreFactory is required")
 	}
 	return cfg, nil
 }

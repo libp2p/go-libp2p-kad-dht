@@ -40,15 +40,16 @@ type resetOp struct {
 //
 // Two storage modes are supported:
 //
-// Shared-datastore mode (WithDatastore): Both namespaces live inside a single
-// datastore via namespace.Wrap. The alternate namespace is emptied via
+// Shared-datastore mode (default): Both namespaces live inside the provided
+// metaDs via namespace.Wrap. The alternate namespace is emptied via
 // iterate-and-delete after each reset.
 //
 // Factory mode (WithDatastoreFactory): Each namespace is a physically separate
-// datastore. Only the active datastore exists between resets; the alternate is
-// created on demand by ResetCids and destroyed after the swap completes. This
-// enables full disk reclamation because the old datastore is deleted from disk
-// rather than emptied key-by-key.
+// datastore created by the factory. Only the active datastore exists between
+// resets; the alternate is created on demand by ResetCids and destroyed after
+// the swap completes. This enables full disk reclamation because the old
+// datastore is deleted from disk rather than emptied key-by-key. The provided
+// metaDs stores only the active-namespace marker and persisted size.
 //
 // Reset Operation Flow:
 //  1. The alternate datastore is prepared (created or emptied)
@@ -66,7 +67,7 @@ type resetOp struct {
 type ResettableKeystore struct {
 	keystore
 
-	baseDs          ds.Batching // stores the active namespace marker; meta ds in factory mode
+	metaDs          ds.Batching // stores the active namespace marker and persisted size
 	altDs           ds.Batching // nil between resets in factory mode
 	altSize         atomic.Int64
 	resetInProgress bool
@@ -80,52 +81,47 @@ type ResettableKeystore struct {
 
 var _ Keystore = (*ResettableKeystore)(nil)
 
-// NewResettableKeystore creates a new ResettableKeystore.
+// NewResettableKeystore creates a new ResettableKeystore backed by the
+// provided datastore d.
 //
-// Exactly one of WithDatastore or WithDatastoreFactory must be provided.
-// Base keystore options (WithPrefixBits, WithBatchSize, etc.) are passed
-// via KeystoreOption.
-//
-// In shared-datastore mode (WithDatastore), "/0" and "/1" namespace suffixes
-// are created inside the provided datastore for atomic reset operations.
+// In shared-datastore mode (default), "/0" and "/1" namespace suffixes are
+// created inside d for atomic reset operations, and the active-namespace
+// marker is stored directly in d.
 //
 // In factory mode (WithDatastoreFactory), independent datastores are created
-// per namespace, enabling full disk reclamation after a reset by physically
-// deleting and recreating the old datastore.
+// per namespace by the factory, enabling full disk reclamation after a reset.
+// The provided datastore d is used as the meta store for the active-namespace
+// marker.
+//
+// Base keystore options (WithPrefixBits, WithBatchSize, etc.) are passed
+// via KeystoreOption.
 //
 // On initialization, it checks for a persisted active namespace marker to
 // determine which namespace was active during the previous session. This
 // ensures keystore data persists correctly across restarts.
-func NewResettableKeystore(opts ...ResettableKeystoreOption) (*ResettableKeystore, error) {
+func NewResettableKeystore(d ds.Batching, opts ...ResettableKeystoreOption) (*ResettableKeystore, error) {
 	rcfg, err := getResettableOpts(opts)
 	if err != nil {
 		return nil, err
 	}
 	cfg := rcfg.config
 
-	var baseDs ds.Batching
 	var createDs func(string) (ds.Batching, error)
 	var destroyDs func(string) error
 
 	if rcfg.createDs != nil {
-		// Factory mode: create meta ds, determine active namespace, then
-		// create only the active datastore. The alternate datastore is
-		// created on demand when ResetCids is called and destroyed after
-		// the reset completes, enabling full disk reclamation.
+		// Factory mode: d is the meta datastore. Determine active
+		// namespace, then create only the active datastore. The alternate
+		// datastore is created on demand when ResetCids is called and
+		// destroyed after the reset completes, enabling full disk
+		// reclamation.
 		createDs = rcfg.createDs
 		destroyDs = rcfg.destroyDs
-		baseDs, err = createDs("meta")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create meta datastore: %w", err)
-		}
-	} else {
-		// Shared datastore mode
-		baseDs = rcfg.datastore
 	}
 
 	// Check if there's a persisted active namespace marker
 	ctx := context.Background()
-	activeVal, err := baseDs.Get(ctx, activeNamespaceKey)
+	activeVal, err := d.Get(ctx, activeNamespaceKey)
 	var primaryDs, altDs ds.Batching
 	var activeIdx byte
 	if err != nil {
@@ -151,8 +147,8 @@ func NewResettableKeystore(opts ...ResettableKeystoreOption) (*ResettableKeystor
 	} else {
 		// Shared datastore mode: both namespaces always exist
 		datastores := [2]ds.Batching{
-			namespace.Wrap(baseDs, ds.NewKey("0")),
-			namespace.Wrap(baseDs, ds.NewKey("1")),
+			namespace.Wrap(d, ds.NewKey("0")),
+			namespace.Wrap(d, ds.NewKey("1")),
 		}
 		primaryDs = datastores[activeIdx]
 		altDs = datastores[1-activeIdx]
@@ -168,7 +164,7 @@ func NewResettableKeystore(opts ...ResettableKeystoreOption) (*ResettableKeystor
 			done:       make(chan struct{}),
 			logger:     log.Logger(cfg.loggerName),
 		},
-		baseDs:          baseDs,
+		metaDs:          d,
 		altDs:           altDs,
 		activeNamespace: activeIdx,
 		resetOps:        make(chan resetOp),
@@ -396,11 +392,11 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 		activeValue := []byte{s.activeNamespace}
 
 		// Write the active namespace marker
-		if err := s.baseDs.Put(ctx, activeNamespaceKey, activeValue); err != nil {
+		if err := s.metaDs.Put(ctx, activeNamespaceKey, activeValue); err != nil {
 			s.logger.Errorf("keystore: failed to persist active namespace marker: %v", err)
 		}
 		// Sync to ensure marker is persisted
-		if err := s.baseDs.Sync(ctx, activeNamespaceKey); err != nil {
+		if err := s.metaDs.Sync(ctx, activeNamespaceKey); err != nil {
 			s.logger.Warnf("keystore: failed to sync active namespace marker: %v", err)
 		}
 	}
@@ -505,8 +501,9 @@ loop:
 
 // Close shuts down the ResettableKeystore. It waits for any ongoing altPut
 // operations to complete before persisting state to avoid race conditions.
-// In factory mode, the primary, meta, and (if mid-reset) alternate datastores
-// are closed since they are owned by the keystore.
+// In factory mode, the primary and (if mid-reset) alternate datastores are
+// closed since they are owned by the keystore. The metaDs is not closed
+// because it is owned by the caller.
 func (s *ResettableKeystore) Close() (err error) {
 	select {
 	case <-s.close:
@@ -519,8 +516,9 @@ func (s *ResettableKeystore) Close() (err error) {
 		// if idle.
 		<-s.altPutSem
 
-		// In factory mode, defer closing all owned datastores so they are closed
-		// even if persistSize/Sync fails.
+		// In factory mode, defer closing owned datastores (primary and alt)
+		// so they are closed even if persistSize/Sync fails. The metaDs
+		// is not closed here because it is owned by the caller.
 		if s.createDs != nil {
 			defer func() {
 				if cerr := s.ds.Close(); cerr != nil {
@@ -532,9 +530,6 @@ func (s *ResettableKeystore) Close() (err error) {
 					if cerr := s.altDs.Close(); cerr != nil {
 						err = errors.Join(err, fmt.Errorf("error closing alt datastore: %w", cerr))
 					}
-				}
-				if cerr := s.baseDs.Close(); cerr != nil {
-					err = errors.Join(err, fmt.Errorf("error closing meta datastore: %w", cerr))
 				}
 			}()
 		}

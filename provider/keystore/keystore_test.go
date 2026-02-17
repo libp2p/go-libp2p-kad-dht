@@ -32,7 +32,7 @@ func TestKeystorePutAndGet(t *testing.T) {
 	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeystore(WithDatastore(ds))
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -114,7 +114,7 @@ func TestKeyStoreContainsPrefix(t *testing.T) {
 	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeystore(WithDatastore(ds))
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -176,7 +176,7 @@ func TestKeystoreDelete(t *testing.T) {
 	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeystore(WithDatastore(ds))
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -225,7 +225,7 @@ func TestKeystoreSize(t *testing.T) {
 	t.Run("ResettableKeystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
 		defer ds.Close()
-		store, err := NewResettableKeystore(WithDatastore(ds))
+		store, err := NewResettableKeystore(ds)
 		require.NoError(t, err)
 		defer store.Close()
 
@@ -272,7 +272,7 @@ func TestKeystoreSizePersistence(t *testing.T) {
 		defer d.Close()
 
 		testKeystoreSizePersistenceImpl(t, d, func(datastore ds.Batching) (Keystore, error) {
-			return NewResettableKeystore(WithDatastore(datastore))
+			return NewResettableKeystore(datastore)
 		})
 	})
 }
@@ -324,7 +324,7 @@ func TestKeystoreSizeFallbackOnCorruption(t *testing.T) {
 		newFunc func(ds.Batching) (Keystore, error)
 	}{
 		{"Keystore", func(d ds.Batching) (Keystore, error) { return NewKeystore(d) }},
-		{"ResettableKeystore", func(d ds.Batching) (Keystore, error) { return NewResettableKeystore(WithDatastore(d)) }},
+		{"ResettableKeystore", func(d ds.Batching) (Keystore, error) { return NewResettableKeystore(d) }},
 	}
 
 	subtests := []struct {
@@ -405,7 +405,7 @@ func TestKeystoreSizeWithDeleteAndEmpty(t *testing.T) {
 		newFunc func(ds.Batching) (Keystore, error)
 	}{
 		{"Keystore", func(d ds.Batching) (Keystore, error) { return NewKeystore(d) }},
-		{"ResettableKeystore", func(d ds.Batching) (Keystore, error) { return NewResettableKeystore(WithDatastore(d)) }},
+		{"ResettableKeystore", func(d ds.Batching) (Keystore, error) { return NewResettableKeystore(d) }},
 	}
 
 	subtests := []struct {

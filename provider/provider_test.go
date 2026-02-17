@@ -2278,7 +2278,7 @@ func TestResettableKeystoreWithPersistence(t *testing.T) {
 		require.NoError(t, err)
 
 		keystoreDs := namespace.Wrap(pebbleDs, datastore.NewKey("provider/keystore"))
-		ks, err := keystore.NewResettableKeystore(keystore.WithDatastore(keystoreDs))
+		ks, err := keystore.NewResettableKeystore(keystoreDs)
 		require.NoError(t, err)
 
 		provDs := namespace.Wrap(pebbleDs, datastore.NewKey("provider"))
@@ -2379,7 +2379,7 @@ func TestResettableKeystoreWithPersistence(t *testing.T) {
 		require.NoError(t, err)
 		defer pebbleDs2.Close()
 		keystoreDs2 := namespace.Wrap(pebbleDs2, datastore.NewKey("provider/keystore"))
-		ks2, err := keystore.NewResettableKeystore(keystore.WithDatastore(keystoreDs2))
+		ks2, err := keystore.NewResettableKeystore(keystoreDs2)
 		require.NoError(t, err)
 		defer ks2.Close()
 

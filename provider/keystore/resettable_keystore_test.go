@@ -23,7 +23,7 @@ func TestKeystoreReset(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -83,7 +83,7 @@ func TestKeystoreResetSize(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -149,7 +149,7 @@ func TestKeystoreResetSizeAcrossMultipleCycles(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -199,7 +199,7 @@ func TestKeystoreResetSizeWithConcurrentPuts(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -254,7 +254,7 @@ func TestKeystoreResetSizePersistence(t *testing.T) {
 	defer ds.Close()
 
 	// Create and populate keystore
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -273,7 +273,7 @@ func TestKeystoreResetSizePersistence(t *testing.T) {
 	err = store.Close()
 	require.NoError(t, err)
 
-	store2, err := NewResettableKeystore(WithDatastore(ds))
+	store2, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store2.Close()
 
@@ -290,7 +290,7 @@ func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
 	ctx := context.Background()
 
 	// Create initial keystore
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
 	// Add initial keys
@@ -326,7 +326,7 @@ func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reopen keystore - it should restore from the active namespace (post-reset)
-	store2, err := NewResettableKeystore(WithDatastore(ds))
+	store2, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store2.Close()
 
@@ -369,7 +369,7 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 	ctx := context.Background()
 
 	// Create initial keystore
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
 	// Perform first reset
@@ -388,7 +388,7 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 	err = store.Close()
 	require.NoError(t, err)
 
-	store2, err := NewResettableKeystore(WithDatastore(ds))
+	store2, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
 	// Verify first reset keys are present
@@ -412,7 +412,7 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 	err = store2.Close()
 	require.NoError(t, err)
 
-	store3, err := NewResettableKeystore(WithDatastore(ds))
+	store3, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 	defer store3.Close()
 
@@ -456,7 +456,7 @@ func TestKeystoreCloseDuringReset(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	store, err := NewResettableKeystore(WithDatastore(ds))
+	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -505,6 +505,12 @@ func TestKeystoreFactoryMode(t *testing.T) {
 	ctx := context.Background()
 	baseDir := t.TempDir()
 
+	// Meta datastore for the active-namespace marker, owned by the caller.
+	// An in-memory datastore suffices since it only stores the active
+	// namespace marker and persisted size.
+	metaDs := ds.NewMapDatastore()
+	defer metaDs.Close()
+
 	create := func(suffix string) (ds.Batching, error) {
 		return pebble.NewDatastore(filepath.Join(baseDir, suffix), nil)
 	}
@@ -514,7 +520,7 @@ func TestKeystoreFactoryMode(t *testing.T) {
 
 	// --- Phase 1: create keystore, write keys, verify ---
 
-	store, err := NewResettableKeystore(
+	store, err := NewResettableKeystore(metaDs,
 		WithDatastoreFactory(create, destroy),
 	)
 	require.NoError(t, err)
@@ -574,7 +580,7 @@ func TestKeystoreFactoryMode(t *testing.T) {
 	err = store.Close()
 	require.NoError(t, err)
 
-	store2, err := NewResettableKeystore(
+	store2, err := NewResettableKeystore(metaDs,
 		WithDatastoreFactory(create, destroy),
 	)
 	require.NoError(t, err)

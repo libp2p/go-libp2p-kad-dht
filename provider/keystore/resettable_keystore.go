@@ -507,8 +507,7 @@ loop:
 // operations to complete before persisting state to avoid race conditions.
 // In factory mode, the primary, meta, and (if mid-reset) alternate datastores
 // are closed since they are owned by the keystore.
-func (s *ResettableKeystore) Close() error {
-	var err error
+func (s *ResettableKeystore) Close() (err error) {
 	select {
 	case <-s.close:
 		// Already closed
@@ -519,29 +518,35 @@ func (s *ResettableKeystore) Close() error {
 		// semaphore token. This blocks if altPut is running, succeeds immediately
 		// if idle.
 		<-s.altPutSem
+
+		// In factory mode, defer closing all owned datastores so they are closed
+		// even if persistSize/Sync fails.
+		if s.createDs != nil {
+			defer func() {
+				if cerr := s.ds.Close(); cerr != nil {
+					err = errors.Join(err, fmt.Errorf("error closing primary datastore: %w", cerr))
+				}
+				// altDs is nil between resets; only close if a reset was in
+				// progress when Close was called.
+				if s.altDs != nil {
+					if cerr := s.altDs.Close(); cerr != nil {
+						err = errors.Join(err, fmt.Errorf("error closing alt datastore: %w", cerr))
+					}
+				}
+				if cerr := s.baseDs.Close(); cerr != nil {
+					err = errors.Join(err, fmt.Errorf("error closing meta datastore: %w", cerr))
+				}
+			}()
+		}
+
 		if err = s.persistSize(); err != nil {
-			return fmt.Errorf("error persisting size on close: %w", err)
+			err = fmt.Errorf("error persisting size on close: %w", err)
+			return
 		}
 		if err = s.ds.Sync(context.Background(), sizeKey); err != nil {
-			return fmt.Errorf("error syncing size on close: %w", err)
-		}
-		// In factory mode, close all datastores since they are owned by
-		// the keystore (the factory created them).
-		if s.createDs != nil {
-			if err = s.ds.Close(); err != nil {
-				return fmt.Errorf("error closing primary datastore: %w", err)
-			}
-			// altDs is nil between resets; only close if a reset was in
-			// progress when Close was called.
-			if s.altDs != nil {
-				if err = s.altDs.Close(); err != nil {
-					return fmt.Errorf("error closing alt datastore: %w", err)
-				}
-			}
-			if err = s.baseDs.Close(); err != nil {
-				return fmt.Errorf("error closing meta datastore: %w", err)
-			}
+			err = fmt.Errorf("error syncing size on close: %w", err)
+			return
 		}
 	}
-	return err
+	return
 }

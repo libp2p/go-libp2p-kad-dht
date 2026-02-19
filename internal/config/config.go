@@ -128,7 +128,7 @@ var Defaults = func(o *Config) error {
 	o.RoutingTable.AutoRefresh = true
 	o.RoutingTable.PeerFilter = EmptyRTFilter
 
-	o.MaxRecordAge = records.ProvideValidity
+	o.MaxRecordAge = amino.DefaultProvideValidity
 
 	o.BucketSize = amino.DefaultBucketSize
 	o.Concurrency = amino.DefaultConcurrency

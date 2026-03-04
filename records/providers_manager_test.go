@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
+	"github.com/stretchr/testify/require"
 
 	mh "github.com/multiformats/go-multihash"
 
@@ -230,63 +232,55 @@ func TestProvidesExpire(t *testing.T) {
 }
 
 func TestProvidesCacheExpire(t *testing.T) {
-	provideValidity := time.Second / 2
-	cleanupInterval := provideValidity * 10
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		provideValidity := 24 * time.Hour     // 1 day
+		cleanupInterval := 5 * 24 * time.Hour // 5 days
 
-	ds := dssync.MutexWrap(ds.NewMapDatastore())
-	mid := peer.ID("testing")
-	ps, err := pstoremem.NewPeerstore()
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := NewProviderManager(t.Context(), mid, ps, ds, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
-	if err != nil {
-		t.Fatal(err)
-	}
+		dstore := dssync.MutexWrap(ds.NewMapDatastore())
+		mid := peer.ID("testing")
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { ps.Close() })
+		p, err := NewProviderManager(ctx, mid, ps, dstore, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
+		require.NoError(t, err)
+		t.Cleanup(func() { p.Close() })
 
-	peers := []peer.ID{"a", "b"}
-	var mhs []mh.Multihash
-	for i := range 2 {
-		h := internal.Hash(fmt.Append(nil, i))
-		mhs = append(mhs, h)
-	}
-
-	for i, h := range mhs {
-		p.AddProvider(t.Context(), h, peer.AddrInfo{ID: peers[0]})
-		p.GetProviders(t.Context(), h)
-		if len(p.cache.Keys()) != i+1 {
-			t.Fatal("expected two cached keys")
+		mhs := make([]mh.Multihash, 2)
+		for i := range mhs {
+			mhs[i] = internal.Hash(fmt.Append(nil, i))
 		}
-	}
 
-	time.Sleep(provideValidity / 2)
+		peers := []peer.ID{"a", "b"}
+		for i, h := range mhs {
+			p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
+			p.GetProviders(ctx, h)
+			require.Len(t, p.cache.Keys(), i+1)
+		}
 
-	p.AddProvider(t.Context(), mhs[0], peer.AddrInfo{ID: peers[1]})
-	time.Sleep(10 * time.Millisecond)
-	cached, _ := p.cache.Get(string(mhs[0]))
-	if len(cached.(*providerSet).providers) != 2 {
-		t.Fatal("expected two cached providers")
-	}
+		time.Sleep(provideValidity / 2)
 
-	time.Sleep(provideValidity / 2)
+		p.AddProvider(ctx, mhs[0], peer.AddrInfo{ID: peers[1]})
+		// Wait for the manager goroutine to finish addProv (which writes to the
+		// cached providerSet) before we read from the cache directly.
+		synctest.Wait()
+		cached, _ := p.cache.Get(string(mhs[0]))
+		require.Len(t, cached.(*providerSet).providers, 2)
 
-	out, _ := p.GetProviders(t.Context(), mhs[0])
-	if len(out) != 1 {
-		t.Fatal("expected one provider to have expired")
-	}
-	cached, _ = p.cache.Get(string(mhs[0]))
-	if len(cached.(*providerSet).providers) != 1 {
-		t.Fatal("expected one provider in cache")
-	}
+		// Sleep slightly past provideValidity so the expiry check
+		// time.Since(v)>provideValidity triggers for the first batch.
+		time.Sleep(provideValidity/2 + time.Millisecond)
 
-	out, _ = p.GetProviders(t.Context(), mhs[1])
-	if len(out) != 0 {
-		t.Fatal("expected all providers to have expired")
-	}
-	cached, _ = p.cache.Get(string(mhs[1]))
-	if len(cached.(*providerSet).providers) != 0 {
-		t.Fatal("expected one provider to have expired")
-	}
+		out, _ := p.GetProviders(ctx, mhs[0])
+		require.Len(t, out, 1, "expected one provider to have expired")
+		cached, _ = p.cache.Get(string(mhs[0]))
+		require.Len(t, cached.(*providerSet).providers, 1)
+
+		out, _ = p.GetProviders(ctx, mhs[1])
+		require.Empty(t, out, "expected all providers to have expired")
+		cached, _ = p.cache.Get(string(mhs[1]))
+		require.Empty(t, cached.(*providerSet).providers)
+	})
 }
 
 var (

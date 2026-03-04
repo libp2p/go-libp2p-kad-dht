@@ -6,11 +6,14 @@ import (
 	"io"
 	"os"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/libp2p/go-libp2p-kad-dht/amino"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
+	"github.com/stretchr/testify/require"
 
 	mh "github.com/multiformats/go-multihash"
 
@@ -119,7 +122,7 @@ func TestProvidersSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pset, err := loadProviderSet(context.Background(), dstore, k)
+	pset, err := loadProviderSet(context.Background(), dstore, amino.DefaultProvideValidity, k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,14 +147,8 @@ func TestProvidersSerialization(t *testing.T) {
 }
 
 func TestProvidesExpire(t *testing.T) {
-	pval := ProvideValidity
-	cleanup := defaultCleanupInterval
-	ProvideValidity = time.Second / 2
-	defaultCleanupInterval = time.Second / 10
-	defer func() {
-		ProvideValidity = pval
-		defaultCleanupInterval = cleanup
-	}()
+	provideValidity := time.Second / 2
+	cleanupInterval := time.Second / 10
 
 	ctx := t.Context()
 
@@ -161,7 +158,7 @@ func TestProvidesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(ctx, mid, ps, ds)
+	p, err := NewProviderManager(ctx, mid, ps, ds, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +175,7 @@ func TestProvidesExpire(t *testing.T) {
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]})
 	}
 
-	time.Sleep(ProvideValidity / 2)
+	time.Sleep(provideValidity / 2)
 
 	for _, h := range mhs[5:] {
 		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
@@ -196,7 +193,7 @@ func TestProvidesExpire(t *testing.T) {
 	// First batch: added at t=0, expires at t=500ms (ProvideValidity)
 	// Second batch: added at t=250ms, expires at t=750ms
 	// We sleep 350ms (total 600ms) to provide 150ms margin before second batch expires
-	time.Sleep(ProvideValidity/2 + defaultCleanupInterval)
+	time.Sleep(provideValidity/2 + cleanupInterval)
 
 	for _, h := range mhs[:5] {
 		out, _ := p.GetProviders(ctx, h)
@@ -212,7 +209,7 @@ func TestProvidesExpire(t *testing.T) {
 		}
 	}
 
-	time.Sleep(ProvideValidity)
+	time.Sleep(provideValidity)
 
 	// Stop to prevent data races
 	p.Close()
@@ -232,6 +229,58 @@ func TestProvidesExpire(t *testing.T) {
 	if len(rest) > 0 {
 		t.Fatal("expected everything to be cleaned out of the datastore")
 	}
+}
+
+func TestProvidesCacheExpire(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		provideValidity := 24 * time.Hour     // 1 day
+		cleanupInterval := 5 * 24 * time.Hour // 5 days
+
+		dstore := dssync.MutexWrap(ds.NewMapDatastore())
+		mid := peer.ID("testing")
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { ps.Close() })
+		p, err := NewProviderManager(ctx, mid, ps, dstore, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
+		require.NoError(t, err)
+		t.Cleanup(func() { p.Close() })
+
+		mhs := make([]mh.Multihash, 2)
+		for i := range mhs {
+			mhs[i] = internal.Hash(fmt.Append(nil, i))
+		}
+
+		peers := []peer.ID{"a", "b"}
+		for i, h := range mhs {
+			p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
+			p.GetProviders(ctx, h)
+			require.Len(t, p.cache.Keys(), i+1)
+		}
+
+		time.Sleep(provideValidity / 2)
+
+		p.AddProvider(ctx, mhs[0], peer.AddrInfo{ID: peers[1]})
+		// Wait for the manager goroutine to finish addProv (which writes to the
+		// cached providerSet) before we read from the cache directly.
+		synctest.Wait()
+		cached, _ := p.cache.Get(string(mhs[0]))
+		require.Len(t, cached.(*providerSet).providers, 2)
+
+		// Sleep slightly past provideValidity so the expiry check
+		// time.Since(v)>provideValidity triggers for the first batch.
+		time.Sleep(provideValidity/2 + time.Millisecond)
+
+		out, _ := p.GetProviders(ctx, mhs[0])
+		require.Len(t, out, 1, "expected one provider to have expired")
+		cached, _ = p.cache.Get(string(mhs[0]))
+		require.Len(t, cached.(*providerSet).providers, 1)
+
+		out, _ = p.GetProviders(ctx, mhs[1])
+		require.Empty(t, out, "expected all providers to have expired")
+		cached, _ = p.cache.Get(string(mhs[1]))
+		require.Empty(t, cached.(*providerSet).providers)
+	})
 }
 
 var (

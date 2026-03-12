@@ -93,6 +93,14 @@ var _ Keystore = (*ResettableKeystore)(nil)
 // The provided datastore d is used as the meta store for the active-namespace
 // marker.
 //
+// If the keystore is reset periodically (e.g. to GC keys that should no longer
+// be advertised), and the underlying datastore does not reclaim disk space
+// immediately upon key deletion (e.g. LevelDB, Pebble deffering reclamation to
+// background compaction), it is strongly advised to use WithDatastoreFactory.
+// In factory mode the old datastore is destroyed after each reset rather than
+// emptied key-by-key, so disk space is reclaimed immediately without waiting
+// for compaction.
+//
 // Base keystore options (WithPrefixBits, WithBatchSize, etc.) are passed
 // via KeystoreOption.
 //

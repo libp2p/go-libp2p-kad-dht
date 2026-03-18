@@ -2,6 +2,7 @@ package keystore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -617,4 +618,150 @@ func TestKeystoreFactoryMode(t *testing.T) {
 
 	err = store2.Close()
 	require.NoError(t, err)
+}
+
+func TestKeystoreFactoryModeCrashRecovery(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+
+	metaDs := ds.NewMapDatastore()
+	defer metaDs.Close()
+
+	create := func(suffix string) (ds.Batching, error) {
+		return pebble.NewDatastore(filepath.Join(baseDir, suffix), nil)
+	}
+	destroy := func(suffix string) error {
+		return os.RemoveAll(filepath.Join(baseDir, suffix))
+	}
+
+	// Create keystore with initial keys in namespace "0".
+	store, err := NewResettableKeystore(metaDs,
+		WithDatastoreFactory(create, destroy),
+	)
+	require.NoError(t, err)
+
+	initialMhs := random.Multihashes(20)
+	_, err = store.Put(ctx, initialMhs...)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Close())
+
+	// Simulate a crash that left a stale alt directory ("1") on disk with
+	// garbage keys from an incomplete prior reset.
+	staleDs, err := create("1")
+	require.NoError(t, err)
+	staleMhs := random.Multihashes(10)
+	b, err := staleDs.Batch(ctx)
+	require.NoError(t, err)
+	for _, h := range staleMhs {
+		k := keyspace.MhToBit256(h)
+		require.NoError(t, b.Put(ctx, dsKey(k, DefaultPrefixBits), h))
+	}
+	require.NoError(t, b.Commit(ctx))
+	require.NoError(t, staleDs.Close())
+
+	// Reopen keystore and perform a reset. The stale directory should be
+	// cleaned up before the new alt datastore is created.
+	store2, err := NewResettableKeystore(metaDs,
+		WithDatastoreFactory(create, destroy),
+	)
+	require.NoError(t, err)
+
+	const resetKeys = 15
+	freshMhs := random.Multihashes(resetKeys)
+	ch := make(chan cid.Cid, resetKeys)
+	for _, h := range freshMhs {
+		ch <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(ch)
+
+	require.NoError(t, store2.ResetCids(ctx, ch))
+
+	size, err := store2.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, resetKeys, size, "only fresh keys should be present")
+
+	// Verify none of the stale keys leaked through.
+	for _, h := range staleMhs {
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:DefaultPrefixBits])
+		got, err := store2.Get(ctx, prefix)
+		require.NoError(t, err)
+		for _, m := range got {
+			require.NotEqual(t, string(m), string(h), "stale key should not be present after reset")
+		}
+	}
+
+	require.NoError(t, store2.Close())
+}
+
+// closeErrDs wraps a ds.Batching and makes Close return an error when
+// the failClose flag is set.
+type closeErrDs struct {
+	ds.Batching
+	failClose *bool
+}
+
+func (d *closeErrDs) Close() error {
+	d.Batching.Close()
+	if *d.failClose {
+		return errors.New("injected close error")
+	}
+	return nil
+}
+
+func TestKeystoreFactoryModeTeardownCloseError(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+
+	metaDs := ds.NewMapDatastore()
+	defer metaDs.Close()
+
+	failClose := true
+	create := func(suffix string) (ds.Batching, error) {
+		d, err := pebble.NewDatastore(filepath.Join(baseDir, suffix), nil)
+		if err != nil {
+			return nil, err
+		}
+		return &closeErrDs{Batching: d, failClose: &failClose}, nil
+	}
+	destroyed := make(map[string]bool)
+	destroy := func(suffix string) error {
+		destroyed[suffix] = true
+		return os.RemoveAll(filepath.Join(baseDir, suffix))
+	}
+
+	// Start with failClose disabled so the primary opens normally.
+	failClose = false
+	store, err := NewResettableKeystore(metaDs,
+		WithDatastoreFactory(create, destroy),
+	)
+	require.NoError(t, err)
+
+	_, err = store.Put(ctx, random.Multihashes(10)...)
+	require.NoError(t, err)
+
+	// Enable close errors. The alt datastore created during reset (and the
+	// old primary torn down after the swap) will both use this flag.
+	// teardownAltDs should still call destroyDs even when Close fails.
+	failClose = true
+
+	ch := make(chan cid.Cid, 5)
+	for _, h := range random.Multihashes(5) {
+		ch <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(ch)
+
+	// ResetCids does not propagate teardown errors (cleanup is best-effort
+	// in the defer), but destroyDs should still have been called.
+	err = store.ResetCids(ctx, ch)
+	require.NoError(t, err)
+
+	// destroyDs should still have been called for the old namespace.
+	require.True(t, destroyed["0"], "destroyDs should be called even when Close fails")
+	// The old namespace directory should be gone.
+	_, statErr := os.Stat(filepath.Join(baseDir, "0"))
+	require.ErrorIs(t, statErr, os.ErrNotExist, "old namespace dir should be removed despite close error")
+
+	failClose = false
+	require.NoError(t, store.Close())
 }

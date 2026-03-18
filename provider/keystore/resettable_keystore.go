@@ -95,7 +95,7 @@ var _ Keystore = (*ResettableKeystore)(nil)
 //
 // If the keystore is reset periodically (e.g. to GC keys that should no longer
 // be advertised), and the underlying datastore does not reclaim disk space
-// immediately upon key deletion (e.g. LevelDB, Pebble deffering reclamation to
+// immediately upon key deletion (e.g. LevelDB, Pebble deferring reclamation to
 // background compaction), it is strongly advised to use WithDatastoreFactory.
 // In factory mode the old datastore is destroyed after each reset rather than
 // emptied key-by-key, so disk space is reclaimed immediately without waiting
@@ -339,6 +339,8 @@ func (s *ResettableKeystore) tryAltPut(ctx context.Context, keys []mh.Multihash)
 func (s *ResettableKeystore) prepareAltDs() error {
 	if s.createDs != nil {
 		altSuffix := fmt.Sprintf("%d", 1-s.activeNamespace)
+		// Remove any stale data left by a prior crash or incomplete teardown.
+		_ = s.destroyDs(altSuffix)
 		newDs, err := s.createDs(altSuffix)
 		if err != nil {
 			return fmt.Errorf("failed to create alt datastore %s: %w", altSuffix, err)
@@ -356,14 +358,15 @@ func (s *ResettableKeystore) prepareAltDs() error {
 func (s *ResettableKeystore) teardownAltDs() error {
 	if s.createDs != nil {
 		altSuffix := fmt.Sprintf("%d", 1-s.activeNamespace)
+		var errs []error
 		if err := s.altDs.Close(); err != nil {
-			return fmt.Errorf("failed to close alt datastore %s: %w", altSuffix, err)
-		}
-		if err := s.destroyDs(altSuffix); err != nil {
-			return fmt.Errorf("failed to destroy alt datastore %s: %w", altSuffix, err)
+			errs = append(errs, fmt.Errorf("failed to close alt datastore %s: %w", altSuffix, err))
 		}
 		s.altDs = nil
-		return nil
+		if err := s.destroyDs(altSuffix); err != nil {
+			errs = append(errs, fmt.Errorf("failed to destroy alt datastore %s: %w", altSuffix, err))
+		}
+		return errors.Join(errs...)
 	}
 	return s.empty(context.Background(), s.altDs)
 }

@@ -376,6 +376,9 @@ func (s *ResettableKeystore) prepareAltDs() error {
 // mode it empties the existing namespace.
 func (s *ResettableKeystore) teardownAltDs() error {
 	if s.createDs != nil {
+		if s.altDs == nil {
+			return nil
+		}
 		altSuffix := fmt.Sprintf("%d", 1-s.activeNamespace)
 		var errs []error
 		if err := s.altDs.Close(); err != nil {

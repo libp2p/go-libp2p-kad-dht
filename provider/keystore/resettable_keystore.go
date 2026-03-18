@@ -170,6 +170,7 @@ func NewResettableKeystore(d ds.Batching, opts ...ResettableKeystoreOption) (*Re
 		if err != nil {
 			return nil, fmt.Errorf("failed to create datastore for namespace %s: %w", activeSuffix, err)
 		}
+		logger.Infof("keystore: initialized with active namespace %s (factory mode)", activeSuffix)
 		// altDs stays nil — created on demand by ResetCids
 	} else {
 		// Shared datastore mode: both namespaces always exist
@@ -365,6 +366,7 @@ func (s *ResettableKeystore) prepareAltDs() error {
 			return fmt.Errorf("failed to create alt datastore %s: %w", altSuffix, err)
 		}
 		s.altDs = newDs
+		s.logger.Infof("keystore: created new datastore %s", altSuffix)
 		return nil
 	}
 	return s.empty(context.Background(), s.altDs)
@@ -385,6 +387,7 @@ func (s *ResettableKeystore) teardownAltDs() error {
 			errs = append(errs, fmt.Errorf("failed to close alt datastore %s: %w", altSuffix, err))
 		}
 		s.altDs = nil
+		s.logger.Infof("keystore: removing old datastore %s", altSuffix)
 		if err := s.destroyDs(altSuffix); err != nil {
 			errs = append(errs, fmt.Errorf("failed to destroy alt datastore %s: %w", altSuffix, err))
 		}
@@ -421,6 +424,7 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 
 		// Toggle the active namespace index
 		s.activeNamespace = 1 - s.activeNamespace
+		s.logger.Infof("keystore: swapped active namespace to %d (size=%d)", s.activeNamespace, s.size)
 		// Persist the new active namespace
 		activeValue := []byte{s.activeNamespace}
 

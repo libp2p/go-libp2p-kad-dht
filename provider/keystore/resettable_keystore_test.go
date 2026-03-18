@@ -765,3 +765,141 @@ func TestKeystoreFactoryModeTeardownCloseError(t *testing.T) {
 	failClose = false
 	require.NoError(t, store.Close())
 }
+
+func TestKeystoreCorruptedMarkerRecovery(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("shared datastore mode", func(t *testing.T) {
+		metaDs := ds.NewMapDatastore()
+		defer metaDs.Close()
+
+		// Write a corrupted active namespace marker (value 42).
+		require.NoError(t, metaDs.Put(ctx, ds.NewKey("active"), []byte{42}))
+
+		store, err := NewResettableKeystore(metaDs)
+		require.NoError(t, err)
+
+		require.Equal(t, byte(0), store.activeNamespace, "corrupted marker should reset to 0")
+
+		// Verify the keystore is fully functional after recovery.
+		mhs := random.Multihashes(5)
+		_, err = store.Put(ctx, mhs...)
+		require.NoError(t, err)
+
+		size, err := store.Size(ctx)
+		require.NoError(t, err)
+		require.Equal(t, 5, size)
+
+		require.NoError(t, store.Close())
+	})
+
+	t.Run("factory mode", func(t *testing.T) {
+		baseDir := t.TempDir()
+		metaDs := ds.NewMapDatastore()
+		defer metaDs.Close()
+
+		// Create a stale datastore at "0" with leftover keys.
+		staleDs, err := pebble.NewDatastore(filepath.Join(baseDir, "0"), nil)
+		require.NoError(t, err)
+		staleMhs := random.Multihashes(5)
+		b, err := staleDs.Batch(ctx)
+		require.NoError(t, err)
+		for _, h := range staleMhs {
+			k := keyspace.MhToBit256(h)
+			require.NoError(t, b.Put(ctx, dsKey(k, DefaultPrefixBits), h))
+		}
+		require.NoError(t, b.Commit(ctx))
+		require.NoError(t, staleDs.Close())
+
+		// Write a corrupted marker with wrong length.
+		require.NoError(t, metaDs.Put(ctx, ds.NewKey("active"), []byte{0, 1, 2}))
+
+		create := func(suffix string) (ds.Batching, error) {
+			return pebble.NewDatastore(filepath.Join(baseDir, suffix), nil)
+		}
+		destroy := func(suffix string) error {
+			return os.RemoveAll(filepath.Join(baseDir, suffix))
+		}
+
+		store, err := NewResettableKeystore(metaDs,
+			WithDatastoreFactory(create, destroy),
+		)
+		require.NoError(t, err)
+
+		require.Equal(t, byte(0), store.activeNamespace, "corrupted marker should reset to 0")
+
+		// Stale directory should have been destroyed and recreated empty.
+		size, err := store.Size(ctx)
+		require.NoError(t, err)
+		require.Equal(t, 0, size, "stale data should be purged on corrupted marker")
+
+		// Verify put + reset cycle works on the recovered keystore.
+		freshMhs := random.Multihashes(10)
+		_, err = store.Put(ctx, freshMhs...)
+		require.NoError(t, err)
+
+		resetMhs := random.Multihashes(5)
+		ch := make(chan cid.Cid, len(resetMhs))
+		for _, h := range resetMhs {
+			ch <- cid.NewCidV1(cid.Raw, h)
+		}
+		close(ch)
+		require.NoError(t, store.ResetCids(ctx, ch))
+
+		size, err = store.Size(ctx)
+		require.NoError(t, err)
+		require.Equal(t, 5, size)
+
+		require.NoError(t, store.Close())
+	})
+}
+
+func TestKeystoreOptionAdapter(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+
+	metaDs := ds.NewMapDatastore()
+	defer metaDs.Close()
+
+	create := func(suffix string) (ds.Batching, error) {
+		return pebble.NewDatastore(filepath.Join(baseDir, suffix), nil)
+	}
+	destroy := func(suffix string) error {
+		return os.RemoveAll(filepath.Join(baseDir, suffix))
+	}
+
+	const customPrefixBits = 8
+	store, err := NewResettableKeystore(metaDs,
+		WithDatastoreFactory(create, destroy),
+		KeystoreOption(WithPrefixBits(customPrefixBits)),
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, customPrefixBits, store.prefixBits, "KeystoreOption should pass through prefixBits")
+
+	// Verify the keystore works with the custom prefix.
+	mhs := random.Multihashes(10)
+	_, err = store.Put(ctx, mhs...)
+	require.NoError(t, err)
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 10, size)
+
+	// Verify keys are retrievable with the configured prefix length.
+	for _, h := range mhs {
+		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:customPrefixBits])
+		got, err := store.Get(ctx, prefix)
+		require.NoError(t, err)
+		found := false
+		for _, m := range got {
+			if string(m) == string(h) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "key should be retrievable with custom prefix bits")
+	}
+
+	require.NoError(t, store.Close())
+}

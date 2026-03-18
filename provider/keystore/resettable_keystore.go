@@ -67,7 +67,7 @@ type resetOp struct {
 type ResettableKeystore struct {
 	keystore
 
-	metaDs          ds.Batching // stores the active namespace marker and persisted size
+	metaDs          ds.Batching // stores the active namespace marker (size is persisted in the primary ds)
 	altDs           ds.Batching // nil between resets in factory mode
 	altSize         atomic.Int64
 	resetInProgress bool
@@ -127,25 +127,44 @@ func NewResettableKeystore(d ds.Batching, opts ...ResettableKeystoreOption) (*Re
 		destroyDs = rcfg.destroyDs
 	}
 
-	// Check if there's a persisted active namespace marker
+	logger := log.Logger(cfg.loggerName)
+
+	// Determine which namespace ("0" or "1") was active in the previous
+	// session. A missing marker means first run; a corrupted marker
+	// (wrong length or value > 1) is treated as recoverable: we log a
+	// warning and fall back to namespace 0 (clear slate).
 	ctx := context.Background()
 	activeVal, err := d.Get(ctx, activeNamespaceKey)
 	var primaryDs, altDs ds.Batching
 	var activeIdx byte
+	var markerCorrupted bool
 	if err != nil {
 		if err != ds.ErrNotFound {
 			return nil, err
 		}
+		// No marker found, default to namespace 0.
+	} else if len(activeVal) != 1 || activeVal[0] > 1 {
+		// Corrupted marker: fall back to namespace 0 (clean slate).
+		// Both namespaces are purged below so no stale data is served.
+		// The corrected marker is persisted so subsequent restarts don't
+		// repeat the warning.
+		logger.Errorf("keystore: corrupted active namespace marker (got %x, expected 0x00 or 0x01), falling back to empty namespace 0; the provide system will re-advertise all CIDs from scratch on the next reprovide cycle", activeVal)
 		activeIdx = 0
-	} else {
-		if len(activeVal) != 1 {
-			return nil, fmt.Errorf("invalid active namespace marker length: %d", len(activeVal))
+		markerCorrupted = true
+		if err := d.Put(ctx, activeNamespaceKey, []byte{0}); err != nil {
+			return nil, fmt.Errorf("failed to correct corrupted namespace marker: %w", err)
 		}
+	} else {
 		activeIdx = activeVal[0]
 	}
 
 	if createDs != nil {
-		// Factory mode: create only the active datastore
+		if markerCorrupted {
+			// Purge both namespaces so no stale data survives.
+			_ = destroyDs("0")
+			_ = destroyDs("1")
+		}
+		// Factory mode: create only the active datastore.
 		activeSuffix := fmt.Sprintf("%d", activeIdx)
 		primaryDs, err = createDs(activeSuffix)
 		if err != nil {
@@ -170,7 +189,7 @@ func NewResettableKeystore(d ds.Batching, opts ...ResettableKeystoreOption) (*Re
 			requests:   make(chan operation),
 			close:      make(chan struct{}),
 			done:       make(chan struct{}),
-			logger:     log.Logger(cfg.loggerName),
+			logger:     logger,
 		},
 		metaDs:          d,
 		altDs:           altDs,

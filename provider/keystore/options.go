@@ -32,7 +32,7 @@ func getOpts(opts []Option) (config, error) {
 
 	for i, opt := range opts {
 		if err := opt(&cfg); err != nil {
-			return config{}, fmt.Errorf("option %d error: %s", i, err)
+			return config{}, fmt.Errorf("option %d error: %w", i, err)
 		}
 	}
 	return cfg, nil
@@ -144,7 +144,7 @@ func getResettableOpts(opts []ResettableKeystoreOption) (resettableKeystoreConfi
 	}
 	for i, opt := range opts {
 		if err := opt(&cfg); err != nil {
-			return resettableKeystoreConfig{}, fmt.Errorf("resettable option %d error: %s", i, err)
+			return resettableKeystoreConfig{}, fmt.Errorf("resettable option %d error: %w", i, err)
 		}
 	}
 	return cfg, nil

@@ -197,6 +197,15 @@ func Concurrency(alpha int) Option {
 	}
 }
 
+// MsgSenderBuilder sets the factory for creating the message sender.
+// The default uses the libp2p stream-based sender.
+func MsgSenderBuilder(f func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect) Option {
+	return func(o *dhtcfg.Config) error {
+		o.MsgSenderBuilder = f
+		return nil
+	}
+}
+
 // Resiliency configures the number of peers closest to a target that must have responded in order for a given query
 // path to complete.
 //

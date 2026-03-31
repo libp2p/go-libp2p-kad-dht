@@ -1021,16 +1021,12 @@ func TestStartProvidingSingle(t *testing.T) {
 		require.Equal(t, expectedGCPCount, int(getClosestPeersCount.Load()))
 
 		// Verify reprovide is scheduled.
-		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixLen])
 		prov.scheduleLk.Lock()
 		require.Equal(t, 1, prov.schedule.Size())
-		found, reprovideTime := trie.Find(prov.schedule, prefix)
-		if !found {
-			t.Log(prefix)
-			t.Log(keyspace.AllEntries(prov.schedule, prov.order)[0].Key)
-			require.FailNow(t, "prefix not inserted in schedule")
-		}
-		require.Equal(t, prov.reprovideTimeForPrefix(prefix), reprovideTime)
+		scheduledPrefix, found := keyspace.FindPrefixOfKey(prov.schedule, keyspace.MhToBit256(h))
+		require.True(t, found, "prefix covering key not inserted in schedule")
+		_, reprovideTime := trie.Find(prov.schedule, scheduledPrefix)
+		require.Equal(t, prov.reprovideTimeForPrefix(scheduledPrefix), reprovideTime)
 		prov.scheduleLk.Unlock()
 
 		// Try to provide the same key again -> noop

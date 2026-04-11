@@ -1085,7 +1085,7 @@ loop:
 	s.increaseProvideCounter(successfulKeys)
 
 	errCountLoaded := int(errCount.Load())
-	s.logger.Infof("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
+	s.logger.Debugf("sent provider records to peers in %s, errors %d/%d", time.Since(startTime), errCountLoaded, len(keysAllocations))
 	reachablePeers = nPeers - errCountLoaded
 
 	if errCountLoaded == nPeers || errCountLoaded > int(float32(nPeers)*(1-minimalRegionReachablePeersRatio)) {

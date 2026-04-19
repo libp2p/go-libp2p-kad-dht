@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -451,17 +452,20 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 			continue
 		}
 
-		// add any other know addresses for the candidate peer.
+		// Combine addresses from the response with any we already know
+		// for this peer. Build a fresh slice: next may be aliased by the
+		// caller (e.g. routing.QueryEvent.Responses) and mutating its
+		// Addrs races with consumers that serialize events.
 		curInfo := q.dht.peerstore.PeerInfo(next.ID)
-		next.Addrs = append(next.Addrs, curInfo.Addrs...)
+		addrs := slices.Concat(next.Addrs, curInfo.Addrs)
 
 		// add their addresses to the dialer's peerstore
 		//
 		// add the next peer to the query if matches the query target even if it would otherwise fail the query filter
 		// TODO: this behavior is really specific to how FindPeer works and not GetClosestPeers or any other function
 		isTarget := string(next.ID) == q.key
-		if isTarget || q.dht.queryPeerFilter(q.dht, *next) {
-			q.dht.maybeAddAddrs(next.ID, next.Addrs, pstore.TempAddrTTL)
+		if isTarget || q.dht.queryPeerFilter(q.dht, peer.AddrInfo{ID: next.ID, Addrs: addrs}) {
+			q.dht.maybeAddAddrs(next.ID, addrs, pstore.TempAddrTTL)
 			saw = append(saw, next.ID)
 		}
 	}

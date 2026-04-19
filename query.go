@@ -25,10 +25,19 @@ import (
 // ErrNoPeersQueried is returned when we failed to connect to any peers.
 var ErrNoPeersQueried = errors.New("failed to query any peers")
 
-type (
-	queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
-	stopFn  func(*qpeerset.QueryPeerset) bool
-)
+// queryFn runs once per peer visited in a DHT lookup. The returned
+// slice is the "heard" set the worker follows up on, and is commonly
+// also published via routing.QueryEvent.Responses.
+//
+// The returned slice and the AddrInfo values it points at are
+// read-only: mutating them (e.g. appending to AddrInfo.Addrs) races
+// with any RegisterForQueryEvents consumer reading the published
+// event.
+type queryFn func(context.Context, peer.ID) ([]*peer.AddrInfo, error)
+
+// stopFn decides whether a lookup has collected enough results and
+// can terminate early.
+type stopFn func(*qpeerset.QueryPeerset) bool
 
 // query represents a single DHT query.
 type query struct {
@@ -452,10 +461,15 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 			continue
 		}
 
-		// Combine addresses from the response with any we already know
-		// for this peer. Build a fresh slice: next may be aliased by the
-		// caller (e.g. routing.QueryEvent.Responses) and mutating its
-		// Addrs races with consumers that serialize events.
+		// A RegisterForQueryEvents consumer may be reading next.Addrs
+		// right now: the same *peer.AddrInfo is published on
+		// routing.QueryEvent.Responses. Don't use append:
+		//   - with spare capacity, append writes into next.Addrs's
+		//     backing array, which the consumer still holds.
+		//   - writing the result back to next.Addrs races on the slice
+		//     header (three words, torn read/write).
+		// slices.Concat always allocates a fresh backing array, so our
+		// addrs don't share memory with the consumer's view.
 		curInfo := q.dht.peerstore.PeerInfo(next.ID)
 		addrs := slices.Concat(next.Addrs, curInfo.Addrs)
 

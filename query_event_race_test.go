@@ -31,6 +31,10 @@ import (
 // Under -race the test reports a read/write race on AddrInfo.Addrs.
 // Without -race the torn slice header can crash inside go-multiaddr.
 func TestFindProvidersAsyncQueryEventResponsesRace(t *testing.T) {
+	if testing.Short() {
+		// Hammers FindProvidersAsync for several seconds to expose a data race.
+		t.SkipNow()
+	}
 	ctx := t.Context()
 	dhts := setupDHTS(t, ctx, 2)
 	connect(t, ctx, dhts[0], dhts[1])

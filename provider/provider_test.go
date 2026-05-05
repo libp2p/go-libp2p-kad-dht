@@ -1057,6 +1057,134 @@ func TestStartProvidingSingle(t *testing.T) {
 	})
 }
 
+func TestNoScheduleMode(t *testing.T) {
+	t.Run("WithReprovideInterval(0) constructs successfully", func(t *testing.T) {
+		pid, err := peer.Decode("12BoooooPEER")
+		require.NoError(t, err)
+
+		prov, err := New(
+			WithPeerID(pid),
+			WithRouter(&mockRouter{
+				getClosestPeersFunc: func(_ context.Context, _ string) ([]peer.ID, error) {
+					return []peer.ID{pid}, nil
+				},
+			}),
+			WithMessageSender(&mockMsgSender{
+				sendMessageFunc: func(_ context.Context, _ peer.ID, _ *pb.Message) error { return nil },
+			}),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithReprovideInterval(0),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, prov)
+		require.False(t, prov.scheduleEnabled(), "scheduleEnabled should report false with interval=0")
+		require.NoError(t, prov.Close())
+	})
+
+	t.Run("WithReprovideInterval(-1) is rejected", func(t *testing.T) {
+		pid, err := peer.Decode("12BoooooPEER")
+		require.NoError(t, err)
+		_, err = New(
+			WithPeerID(pid),
+			WithRouter(&mockRouter{}),
+			WithMessageSender(&mockMsgSender{}),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithReprovideInterval(-1),
+		)
+		require.Error(t, err)
+	})
+
+	t.Run("StartProviding publishes records and skips schedule in no-schedule mode", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			pid, err := peer.Decode("12BoooooPEER")
+			require.NoError(t, err)
+			replicationFactor := 4
+			h := genMultihashes(1)[0]
+
+			prefixLen := 4
+			peers := make([]peer.ID, replicationFactor)
+			seen := make(map[peer.ID]struct{}, replicationFactor)
+			peers[0], err = peer.Decode("12BooooPEER1")
+			require.NoError(t, err)
+			kbKey := keyspace.KeyToBytes(keyspace.PeerIDToBit256(peers[0]))
+			for i := range peers[1:] {
+				p, err := kb.GenRandPeerIDWithCPL(kbKey, uint(prefixLen))
+				require.NoError(t, err)
+				if _, ok := seen[p]; ok {
+					continue
+				}
+				seen[p] = struct{}{}
+				peers[i+1] = p
+			}
+
+			router := &mockRouter{
+				getClosestPeersFunc: func(_ context.Context, _ string) ([]peer.ID, error) {
+					return peers, nil
+				},
+			}
+			provideCount := atomic.Int32{}
+			msgSender := &mockMsgSender{
+				sendMessageFunc: func(_ context.Context, _ peer.ID, _ *pb.Message) error {
+					provideCount.Add(1)
+					return nil
+				},
+			}
+
+			checkInterval := time.Second
+			offlineDelay := time.Minute
+			prov, err := New(
+				WithReplicationFactor(replicationFactor),
+				WithReprovideInterval(0),
+				WithPeerID(pid),
+				WithRouter(router),
+				WithMessageSender(msgSender),
+				WithSelfAddrs(getMockAddrs(t)),
+				WithOfflineDelay(offlineDelay),
+				WithConnectivityCheckOnlineInterval(checkInterval),
+			)
+			require.NoError(t, err)
+			defer prov.Close()
+
+			synctest.Wait()
+			require.True(t, prov.connectivity.IsOnline())
+
+			err = prov.StartProviding(true, h)
+			require.NoError(t, err)
+			synctest.Wait()
+			require.Equal(t, int32(len(peers)), provideCount.Load(), "key should be published to every peer")
+
+			// Stats must not panic on the modulo-by-zero schedule math.
+			s := prov.Stats()
+			require.False(t, s.Closed)
+			require.Equal(t, time.Duration(0), s.Timing.ReprovidesInterval)
+			require.Equal(t, time.Duration(0), s.Timing.CurrentTimeOffset)
+
+			// Schedule must remain empty in no-schedule mode.
+			prov.scheduleLk.Lock()
+			require.Equal(t, 0, prov.schedule.Size(), "schedule should be empty in no-schedule mode")
+			prov.scheduleLk.Unlock()
+
+			// Keystore must stay empty: StartProviding collapses to
+			// ProvideOnce semantics in no-schedule mode.
+			ksSize, err := prov.keystore.Size(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, 0, ksSize, "keystore should be empty when StartProviding runs in no-schedule mode")
+
+			// AddToSchedule and RefreshSchedule are no-ops.
+			require.NoError(t, prov.AddToSchedule(h))
+			require.NoError(t, prov.RefreshSchedule())
+			prov.scheduleLk.Lock()
+			require.Equal(t, 0, prov.schedule.Size(), "no-op AddToSchedule/RefreshSchedule should leave schedule empty")
+			prov.scheduleLk.Unlock()
+
+			// No periodic reprovide ever fires.
+			time.Sleep(time.Hour)
+			synctest.Wait()
+			require.Equal(t, int32(len(peers)), provideCount.Load(), "no reprovide should have fired in no-schedule mode")
+		})
+	})
+}
+
 const bitsPerByte = 8
 
 func TestStartProvidingMany(t *testing.T) {

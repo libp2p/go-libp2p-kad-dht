@@ -214,6 +214,11 @@ type SweepingProvider struct {
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
+//
+// When [WithReprovideInterval] is set to 0, the provider operates in
+// no-schedule (burst-only) mode: ProvideOnce and StartProviding still
+// publish records to the DHT, but no schedule is built and no periodic
+// reprovide loop runs. See [WithReprovideInterval] for details.
 func New(opts ...Option) (*SweepingProvider, error) {
 	cfg, err := getOpts(opts)
 	if err != nil {
@@ -534,6 +539,15 @@ func (s *SweepingProvider) closed() bool {
 	}
 }
 
+// scheduleEnabled reports whether the periodic reprovide schedule is
+// active. It is false when the provider was constructed with
+// WithReprovideInterval(0); in that no-schedule mode immediate provides
+// (StartProviding, ProvideOnce) still publish records, but no schedule
+// is built and no periodic reprovide loop runs.
+func (s *SweepingProvider) scheduleEnabled() bool {
+	return s.reprovideInterval > 0
+}
+
 // scheduleNextReprovideNoLock makes sure the scheduler wakes up in
 // `timeUntilReprovide` to reprovide the region identified by `prefix`.
 func (s *SweepingProvider) scheduleNextReprovideNoLock(prefix bitstr.Key, timeUntilReprovide time.Duration) {
@@ -558,6 +572,10 @@ func (s *SweepingProvider) reschedulePrefix(prefix bitstr.Key) {
 // If the supplied prefix is the next prefix to be reprovided, update the
 // schedule cursor and timer.
 func (s *SweepingProvider) schedulePrefixNoLock(prefix bitstr.Key, justReprovided bool) {
+	if !s.scheduleEnabled() {
+		// No-schedule mode: do not build or maintain a schedule.
+		return
+	}
 	nextReprovideTime := s.reprovideTimeForPrefix(prefix)
 	if justReprovided {
 		// Schedule next reprovide given that the prefix was just reprovided on
@@ -620,8 +638,11 @@ func (s *SweepingProvider) currentTimeOffset() time.Duration {
 }
 
 // timeOffset returns the time offset in the reprovide cycle for the given
-// time.
+// time. In no-schedule mode there is no cycle, so this returns 0.
 func (s *SweepingProvider) timeOffset(t time.Time) time.Duration {
+	if !s.scheduleEnabled() {
+		return 0
+	}
 	return t.Sub(s.cycleStart) % s.reprovideInterval
 }
 
@@ -631,8 +652,12 @@ func (s *SweepingProvider) timeUntil(d time.Duration) time.Duration {
 }
 
 // timeBetween returns the duration between the two provided offsets, assuming
-// it is no more than s.reprovideInterval.
+// it is no more than s.reprovideInterval. In no-schedule mode there is no
+// cycle so this returns 0.
 func (s *SweepingProvider) timeBetween(from, to time.Duration) time.Duration {
+	if !s.scheduleEnabled() {
+		return 0
+	}
 	return (to-from+s.reprovideInterval-1)%s.reprovideInterval + 1
 }
 
@@ -1279,6 +1304,13 @@ func (s *SweepingProvider) handleReprovide() {
 func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multihash) {
 	if len(keys) == 0 {
 		return
+	}
+	if reprovide && !s.scheduleEnabled() {
+		// No-schedule mode: persisting keys to the keystore would only grow
+		// disk state with no reader to consume it (no schedule, no reprovide
+		// cycle). Collapse to ProvideOnce semantics: publish now, do not
+		// persist.
+		reprovide = false
 	}
 	if reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
@@ -2037,6 +2069,10 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
 //
+// When the provider is in no-schedule mode ([WithReprovideInterval] = 0),
+// StartProviding behaves identically to ProvideOnce: keys are published
+// to the DHT immediately but NOT persisted in the keystore.
+//
 // Returns an error if the keys could not be added to the provide queue. This
 // can happen if the provider is closed or if the node is currently Offline
 // (either never bootstrapped, or disconnected since more than `OfflineDelay`).
@@ -2080,6 +2116,9 @@ func (s *SweepingProvider) Clear() int {
 // AddToSchedule makes sure the prefixes associated with the supplied keys are
 // scheduled to be reprovided.
 //
+// In no-schedule mode ([WithReprovideInterval] = 0) this is a no-op and
+// returns nil.
+//
 // Returns an error if the provider is closed or if the node is currently
 // Offline (either never bootstrapped, or disconnected since more than
 // `OfflineDelay`). The schedule depends on the network size, hence recent
@@ -2087,6 +2126,10 @@ func (s *SweepingProvider) Clear() int {
 func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
+	}
+	if !s.scheduleEnabled() {
+		// No-schedule mode: nothing to schedule.
+		return nil
 	}
 	if !s.isOffline() {
 		// If node is offline, the schedule will be refreshed when the node
@@ -2104,6 +2147,9 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 // This is done automatically during the reprovide operation if a region has no
 // keys.
 //
+// In no-schedule mode ([WithReprovideInterval] = 0) this is a no-op and
+// returns nil.
+//
 // Returns an error if the provider is closed or if the node is currently
 // Offline (either never bootstrapped, or disconnected since more than
 // `OfflineDelay`). The schedule depends on the network size, hence recent
@@ -2111,6 +2157,10 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 func (s *SweepingProvider) RefreshSchedule() error {
 	if s.closed() {
 		return ErrClosed
+	}
+	if !s.scheduleEnabled() {
+		// No-schedule mode: nothing to refresh.
+		return nil
 	}
 	// Look for prefixes not included in the schedule
 	s.scheduleLk.Lock()

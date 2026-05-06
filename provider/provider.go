@@ -214,6 +214,11 @@ type SweepingProvider struct {
 }
 
 // New creates a new SweepingProvider instance with the supplied options.
+//
+// When [WithReprovideInterval] is set to 0, the provider operates in
+// no-schedule (burst-only) mode: ProvideOnce and StartProviding still
+// publish records to the DHT, but no schedule is built and no periodic
+// reprovide loop runs. See [WithReprovideInterval] for details.
 func New(opts ...Option) (*SweepingProvider, error) {
 	cfg, err := getOpts(opts)
 	if err != nil {
@@ -532,6 +537,15 @@ func (s *SweepingProvider) closed() bool {
 	default:
 		return false
 	}
+}
+
+// scheduleEnabled reports whether the periodic reprovide schedule is
+// active. It is false when the provider was constructed with
+// WithReprovideInterval(0); in that no-schedule mode immediate provides
+// (StartProviding, ProvideOnce) still publish records, but no schedule
+// is built and no periodic reprovide loop runs.
+func (s *SweepingProvider) scheduleEnabled() bool {
+	return s.reprovideInterval > 0
 }
 
 // scheduleNextReprovideNoLock makes sure the scheduler wakes up in
@@ -2037,6 +2051,10 @@ func (s *SweepingProvider) ProvideOnce(keys ...mh.Multihash) error {
 // StopProviding is called for the same keys or user defined garbage collection
 // deletes the keys.
 //
+// When the provider is in no-schedule mode ([WithReprovideInterval] = 0),
+// StartProviding behaves identically to ProvideOnce: keys are published
+// to the DHT immediately but NOT persisted in the keystore.
+//
 // Returns an error if the keys could not be added to the provide queue. This
 // can happen if the provider is closed or if the node is currently Offline
 // (either never bootstrapped, or disconnected since more than `OfflineDelay`).
@@ -2046,7 +2064,7 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) erro
 	if s.closed() {
 		return ErrClosed
 	}
-	s.handleProvide(force, true, keys...)
+	s.handleProvide(force, s.scheduleEnabled(), keys...)
 	return nil
 }
 
@@ -2057,11 +2075,15 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
 	}
+	s.provideQueue.Remove(keys...)
+	if !s.scheduleEnabled() {
+		// No-schedule mode: keystore is empty, nothing to remove.
+		return nil
+	}
 	err := s.keystore.Delete(s.ctx, keys...)
 	if err != nil {
 		err = fmt.Errorf("failed to stop providing keys: %w", err)
 	}
-	s.provideQueue.Remove(keys...)
 	return err
 }
 
@@ -2080,6 +2102,9 @@ func (s *SweepingProvider) Clear() int {
 // AddToSchedule makes sure the prefixes associated with the supplied keys are
 // scheduled to be reprovided.
 //
+// In no-schedule mode ([WithReprovideInterval] = 0) this is a no-op and
+// returns nil.
+//
 // Returns an error if the provider is closed or if the node is currently
 // Offline (either never bootstrapped, or disconnected since more than
 // `OfflineDelay`). The schedule depends on the network size, hence recent
@@ -2087,6 +2112,10 @@ func (s *SweepingProvider) Clear() int {
 func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
+	}
+	if !s.scheduleEnabled() {
+		// No-schedule mode: nothing to schedule.
+		return nil
 	}
 	if !s.isOffline() {
 		// If node is offline, the schedule will be refreshed when the node
@@ -2104,6 +2133,9 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 // This is done automatically during the reprovide operation if a region has no
 // keys.
 //
+// In no-schedule mode ([WithReprovideInterval] = 0) this is a no-op and
+// returns nil.
+//
 // Returns an error if the provider is closed or if the node is currently
 // Offline (either never bootstrapped, or disconnected since more than
 // `OfflineDelay`). The schedule depends on the network size, hence recent
@@ -2111,6 +2143,10 @@ func (s *SweepingProvider) AddToSchedule(keys ...mh.Multihash) error {
 func (s *SweepingProvider) RefreshSchedule() error {
 	if s.closed() {
 		return ErrClosed
+	}
+	if !s.scheduleEnabled() {
+		// No-schedule mode: nothing to refresh.
+		return nil
 	}
 	// Look for prefixes not included in the schedule
 	s.scheduleLk.Lock()

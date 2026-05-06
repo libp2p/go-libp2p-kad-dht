@@ -2075,11 +2075,15 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
 	if s.closed() {
 		return ErrClosed
 	}
+	s.provideQueue.Remove(keys...)
+	if !s.scheduleEnabled() {
+		// No-schedule mode: keystore is empty, nothing to remove.
+		return nil
+	}
 	err := s.keystore.Delete(s.ctx, keys...)
 	if err != nil {
 		err = fmt.Errorf("failed to stop providing keys: %w", err)
 	}
-	s.provideQueue.Remove(keys...)
 	return err
 }
 

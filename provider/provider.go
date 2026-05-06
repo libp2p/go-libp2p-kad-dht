@@ -1305,13 +1305,6 @@ func (s *SweepingProvider) handleProvide(force, reprovide bool, keys ...mh.Multi
 	if len(keys) == 0 {
 		return
 	}
-	if reprovide && !s.scheduleEnabled() {
-		// No-schedule mode: persisting keys to the keystore would only grow
-		// disk state with no reader to consume it (no schedule, no reprovide
-		// cycle). Collapse to ProvideOnce semantics: publish now, do not
-		// persist.
-		reprovide = false
-	}
 	if reprovide {
 		// Add keys to list of keys to be reprovided. Returned keys are deduplicated
 		// newly added keys.
@@ -2082,7 +2075,7 @@ func (s *SweepingProvider) StartProviding(force bool, keys ...mh.Multihash) erro
 	if s.closed() {
 		return ErrClosed
 	}
-	s.handleProvide(force, true, keys...)
+	s.handleProvide(force, s.scheduleEnabled(), keys...)
 	return nil
 }
 

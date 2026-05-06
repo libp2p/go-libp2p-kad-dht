@@ -572,10 +572,6 @@ func (s *SweepingProvider) reschedulePrefix(prefix bitstr.Key) {
 // If the supplied prefix is the next prefix to be reprovided, update the
 // schedule cursor and timer.
 func (s *SweepingProvider) schedulePrefixNoLock(prefix bitstr.Key, justReprovided bool) {
-	if !s.scheduleEnabled() {
-		// No-schedule mode: do not build or maintain a schedule.
-		return
-	}
 	nextReprovideTime := s.reprovideTimeForPrefix(prefix)
 	if justReprovided {
 		// Schedule next reprovide given that the prefix was just reprovided on
@@ -638,11 +634,8 @@ func (s *SweepingProvider) currentTimeOffset() time.Duration {
 }
 
 // timeOffset returns the time offset in the reprovide cycle for the given
-// time. In no-schedule mode there is no cycle, so this returns 0.
+// time.
 func (s *SweepingProvider) timeOffset(t time.Time) time.Duration {
-	if !s.scheduleEnabled() {
-		return 0
-	}
 	return t.Sub(s.cycleStart) % s.reprovideInterval
 }
 
@@ -652,12 +645,8 @@ func (s *SweepingProvider) timeUntil(d time.Duration) time.Duration {
 }
 
 // timeBetween returns the duration between the two provided offsets, assuming
-// it is no more than s.reprovideInterval. In no-schedule mode there is no
-// cycle so this returns 0.
+// it is no more than s.reprovideInterval.
 func (s *SweepingProvider) timeBetween(from, to time.Duration) time.Duration {
-	if !s.scheduleEnabled() {
-		return 0
-	}
 	return (to-from+s.reprovideInterval-1)%s.reprovideInterval + 1
 }
 

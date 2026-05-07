@@ -961,15 +961,17 @@ func TestStartProvidingSingle(t *testing.T) {
 		seen := make(map[peer.ID]struct{}, replicationFactor)
 		peers[0], err = peer.Decode("12BooooPEER1")
 		require.NoError(t, err)
+		seen[peers[0]] = struct{}{}
 		kbKey := keyspace.KeyToBytes(keyspace.PeerIDToBit256(peers[0]))
-		for i := range peers[1:] {
+		for i := 1; i < len(peers); {
 			p, err := kb.GenRandPeerIDWithCPL(kbKey, uint(prefixLen))
 			require.NoError(t, err)
 			if _, ok := seen[p]; ok {
 				continue
 			}
 			seen[p] = struct{}{}
-			peers[i+1] = p
+			peers[i] = p
+			i++
 		}
 		// Sort peers from closest to h, to furthest
 		slices.SortFunc(peers, func(a, b peer.ID) int {
@@ -1106,15 +1108,17 @@ func TestNoScheduleMode(t *testing.T) {
 			seen := make(map[peer.ID]struct{}, replicationFactor)
 			peers[0], err = peer.Decode("12BooooPEER1")
 			require.NoError(t, err)
+			seen[peers[0]] = struct{}{}
 			kbKey := keyspace.KeyToBytes(keyspace.PeerIDToBit256(peers[0]))
-			for i := range peers[1:] {
+			for i := 1; i < len(peers); {
 				p, err := kb.GenRandPeerIDWithCPL(kbKey, uint(prefixLen))
 				require.NoError(t, err)
 				if _, ok := seen[p]; ok {
 					continue
 				}
 				seen[p] = struct{}{}
-				peers[i+1] = p
+				peers[i] = p
+				i++
 			}
 
 			router := &mockRouter{

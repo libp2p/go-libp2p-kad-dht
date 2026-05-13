@@ -145,7 +145,9 @@ func TestProvideKeysToPeer(t *testing.T) {
 		},
 	}
 	prov := SweepingProvider{
-		msgSender: msgSender,
+		ctx:                       context.Background(),
+		msgSender:                 msgSender,
+		sendProviderRecordTimeout: DefaultSendProviderRecordTimeout,
 	}
 
 	nKeys := 16
@@ -171,6 +173,66 @@ func TestProvideKeysToPeer(t *testing.T) {
 	err = prov.provideKeysToPeer(pid, mhs, pmes)
 	require.NoError(t, err)
 	require.Equal(t, nKeys, msgCount)
+}
+
+// TestProvideKeysToPeerSendMessageTimeout verifies that a peer which accepts
+// the libp2p stream but never replies cannot pin the provideKeysToPeer worker
+// indefinitely. Each ADD_PROVIDER send is bounded by sendProviderRecordTimeout;
+// after maxConsecutiveProvideFailuresAllowed+1 consecutive timeouts the call
+// returns the underlying error.
+func TestProvideKeysToPeerSendMessageTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var sendCount atomic.Int32
+		msgSender := &mockMsgSender{
+			sendMessageFunc: func(ctx context.Context, _ peer.ID, _ *pb.Message) error {
+				sendCount.Add(1)
+				<-ctx.Done()
+				return ctx.Err()
+			},
+		}
+		prov := SweepingProvider{
+			ctx:                       context.Background(),
+			msgSender:                 msgSender,
+			sendProviderRecordTimeout: DefaultSendProviderRecordTimeout,
+		}
+
+		nKeys := 16
+		pid, err := peer.Decode("12BoooooPEER")
+		require.NoError(t, err)
+		mhs := [][]mh.Multihash{genMultihashes(nKeys)}
+		pmes := &pb.Message{}
+
+		done := make(chan error, 1)
+		start := time.Now()
+		go func() {
+			done <- prov.provideKeysToPeer(pid, mhs, pmes)
+		}()
+		synctest.Wait()
+
+		var providerErr error
+		select {
+		case providerErr = <-done:
+		case <-time.After(time.Hour):
+			t.Fatal("provideKeysToPeer did not return within a synthetic hour")
+		}
+		elapsed := time.Since(start)
+
+		require.Error(t, providerErr)
+		require.Contains(t, providerErr.Error(), "failed to provide")
+
+		// We expect exactly maxConsecutiveProvideFailuresAllowed+1 send attempts:
+		// the first 1+maxConsecutiveProvideFailuresAllowed each time out, then the
+		// next attempt would exceed the streak and the call bails. No additional
+		// sends should leak after the bail.
+		require.Equal(t, int32(maxConsecutiveProvideFailuresAllowed+1), sendCount.Load(),
+			"expected %d send attempts before bailing on streak", maxConsecutiveProvideFailuresAllowed+1)
+
+		// Total elapsed time must be bounded by per-send timeout × attempts and
+		// must not approach the unbounded behaviour we are fixing.
+		maxElapsed := prov.sendProviderRecordTimeout*time.Duration(maxConsecutiveProvideFailuresAllowed+1) + time.Second
+		require.Less(t, elapsed, maxElapsed,
+			"provideKeysToPeer should complete in at most per-send timeout × attempts")
+	})
 }
 
 func TestKeysAllocationsToPeers(t *testing.T) {
@@ -512,19 +574,21 @@ func TestIndividualProvideSingle(t *testing.T) {
 		},
 	}
 	r := SweepingProvider{
-		router:                   router,
-		msgSender:                msgSender,
-		reprovideInterval:        time.Hour,
-		maxProvideConnsPerWorker: 2,
-		provideQueue:             queue.NewProvideQueue(),
-		reprovideQueue:           queue.NewReprovideQueue(),
-		connectivity:             noopConnectivityChecker(),
-		schedule:                 trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer:            time.NewTimer(time.Hour),
-		getSelfAddrs:             func() []ma.Multiaddr { return nil },
-		addLocalRecord:           func(mh mh.Multihash) error { return nil },
-		provideCounter:           provideCounter(),
-		logger:                   defaultLogger,
+		ctx:                       context.Background(),
+		router:                    router,
+		msgSender:                 msgSender,
+		reprovideInterval:         time.Hour,
+		maxProvideConnsPerWorker:  2,
+		sendProviderRecordTimeout: DefaultSendProviderRecordTimeout,
+		provideQueue:              queue.NewProvideQueue(),
+		reprovideQueue:            queue.NewReprovideQueue(),
+		connectivity:              noopConnectivityChecker(),
+		schedule:                  trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:             time.NewTimer(time.Hour),
+		getSelfAddrs:              func() []ma.Multiaddr { return nil },
+		addLocalRecord:            func(mh mh.Multihash) error { return nil },
+		provideCounter:            provideCounter(),
+		logger:                    defaultLogger,
 	}
 
 	assertAdvertisementCount := func(n int) {
@@ -601,22 +665,24 @@ func TestIndividualProvideMultiple(t *testing.T) {
 	maxDelay := time.Minute
 	ds := datastore.NewMapDatastore()
 	r := SweepingProvider{
-		router:                   router,
-		msgSender:                msgSender,
-		reprovideInterval:        reprovideInterval,
-		maxReprovideDelay:        maxDelay,
-		maxProvideConnsPerWorker: 2,
-		provideQueue:             queue.NewProvideQueue(),
-		reprovideQueue:           queue.NewReprovideQueue(),
-		connectivity:             noopConnectivityChecker(),
-		schedule:                 trie.New[bitstr.Key, time.Duration](),
-		scheduleTimer:            time.NewTimer(time.Hour),
-		getSelfAddrs:             func() []ma.Multiaddr { return nil },
-		addLocalRecord:           func(mh mh.Multihash) error { return nil },
-		provideCounter:           provideCounter(),
-		stats:                    newOperationStats(reprovideInterval, maxDelay),
-		datastore:                ds,
-		logger:                   defaultLogger,
+		ctx:                       context.Background(),
+		router:                    router,
+		msgSender:                 msgSender,
+		reprovideInterval:         reprovideInterval,
+		maxReprovideDelay:         maxDelay,
+		maxProvideConnsPerWorker:  2,
+		sendProviderRecordTimeout: DefaultSendProviderRecordTimeout,
+		provideQueue:              queue.NewProvideQueue(),
+		reprovideQueue:            queue.NewReprovideQueue(),
+		connectivity:              noopConnectivityChecker(),
+		schedule:                  trie.New[bitstr.Key, time.Duration](),
+		scheduleTimer:             time.NewTimer(time.Hour),
+		getSelfAddrs:              func() []ma.Multiaddr { return nil },
+		addLocalRecord:            func(mh mh.Multihash) error { return nil },
+		provideCounter:            provideCounter(),
+		stats:                     newOperationStats(reprovideInterval, maxDelay),
+		datastore:                 ds,
+		logger:                    defaultLogger,
 	}
 
 	assertAdvertisementCount := func(n int) {

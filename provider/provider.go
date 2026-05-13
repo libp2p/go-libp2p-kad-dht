@@ -177,8 +177,9 @@ type SweepingProvider struct {
 	reprovideQueue       *queue.ReprovideQueue
 	lateReprovideRunning sync.Mutex
 
-	workerPool               *pool.Pool[workerType]
-	maxProvideConnsPerWorker int
+	workerPool                *pool.Pool[workerType]
+	maxProvideConnsPerWorker  int
+	sendProviderRecordTimeout time.Duration
 
 	startedAt         time.Time
 	cycleStart        time.Time
@@ -313,7 +314,8 @@ func New(opts ...Option) (*SweepingProvider, error) {
 			periodicWorker: cfg.dedicatedPeriodicWorkers,
 			burstWorker:    cfg.dedicatedBurstWorkers,
 		}),
-		maxProvideConnsPerWorker: cfg.maxProvideConnsPerWorker,
+		maxProvideConnsPerWorker:  cfg.maxProvideConnsPerWorker,
+		sendProviderRecordTimeout: cfg.sendProviderRecordTimeout,
 
 		avgPrefixLenValidity: defaultPrefixLenValidity,
 		cachedAvgPrefixLen:   cachedAvgPrefixLen,
@@ -1145,7 +1147,9 @@ func (s *SweepingProvider) provideKeysToPeer(p peer.ID, batches [][]mh.Multihash
 				return ErrClosed
 			}
 			pmes.Key = mh
-			err := s.msgSender.SendMessage(s.ctx, p, pmes)
+			sendCtx, cancel := context.WithTimeout(s.ctx, s.sendProviderRecordTimeout)
+			err := s.msgSender.SendMessage(sendCtx, p, pmes)
+			cancel()
 			sentKeys++
 			if err != nil {
 				errStreak++

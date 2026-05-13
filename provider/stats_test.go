@@ -17,6 +17,7 @@ import (
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
+	"github.com/libp2p/go-libp2p-kad-dht/provider/keystore"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 
 	"github.com/stretchr/testify/require"
@@ -115,7 +116,8 @@ func TestStats(t *testing.T) {
 		avgPrefixLenFloat := float64(avgPrefixLen)
 
 		// Initial stats check
-		stats := prov.Stats()
+		stats, err := prov.Stats(t.Context())
+		require.NoError(t, err)
 		require.False(t, stats.Closed)
 		require.Equal(t, "online", stats.Connectivity.Status)
 		require.Equal(t, startTime, stats.Connectivity.Since)
@@ -182,7 +184,8 @@ func TestStats(t *testing.T) {
 		require.Empty(t, workersBlocked)
 
 		// Check stats during a provide operation (blocked)
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		require.False(t, stats.Closed)
 		require.Equal(t, "online", stats.Connectivity.Status)
@@ -238,7 +241,8 @@ func TestStats(t *testing.T) {
 		synctest.Wait()
 
 		// Check stats after the provide operation
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		// Count to how many peers the record was actually provided
 		recordsProvided := 0
@@ -323,7 +327,8 @@ func TestStats(t *testing.T) {
 		}
 		require.Empty(t, workersBlocked)
 
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		reprovidedKeys := len(newKeys) + 1
 
@@ -385,7 +390,8 @@ func TestStats(t *testing.T) {
 		synctest.Wait()
 
 		// Check stats after the reprovide operation
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		newKeysProvidedRecords := 0
 		for _, k := range newKeys {
@@ -481,7 +487,8 @@ func TestStats(t *testing.T) {
 		}
 		require.Empty(t, workersBlocked)
 
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		require.False(t, stats.Closed)
 		require.Equal(t, "online", stats.Connectivity.Status)
@@ -536,7 +543,8 @@ func TestStats(t *testing.T) {
 		synctest.Wait()
 
 		// Provide of all balanced keys is complete
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		balancedKeysRecords := 0
 		for _, k := range balancedKeys {
@@ -596,7 +604,8 @@ func TestStats(t *testing.T) {
 		time.Sleep(reprovideInterval)
 
 		// Check stats after all regions have been reprovided
-		stats = prov.Stats()
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
 
 		require.False(t, stats.Closed)
 		require.Equal(t, "online", stats.Connectivity.Status)
@@ -648,16 +657,98 @@ func TestStats(t *testing.T) {
 		prov.connectivity.TriggerCheck()
 		synctest.Wait()
 
-		require.Equal(t, "disconnected", prov.Stats().Connectivity.Status)
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "disconnected", stats.Connectivity.Status)
 
 		// Switch to offline
 		time.Sleep(offlineDelay)
 		synctest.Wait()
 
-		require.Equal(t, "offline", prov.Stats().Connectivity.Status)
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "offline", stats.Connectivity.Status)
 
 		prov.Close()
-		require.True(t, prov.Stats().Closed)
+		stats, err = prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.True(t, stats.Closed)
+	})
+}
+
+// blockingSizeKeystore is a keystore.Keystore whose Size method blocks
+// until ctx is canceled. Other methods return zero values. Used to verify
+// that Stats unblocks when the caller's deadline elapses while the
+// keystore worker is stuck (e.g. behind a slow datastore op).
+type blockingSizeKeystore struct{}
+
+var _ keystore.Keystore = (*blockingSizeKeystore)(nil)
+
+func (b *blockingSizeKeystore) Size(ctx context.Context) (int, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+func (b *blockingSizeKeystore) Put(_ context.Context, _ ...multihash.Multihash) ([]multihash.Multihash, error) {
+	return nil, nil
+}
+
+func (b *blockingSizeKeystore) Get(_ context.Context, _ bitstr.Key) ([]multihash.Multihash, error) {
+	return nil, nil
+}
+
+func (b *blockingSizeKeystore) ContainsPrefix(_ context.Context, _ bitstr.Key) (bool, error) {
+	return false, nil
+}
+
+func (b *blockingSizeKeystore) Delete(_ context.Context, _ ...multihash.Multihash) error {
+	return nil
+}
+
+func (b *blockingSizeKeystore) Empty(_ context.Context) error { return nil }
+
+func (b *blockingSizeKeystore) BatchSize() int { return 256 }
+
+func (b *blockingSizeKeystore) Close() error { return nil }
+
+// TestStatsContextDeadline verifies that Stats returns stats.Stats{} and
+// ctx.Err() when keystore.Size is stuck (e.g. the keystore worker is
+// blocked on a slow datastore op) and the caller's deadline elapses.
+func TestStatsContextDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka")
+		require.NoError(t, err)
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(_ context.Context, _ string) ([]peer.ID, error) {
+				return nil, nil
+			},
+		}
+		msgSender := &mockMsgSender{}
+
+		prov, err := New(
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithKeystore(&blockingSizeKeystore{}),
+		)
+		require.NoError(t, err)
+		synctest.Wait()
+		defer prov.Close()
+
+		const deadline = 5 * time.Second
+		ctx, cancel := context.WithTimeout(t.Context(), deadline)
+		defer cancel()
+
+		start := time.Now()
+		s, err := prov.Stats(ctx)
+		elapsed := time.Since(start)
+
+		require.ErrorIsf(t, err, context.DeadlineExceeded, "Stats should return ctx.Err when keystore.Size blocks past the deadline")
+		require.Emptyf(t, s, "Stats should return a zero snapshot when ctx is done")
+		require.GreaterOrEqualf(t, elapsed, deadline, "Stats should not return before the deadline elapses")
+		require.Lessf(t, elapsed, deadline+time.Second, "Stats should return shortly after the deadline elapses")
 	})
 }
 

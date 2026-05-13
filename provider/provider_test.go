@@ -1224,7 +1224,8 @@ func TestNoScheduleMode(t *testing.T) {
 			require.Equal(t, int32(len(peers)), provideCount.Load(), "key should be published to every peer")
 
 			// Stats must not panic on the modulo-by-zero schedule math.
-			s := prov.Stats()
+			s, err := prov.Stats(t.Context())
+			require.NoError(t, err)
 			require.False(t, s.Closed)
 			require.Equal(t, time.Duration(0), s.Timing.ReprovidesInterval)
 			require.Equal(t, time.Duration(0), s.Timing.CurrentTimeOffset)
@@ -2371,7 +2372,9 @@ func TestConnectivityCallbacks(t *testing.T) {
 		require.Equal(t, StateOnline, trackedState)
 		stateLk.Unlock()
 		require.True(t, prov.connectivity.IsOnline())
-		require.Equal(t, "online", prov.Stats().Connectivity.Status)
+		s, err := prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "online", s.Connectivity.Status)
 
 		// Transition to DISCONNECTED
 		time.Sleep(checkInterval)
@@ -2385,7 +2388,9 @@ func TestConnectivityCallbacks(t *testing.T) {
 		require.Equal(t, StateDisconnected, trackedState)
 		stateLk.Unlock()
 		require.False(t, prov.connectivity.IsOnline())
-		require.Equal(t, "disconnected", prov.Stats().Connectivity.Status)
+		s, err = prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "disconnected", s.Connectivity.Status)
 
 		// Transition to OFFLINE after offlineDelay
 		time.Sleep(offlineDelay)
@@ -2397,7 +2402,9 @@ func TestConnectivityCallbacks(t *testing.T) {
 		require.Equal(t, StateOffline, trackedState)
 		stateLk.Unlock()
 		require.False(t, prov.connectivity.IsOnline())
-		require.Equal(t, "offline", prov.Stats().Connectivity.Status)
+		s, err = prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "offline", s.Connectivity.Status)
 
 		// Transition back to ONLINE
 		online.Store(true)
@@ -2409,7 +2416,9 @@ func TestConnectivityCallbacks(t *testing.T) {
 		require.Equal(t, StateOnline, trackedState)
 		stateLk.Unlock()
 		require.True(t, prov.connectivity.IsOnline())
-		require.Equal(t, "online", prov.Stats().Connectivity.Status)
+		s, err = prov.Stats(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, "online", s.Connectivity.Status)
 	})
 }
 

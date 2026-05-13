@@ -32,6 +32,12 @@ const (
 	// how often such a check is performed.
 	DefaultConnectivityCheckOnlineInterval = 1 * time.Minute
 
+	// DefaultSendProviderRecordTimeout is the default per-peer timeout applied
+	// to a single ADD_PROVIDER RPC. Healthy peers complete the round-trip in
+	// well under a second; this leaves significant headroom for slow links
+	// while still bounding the time a hung peer can pin a provide worker.
+	DefaultSendProviderRecordTimeout = 10 * time.Second
+
 	// DefaultLoggerName is the default logger name for the DHT provider.
 	DefaultLoggerName = internal.DefaultLoggerName
 )
@@ -44,6 +50,8 @@ type config struct {
 	offlineDelay                    time.Duration
 	connectivityCheckOnlineInterval time.Duration
 	connectivityCallbacks           [3]func()
+
+	sendProviderRecordTimeout time.Duration
 
 	peerid peer.ID
 	host   host.Host
@@ -77,6 +85,7 @@ func getOpts(opts []Option) (config, error) {
 		maxReprovideDelay:               DefaultMaxReprovideDelay,
 		offlineDelay:                    DefaultOfflineDelay,
 		connectivityCheckOnlineInterval: DefaultConnectivityCheckOnlineInterval,
+		sendProviderRecordTimeout:       DefaultSendProviderRecordTimeout,
 		loggerName:                      DefaultLoggerName,
 
 		maxWorkers:               4,
@@ -197,6 +206,20 @@ func WithOfflineDelay(d time.Duration) Option {
 func WithConnectivityCheckOnlineInterval(d time.Duration) Option {
 	return func(cfg *config) error {
 		cfg.connectivityCheckOnlineInterval = d
+		return nil
+	}
+}
+
+// WithSendProviderRecordTimeout sets the per-peer timeout applied to a single
+// ADD_PROVIDER RPC. A peer that accepts the libp2p stream but never reads the
+// request must not pin a provide worker goroutine indefinitely; this timeout
+// bounds the wait. Defaults to [DefaultSendProviderRecordTimeout].
+func WithSendProviderRecordTimeout(d time.Duration) Option {
+	return func(cfg *config) error {
+		if d <= 0 {
+			return errors.New("provider config: send provider record timeout must be greater than 0")
+		}
+		cfg.sendProviderRecordTimeout = d
 		return nil
 	}
 }

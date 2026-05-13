@@ -676,10 +676,10 @@ func TestStats(t *testing.T) {
 	})
 }
 
-// blockingSizeKeystore is a Keystore implementation whose Size method blocks
-// until the context is cancelled. All other methods return zero values. Used
-// to verify Stats honours the caller's context when the keystore worker is
-// stuck (e.g. behind a slow datastore op).
+// blockingSizeKeystore is a keystore.Keystore whose Size method blocks
+// until ctx is canceled. Other methods return zero values. Used to verify
+// that Stats unblocks when the caller's deadline elapses while the
+// keystore worker is stuck (e.g. behind a slow datastore op).
 type blockingSizeKeystore struct{}
 
 var _ keystore.Keystore = (*blockingSizeKeystore)(nil)
@@ -711,10 +711,9 @@ func (b *blockingSizeKeystore) BatchSize() int { return 256 }
 
 func (b *blockingSizeKeystore) Close() error { return nil }
 
-// TestStatsContextDeadline verifies that Stats honours the caller's context
-// when keystore.Size is stuck (e.g. because the keystore worker is blocked on
-// a slow datastore op). Stats must unblock when the deadline elapses and
-// return a zero stats.Stats together with the context error.
+// TestStatsContextDeadline verifies that Stats returns stats.Stats{} and
+// ctx.Err() when keystore.Size is stuck (e.g. the keystore worker is
+// blocked on a slow datastore op) and the caller's deadline elapses.
 func TestStatsContextDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka")

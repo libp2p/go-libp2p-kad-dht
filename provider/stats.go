@@ -14,12 +14,14 @@ import (
 
 // Stats returns a snapshot of the provider's current operational metrics.
 //
-// Stats honours ctx for cancellation: if ctx is done, it returns a zero
-// stats.Stats and ctx.Err(). Callers should pass a deadline-bearing ctx
-// because the keystore key count lookup is serialised through the keystore
-// worker and may block on a slow datastore operation. Non-context errors
-// from that lookup are reported as Schedule.Keys == -1 in the returned
-// snapshot with a nil error.
+// Pass a ctx with a deadline. The key count is fetched through the
+// keystore worker, which processes operations one at a time, so Stats
+// can stall behind a slow datastore op queued ahead of it. If ctx is
+// canceled before the key count returns, Stats returns stats.Stats{}
+// and ctx.Err().
+//
+// If the key count lookup fails for a non-ctx reason, the snapshot's
+// Schedule.Keys is -1 and the returned error is nil.
 func (s *SweepingProvider) Stats(ctx context.Context) (stats.Stats, error) {
 	if err := ctx.Err(); err != nil {
 		return stats.Stats{}, err
@@ -88,7 +90,7 @@ func (s *SweepingProvider) Stats(ctx context.Context) (stats.Stats, error) {
 		nextReprovideAt = now.Add(s.timeUntil(nextReprovideOffset))
 	}
 
-	var keys int64 = -1 // sentinel if keystore.Size() fails (non-ctx error)
+	var keys int64 = -1 // -1 sentinel when keystore.Size fails without a ctx error
 	if keyCount, err := s.keystore.Size(ctx); err == nil {
 		keys = int64(keyCount)
 	} else if ctxErr := ctx.Err(); ctxErr != nil {

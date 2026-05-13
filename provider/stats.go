@@ -12,14 +12,25 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/provider/stats"
 )
 
-func (s *SweepingProvider) Stats() stats.Stats {
+// Stats returns a snapshot of the provider's current operational metrics.
+//
+// Stats honours ctx for cancellation: if ctx is done, it returns a zero
+// stats.Stats and ctx.Err(). Callers should pass a deadline-bearing ctx
+// because the keystore key count lookup is serialised through the keystore
+// worker and may block on a slow datastore operation. Non-context errors
+// from that lookup are reported as Schedule.Keys == -1 in the returned
+// snapshot with a nil error.
+func (s *SweepingProvider) Stats(ctx context.Context) (stats.Stats, error) {
+	if err := ctx.Err(); err != nil {
+		return stats.Stats{}, err
+	}
 	now := time.Now()
 	snapshot := stats.Stats{
 		Closed: s.closed(),
 	}
 
 	if snapshot.Closed {
-		return snapshot
+		return snapshot, nil
 	}
 
 	// Queue metrics
@@ -77,9 +88,11 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		nextReprovideAt = now.Add(s.timeUntil(nextReprovideOffset))
 	}
 
-	var keys int64 = -1 // Default value if keyStore.Size() fails
-	if keyCount, err := s.keystore.Size(context.Background()); err == nil {
+	var keys int64 = -1 // sentinel if keystore.Size() fails (non-ctx error)
+	if keyCount, err := s.keystore.Size(ctx); err == nil {
 		keys = int64(keyCount)
+	} else if ctxErr := ctx.Err(); ctxErr != nil {
+		return stats.Stats{}, ctxErr
 	}
 	snapshot.Schedule = stats.Schedule{
 		Keys:                keys,
@@ -193,7 +206,7 @@ func (s *SweepingProvider) Stats() stats.Stats {
 		ReplicationFactor:        s.replicationFactor,
 	}
 
-	return snapshot
+	return snapshot, nil
 }
 
 // operationStats tracks provider operation metrics over time windows.

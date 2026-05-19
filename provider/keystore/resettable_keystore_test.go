@@ -15,6 +15,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
 	pebble "github.com/ipfs/go-ds-pebble"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
@@ -1314,4 +1315,86 @@ func TestKeystoreResetNoHasInBulkPhase(t *testing.T) {
 	size, err := store.Size(ctx)
 	require.NoError(t, err)
 	require.Equal(t, n, size, "reset must still produce the correct size")
+}
+
+// pickMhsWithBit0 returns n multihashes whose first sha256 bit equals
+// targetBit. Used to construct keys whose dsKey path collides with the
+// shared-mode namespace prefix (namespace "/1" + dsKey "/1/...").
+func pickMhsWithBit0(t *testing.T, targetBit int, n int) []mh.Multihash {
+	t.Helper()
+	out := make([]mh.Multihash, 0, n)
+	for tries := 0; tries < 4096 && len(out) < n; tries++ {
+		h := random.Multihashes(1)[0]
+		if int(keyspace.MhToBit256(h).Bit(0)) == targetBit {
+			out = append(out, h)
+		}
+	}
+	require.Lenf(t, out, n,
+		"failed to find %d multihashes whose first sha256 bit is %d",
+		n, targetBit)
+	return out
+}
+
+// TestKeystoreResetEmptiesNamespaceCollidingKeys is a tripwire for the
+// emptySharedAltDs fix. If a future caller replaces it with the obvious
+// wrapped iterate-then-Delete path, the bug below returns silently and
+// this test catches it.
+//
+// Background: in shared-datastore mode the alt slot is "/0" or "/1",
+// and inside the slot each key is filed under "/<bit0>/<bit1>/...". So
+// a key whose first hash bit is 1, stored in slot "/1", lives at the
+// underlying path "/1/1/...".
+//
+// Bug: namespace.Wrap.Delete runs the key through ConvertKey, which
+// only adds the namespace prefix when it isn't already an ancestor. For
+// "/1/..." it isn't added, so Delete targets "/1/..." instead of
+// "/1/1/...". The real key stays behind on every reset.
+//
+// Fix: emptySharedAltDs talks to the unwrapped datastore directly and
+// deletes everything under the "/1" prefix as stored, with no rewrite.
+func TestKeystoreResetEmptiesNamespaceCollidingKeys(t *testing.T) {
+	base := dssync.MutexWrap(ds.NewMapDatastore())
+	store, err := NewResettableKeystore(base)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	// Active namespace defaults to 0, so the first reset writes into
+	// altDs = "/1". Pick multihashes whose dsKey starts with "/1/...",
+	// so the underlying keys collide with the namespace prefix.
+	require.Equal(t, byte(0), store.activeNamespace,
+		"test assumes initial active namespace is 0")
+	const n = 8
+	mhs := pickMhsWithBit0(t, 1, n)
+
+	ctx := t.Context()
+	ch := make(chan cid.Cid, n)
+	for _, h := range mhs {
+		ch <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(ch)
+	require.NoError(t, store.ResetCids(ctx, ch))
+
+	// After the first reset, primary is "/1" and holds n colliding keys.
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, n, size)
+
+	// Second reset with an empty channel swaps "/1" back into altDs and
+	// triggers teardownAltDs("/1"), which runs emptySharedAltDs. This is
+	// the path under test.
+	ch2 := make(chan cid.Cid)
+	close(ch2)
+	require.NoError(t, store.ResetCids(ctx, ch2))
+
+	// No "/1/..." keys must remain in the underlying datastore. With the
+	// old wrapped-delete path, the colliding "/1/1/..." underlying keys
+	// would still be present here.
+	var leftover []string
+	for res, err := range ds.QueryIter(ctx, base, query.Query{Prefix: "/1", KeysOnly: true}) {
+		require.NoError(t, err)
+		leftover = append(leftover, res.Key)
+	}
+	require.Emptyf(t, leftover,
+		"teardown must remove all alt-namespace keys; %d orphaned: %v",
+		len(leftover), leftover)
 }

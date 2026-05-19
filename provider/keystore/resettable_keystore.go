@@ -113,9 +113,17 @@ type ResettableKeystore struct {
 	// bufDrained is the channel-as-condition idiom: every drain replaces it
 	// with a fresh empty channel, closing the previous one to wake any
 	// goroutines blocked in bufferKeys waiting for the buffer to have room.
-	bufMu      sync.Mutex
-	buf        []mh.Multihash
-	bufDrained chan struct{}
+	//
+	// resetDrainCanceled is closed by ResetCids' defer when no further drain
+	// will arrive (success or failure) and the worker must be free to
+	// receive opCleanup. bufferKeys observes it as an escape, appending the
+	// remainder unconditionally so opCleanup can still drain (success path)
+	// or discard (failure path) those keys. Allocated by opStart; only
+	// meaningful while resetInProgress is true.
+	bufMu              sync.Mutex
+	buf                []mh.Multihash
+	bufDrained         chan struct{}
+	resetDrainCanceled chan struct{}
 
 	// altDsBusy is a binary semaphore (1-deep channel, token present when
 	// altDs is idle) that serialises Close with in-flight altDs writes from
@@ -338,8 +346,14 @@ func (s *ResettableKeystore) put(ctx context.Context, keys []mh.Multihash) ([]mh
 // blocks until a drain creates room and then resumes. Inputs larger than
 // resetBufCap are buffered across multiple drain cycles rather than waiting
 // for room they could never obtain in a single pass. Returns early if the
-// keystore is closed or the request's context is cancelled.
+// keystore is closed or the request's context is cancelled. If ResetCids
+// signals resetDrainCanceled (no more drains coming, e.g. the reset's ctx
+// was cancelled mid-Phase-A with no tail drain), bufferKeys appends the
+// remainder unconditionally and returns nil; this prevents the worker from
+// being wedged while opCleanup is queued. The temporary over-cap is bounded
+// by one Put's worth and is cleared by opCleanup.
 func (s *ResettableKeystore) bufferKeys(ctx context.Context, keys []mh.Multihash) error {
+	canceled := s.resetDrainCanceled
 	s.bufMu.Lock()
 	for len(keys) > 0 {
 		if room := s.resetBufCap - len(s.buf); room > 0 {
@@ -356,6 +370,11 @@ func (s *ResettableKeystore) bufferKeys(ctx context.Context, keys []mh.Multihash
 			return ctx.Err()
 		case <-s.close:
 			return ErrClosed
+		case <-canceled:
+			s.bufMu.Lock()
+			s.buf = append(s.buf, keys...)
+			s.bufMu.Unlock()
+			return nil
 		}
 		s.bufMu.Lock()
 	}
@@ -590,6 +609,7 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 			op.response <- err
 			return
 		}
+		s.resetDrainCanceled = make(chan struct{})
 		s.resetInProgress = true
 		op.response <- nil
 		return
@@ -709,6 +729,11 @@ func (s *ResettableKeystore) ResetCids(ctx context.Context, keysChan <-chan cid.
 	}
 
 	defer func() {
+		// Wake any worker parked in bufferKeys: no further drain will
+		// arrive before opCleanup, and the worker must be free to receive
+		// it. Without this, a Phase-A ctx cancel with the buffer at
+		// capacity deadlocks (worker blocked, opCleanup send blocked).
+		close(s.resetDrainCanceled)
 		// Cleanup before returning on success and failure.
 		select {
 		case s.resetOps <- resetOp{ctx: ctx, op: opCleanup, success: success, response: opsChan}:

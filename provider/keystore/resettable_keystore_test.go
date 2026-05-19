@@ -1208,6 +1208,108 @@ func TestKeystoreResetBufferLargerThanCap(t *testing.T) {
 	})
 }
 
+// TestKeystoreResetCtxCancelDoesNotDeadlock verifies that cancelling
+// ResetCids' context while the worker is parked in bufferKeys (buffer at
+// capacity, altDs wedged) does not deadlock the keystore.
+//
+// Pre-fix: Phase A returned ctx.Err() without running its tail drain, the
+// defer tried to send opCleanup on s.resetOps, but the worker was wedged
+// in bufferKeys waiting for a drain that would never come — and Put's own
+// ctx was independent of the reset's ctx, so nothing unblocked the worker
+// until Close().
+//
+// Post-fix: the defer closes s.resetDrainCanceled before sending opCleanup;
+// bufferKeys observes it, appends the remainder unconditionally, and the
+// worker returns to its select in time to receive opCleanup.
+func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bufCap = 10
+
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		}()
+
+		base := dssync.MutexWrap(ds.NewMapDatastore())
+		slow := &slowSyncDatastore{
+			Batching: base,
+			release:  release,
+			skipN:    1,
+			wedged:   make(chan struct{}),
+		}
+		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
+		require.NoError(t, err)
+		defer store.Close()
+		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+
+		// Reset gets its own cancellable ctx so we can cancel it without
+		// also cancelling the probe Put contexts.
+		resetCtx, resetCancel := context.WithCancel(t.Context())
+		defer resetCancel()
+
+		resetChan := make(chan cid.Cid, 1)
+		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		close(resetChan)
+		resetDone := make(chan error, 1)
+		go func() {
+			resetDone <- store.ResetCids(resetCtx, resetChan)
+		}()
+
+		// Wait until ResetCids is wedged in Phase A's altDs.Sync.
+		synctest.Wait()
+		select {
+		case <-slow.wedged:
+		default:
+			t.Fatal("ResetCids never reached the wedged altDs.Sync")
+		}
+
+		ctx := t.Context()
+
+		// Fill the buffer exactly to capacity.
+		_, err = store.Put(ctx, random.Multihashes(bufCap)...)
+		require.NoError(t, err, "filling the buffer to capacity should succeed")
+
+		// One more Put must block in bufferKeys: buffer is full, no drain
+		// is coming (altDs.Sync wedged, no Phase-A flush will fire because
+		// keysChan is already drained).
+		blocked := make(chan error, 1)
+		go func() {
+			_, err := store.Put(ctx, random.Multihashes(1)...)
+			blocked <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-blocked:
+			t.Fatalf("Put should have blocked on full buffer, got err=%v", err)
+		default:
+		}
+
+		// Cancel the reset's ctx. Pre-fix this deadlocked: ResetCids' defer
+		// sent opCleanup on s.resetOps but the worker was wedged in
+		// bufferKeys, and the Put's own ctx (t.Context()) was still alive.
+		resetCancel()
+		synctest.Wait()
+
+		require.ErrorIs(t, <-resetDone, context.Canceled)
+		require.NoError(t, <-blocked,
+			"blocked Put must unblock once the reset's ctx is cancelled")
+
+		// Keystore must remain responsive after the cancelled reset.
+		const post = 3
+		_, err = store.Put(ctx, random.Multihashes(post)...)
+		require.NoError(t, err)
+		size, err := store.Size(ctx)
+		require.NoError(t, err)
+		require.Equalf(t, bufCap+1+post, size,
+			"primary should hold bufCap fill + blocked Put + post-cancel Puts (got %d)",
+			size)
+	})
+}
+
 // TestKeystoreResetPhaseATickerDrainsSlowKeysChan verifies that Phase A's
 // periodic ticker drains the worker buffer even when keysChan stops
 // delivering, so no batch-flush drain ever fires. Without the ticker the

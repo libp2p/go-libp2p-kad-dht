@@ -1795,7 +1795,9 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	defer func() {
 		elapsed := time.Since(startTime)
 		s.stats.ongoingReprovides.finish(len(keys))
+		s.stats.cycleStatsLk.Lock()
 		s.stats.reprovideDuration.Add(prefix, int64(elapsed))
+		s.stats.cycleStatsLk.Unlock()
 		s.logger.Infof("reprovide finished for prefix %q, %d keys in %s", prefix, keyCount, elapsed)
 	}()
 

@@ -83,13 +83,19 @@ func WithLoggerName(name string) Option {
 	}
 }
 
+// DefaultResetBufferCapacity is the default ceiling on the worker buffer
+// that holds concurrent Put keys during a reset (~512K multihashes,
+// ~20 MiB at ~40 B/key). See WithResetBufferCapacity for details.
+const DefaultResetBufferCapacity = 1 << 19
+
 // resettableKeystoreConfig holds resettable-specific fields and the base
 // keystore config.
 type resettableKeystoreConfig struct {
 	config // base keystore config (prefixBits, batchSize, loggerName)
 
-	createDs  func(string) (ds.Batching, error) // factory to create per-namespace datastores
-	destroyDs func(string) error                // destroys a per-namespace datastore on disk
+	resetBufCap int                               // ceiling on the worker buffer during a reset
+	createDs    func(string) (ds.Batching, error) // factory to create per-namespace datastores
+	destroyDs   func(string) error                // destroys a per-namespace datastore on disk
 }
 
 // ResettableKeystoreOption configures a ResettableKeystore.
@@ -103,6 +109,24 @@ func KeystoreOption(opts ...Option) ResettableKeystoreOption {
 				return err
 			}
 		}
+		return nil
+	}
+}
+
+// WithResetBufferCapacity sets the maximum number of multihashes the worker
+// can stage in-memory for the alternate datastore during a reset. Bounds
+// memory at roughly capacity × 40 B (32 B multihash + slice overhead).
+//
+// When the buffer is full, concurrent Puts back-pressure the worker until
+// ResetCids drains it. A larger capacity absorbs longer Put bursts before
+// back-pressure kicks in; a smaller one trades responsiveness for memory.
+// Must be > 0. Default: DefaultResetBufferCapacity (~512K).
+func WithResetBufferCapacity(capacity int) ResettableKeystoreOption {
+	return func(c *resettableKeystoreConfig) error {
+		if capacity <= 0 {
+			return fmt.Errorf("invalid reset buffer capacity %d, must be > 0", capacity)
+		}
+		c.resetBufCap = capacity
 		return nil
 	}
 }
@@ -141,6 +165,7 @@ func getResettableOpts(opts []ResettableKeystoreOption) (resettableKeystoreConfi
 			batchSize:  DefaultBatchSize,
 			loggerName: DefaultLoggerName,
 		},
+		resetBufCap: DefaultResetBufferCapacity,
 	}
 	for i, opt := range opts {
 		if err := opt(&cfg); err != nil {

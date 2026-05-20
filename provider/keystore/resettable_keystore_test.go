@@ -3,12 +3,20 @@ package keystore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/query"
+	dssync "github.com/ipfs/go-datastore/sync"
 	pebble "github.com/ipfs/go-ds-pebble"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
@@ -902,4 +910,593 @@ func TestKeystoreOptionAdapter(t *testing.T) {
 	}
 
 	require.NoError(t, store.Close())
+}
+
+// slowSyncDatastore wraps a ds.Batching and blocks Sync() calls whose key
+// path starts with slowPrefix until release is closed. The first skipN
+// matching calls are allowed through unblocked — this lets the test pass
+// through the Sync that prepareAltDs.empty issues during opStart, so the
+// wedge lands on the Phase-A altPutBlind Sync instead. If wedged is
+// non-nil, it is closed when the first call actually blocks, letting tests
+// synchronise around the wedge taking effect.
+type slowSyncDatastore struct {
+	ds.Batching
+	slowPrefix string
+	skipN      int
+	count      atomic.Int64
+	release    <-chan struct{}
+	wedged     chan struct{}
+	wedgedOnce sync.Once
+}
+
+func (s *slowSyncDatastore) Sync(ctx context.Context, k ds.Key) error {
+	if !strings.HasPrefix(k.String(), s.slowPrefix) {
+		return s.Batching.Sync(ctx, k)
+	}
+	if s.count.Add(1) <= int64(s.skipN) {
+		return s.Batching.Sync(ctx, k)
+	}
+	s.wedgedOnce.Do(func() {
+		if s.wedged != nil {
+			close(s.wedged)
+		}
+	})
+	select {
+	case <-s.release:
+		return s.Batching.Sync(ctx, k)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// TestKeystoreWorkerResponsiveWhileAltDsWedged verifies the core property of
+// the altPut-decoupling design: while a reset's altDs write is blocked inside
+// a slow underlying datastore, the keystore worker continues to serve Size/Put
+// on the primary namespace without delay.
+//
+// Regression test for the production hang where a single pebble call stayed in
+// flight for >1h, freezing every keystore operation. The fix moves all altDs
+// I/O off the worker: worker Puts go to an in-memory buffer; ResetCids' own
+// goroutine owns altDs writes. So even when altDs wedges, the worker stays
+// responsive.
+func TestKeystoreWorkerResponsiveWhileAltDsWedged(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		}()
+
+		base := dssync.MutexWrap(ds.NewMapDatastore())
+		// Block Sync on the alternate namespace only, so primary-side worker
+		// operations stay fast while ResetCids' altPutBlind wedges in altDs.Sync.
+		slow := &slowSyncDatastore{Batching: base, release: release, skipN: 1}
+
+		store, err := NewResettableKeystore(slow)
+		require.NoError(t, err)
+		defer store.Close()
+
+		// Derive the alt namespace prefix from the freshly-initialised store
+		// rather than hard-coding "/1". Safe to set after NewResettableKeystore
+		// because the constructor performs no Sync calls itself (the loadSize
+		// path only Gets/Deletes the size key).
+		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+
+		ctx := t.Context()
+
+		// Pre-populate primary so Size has a non-zero baseline.
+		const initial = 10
+		_, err = store.Put(ctx, random.Multihashes(initial)...)
+		require.NoError(t, err)
+
+		// Start a reset. ResetCids' first altPutBlind reaches altDs.Sync,
+		// which blocks until release is closed.
+		resetChan := make(chan cid.Cid, 1)
+		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		close(resetChan)
+		resetDone := make(chan error, 1)
+		go func() {
+			resetDone <- store.ResetCids(ctx, resetChan)
+		}()
+
+		// Wait until ResetCids is parked inside altDs.Sync. After this,
+		// the worker must be idle in its select — any subsequent probe
+		// that hangs proves the worker was stuck behind altDs.
+		synctest.Wait()
+
+		// Probes use a short synthetic deadline so a wedged worker fails
+		// cleanly with ctx.Err() rather than deadlocking the bubble. On
+		// the happy path the deadline never fires — Size/Put round-trip
+		// through the worker in zero synthetic time.
+		expected := initial
+		probe := func() {
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			size, err := store.Size(probeCtx)
+			require.NoError(t, err, "Size must return while altDs is wedged")
+			require.Equal(t, expected, size)
+
+			const probePuts = 3
+			_, err = store.Put(probeCtx, random.Multihashes(probePuts)...)
+			require.NoError(t, err, "Put must return while altDs is wedged")
+			expected += probePuts
+		}
+		for range 5 {
+			probe()
+		}
+
+		// Sanity check: ResetCids is still in flight (its altPut is wedged).
+		select {
+		case err := <-resetDone:
+			t.Fatalf("ResetCids returned unexpectedly while altDs wedged: %v", err)
+		default:
+		}
+
+		// Release the wedge; reset must complete cleanly.
+		close(release)
+		synctest.Wait()
+		require.NoError(t, <-resetDone)
+	})
+}
+
+// TestKeystoreResetBufferBackpressure verifies that when the worker's reset
+// buffer is at capacity, additional Puts block until ResetCids drains the
+// buffer — keys are never dropped silently.
+func TestKeystoreResetBufferBackpressure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Shrink the cap so we can hit it without writing millions of keys.
+		const bufCap = 10
+
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		}()
+
+		base := dssync.MutexWrap(ds.NewMapDatastore())
+		slow := &slowSyncDatastore{
+			Batching: base,
+			release:  release,
+			skipN:    1,
+			wedged:   make(chan struct{}),
+		}
+		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
+		require.NoError(t, err)
+		defer store.Close()
+		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+
+		ctx := t.Context()
+
+		// Start a reset that wedges in Phase A's altDs.Sync so it can't drain
+		// the buffer.
+		resetChan := make(chan cid.Cid, 1)
+		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		close(resetChan)
+		resetDone := make(chan error, 1)
+		go func() {
+			resetDone <- store.ResetCids(ctx, resetChan)
+		}()
+
+		// Wait until ResetCids is wedged in Phase A's Sync. Without this,
+		// the test's Puts could race ahead of opStart and bypass the buffer.
+		synctest.Wait()
+		select {
+		case <-slow.wedged:
+		default:
+			t.Fatal("ResetCids never reached the wedged altDs.Sync")
+		}
+
+		// Fill the buffer exactly to capacity.
+		_, err = store.Put(ctx, random.Multihashes(bufCap)...)
+		require.NoError(t, err, "filling the buffer to capacity should succeed")
+
+		// The next Put must block; it cannot be accepted without dropping
+		// keys, which the design forbids. synctest.Wait returns once the
+		// goroutine is durably parked in bufferKeys — a stronger guarantee
+		// than any wall-clock delay.
+		blocked := make(chan error, 1)
+		go func() {
+			_, err := store.Put(ctx, random.Multihashes(1)...)
+			blocked <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-blocked:
+			t.Fatalf("Put should have blocked on full buffer, got err=%v", err)
+		default:
+		}
+
+		// Release the reset wedge. Phase A's drainBufBlind drains the buffer,
+		// the blocked Put wakes up and completes; ResetCids then progresses
+		// through Phase B/C and opCleanup.
+		close(release)
+		synctest.Wait()
+		require.NoError(t, <-blocked, "blocked Put must succeed after buffer drains")
+		require.NoError(t, <-resetDone)
+	})
+}
+
+// TestKeystoreResetBufferLargerThanCap verifies that a single Put larger
+// than the configured reset buffer capacity completes by buffering in
+// chunks across multiple drain cycles. Without the chunking fix in
+// bufferKeys, the old condition len(s.buf)+len(keys) > cap stayed
+// permanently true once len(keys) > cap and the worker deadlocked.
+func TestKeystoreResetBufferLargerThanCap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bufCap = 10
+
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		}()
+
+		base := dssync.MutexWrap(ds.NewMapDatastore())
+		slow := &slowSyncDatastore{
+			Batching: base,
+			release:  release,
+			skipN:    1,
+			wedged:   make(chan struct{}),
+		}
+		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
+		require.NoError(t, err)
+		defer store.Close()
+		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+
+		ctx := t.Context()
+
+		resetChan := make(chan cid.Cid, 1)
+		resetMh := random.Multihashes(1)[0]
+		resetChan <- cid.NewCidV1(cid.Raw, resetMh)
+		close(resetChan)
+		resetDone := make(chan error, 1)
+		go func() {
+			resetDone <- store.ResetCids(ctx, resetChan)
+		}()
+
+		// Wait until ResetCids is wedged inside altDs.Sync so the buffer
+		// cannot drain while we issue the large Put.
+		synctest.Wait()
+		select {
+		case <-slow.wedged:
+		default:
+			t.Fatal("ResetCids never reached the wedged altDs.Sync")
+		}
+
+		// Put 2x bufCap keys in a single call. The first bufCap keys fill
+		// the buffer; the remainder cannot be appended until ResetCids
+		// drains.
+		const factor = 2
+		putN := factor * bufCap
+		putMhs := random.Multihashes(putN)
+		putDone := make(chan error, 1)
+		go func() {
+			_, err := store.Put(ctx, putMhs...)
+			putDone <- err
+		}()
+
+		synctest.Wait()
+		select {
+		case err := <-putDone:
+			t.Fatalf("Put should have blocked while buffer was full, got err=%v", err)
+		default:
+		}
+
+		// Release the wedge. Phase A's final drainBuf takes the first chunk;
+		// bufferKeys wakes and appends the remaining chunk.
+		close(release)
+		synctest.Wait()
+		require.NoError(t, <-putDone, "Put must complete after enough drains")
+		require.NoError(t, <-resetDone)
+
+		// All keys (1 reset key + putN concurrent Put keys) must be present
+		// in the swapped-in primary.
+		size, err := store.Size(ctx)
+		require.NoError(t, err)
+		require.Equalf(t, putN+1, size,
+			"size should reflect reset key plus concurrent Put keys (got %d)",
+			size)
+	})
+}
+
+// TestKeystoreResetCtxCancelDoesNotDeadlock verifies that cancelling
+// ResetCids' context while the worker is parked in bufferKeys (buffer at
+// capacity, altDs wedged) does not deadlock the keystore.
+//
+// Pre-fix: Phase A returned ctx.Err() without running its tail drain, the
+// defer tried to send opCleanup on s.resetOps, but the worker was wedged
+// in bufferKeys waiting for a drain that would never come — and Put's own
+// ctx was independent of the reset's ctx, so nothing unblocked the worker
+// until Close().
+//
+// Post-fix: the defer closes s.resetDrainCanceled before sending opCleanup;
+// bufferKeys observes it, appends the remainder unconditionally, and the
+// worker returns to its select in time to receive opCleanup.
+func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bufCap = 10
+
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		}()
+
+		base := dssync.MutexWrap(ds.NewMapDatastore())
+		slow := &slowSyncDatastore{
+			Batching: base,
+			release:  release,
+			skipN:    1,
+			wedged:   make(chan struct{}),
+		}
+		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
+		require.NoError(t, err)
+		defer store.Close()
+		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+
+		// Reset gets its own cancellable ctx so we can cancel it without
+		// also cancelling the probe Put contexts.
+		resetCtx, resetCancel := context.WithCancel(t.Context())
+		defer resetCancel()
+
+		resetChan := make(chan cid.Cid, 1)
+		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		close(resetChan)
+		resetDone := make(chan error, 1)
+		go func() {
+			resetDone <- store.ResetCids(resetCtx, resetChan)
+		}()
+
+		// Wait until ResetCids is wedged in Phase A's altDs.Sync.
+		synctest.Wait()
+		select {
+		case <-slow.wedged:
+		default:
+			t.Fatal("ResetCids never reached the wedged altDs.Sync")
+		}
+
+		ctx := t.Context()
+
+		// Fill the buffer exactly to capacity.
+		_, err = store.Put(ctx, random.Multihashes(bufCap)...)
+		require.NoError(t, err, "filling the buffer to capacity should succeed")
+
+		// One more Put must block in bufferKeys: buffer is full, no drain
+		// is coming (altDs.Sync wedged, no Phase-A flush will fire because
+		// keysChan is already drained).
+		blocked := make(chan error, 1)
+		go func() {
+			_, err := store.Put(ctx, random.Multihashes(1)...)
+			blocked <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-blocked:
+			t.Fatalf("Put should have blocked on full buffer, got err=%v", err)
+		default:
+		}
+
+		// Cancel the reset's ctx. Pre-fix this deadlocked: ResetCids' defer
+		// sent opCleanup on s.resetOps but the worker was wedged in
+		// bufferKeys, and the Put's own ctx (t.Context()) was still alive.
+		resetCancel()
+		synctest.Wait()
+
+		require.ErrorIs(t, <-resetDone, context.Canceled)
+		require.NoError(t, <-blocked,
+			"blocked Put must unblock once the reset's ctx is cancelled")
+
+		// Keystore must remain responsive after the cancelled reset.
+		const post = 3
+		_, err = store.Put(ctx, random.Multihashes(post)...)
+		require.NoError(t, err)
+		size, err := store.Size(ctx)
+		require.NoError(t, err)
+		require.Equalf(t, bufCap+1+post, size,
+			"primary should hold bufCap fill + blocked Put + post-cancel Puts (got %d)",
+			size)
+	})
+}
+
+// TestKeystoreResetPhaseATickerDrainsSlowKeysChan verifies that Phase A's
+// periodic ticker drains the worker buffer even when keysChan stops
+// delivering, so no batch-flush drain ever fires. Without the ticker the
+// worker would block in bufferKeys forever on any concurrent Put larger
+// than the buffer capacity, because the only remaining drains would be
+// Phase A's tail drain (after keysChan closes) and Phase C's drain — at
+// most enough for 3x capacity.
+func TestKeystoreResetPhaseATickerDrainsSlowKeysChan(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bufCap = 5
+
+		base := dssync.MutexWrap(ds.NewMapDatastore())
+		store, err := NewResettableKeystore(base, WithResetBufferCapacity(bufCap))
+		require.NoError(t, err)
+		defer func() { require.NoError(t, store.Close()) }()
+
+		ctx := t.Context()
+
+		resetChan := make(chan cid.Cid)
+		resetDone := make(chan error, 1)
+		go func() {
+			resetDone <- store.ResetCids(ctx, resetChan)
+		}()
+
+		// Deliver one key so the channel send unblocks once Phase A picks it
+		// up — guarantees opStart finished and resetInProgress is true before
+		// the concurrent Put fires.
+		syncMh := random.Multihashes(1)[0]
+		resetChan <- cid.NewCidV1(cid.Raw, syncMh)
+
+		// Concurrent Put of 5x capacity keys, more than the 3x ceiling
+		// covered by Phase A's tail drain + Phase C's drain alone. Under
+		// synctest the Phase A ticker fires at synthetic 100ms intervals
+		// the moment all goroutines park; without the ticker the buffer
+		// would never drain and the Put would block until close(resetChan).
+		const factor = 5
+		putN := factor * bufCap
+		putMhs := random.Multihashes(putN)
+		putDone := make(chan error, 1)
+		go func() {
+			_, err := store.Put(ctx, putMhs...)
+			putDone <- err
+		}()
+		require.NoError(t, <-putDone, "Put must complete via ticker-driven drains")
+
+		close(resetChan)
+		require.NoError(t, <-resetDone)
+
+		size, err := store.Size(ctx)
+		require.NoError(t, err)
+		require.Equalf(t, putN+1, size,
+			"size should reflect sync key + concurrent Put keys (got %d)", size)
+	})
+}
+
+// hasCountingDatastore counts the number of Has() calls made against keys
+// whose path starts with the configured prefix. Used to assert that the
+// new design's Phase A never calls Has on altDs.
+type hasCountingDatastore struct {
+	ds.Batching
+	prefix string
+	count  atomic.Int64
+}
+
+func (h *hasCountingDatastore) Has(ctx context.Context, k ds.Key) (bool, error) {
+	if strings.HasPrefix(k.String(), h.prefix) {
+		h.count.Add(1)
+	}
+	return h.Batching.Has(ctx, k)
+}
+
+// TestKeystoreResetNoHasInBulkPhase verifies that a reset without
+// concurrent Puts performs zero Has() calls on altDs. This is the key
+// property that prevents the pebble.Has wedge from blocking Phase A,
+// which is by far the bulk of a reset's altDs work.
+func TestKeystoreResetNoHasInBulkPhase(t *testing.T) {
+	base := dssync.MutexWrap(ds.NewMapDatastore())
+	counter := &hasCountingDatastore{Batching: base}
+
+	store, err := NewResettableKeystore(counter)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	counter.prefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+
+	ctx := t.Context()
+
+	// Reset with N keys, no concurrent Puts. Phase A blind-puts all of
+	// them; Phase B counts via Query (not Has); Phase C / opCleanup find
+	// the buffer empty. Total Has calls on altDs should be zero.
+	const n = 200
+	mhs := random.Multihashes(n)
+	ch := make(chan cid.Cid, n)
+	for _, h := range mhs {
+		ch <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(ch)
+
+	require.NoError(t, store.ResetCids(ctx, ch))
+
+	require.Zero(t, counter.count.Load(),
+		"Phase A bulk reset must not call Has on altDs (got %d calls)",
+		counter.count.Load())
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, n, size, "reset must still produce the correct size")
+}
+
+// pickMhsWithBit0 returns n multihashes whose first sha256 bit equals
+// targetBit. Used to construct keys whose dsKey path collides with the
+// shared-mode namespace prefix (namespace "/1" + dsKey "/1/...").
+func pickMhsWithBit0(t *testing.T, targetBit int, n int) []mh.Multihash {
+	t.Helper()
+	out := make([]mh.Multihash, 0, n)
+	for tries := 0; tries < 4096 && len(out) < n; tries++ {
+		h := random.Multihashes(1)[0]
+		if int(keyspace.MhToBit256(h).Bit(0)) == targetBit {
+			out = append(out, h)
+		}
+	}
+	require.Lenf(t, out, n,
+		"failed to find %d multihashes whose first sha256 bit is %d",
+		n, targetBit)
+	return out
+}
+
+// TestKeystoreResetEmptiesNamespaceCollidingKeys is a tripwire for the
+// emptySharedAltDs fix. If a future caller replaces it with the obvious
+// wrapped iterate-then-Delete path, the bug below returns silently and
+// this test catches it.
+//
+// Background: in shared-datastore mode the alt slot is "/0" or "/1",
+// and inside the slot each key is filed under "/<bit0>/<bit1>/...". So
+// a key whose first hash bit is 1, stored in slot "/1", lives at the
+// underlying path "/1/1/...".
+//
+// Bug: namespace.Wrap.Delete runs the key through ConvertKey, which
+// only adds the namespace prefix when it isn't already an ancestor. For
+// "/1/..." it isn't added, so Delete targets "/1/..." instead of
+// "/1/1/...". The real key stays behind on every reset.
+//
+// Fix: emptySharedAltDs talks to the unwrapped datastore directly and
+// deletes everything under the "/1" prefix as stored, with no rewrite.
+func TestKeystoreResetEmptiesNamespaceCollidingKeys(t *testing.T) {
+	base := dssync.MutexWrap(ds.NewMapDatastore())
+	store, err := NewResettableKeystore(base)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	// Active namespace defaults to 0, so the first reset writes into
+	// altDs = "/1". Pick multihashes whose dsKey starts with "/1/...",
+	// so the underlying keys collide with the namespace prefix.
+	require.Equal(t, byte(0), store.activeNamespace,
+		"test assumes initial active namespace is 0")
+	const n = 8
+	mhs := pickMhsWithBit0(t, 1, n)
+
+	ctx := t.Context()
+	ch := make(chan cid.Cid, n)
+	for _, h := range mhs {
+		ch <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(ch)
+	require.NoError(t, store.ResetCids(ctx, ch))
+
+	// After the first reset, primary is "/1" and holds n colliding keys.
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, n, size)
+
+	// Second reset with an empty channel swaps "/1" back into altDs and
+	// triggers teardownAltDs("/1"), which runs emptySharedAltDs. This is
+	// the path under test.
+	ch2 := make(chan cid.Cid)
+	close(ch2)
+	require.NoError(t, store.ResetCids(ctx, ch2))
+
+	// No "/1/..." keys must remain in the underlying datastore. With the
+	// old wrapped-delete path, the colliding "/1/1/..." underlying keys
+	// would still be present here.
+	var leftover []string
+	for res, err := range ds.QueryIter(ctx, base, query.Query{Prefix: "/1", KeysOnly: true}) {
+		require.NoError(t, err)
+		leftover = append(leftover, res.Key)
+	}
+	require.Emptyf(t, leftover,
+		"teardown must remove all alt-namespace keys; %d orphaned: %v",
+		len(leftover), leftover)
 }

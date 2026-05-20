@@ -73,9 +73,9 @@ type resetOp struct {
 //     c. catch-up — drain whatever the worker buffered during refresh, this
 //     time with Has-before-Put so altSize is incremented once per unique
 //     new key.
-//  3. opCleanup drains any tail of the buffer that arrived after Phase C
-//     (worker has been idle for at most a few Puts), then atomically swaps
-//     primary and altDs and persists the active namespace marker.
+//  3. opCleanup drains any tail of the buffer that arrived after Phase C,
+//     Syncs altDs (durability boundary), then atomically swaps primary and
+//     altDs and persists the active namespace marker.
 //  4. The old datastore (now alternate) is torn down (destroyed or emptied).
 //
 // Thread Safety:
@@ -408,7 +408,8 @@ func (s *ResettableKeystore) bufEmpty() bool {
 // Used by Phase A (bulk). altSize is NOT updated here; Phase B's refreshSize
 // establishes the authoritative count over the entire altDs. Duplicate Puts
 // — within a single batch or across batches — are idempotent in pebble, so
-// no per-call dedupe is performed.
+// no per-call dedupe is performed. No per-call Sync; see ResetCids for the
+// durability boundary.
 func (s *ResettableKeystore) altPutBlind(ctx context.Context, keys []mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
@@ -426,15 +427,13 @@ func (s *ResettableKeystore) altPutBlind(ctx context.Context, keys []mh.Multihas
 	if err := b.Commit(ctx); err != nil {
 		return fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
-	if err := s.altDs.Sync(ctx, ds.NewKey("")); err != nil {
-		s.logger.Warnf("keystore: failed to sync datastore after alt put: %v", err)
-	}
 	return nil
 }
 
 // altPutChecked writes keys to altDs after a Has check on each, and
 // increments altSize for each unique addition. Used by Phase C (catch-up)
-// and by opCleanup's final drain.
+// and by opCleanup's final drain. No per-call Sync; Has-before-Put only
+// needs Commit visibility, not Sync.
 func (s *ResettableKeystore) altPutChecked(ctx context.Context, keys []mh.Multihash) error {
 	if len(keys) == 0 {
 		return nil
@@ -467,9 +466,6 @@ func (s *ResettableKeystore) altPutChecked(ctx context.Context, keys []mh.Multih
 		return fmt.Errorf("cannot commit keystore updates: %w", err)
 	}
 	s.altSize.Add(added)
-	if err := s.altDs.Sync(ctx, ds.NewKey("")); err != nil {
-		s.logger.Warnf("keystore: failed to sync datastore after alt put: %v", err)
-	}
 	return nil
 }
 
@@ -624,6 +620,13 @@ func (s *ResettableKeystore) handleResetOp(op resetOp) {
 	if op.success {
 		if err := s.withAltDs(ctx, func() error { return s.drainBuf(ctx, s.altPutChecked) }); err != nil {
 			s.logger.Errorf("keystore: aborting swap, final buf drain failed: %v", err)
+			op.success = false
+		}
+	}
+	if op.success {
+		// Durability boundary: altDs must be on disk before the marker flips.
+		if err := s.withAltDs(ctx, func() error { return s.altDs.Sync(ctx, ds.NewKey("")) }); err != nil {
+			s.logger.Errorf("keystore: aborting swap, altDs sync failed: %v", err)
 			op.success = false
 		}
 	}
@@ -788,6 +791,11 @@ loop:
 	}
 	if err := s.withAltDs(ctx, func() error { return s.drainBuf(ctx, s.altPutBlind) }); err != nil {
 		return err
+	}
+	// Off-worker fsync of the bulk write, so opCleanup's Sync (which runs
+	// on the worker) only has to flush Phase C's small drain.
+	if err := s.withAltDs(ctx, func() error { return s.altDs.Sync(ctx, ds.NewKey("")) }); err != nil {
+		return fmt.Errorf("phase A altDs sync: %w", err)
 	}
 
 	// Phase B — refresh. altDs is naturally quiesced: the worker buffers,

@@ -9,6 +9,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
+	dssync "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-libdht/kad/key"
 	"github.com/ipfs/go-libdht/kad/key/bit256"
 	"github.com/ipfs/go-libdht/kad/key/bitstr"
@@ -749,6 +752,108 @@ func TestStatsContextDeadline(t *testing.T) {
 		require.Emptyf(t, s, "Stats should return a zero snapshot when ctx is done")
 		require.GreaterOrEqualf(t, elapsed, deadline, "Stats should not return before the deadline elapses")
 		require.Lessf(t, elapsed, deadline+time.Second, "Stats should return shortly after the deadline elapses")
+	})
+}
+
+// TestStatsConcurrentReprovideRace is a regression test for
+// libp2p/go-libp2p-kad-dht#1254 (fixed in #1255). It drives many concurrent
+// batchReprovide invocations alongside repeated Stats() reads to lock in the
+// invariant that every CycleStats access (reprovideDuration, keysPerReprovide,
+// peers, reachable) runs under cycleStatsLk. Run with -race.
+func TestStatsConcurrentReprovideRace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka")
+		require.NoError(t, err)
+
+		replicationFactor := 2
+		peerPrefixBitlen := 4
+		require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+		var nPeers byte = 1 << peerPrefixBitlen
+		peers := make([]peer.ID, nPeers)
+		for i := range nPeers {
+			b := i << (bitsPerByte - peerPrefixBitlen)
+			k := [32]byte{b}
+			peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
+			require.NoError(t, err)
+		}
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(_ context.Context, k string) ([]peer.ID, error) {
+				sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+				return sortedPeers[:min(replicationFactor, len(peers))], nil
+			},
+		}
+		msgSender := &mockMsgSender{
+			sendMessageFunc: func(context.Context, peer.ID, *pb.Message) error { return nil },
+		}
+
+		ds := dssync.MutexWrap(datastore.NewMapDatastore())
+		ks, err := keystore.NewKeystore(ds)
+		require.NoError(t, err)
+		defer ks.Close()
+
+		// 32 multihashes spanning 32 distinct 5-bit prefixes. Each
+		// batchReprovide(prefix) call retrieves a single key, falls
+		// through to individualProvide -> vanillaProvide (acquiring
+		// cycleStatsLk at provider.go:835), and then runs the defer
+		// that writes to reprovideDuration (the lock at provider.go:1799
+		// that this regression test exists to protect).
+		const prefixLen = 5
+		mhs := genBalancedMultihashes(prefixLen)
+		_, err = ks.Put(ctx, mhs...)
+		require.NoError(t, err)
+
+		prefixes := make([]bitstr.Key, 0, len(mhs))
+		for _, h := range mhs {
+			prefixes = append(prefixes, bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixLen]))
+		}
+
+		provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
+		prov, err := New(
+			WithReprovideInterval(time.Hour),
+			WithReplicationFactor(replicationFactor),
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithKeystore(ks),
+			WithDatastore(provDs),
+			WithSkipBootstrapReprovide(true),
+		)
+		require.NoError(t, err)
+		defer prov.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		// Reader: hammer Stats() while reprovides run.
+		readerCtx, cancelReader := context.WithCancel(ctx)
+		readerDone := make(chan struct{})
+		go func() {
+			defer close(readerDone)
+			for readerCtx.Err() == nil {
+				_, _ = prov.Stats(readerCtx)
+			}
+		}()
+
+		// Writers: many concurrent batchReprovides across distinct prefixes,
+		// repeated a few times to widen the race window.
+		var wg sync.WaitGroup
+		for range 4 {
+			for _, prefix := range prefixes {
+				wg.Add(1)
+				go func(p bitstr.Key) {
+					defer wg.Done()
+					prov.batchReprovide(p)
+				}(prefix)
+			}
+		}
+		wg.Wait()
+
+		cancelReader()
+		<-readerDone
 	})
 }
 

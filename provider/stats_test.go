@@ -700,6 +700,10 @@ func (b *blockingSizeKeystore) Get(_ context.Context, _ bitstr.Key) ([]multihash
 	return nil, nil
 }
 
+func (b *blockingSizeKeystore) KeyCount(_ context.Context, _ bitstr.Key) (int, error) {
+	return 0, nil
+}
+
 func (b *blockingSizeKeystore) ContainsPrefix(_ context.Context, _ bitstr.Key) (bool, error) {
 	return false, nil
 }

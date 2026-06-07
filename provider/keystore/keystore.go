@@ -40,6 +40,10 @@ var (
 type Keystore interface {
 	Put(context.Context, ...mh.Multihash) ([]mh.Multihash, error)
 	Get(context.Context, bitstr.Key) ([]mh.Multihash, error)
+	// KeyCount returns how many stored multihashes match the prefix without
+	// materialising them, so callers can size or split a region before loading
+	// it with Get.
+	KeyCount(context.Context, bitstr.Key) (int, error)
 	ContainsPrefix(context.Context, bitstr.Key) (bool, error)
 	Delete(context.Context, ...mh.Multihash) error
 	Empty(context.Context) error
@@ -58,6 +62,7 @@ const (
 	opDelete
 	opEmpty
 	opSize
+	opCount
 	lastOp
 )
 
@@ -233,6 +238,10 @@ func (s *keystore) worker() {
 			case opSize:
 				op.response <- operationResponse{size: s.size}
 
+			case opCount:
+				n, err := s.count(op.ctx, op.prefix)
+				op.response <- operationResponse{size: n, err: err}
+
 			default:
 				op.response <- operationResponse{err: fmt.Errorf("unknown operation %d", op.op)}
 			}
@@ -338,6 +347,34 @@ func (s *keystore) get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, 
 	}
 
 	return out, nil
+}
+
+// count returns the number of stored multihashes whose bit256 representation
+// matches the provided prefix. It runs a keys-only datastore query and never
+// materialises the multihash values, so its memory use is bounded regardless of
+// how many keys match (unlike get, which builds a slice of all matches).
+func (s *keystore) count(ctx context.Context, prefix bitstr.Key) (int, error) {
+	longPrefix := prefix.BitLen() > s.prefixBits
+	dsk := dsKey(prefix, s.prefixBits).String()
+	q := query.Query{Prefix: dsk, KeysOnly: true}
+	n := 0
+	for r, err := range ds.QueryIter(ctx, s.ds, q) {
+		if err != nil {
+			return 0, err
+		}
+		// Depending on prefix length, filter out non matching keys
+		if longPrefix {
+			k, err := s.decodeKey(r.Key)
+			if err != nil {
+				return 0, err
+			}
+			if !keyspace.IsPrefix(prefix, k) {
+				continue
+			}
+		}
+		n++
+	}
+	return n, nil
 }
 
 // containsPrefix reports whether the Keystore currently holds at least one
@@ -508,6 +545,15 @@ func (s *keystore) Put(ctx context.Context, keys ...mh.Multihash) ([]mh.Multihas
 func (s *keystore) Get(ctx context.Context, prefix bitstr.Key) ([]mh.Multihash, error) {
 	keys, _, _, err := s.executeOperation(opGet, ctx, nil, prefix)
 	return keys, err
+}
+
+// KeyCount returns the number of stored multihashes whose bit256 key matches
+// the provided prefix, without materialising the multihashes. This lets callers
+// size a region (e.g. to decide whether to split a very large one) before
+// loading it into memory with Get.
+func (s *keystore) KeyCount(ctx context.Context, prefix bitstr.Key) (int, error) {
+	_, n, _, err := s.executeOperation(opCount, ctx, nil, prefix)
+	return n, err
 }
 
 // ContainsPrefix reports whether the Keystore currently holds at least one

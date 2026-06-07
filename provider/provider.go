@@ -1776,14 +1776,20 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 		return
 	}
 
-	// Load keys matching prefix from the keystore.
-	keys, err := s.keystore.Get(s.ctx, prefix)
+	// Count the keys matching the prefix without materialising them. A region
+	// can hold a very large number of multihashes; loading them all into memory
+	// here (and again for the covered prefix below) just to make routing
+	// decisions is what drives the reprovide memory spikes that have OOM-killed
+	// nodes with large keystores. The actual load is deferred until the covered
+	// prefix is known and then done exactly once. (A region that is still very
+	// large after exploration should ideally be loaded and provided in bounded
+	// chunks; see the keystore.KeyCount-based splitting discussion upstream.)
+	keyCount, err := s.keystore.KeyCount(s.ctx, prefix)
 	if err != nil {
-		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
+		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when counting keys: %s", err))
 		s.reschedulePrefix(prefix)
 		return
 	}
-	keyCount := len(keys)
 	if keyCount == 0 {
 		s.logger.Infof("no keys to reprovide for prefix %s", prefix)
 		return
@@ -1792,9 +1798,15 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	s.logger.Infof("reprovide starting for prefix %q, %d keys", prefix, keyCount)
 	startTime := time.Now()
 	s.stats.ongoingReprovides.start(keyCount)
+	// gaugeKeys tracks how many keys were added to the ongoing-reprovides gauge
+	// (start, plus the addKeys adjustment below for a wider region) so the
+	// deferred finish always balances it, including on the error paths that
+	// return before keys is loaded.
+	gaugeKeys := keyCount
+	var keys []mh.Multihash
 	defer func() {
 		elapsed := time.Since(startTime)
-		s.stats.ongoingReprovides.finish(len(keys))
+		s.stats.ongoingReprovides.finish(gaugeKeys)
 		s.stats.cycleStatsLk.Lock()
 		s.stats.reprovideDuration.Add(prefix, int64(elapsed))
 		s.stats.cycleStatsLk.Unlock()
@@ -1804,6 +1816,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	if keyCount <= individualProvideThreshold {
 		// Don't fully explore the region, execute simple DHT provides for these
 		// keys. It isn't worth it to fully explore a region for just a few keys.
+		keys, err = s.keystore.Get(s.ctx, prefix)
+		if err != nil {
+			s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
+			s.reschedulePrefix(prefix)
+			return
+		}
 		s.individualProvide(prefix, keys, true)
 		return
 	}
@@ -1818,17 +1836,24 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 
 	regions = s.claimRegionReprovide(regions)
 
-	if len(coveredPrefix) < len(prefix) {
-		// Covered prefix is shorter than the requested one, load all the keys
-		// matching the covered prefix from the keystore.
-		keys, err = s.keystore.Get(s.ctx, coveredPrefix)
-		if err != nil {
-			err = fmt.Errorf("could not reprovide, error when loading keys: %s", err)
-			s.failedReprovide(prefix, err)
-			s.reschedulePrefix(prefix)
-			return
-		}
+	// Load the region keys now that the covered prefix is known, so the big
+	// slice is never held across swarm exploration and is loaded exactly once.
+	// The covered prefix may be shorter (wider) than the requested one, in which
+	// case it matches more keys than keyCount.
+	widerRegion := len(coveredPrefix) < len(prefix)
+	loadPrefix := prefix
+	if widerRegion {
+		loadPrefix = coveredPrefix
+	}
+	keys, err = s.keystore.Get(s.ctx, loadPrefix)
+	if err != nil {
+		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
+		s.reschedulePrefix(prefix)
+		return
+	}
+	if widerRegion {
 		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
+		gaugeKeys = len(keys)
 		prefix = coveredPrefix
 	}
 

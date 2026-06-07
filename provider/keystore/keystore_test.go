@@ -100,6 +100,26 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 	return mhs
 }
 
+// mapDatastoreFactory returns an in-memory WithDatastoreFactory pair, mirroring
+// how Kubo runs the ResettableKeystore in factory mode (separate per-namespace
+// datastores) but without touching the filesystem.
+func mapDatastoreFactory() (func(string) (ds.Batching, error), func(string) error) {
+	stores := map[string]ds.Batching{}
+	create := func(suffix string) (ds.Batching, error) {
+		d := ds.NewMapDatastore()
+		stores[suffix] = d
+		return d, nil
+	}
+	destroy := func(suffix string) error {
+		if d, ok := stores[suffix]; ok {
+			_ = d.Close()
+			delete(stores, suffix)
+		}
+		return nil
+	}
+	return create, destroy
+}
+
 func TestKeyStoreContainsPrefix(t *testing.T) {
 	t.Run("Keystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
@@ -160,6 +180,90 @@ func testKeystoreContainsPrefixImpl(t *testing.T, store Keystore) {
 	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", 8)+"1"))
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestKeystoreKeyCount(t *testing.T) {
+	// A small prefixBits keeps the "long" prefixes that exercise count's per-key
+	// decodeKey/IsPrefix filter (those exceeding prefixBits) only a few bits
+	// long, so the rejection sampling below stays cheap.
+	const prefixBits = 8
+	bucket := bitstr.Key(strings.Repeat("0", prefixBits))      // "00000000"
+	otherBucket := bitstr.Key(strings.Repeat("1", prefixBits)) // "11111111"
+	// Generate the keys once and reuse them across both store implementations.
+	bucketKeys := genMultihashesMatchingPrefix(bucket, 3)
+	otherKeys := genMultihashesMatchingPrefix(otherBucket, 2)
+
+	t.Run("Keystore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewKeystore(ds, WithPrefixBits(prefixBits))
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeystoreKeyCountImpl(t, store, bucket, bucketKeys, otherKeys)
+	})
+
+	// Exercise the ResettableKeystore in factory mode, matching how Kubo
+	// constructs it (keystore.WithDatastoreFactory). Factory mode keeps each
+	// namespace in its own datastore with no namespace.Wrap, so keys whose path
+	// starts with the active-namespace digit (e.g. bit 0 under namespace "/0")
+	// still decode correctly for prefixes longer than prefixBits. The default
+	// shared-datastore constructor has a namespace.Wrap round-trip bug on that
+	// path; Kubo sidesteps it by using factory mode, and so does this test.
+	t.Run("ResettableKeystore", func(t *testing.T) {
+		create, destroy := mapDatastoreFactory()
+		store, err := NewResettableKeystore(ds.NewMapDatastore(),
+			WithDatastoreFactory(create, destroy),
+			KeystoreOption(WithPrefixBits(prefixBits)))
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeystoreKeyCountImpl(t, store, bucket, bucketKeys, otherKeys)
+	})
+}
+
+func testKeystoreKeyCountImpl(t *testing.T, store Keystore, bucket bitstr.Key, bucketKeys, otherKeys []mh.Multihash) {
+	ctx := context.Background()
+
+	// Empty keystore counts zero.
+	n, err := store.KeyCount(ctx, bitstr.Key("1"))
+	require.NoError(t, err)
+	require.Zero(t, n)
+
+	// bucketKeys share the bucket prefix (prefixBits), so they land in one
+	// datastore bucket. A prefix longer than prefixBits then exercises count's
+	// per-key filter (decodeKey and IsPrefix), the path that differs from a
+	// plain datastore prefix scan. otherKeys live in a different bucket so counts
+	// must filter rather than just total the keystore.
+	_, err = store.Put(ctx, bucketKeys...)
+	require.NoError(t, err)
+	_, err = store.Put(ctx, otherKeys...)
+	require.NoError(t, err)
+
+	// A prefix 4 bits longer than the bucket (so > prefixBits), derived from a
+	// real key so it matches that key while the filter discards bucket peers
+	// that diverge in the extra bits.
+	longPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(bucketKeys[0]))[:len(bucket)+4])
+
+	// KeyCount must agree with len(Get) for every prefix, across the short
+	// (<=prefixBits) and long (>prefixBits) branches.
+	for _, prefix := range []bitstr.Key{"0", "1", bucket, longPrefix} {
+		got, err := store.Get(ctx, prefix)
+		require.NoError(t, err)
+		n, err := store.KeyCount(ctx, prefix)
+		require.NoError(t, err)
+		require.Equal(t, len(got), n, "KeyCount disagrees with Get for prefix %q", prefix)
+	}
+
+	// Exact counts: the full bucket, and a prefix matching neither bucket in a
+	// non-empty keystore.
+	n, err = store.KeyCount(ctx, bucket)
+	require.NoError(t, err)
+	require.Equal(t, len(bucketKeys), n)
+
+	n, err = store.KeyCount(ctx, bitstr.Key("01"))
+	require.NoError(t, err)
+	require.Zero(t, n)
 }
 
 func TestKeystoreDelete(t *testing.T) {

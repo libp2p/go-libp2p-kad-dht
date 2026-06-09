@@ -1822,6 +1822,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 			s.reschedulePrefix(prefix)
 			return
 		}
+		// Reconcile the gauge: the keystore may have changed between KeyCount and
+		// this load, so the count actually provided can differ from keyCount.
+		if len(keys) != keyCount {
+			s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
+			gaugeKeys = len(keys)
+		}
 		s.individualProvide(prefix, keys, true)
 		return
 	}
@@ -1836,14 +1842,7 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 
 	// Load the region keys now that the covered prefix is known, so the big
 	// slice is never held across swarm exploration and is loaded exactly once.
-	// The covered prefix may be shorter (wider) than the requested one, in which
-	// case it matches more keys than keyCount.
-	widerRegion := len(coveredPrefix) < len(prefix)
-	loadPrefix := prefix
-	if widerRegion {
-		loadPrefix = coveredPrefix
-	}
-	keys, err = s.keystore.Get(s.ctx, loadPrefix)
+	keys, err = s.keystore.Get(s.ctx, coveredPrefix)
 	if err != nil {
 		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
 		s.reschedulePrefix(prefix)
@@ -1852,9 +1851,15 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 
 	regions = s.claimRegionReprovide(regions)
 
-	if widerRegion {
+	// Reconcile the ongoing-reprovides gauge to the number of keys actually
+	// loaded. keyCount was only an estimate from KeyCount(prefix): coveredPrefix
+	// may be wider than the requested prefix, and the keystore can change
+	// between the count and the load.
+	if len(keys) != keyCount {
 		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
 		gaugeKeys = len(keys)
+	}
+	if len(coveredPrefix) < len(prefix) {
 		prefix = coveredPrefix
 	}
 

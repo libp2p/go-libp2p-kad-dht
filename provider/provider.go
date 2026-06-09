@@ -1834,8 +1834,6 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	}
 	s.logger.Debugf("reprovide: requested prefix '%s' (len %d), prefix covered '%s' (len %d)", prefix, len(prefix), coveredPrefix, len(coveredPrefix))
 
-	regions = s.claimRegionReprovide(regions)
-
 	// Load the region keys now that the covered prefix is known, so the big
 	// slice is never held across swarm exploration and is loaded exactly once.
 	// The covered prefix may be shorter (wider) than the requested one, in which
@@ -1851,6 +1849,9 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 		s.reschedulePrefix(prefix)
 		return
 	}
+
+	regions = s.claimRegionReprovide(regions)
+
 	if widerRegion {
 		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
 		gaugeKeys = len(keys)

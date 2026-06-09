@@ -255,11 +255,15 @@ func testKeystoreKeyCountImpl(t *testing.T, store Keystore, bucket bitstr.Key, b
 		require.Equal(t, len(got), n, "KeyCount disagrees with Get for prefix %q", prefix)
 	}
 
-	// Exact counts: the full bucket, and a prefix matching neither bucket in a
-	// non-empty keystore.
+	// Exact counts: the full bucket, empty prefix and a prefix matching neither
+	// bucket in a non-empty keystore.
 	n, err = store.KeyCount(ctx, bucket)
 	require.NoError(t, err)
 	require.Equal(t, len(bucketKeys), n)
+
+	n, err = store.KeyCount(ctx, "")
+	require.NoError(t, err)
+	require.Equal(t, len(bucketKeys)+len(otherKeys), n)
 
 	n, err = store.KeyCount(ctx, bitstr.Key("01"))
 	require.NoError(t, err)

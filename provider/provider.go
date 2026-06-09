@@ -1776,17 +1776,15 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 		return
 	}
 
-	// Count the keys matching the prefix without materialising them. A region
-	// can hold a very large number of multihashes; loading them all into memory
-	// here (and again for the covered prefix below) just to make routing
-	// decisions is what drives the reprovide memory spikes that have OOM-killed
-	// nodes with large keystores. The actual load is deferred until the covered
-	// prefix is known and then done exactly once. (A region that is still very
-	// large after exploration should ideally be loaded and provided in bounded
-	// chunks; see the keystore.KeyCount-based splitting discussion upstream.)
-	keyCount, err := s.keystore.KeyCount(s.ctx, prefix)
+	// Decide how to provide the region without materialising it. A region can
+	// hold a very large number of multihashes; loading them all into memory just
+	// to make a routing decision would drive up memory usage. CountKeysUpTo
+	// stops scanning once the threshold is exceeded, so this never iterates a
+	// large region, and the actual load is deferred until the covered prefix is
+	// known and then done exactly once.
+	keyCount, err := s.keystore.CountKeysUpTo(s.ctx, prefix, individualProvideThreshold+1)
 	if err != nil {
-		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when counting keys: %s", err))
+		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when counting keys: %w", err))
 		s.reschedulePrefix(prefix)
 		return
 	}
@@ -1795,22 +1793,15 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 		return
 	}
 
-	s.logger.Infof("reprovide starting for prefix %q, %d keys", prefix, keyCount)
+	s.logger.Infof("reprovide starting for prefix %q", prefix)
 	startTime := time.Now()
-	s.stats.ongoingReprovides.start(keyCount)
-	// gaugeKeys tracks how many keys were added to the ongoing-reprovides gauge
-	// (start, plus the addKeys adjustment below for a wider region) so the
-	// deferred finish always balances it, including on the error paths that
-	// return before keys is loaded.
-	gaugeKeys := keyCount
 	var keys []mh.Multihash
 	defer func() {
 		elapsed := time.Since(startTime)
-		s.stats.ongoingReprovides.finish(gaugeKeys)
 		s.stats.cycleStatsLk.Lock()
 		s.stats.reprovideDuration.Add(prefix, int64(elapsed))
 		s.stats.cycleStatsLk.Unlock()
-		s.logger.Infof("reprovide finished for prefix %q, %d keys in %s", prefix, keyCount, elapsed)
+		s.logger.Infof("reprovide finished for prefix %q, %d keys in %s", prefix, len(keys), elapsed)
 	}()
 
 	if keyCount <= individualProvideThreshold {
@@ -1818,16 +1809,12 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 		// keys. It isn't worth it to fully explore a region for just a few keys.
 		keys, err = s.keystore.Get(s.ctx, prefix)
 		if err != nil {
-			s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
+			s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %w", err))
 			s.reschedulePrefix(prefix)
 			return
 		}
-		// Reconcile the gauge: the keystore may have changed between KeyCount and
-		// this load, so the count actually provided can differ from keyCount.
-		if len(keys) != keyCount {
-			s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
-			gaugeKeys = len(keys)
-		}
+		s.stats.ongoingReprovides.start(len(keys))
+		defer s.stats.ongoingReprovides.finish(len(keys))
 		s.individualProvide(prefix, keys, true)
 		return
 	}
@@ -1844,21 +1831,15 @@ func (s *SweepingProvider) batchReprovide(prefix bitstr.Key) {
 	// slice is never held across swarm exploration and is loaded exactly once.
 	keys, err = s.keystore.Get(s.ctx, coveredPrefix)
 	if err != nil {
-		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %s", err))
+		s.failedReprovide(prefix, fmt.Errorf("could not reprovide, error when loading keys: %w", err))
 		s.reschedulePrefix(prefix)
 		return
 	}
+	s.stats.ongoingReprovides.start(len(keys))
+	defer s.stats.ongoingReprovides.finish(len(keys))
 
 	regions = s.claimRegionReprovide(regions)
 
-	// Reconcile the ongoing-reprovides gauge to the number of keys actually
-	// loaded. keyCount was only an estimate from KeyCount(prefix): coveredPrefix
-	// may be wider than the requested prefix, and the keystore can change
-	// between the count and the load.
-	if len(keys) != keyCount {
-		s.stats.ongoingReprovides.addKeys(len(keys) - keyCount)
-		gaugeKeys = len(keys)
-	}
 	if len(coveredPrefix) < len(prefix) {
 		prefix = coveredPrefix
 	}

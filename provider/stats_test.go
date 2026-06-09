@@ -700,7 +700,7 @@ func (b *blockingSizeKeystore) Get(_ context.Context, _ bitstr.Key) ([]multihash
 	return nil, nil
 }
 
-func (b *blockingSizeKeystore) KeyCount(_ context.Context, _ bitstr.Key) (int, error) {
+func (b *blockingSizeKeystore) CountKeysUpTo(_ context.Context, _ bitstr.Key, _ int) (int, error) {
 	return 0, nil
 }
 

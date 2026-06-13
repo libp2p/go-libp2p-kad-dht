@@ -10,7 +10,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
+	ktds "github.com/ipfs/go-datastore/keytransform"
 	"github.com/ipfs/go-datastore/query"
 	"github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
@@ -51,8 +51,8 @@ type resetOp struct {
 // Two storage modes are supported:
 //
 // Shared-datastore mode (default): Both namespaces live inside the provided
-// metaDs via namespace.Wrap. The alternate namespace is emptied via
-// iterate-and-delete after each reset.
+// metaDs under the "/0" and "/1" path prefixes (see prefixWrap). The alternate
+// namespace is emptied via iterate-and-delete after each reset.
 //
 // Factory mode (WithDatastoreFactory): Each namespace is a physically separate
 // datastore created by the factory. Only the active datastore exists between
@@ -136,6 +136,28 @@ type ResettableKeystore struct {
 }
 
 var _ Keystore = (*ResettableKeystore)(nil)
+
+// prefixWrap stores every key under prefix (here "/0" or "/1"), like
+// namespace.Wrap but always adding the prefix instead of sometimes skipping it.
+//
+// namespace.Wrap does not fit this keystore. The keystore files each key under
+// a path whose leading bits are the single characters '0' and '1' (see dsKey),
+// for example "/0/1/0/...". On write, namespace.Wrap skips the prefix when the
+// key already starts with it; on read, it always strips the first component. So
+// a key whose first bit matches the namespace digit (a "/0/..." key in the "/0"
+// namespace) keeps its written form but loses a "/0" on read. That eats the
+// key's first bit and breaks lookups for prefixes longer than prefixBits. See
+// https://github.com/libp2p/go-libp2p-kad-dht/issues/1260.
+//
+// Adding the prefix to every key makes write and read symmetric: read always
+// has exactly one prefix component to strip, so no bit is lost.
+func prefixWrap(d ds.Batching, prefix ds.Key) ds.Batching {
+	pt := ktds.PrefixTransform{Prefix: prefix}
+	return ktds.Wrap(d, &ktds.Pair{
+		Convert: func(k ds.Key) ds.Key { return prefix.Child(k) },
+		Invert:  pt.InvertKey,
+	})
+}
 
 // NewResettableKeystore creates a new ResettableKeystore backed by the
 // provided datastore d.
@@ -231,8 +253,8 @@ func NewResettableKeystore(d ds.Batching, opts ...ResettableKeystoreOption) (*Re
 	} else {
 		// Shared datastore mode: both namespaces always exist
 		datastores := [2]ds.Batching{
-			namespace.Wrap(d, ds.NewKey("0")),
-			namespace.Wrap(d, ds.NewKey("1")),
+			prefixWrap(d, ds.NewKey("0")),
+			prefixWrap(d, ds.NewKey("1")),
 		}
 		primaryDs = datastores[activeIdx]
 		altDs = datastores[1-activeIdx]
@@ -517,18 +539,16 @@ func (s *ResettableKeystore) prepareAltDs(ctx context.Context) error {
 }
 
 // emptySharedAltDs deletes every key in the alternate namespace in
-// shared-datastore mode by iterating the underlying datastore directly.
-// This bypasses a quirk of namespace.Wrap's keytransform: ConvertKey
-// returns the key unchanged when it already starts with the namespace
-// prefix, so the round-trip iterate-then-delete misses any key whose
-// keystore path collides with that prefix (e.g. with namespace "/0",
-// keystore keys "/0/0/...").
+// shared-datastore mode. It reads the underlying datastore directly under the
+// namespace's path prefix ("/0" or "/1") and deletes those raw keys rather than
+// going through the prefix-wrapped view. Working on raw keys keeps it simple and
+// independent of the wrapper's key transform.
 //
 // Only valid in shared-datastore mode, where metaDs is the un-wrapped
-// underlying datastore that altDs is namespace.Wrap'd over. In factory
-// mode altDs is a physically separate datastore and metaDs holds only
-// the active-namespace marker, so this function must not be called —
-// callers gate on s.createDs == nil.
+// underlying datastore that altDs is prefix-wrapped over. In factory mode
+// altDs is a physically separate datastore and metaDs holds only the
+// active-namespace marker, so this function must not be called — callers gate
+// on s.createDs == nil.
 func (s *ResettableKeystore) emptySharedAltDs(ctx context.Context) error {
 	altPrefix := fmt.Sprintf("/%d", 1-s.activeNamespace)
 	q := query.Query{Prefix: altPrefix, KeysOnly: true}

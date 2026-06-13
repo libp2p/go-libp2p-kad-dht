@@ -3,9 +3,9 @@ package keystore
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -979,11 +979,11 @@ func TestKeystoreWorkerResponsiveWhileAltDsWedged(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		// Derive the alt namespace prefix from the freshly-initialised store
-		// rather than hard-coding "/1". Safe to set after NewResettableKeystore
+		// Derive the alt slot prefix from the freshly-initialised store rather
+		// than hard-coding "/k1". Safe to set after NewResettableKeystore
 		// because the constructor performs no Sync calls itself (the loadSize
 		// path only Gets/Deletes the size key).
-		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		ctx := t.Context()
 
@@ -1069,7 +1069,7 @@ func TestKeystoreResetBufferBackpressure(t *testing.T) {
 		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
 		require.NoError(t, err)
 		defer store.Close()
-		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		ctx := t.Context()
 
@@ -1150,7 +1150,7 @@ func TestKeystoreResetBufferLargerThanCap(t *testing.T) {
 		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
 		require.NoError(t, err)
 		defer store.Close()
-		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		ctx := t.Context()
 
@@ -1244,7 +1244,7 @@ func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
 		store, err := NewResettableKeystore(slow, WithResetBufferCapacity(bufCap))
 		require.NoError(t, err)
 		defer store.Close()
-		slow.slowPrefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		// Reset gets its own cancellable ctx so we can cancel it without
 		// also cancelling the probe Put contexts.
@@ -1393,7 +1393,7 @@ func TestKeystoreResetNoHasInBulkPhase(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 
-	counter.prefix = fmt.Sprintf("/%d", 1-store.activeNamespace)
+	counter.prefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 	ctx := t.Context()
 
@@ -1419,41 +1419,23 @@ func TestKeystoreResetNoHasInBulkPhase(t *testing.T) {
 	require.Equal(t, n, size, "reset must still produce the correct size")
 }
 
-// pickMhsWithBit0 returns n multihashes whose first sha256 bit equals
-// targetBit. Used to construct keys whose dsKey path collides with the
-// shared-mode namespace prefix (namespace "/1" + dsKey "/1/...").
+// pickMhsWithBit0 returns n multihashes whose first sha256 bit equals targetBit.
+// Tests use it to target the first-bit bucket that the old "0"/"1" slot tokens
+// corrupted.
 func pickMhsWithBit0(t *testing.T, targetBit int, n int) []mh.Multihash {
 	t.Helper()
-	out := make([]mh.Multihash, 0, n)
-	for tries := 0; tries < 4096 && len(out) < n; tries++ {
-		h := random.Multihashes(1)[0]
-		if int(keyspace.MhToBit256(h).Bit(0)) == targetBit {
-			out = append(out, h)
-		}
-	}
-	require.Lenf(t, out, n,
-		"failed to find %d multihashes whose first sha256 bit is %d",
-		n, targetBit)
-	return out
+	return pickMhsWithBits(t, []int{targetBit}, n)
 }
 
-// TestKeystoreResetEmptiesNamespaceCollidingKeys is a tripwire for the
-// emptySharedAltDs fix. If a future caller replaces it with the obvious
-// wrapped iterate-then-Delete path, the bug below returns silently and
-// this test catches it.
+// TestKeystoreResetEmptiesNamespaceCollidingKeys verifies that a reset fully
+// empties the alternate slot, including keys whose first hash bit equals the
+// slot digit.
 //
-// Background: in shared-datastore mode the alt slot is "/0" or "/1",
-// and inside the slot each key is filed under "/<bit0>/<bit1>/...". So
-// a key whose first hash bit is 1, stored in slot "/1", lives at the
-// underlying path "/1/1/...".
-//
-// Bug: namespace.Wrap.Delete runs the key through ConvertKey, which
-// only adds the namespace prefix when it isn't already an ancestor. For
-// "/1/..." it isn't added, so Delete targets "/1/..." instead of
-// "/1/1/...". The real key stays behind on every reset.
-//
-// Fix: emptySharedAltDs talks to the unwrapped datastore directly and
-// deletes everything under the "/1" prefix as stored, with no rewrite.
+// In shared-datastore mode the alt slot lives under "/k0" or "/k1", and inside
+// the slot each key is filed under "/<bit0>/<bit1>/...". So a key whose first
+// hash bit is 1, stored in slot "/k1", lives at the underlying path
+// "/k1/1/...". emptySharedAltDs deletes the whole slot subtree by iterating the
+// unwrapped datastore directly under "/k1", so no key is left behind.
 func TestKeystoreResetEmptiesNamespaceCollidingKeys(t *testing.T) {
 	base := dssync.MutexWrap(ds.NewMapDatastore())
 	store, err := NewResettableKeystore(base)
@@ -1461,8 +1443,8 @@ func TestKeystoreResetEmptiesNamespaceCollidingKeys(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 
 	// Active namespace defaults to 0, so the first reset writes into
-	// altDs = "/1". Pick multihashes whose dsKey starts with "/1/...",
-	// so the underlying keys collide with the namespace prefix.
+	// altDs = "/k1". Pick multihashes whose first hash bit is 1, so inside
+	// the slot they are filed under "/k1/1/...".
 	require.Equal(t, byte(0), store.activeNamespace,
 		"test assumes initial active namespace is 0")
 	const n = 8
@@ -1476,27 +1458,237 @@ func TestKeystoreResetEmptiesNamespaceCollidingKeys(t *testing.T) {
 	close(ch)
 	require.NoError(t, store.ResetCids(ctx, ch))
 
-	// After the first reset, primary is "/1" and holds n colliding keys.
+	// After the first reset, primary is "/k1" and holds n keys.
 	size, err := store.Size(ctx)
 	require.NoError(t, err)
 	require.Equal(t, n, size)
 
-	// Second reset with an empty channel swaps "/1" back into altDs and
-	// triggers teardownAltDs("/1"), which runs emptySharedAltDs. This is
-	// the path under test.
+	// Second reset with an empty channel swaps "/k1" back into altDs and
+	// triggers teardownAltDs, which runs emptySharedAltDs. This is the path
+	// under test.
 	ch2 := make(chan cid.Cid)
 	close(ch2)
 	require.NoError(t, store.ResetCids(ctx, ch2))
 
-	// No "/1/..." keys must remain in the underlying datastore. With the
-	// old wrapped-delete path, the colliding "/1/1/..." underlying keys
-	// would still be present here.
+	// No "/k1/..." keys must remain in the underlying datastore after the
+	// slot is torn down.
 	var leftover []string
-	for res, err := range ds.QueryIter(ctx, base, query.Query{Prefix: "/1", KeysOnly: true}) {
+	for res, err := range ds.QueryIter(ctx, base, query.Query{Prefix: "/k1", KeysOnly: true}) {
 		require.NoError(t, err)
 		leftover = append(leftover, res.Key)
 	}
 	require.Emptyf(t, leftover,
 		"teardown must remove all alt-namespace keys; %d orphaned: %v",
+		len(leftover), leftover)
+}
+
+// mhStrings returns the multihashes as plain strings for set comparisons.
+func mhStrings(mhs []mh.Multihash) []string {
+	out := make([]string, len(mhs))
+	for i, h := range mhs {
+		out[i] = string(h)
+	}
+	return out
+}
+
+// pickMhsWithBits picks n multihashes whose leading Kademlia bits equal bits.
+func pickMhsWithBits(t *testing.T, bits []int, n int) []mh.Multihash {
+	t.Helper()
+	out := make([]mh.Multihash, 0, n)
+	for tries := 0; tries < 1<<16 && len(out) < n; tries++ {
+		h := random.Multihashes(1)[0]
+		k := keyspace.MhToBit256(h)
+		match := true
+		for i, b := range bits {
+			if int(k.Bit(i)) != b {
+				match = false
+				break
+			}
+		}
+		if match {
+			out = append(out, h)
+		}
+	}
+	require.Lenf(t, out, n, "failed to find %d multihashes with bit prefix %v", n, bits)
+	return out
+}
+
+// requireSlotLayout asserts that every keystore data key in base lives under
+// slotPrefix and none lives under a bare single-bit prefix ("/0" or "/1"). A
+// bare-bit key means the slot token collided with a bit-path component, the
+// regression that https://github.com/libp2p/go-libp2p-kad-dht/issues/1260
+// fixed.
+func requireSlotLayout(t *testing.T, base ds.Datastore, slotPrefix string) {
+	t.Helper()
+	var underSlot, bareBit int
+	for res, err := range ds.QueryIter(t.Context(), base, query.Query{KeysOnly: true}) {
+		require.NoError(t, err)
+		switch {
+		case res.Key == "/active" || res.Key == "/size":
+			// meta markers, not keystore data
+		case strings.HasPrefix(res.Key, slotPrefix+"/"):
+			underSlot++
+		case strings.HasPrefix(res.Key, "/0/") || strings.HasPrefix(res.Key, "/1/"):
+			bareBit++
+		}
+	}
+	require.Zerof(t, bareBit, "keys stored under a bare bit prefix; slot token collided with a bit path")
+	require.Positivef(t, underSlot, "expected keystore data under %s", slotPrefix)
+}
+
+// TestKeystoreSharedModeFirstBitCollision is a regression test for
+// https://github.com/libp2p/go-libp2p-kad-dht/issues/1260.
+//
+// In shared-datastore mode a multihash whose first bit equals the active slot
+// digit was filed under a path that collided with a bare "/0" or "/1" slot
+// prefix. Reading it back corrupted the key, so a lookup with a prefix longer
+// than prefixBits (which makes the keystore decode each stored key) returned the
+// wrong keys or failed with "illegal base64 data". The non-colliding "/k0" and
+// "/k1" slot prefixes make the collision impossible. The test exercises the
+// default slot, then the other slot after a reset swap.
+func TestKeystoreSharedModeFirstBitCollision(t *testing.T) {
+	const prefixBits = 8
+	ctx := t.Context()
+
+	// Shared-datastore mode (no WithDatastoreFactory) is the affected path.
+	store, err := NewResettableKeystore(dssync.MutexWrap(ds.NewMapDatastore()),
+		KeystoreOption(WithPrefixBits(prefixBits)))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	base := store.metaDs
+
+	// verify looks up every key in present with a prefix longer than prefixBits,
+	// which forces the keystore to decode each stored key. present holds keys
+	// with both first bits, so the formerly colliding bucket is hit whichever
+	// slot is active.
+	verify := func(t *testing.T, present []mh.Multihash) {
+		t.Helper()
+		bruteCount := func(p bitstr.Key) int {
+			n := 0
+			for _, h := range present {
+				if keyspace.IsPrefix(p, keyspace.MhToBit256(h)) {
+					n++
+				}
+			}
+			return n
+		}
+		for _, target := range present {
+			longPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(target))[:prefixBits+4])
+
+			got, err := store.Get(ctx, longPrefix)
+			require.NoErrorf(t, err, "Get(%q)", longPrefix)
+			require.Equalf(t, bruteCount(longPrefix), len(got),
+				"Get(%q) returned wrong count", longPrefix)
+			require.Containsf(t, mhStrings(got), string(target),
+				"Get(%q) missing its own key", longPrefix)
+
+			ok, err := store.ContainsPrefix(ctx, longPrefix)
+			require.NoErrorf(t, err, "ContainsPrefix(%q)", longPrefix)
+			require.Truef(t, ok, "ContainsPrefix(%q) must be true", longPrefix)
+		}
+	}
+
+	// Slot 0 active: keys whose first bit is 0 would collide with a bare "/0".
+	require.Equal(t, byte(0), store.activeNamespace)
+	setA := slices.Concat(pickMhsWithBit0(t, 0, 4), pickMhsWithBit0(t, 1, 2))
+	_, err = store.Put(ctx, setA...)
+	require.NoError(t, err)
+	verify(t, setA)
+	requireSlotLayout(t, base, "/k0")
+
+	// A reset swaps the active slot to 1, so keys whose first bit is 1 would now
+	// collide with a bare "/1". The reset set replaces the store contents.
+	setB := slices.Concat(pickMhsWithBit0(t, 1, 4), pickMhsWithBit0(t, 0, 2))
+	ch := make(chan cid.Cid, len(setB))
+	for _, h := range setB {
+		ch <- cid.NewCidV1(cid.Raw, h)
+	}
+	close(ch)
+	require.NoError(t, store.ResetCids(ctx, ch))
+	require.Equal(t, byte(1), store.activeNamespace)
+	verify(t, setB)
+	requireSlotLayout(t, base, "/k1")
+}
+
+// TestKeystoreSharedModeShortPrefixContamination is a regression test for the
+// short-prefix symptom of
+// https://github.com/libp2p/go-libp2p-kad-dht/issues/1260.
+//
+// A prefix no longer than prefixBits never decodes stored keys; the datastore
+// query prefix alone selects the result set. Under a bare "/0" slot, a query for
+// first-bit-1 keys mapped onto the stored first-bit-0 subtree, so Get returned
+// keys from the wrong region and ContainsPrefix reported a false positive. The
+// "/k0" slot prefix keeps the two regions apart.
+func TestKeystoreSharedModeShortPrefixContamination(t *testing.T) {
+	const prefixBits = 8
+	ctx := t.Context()
+
+	store, err := NewResettableKeystore(dssync.MutexWrap(ds.NewMapDatastore()),
+		KeystoreOption(WithPrefixBits(prefixBits)))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	require.Equal(t, byte(0), store.activeNamespace)
+
+	// Store only keys whose first two bits are [0,1]. None has first bit 1.
+	present := pickMhsWithBits(t, []int{0, 1}, 6)
+	_, err = store.Put(ctx, present...)
+	require.NoError(t, err)
+
+	// The first-bit-1 region holds nothing.
+	empty := bitstr.Key("1")
+	ok, err := store.ContainsPrefix(ctx, empty)
+	require.NoError(t, err)
+	require.Falsef(t, ok, "ContainsPrefix(%q) must be false; no key has first bit 1", empty)
+	got, err := store.Get(ctx, empty)
+	require.NoError(t, err)
+	require.Emptyf(t, got, "Get(%q) must be empty; no key has first bit 1", empty)
+
+	// The region that holds the keys returns exactly them.
+	region := bitstr.Key("01")
+	got, err = store.Get(ctx, region)
+	require.NoError(t, err)
+	require.ElementsMatch(t, mhStrings(present), mhStrings(got),
+		"Get(%q) must return exactly the stored keys", region)
+	ok, err = store.ContainsPrefix(ctx, region)
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+// TestKeystoreSharedModeEmptyClearsCollidingKeys guards the Empty() symptom of
+// https://github.com/libp2p/go-libp2p-kad-dht/issues/1260. Empty() runs a
+// wrapped iterate-then-delete over the active slot. Under a bare "/0" slot,
+// that round trip missed keys whose first bits matched the slot digit and left
+// them behind. The "/k0" slot prefix makes the round trip an identity, so Empty
+// clears every key.
+func TestKeystoreSharedModeEmptyClearsCollidingKeys(t *testing.T) {
+	ctx := t.Context()
+	base := dssync.MutexWrap(ds.NewMapDatastore())
+	store, err := NewResettableKeystore(base)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	require.Equal(t, byte(0), store.activeNamespace)
+
+	// Mix of first-bit-0 (collision-prone in slot 0) and first-bit-1 keys.
+	keys := slices.Concat(pickMhsWithBit0(t, 0, 6), pickMhsWithBit0(t, 1, 6))
+	_, err = store.Put(ctx, keys...)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Empty(ctx))
+
+	size, err := store.Size(ctx)
+	require.NoError(t, err)
+	require.Zero(t, size, "Empty must reset the size counter")
+
+	// No keystore data may remain in the active slot.
+	var leftover []string
+	slot := sharedSlotPrefix[store.activeNamespace].String()
+	for res, err := range ds.QueryIter(ctx, base, query.Query{Prefix: slot, KeysOnly: true}) {
+		require.NoError(t, err)
+		if strings.HasSuffix(res.Key, "/size") {
+			continue
+		}
+		leftover = append(leftover, res.Key)
+	}
+	require.Emptyf(t, leftover, "Empty must remove every key in the active slot; %d left: %v",
 		len(leftover), leftover)
 }

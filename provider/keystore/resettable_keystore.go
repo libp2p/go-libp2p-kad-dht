@@ -36,6 +36,21 @@ const (
 // currently active.
 var activeNamespaceKey = ds.NewKey("active")
 
+// sharedSlotPrefix maps a reset slot (0 or 1) to the datastore prefix that
+// holds its keys in shared-datastore mode. Keep the leading "k": it stops the
+// slot prefix from colliding with the keystore's bit-path components.
+//
+// The keystore files each key under a path whose first components are the
+// single characters '0' and '1', one per Kademlia bit (see dsKey), for example
+// "/0/1/0/...". A bare "/0" or "/1" slot prefix would look like one of those
+// bits, and go-datastore's PrefixTransform is asymmetric: on write it skips a
+// prefix the key already starts with, but on read it always strips one
+// component. A key whose first bit equals the slot digit would then lose that
+// bit on read and decode to the wrong value. The "k" keeps the prefix out of
+// the bit alphabet, so write and read stay symmetric. See
+// https://github.com/libp2p/go-libp2p-kad-dht/issues/1260.
+var sharedSlotPrefix = [2]ds.Key{ds.NewKey("k0"), ds.NewKey("k1")}
+
 type resetOp struct {
 	ctx      context.Context
 	op       opType
@@ -44,15 +59,15 @@ type resetOp struct {
 }
 
 // ResettableKeystore is a Keystore implementation that supports atomic reset
-// operations. It uses two storage namespaces ("0" and "1") where only one is
+// operations. It uses two storage namespaces (0 and 1) where only one is
 // active at any time, enabling atomic replacement of all stored keys without
 // interrupting concurrent operations.
 //
 // Two storage modes are supported:
 //
-// Shared-datastore mode (default): Both namespaces live inside the provided
-// metaDs via namespace.Wrap. The alternate namespace is emptied via
-// iterate-and-delete after each reset.
+// Shared-datastore mode (default): both namespaces live inside the provided
+// metaDs, wrapped under the "/k0" and "/k1" prefixes (see sharedSlotPrefix).
+// The alternate namespace is emptied via iterate-and-delete after each reset.
 //
 // Factory mode (WithDatastoreFactory): Each namespace is a physically separate
 // datastore created by the factory. Only the active datastore exists between
@@ -140,9 +155,9 @@ var _ Keystore = (*ResettableKeystore)(nil)
 // NewResettableKeystore creates a new ResettableKeystore backed by the
 // provided datastore d.
 //
-// In shared-datastore mode (default), "/0" and "/1" namespace suffixes are
-// created inside d for atomic reset operations, and the active-namespace
-// marker is stored directly in d.
+// In shared-datastore mode (default), the "/k0" and "/k1" prefixes inside d
+// hold the two reset slots, and the active-namespace marker is stored directly
+// in d.
 //
 // In factory mode (WithDatastoreFactory), independent datastores are created
 // per namespace by the factory, enabling full disk reclamation after a reset.
@@ -229,10 +244,11 @@ func NewResettableKeystore(d ds.Batching, opts ...ResettableKeystoreOption) (*Re
 		logger.Infof("keystore: initialized with active namespace %s (factory mode)", activeSuffix)
 		// altDs stays nil — created on demand by ResetCids
 	} else {
-		// Shared datastore mode: both namespaces always exist
+		// Shared-datastore mode: both slots always exist, each wrapped under
+		// its own non-colliding prefix (see sharedSlotPrefix).
 		datastores := [2]ds.Batching{
-			namespace.Wrap(d, ds.NewKey("0")),
-			namespace.Wrap(d, ds.NewKey("1")),
+			namespace.Wrap(d, sharedSlotPrefix[0]),
+			namespace.Wrap(d, sharedSlotPrefix[1]),
 		}
 		primaryDs = datastores[activeIdx]
 		altDs = datastores[1-activeIdx]
@@ -516,21 +532,19 @@ func (s *ResettableKeystore) prepareAltDs(ctx context.Context) error {
 	return s.emptySharedAltDs(ctx)
 }
 
-// emptySharedAltDs deletes every key in the alternate namespace in
-// shared-datastore mode by iterating the underlying datastore directly.
-// This bypasses a quirk of namespace.Wrap's keytransform: ConvertKey
-// returns the key unchanged when it already starts with the namespace
-// prefix, so the round-trip iterate-then-delete misses any key whose
-// keystore path collides with that prefix (e.g. with namespace "/0",
-// keystore keys "/0/0/...").
+// emptySharedAltDs deletes every key in the alternate slot in shared-datastore
+// mode. It iterates the underlying datastore directly under the slot's prefix
+// ("/k0" or "/k1") and deletes the raw keys, instead of going through the
+// prefix-wrapped view. Working on raw keys empties the whole slot subtree in
+// one pass and keeps the teardown independent of the wrapper's key transform.
 //
 // Only valid in shared-datastore mode, where metaDs is the un-wrapped
-// underlying datastore that altDs is namespace.Wrap'd over. In factory
-// mode altDs is a physically separate datastore and metaDs holds only
-// the active-namespace marker, so this function must not be called —
-// callers gate on s.createDs == nil.
+// underlying datastore that altDs is namespace.Wrap'd over. In factory mode
+// altDs is a physically separate datastore and metaDs holds only the
+// active-namespace marker, so this function must not be called; callers gate
+// on s.createDs == nil.
 func (s *ResettableKeystore) emptySharedAltDs(ctx context.Context) error {
-	altPrefix := fmt.Sprintf("/%d", 1-s.activeNamespace)
+	altPrefix := sharedSlotPrefix[1-s.activeNamespace].String()
 	q := query.Query{Prefix: altPrefix, KeysOnly: true}
 	b, err := s.metaDs.Batch(ctx)
 	if err != nil {

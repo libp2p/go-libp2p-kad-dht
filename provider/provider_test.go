@@ -97,6 +97,19 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 	return mhs
 }
 
+// genPeersWithPrefix generates n peer IDs whose kademlia identifiers all share
+// the given common prefix, simulating a small clustered DHT.
+func genPeersWithPrefix(prefix bitstr.Key, n int) []peer.ID {
+	peers := make([]peer.ID, 0, n)
+	for len(peers) < n {
+		p := random.Peers(1)[0]
+		if keyspace.IsPrefix(prefix, keyspace.PeerIDToBit256(p)) {
+			peers = append(peers, p)
+		}
+	}
+	return peers
+}
+
 func getMockAddrs(t *testing.T) func() []ma.Multiaddr {
 	return func() []ma.Multiaddr {
 		addr, err := ma.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
@@ -445,6 +458,56 @@ func TestClosestPeersToPrefixSinglePeer(t *testing.T) {
 			require.Len(t, closestPeers, 1)
 			require.Contains(t, closestPeers, p)
 		}
+	})
+}
+
+// TestExploreSwarmClusteredPeersCoversAllKeys reproduces #1263: in a small DHT
+// where all peers share a common prefix (e.g. "11"), exploreSwarm must still
+// produce regions that cover the entire keyspace, since these peers are the
+// closest peers to every key. Otherwise keys outside the peers' common prefix
+// are silently dropped when assigned to regions, which is what causes
+// batchReprovide to drop them and the schedule to collapse to a single prefix.
+func TestExploreSwarmClusteredPeersCoversAllKeys(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		replFactor := 20
+		// Small DHT: 4 peers, all sharing the common prefix "11".
+		peers := genPeersWithPrefix("11", 4)
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return peers, nil
+			},
+		}
+
+		prov := SweepingProvider{
+			router:            router,
+			logger:            defaultLogger,
+			connectivity:      noopConnectivityChecker(),
+			replicationFactor: replFactor,
+			stats:             newOperationStats(time.Hour, time.Minute),
+		}
+		prov.connectivity.Start()
+		defer prov.connectivity.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		// Keys spread uniformly across the keyspace: one per 2-bit prefix
+		// (00, 01, 10, 11).
+		keys := genBalancedMultihashes(2)
+
+		// Reprovide a region that does NOT match the peer cluster.
+		regions, _, err := prov.exploreSwarm("10")
+		require.NoError(t, err)
+
+		regions = keyspace.AssignKeysToRegions(regions, keys)
+
+		assigned := 0
+		for _, r := range regions {
+			assigned += r.Keys.Size()
+		}
+		require.Equalf(t, len(keys), assigned,
+			"keys silently dropped: only %d/%d keys were assigned to a region", assigned, len(keys))
 	})
 }
 

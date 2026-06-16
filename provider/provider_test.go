@@ -351,7 +351,7 @@ func TestClosestPeersToPrefixRandom(t *testing.T) {
 		require.True(t, r.connectivity.IsOnline())
 
 		for _, prefix := range []bitstr.Key{"", "0", "1", "00", "01", "10", "11", "000", "001", "010", "011", "100", "101", "110", "111"} {
-			closestPeers, err := r.closestPeersToPrefix(prefix)
+			closestPeers, _, err := r.closestPeersToPrefix(prefix)
 			require.NoError(t, err, "failed for prefix %s", prefix)
 			subtrieSize := 0
 			currPrefix := prefix
@@ -411,7 +411,7 @@ func TestClosestPeersToPrefixSameCPL(t *testing.T) {
 		// No matter what the requested prefix is, the returned closest peers
 		// should be the ones supplied by the GetClosestPeers function.
 		for _, prefix := range []bitstr.Key{"1111", "0111", "0011", "0001", "0000", "1", ""} {
-			closestPeers, err := prov.closestPeersToPrefix(prefix)
+			closestPeers, _, err := prov.closestPeersToPrefix(prefix)
 			require.NoError(t, err)
 			require.ElementsMatch(t, peers, closestPeers)
 		}
@@ -453,7 +453,7 @@ func TestClosestPeersToPrefixSinglePeer(t *testing.T) {
 		// No matter what the requested prefix is, the closest peers to prefix
 		// should always be the only peer.
 		for _, prefix := range []bitstr.Key{"1111", "0111", "0011", "0001", "0000", "1", ""} {
-			closestPeers, err := prov.closestPeersToPrefix(prefix)
+			closestPeers, _, err := prov.closestPeersToPrefix(prefix)
 			require.NoError(t, err)
 			require.Len(t, closestPeers, 1)
 			require.Contains(t, closestPeers, p)
@@ -1826,7 +1826,7 @@ func TestClosestPeersToPrefixErrors(t *testing.T) {
 		}
 
 		prefix := bitstr.Key("0101")
-		_, err = prov.closestPeersToPrefix(prefix)
+		_, _, err = prov.closestPeersToPrefix(prefix)
 
 		require.Error(t, err)
 		require.Equal(t, int32(0), callCount.Load(), "router should not be called when offline")
@@ -1856,7 +1856,7 @@ func TestClosestPeersToPrefixErrors(t *testing.T) {
 			require.True(t, prov.connectivity.IsOnline())
 
 			prefix := bitstr.Key("0101")
-			_, err := prov.closestPeersToPrefix(prefix)
+			_, _, err := prov.closestPeersToPrefix(prefix)
 
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "network timeout")

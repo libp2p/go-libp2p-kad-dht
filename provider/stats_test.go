@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -700,6 +701,10 @@ func (b *blockingSizeKeystore) Get(_ context.Context, _ bitstr.Key) ([]multihash
 	return nil, nil
 }
 
+func (b *blockingSizeKeystore) CountKeysUpTo(_ context.Context, _ bitstr.Key, _ int) (int, error) {
+	return 0, nil
+}
+
 func (b *blockingSizeKeystore) ContainsPrefix(_ context.Context, _ bitstr.Key) (bool, error) {
 	return false, nil
 }
@@ -752,6 +757,125 @@ func TestStatsContextDeadline(t *testing.T) {
 		require.Emptyf(t, s, "Stats should return a zero snapshot when ctx is done")
 		require.GreaterOrEqualf(t, elapsed, deadline, "Stats should not return before the deadline elapses")
 		require.Lessf(t, elapsed, deadline+time.Second, "Stats should return shortly after the deadline elapses")
+	})
+}
+
+// reprovideKeystoreStub is a keystore.Keystore double for steering
+// batchReprovide down a chosen path. CountKeysUpTo and Get return preset
+// values, and Get counts its calls so a test can tell whether a region was
+// loaded. Methods batchReprovide never reaches return zero values.
+type reprovideKeystoreStub struct {
+	countResult int
+	countErr    error
+	getResult   []multihash.Multihash
+	getErr      error
+	getCalls    atomic.Int64
+}
+
+var _ keystore.Keystore = (*reprovideKeystoreStub)(nil)
+
+func (k *reprovideKeystoreStub) CountKeysUpTo(context.Context, bitstr.Key, int) (int, error) {
+	return k.countResult, k.countErr
+}
+
+func (k *reprovideKeystoreStub) Get(context.Context, bitstr.Key) ([]multihash.Multihash, error) {
+	k.getCalls.Add(1)
+	return k.getResult, k.getErr
+}
+
+func (k *reprovideKeystoreStub) Put(context.Context, ...multihash.Multihash) ([]multihash.Multihash, error) {
+	return nil, nil
+}
+
+func (k *reprovideKeystoreStub) ContainsPrefix(context.Context, bitstr.Key) (bool, error) {
+	return false, nil
+}
+
+func (k *reprovideKeystoreStub) Delete(context.Context, ...multihash.Multihash) error { return nil }
+
+func (k *reprovideKeystoreStub) Empty(context.Context) error { return nil }
+
+func (k *reprovideKeystoreStub) Size(context.Context) (int, error) { return 0, nil }
+
+func (k *reprovideKeystoreStub) BatchSize() int { return 256 }
+
+func (k *reprovideKeystoreStub) Close() error { return nil }
+
+// newReprovideStubProvider builds a provider wired to the given router and
+// keystore stub, with the reprovide schedule parked an hour out so only the
+// test's direct batchReprovide call runs.
+func newReprovideStubProvider(t *testing.T, router *mockRouter, ks keystore.Keystore) *SweepingProvider {
+	t.Helper()
+	pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka")
+	require.NoError(t, err)
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(context.Context, peer.ID, *pb.Message) error { return nil },
+	}
+	prov, err := New(
+		WithPeerID(pid),
+		WithRouter(router),
+		WithMessageSender(msgSender),
+		WithSelfAddrs(getMockAddrs(t)),
+		WithKeystore(ks),
+		WithReprovideInterval(time.Hour),
+		WithSkipBootstrapReprovide(true),
+	)
+	require.NoError(t, err)
+	return prov
+}
+
+// TestBatchReprovideSkipsLoadWhenRegionEmpty verifies that batchReprovide
+// counts a region before loading it. When CountKeysUpTo reports zero keys, the
+// region is never fetched, so Get stays untouched.
+func TestBatchReprovideSkipsLoadWhenRegionEmpty(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ks := &reprovideKeystoreStub{countResult: 0}
+		// A router that answers every lookup keeps the node online; the empty
+		// count returns before any lookup happens regardless.
+		prov := newReprovideStubProvider(t, &mockRouter{}, ks)
+		defer prov.Close()
+		synctest.Wait()
+
+		prov.batchReprovide(bitstr.Key("0"))
+
+		require.Zero(t, ks.getCalls.Load(), "an empty region must not be loaded")
+		require.Zero(t, prov.stats.ongoingReprovides.opCount.Load())
+		require.Zero(t, prov.stats.ongoingReprovides.keyCount.Load())
+	})
+}
+
+// TestBatchReprovideBalancesGaugeWhenLoadFails verifies that a failed region
+// load leaves the ongoing-reprovides gauge at zero and reschedules the prefix.
+// batchReprovide starts the gauge only after Get succeeds, so a load error adds
+// nothing to it. A small key count takes the individual-provide path, which
+// loads without exploring the swarm; the node is kept offline so the
+// late-reprovide retry loop stays idle and the gauge and queue settle.
+func TestBatchReprovideBalancesGaugeWhenLoadFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ks := &reprovideKeystoreStub{
+			countResult: individualProvideThreshold, // small region, individual path
+			getErr:      errors.New("datastore read failed"),
+		}
+		// A router that errors on every lookup keeps the node offline.
+		offline := &mockRouter{
+			getClosestPeersFunc: func(context.Context, string) ([]peer.ID, error) {
+				return nil, errors.New("offline")
+			},
+		}
+		prov := newReprovideStubProvider(t, offline, ks)
+		defer prov.Close()
+		synctest.Wait()
+		require.False(t, prov.connectivity.IsOnline())
+
+		prefix := bitstr.Key("0")
+		require.True(t, prov.reprovideQueue.IsEmpty(), "queue should start empty")
+
+		prov.batchReprovide(prefix)
+
+		require.Positive(t, ks.getCalls.Load(), "the individual path must attempt the load")
+		require.Zero(t, prov.stats.ongoingReprovides.opCount.Load(), "a failed load must leave no ongoing operation")
+		require.Zero(t, prov.stats.ongoingReprovides.keyCount.Load(), "a failed load must leak no key count")
+		require.Equal(t, 1, prov.reprovideQueue.Size(), "a failed reprovide must reschedule the prefix")
 	})
 }
 

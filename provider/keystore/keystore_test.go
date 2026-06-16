@@ -3,10 +3,13 @@ package keystore
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/query"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal/keyspace"
 	mh "github.com/multiformats/go-multihash"
 
@@ -100,6 +103,26 @@ func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
 	return mhs
 }
 
+// mapDatastoreFactory returns an in-memory WithDatastoreFactory pair, mirroring
+// how Kubo runs the ResettableKeystore in factory mode (separate per-namespace
+// datastores) but without touching the filesystem.
+func mapDatastoreFactory() (func(string) (ds.Batching, error), func(string) error) {
+	stores := map[string]ds.Batching{}
+	create := func(suffix string) (ds.Batching, error) {
+		d := ds.NewMapDatastore()
+		stores[suffix] = d
+		return d, nil
+	}
+	destroy := func(suffix string) error {
+		if d, ok := stores[suffix]; ok {
+			_ = d.Close()
+			delete(stores, suffix)
+		}
+		return nil
+	}
+	return create, destroy
+}
+
 func TestKeyStoreContainsPrefix(t *testing.T) {
 	t.Run("Keystore", func(t *testing.T) {
 		ds := ds.NewMapDatastore()
@@ -160,6 +183,277 @@ func testKeystoreContainsPrefixImpl(t *testing.T, store Keystore) {
 	ok, err = store.ContainsPrefix(ctx, bitstr.Key(strings.Repeat("0", 8)+"1"))
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestKeystoreCountKeysUpTo(t *testing.T) {
+	// A small prefixBits keeps the "long" prefixes that exercise countUpTo's
+	// per-key decodeKey/IsPrefix filter (those exceeding prefixBits) only a few
+	// bits long, so the rejection sampling below stays cheap.
+	const prefixBits = 8
+	bucket := bitstr.Key(strings.Repeat("0", prefixBits))      // "00000000"
+	otherBucket := bitstr.Key(strings.Repeat("1", prefixBits)) // "11111111"
+	// Generate the keys once and reuse them across both store implementations.
+	bucketKeys := genMultihashesMatchingPrefix(bucket, 3)
+	otherKeys := genMultihashesMatchingPrefix(otherBucket, 2)
+
+	t.Run("Keystore", func(t *testing.T) {
+		ds := ds.NewMapDatastore()
+		defer ds.Close()
+		store, err := NewKeystore(ds, WithPrefixBits(prefixBits))
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeystoreCountKeysUpToImpl(t, store, bucket, bucketKeys, otherKeys)
+	})
+
+	// Exercise the ResettableKeystore in both storage modes. They take
+	// different datastore paths that countUpTo's long-prefix decodeKey/IsPrefix
+	// filter must round-trip correctly: shared mode wraps both reset slots under
+	// the non-colliding "/k0" and "/k1" prefixes via namespace.Wrap (see
+	// sharedSlotPrefix), while factory mode (how Kubo runs it, for full disk
+	// reclamation) keeps each namespace in its own datastore.
+	t.Run("ResettableKeystore/shared", func(t *testing.T) {
+		store, err := NewResettableKeystore(ds.NewMapDatastore(),
+			KeystoreOption(WithPrefixBits(prefixBits)))
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeystoreCountKeysUpToImpl(t, store, bucket, bucketKeys, otherKeys)
+	})
+
+	t.Run("ResettableKeystore/factory", func(t *testing.T) {
+		create, destroy := mapDatastoreFactory()
+		store, err := NewResettableKeystore(ds.NewMapDatastore(),
+			WithDatastoreFactory(create, destroy),
+			KeystoreOption(WithPrefixBits(prefixBits)))
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeystoreCountKeysUpToImpl(t, store, bucket, bucketKeys, otherKeys)
+	})
+}
+
+func testKeystoreCountKeysUpToImpl(t *testing.T, store Keystore, bucket bitstr.Key, bucketKeys, otherKeys []mh.Multihash) {
+	ctx := context.Background()
+
+	// Empty keystore counts zero (limit 0 means no cap).
+	n, err := store.CountKeysUpTo(ctx, bitstr.Key("1"), 0)
+	require.NoError(t, err)
+	require.Zero(t, n)
+
+	// bucketKeys share the bucket prefix (prefixBits), so they land in one
+	// datastore bucket. A prefix longer than prefixBits then exercises countUpTo's
+	// per-key filter (decodeKey and IsPrefix), the path that differs from a
+	// plain datastore prefix scan. otherKeys live in a different bucket so counts
+	// must filter rather than just total the keystore.
+	_, err = store.Put(ctx, bucketKeys...)
+	require.NoError(t, err)
+	_, err = store.Put(ctx, otherKeys...)
+	require.NoError(t, err)
+
+	// A prefix 4 bits longer than the bucket (so > prefixBits), derived from a
+	// real key so it matches that key while the filter discards bucket peers
+	// that diverge in the extra bits.
+	longPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(bucketKeys[0]))[:len(bucket)+4])
+
+	// With no cap (limit 0), CountKeysUpTo must agree with len(Get) for every
+	// prefix, across the short (<=prefixBits) and long (>prefixBits) branches.
+	for _, prefix := range []bitstr.Key{"0", "1", bucket, longPrefix} {
+		got, err := store.Get(ctx, prefix)
+		require.NoError(t, err)
+		n, err := store.CountKeysUpTo(ctx, prefix, 0)
+		require.NoError(t, err)
+		require.Equalf(t, len(got), n, "CountKeysUpTo disagrees with Get for prefix %q", prefix)
+	}
+
+	// Exact uncapped counts: the full bucket, empty prefix and a prefix matching
+	// neither bucket in a non-empty keystore.
+	n, err = store.CountKeysUpTo(ctx, bucket, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(bucketKeys), n)
+
+	n, err = store.CountKeysUpTo(ctx, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, len(bucketKeys)+len(otherKeys), n)
+
+	n, err = store.CountKeysUpTo(ctx, bitstr.Key("01"), 0)
+	require.NoError(t, err)
+	require.Zero(t, n)
+
+	// A negative limit means no cap, just like 0.
+	n, err = store.CountKeysUpTo(ctx, "", -1)
+	require.NoError(t, err)
+	require.Equal(t, len(bucketKeys)+len(otherKeys), n)
+
+	// A positive limit caps the result at min(total, limit). Sweep limits below,
+	// at and above the total for the short branch (bucket, ""), the long branch
+	// (longPrefix), and a non-matching prefix, so the early-exit and cap hold on
+	// every path.
+	for _, prefix := range []bitstr.Key{bucket, "", longPrefix, bitstr.Key("01")} {
+		total, err := store.CountKeysUpTo(ctx, prefix, 0)
+		require.NoError(t, err)
+		for limit := 1; limit <= total+2; limit++ {
+			n, err := store.CountKeysUpTo(ctx, prefix, limit)
+			require.NoError(t, err)
+			require.Equalf(t, min(total, limit), n, "CountKeysUpTo(%q, %d)", prefix, limit)
+		}
+	}
+}
+
+// countingDatastore wraps a datastore and counts how many query entries are
+// pulled through it, so a test can assert that CountKeysUpTo stops scanning once
+// it has enough matches instead of reading the whole match set.
+type countingDatastore struct {
+	ds.Batching
+	reads atomic.Int64
+}
+
+func (c *countingDatastore) Query(ctx context.Context, q query.Query) (query.Results, error) {
+	res, err := c.Batching.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	// Re-serve the underlying entries through an iterator that counts each one
+	// the consumer pulls. The inner datastore still applies q (prefix, limit,
+	// keys-only), so a short-prefix count delegating its cap to query.Limit reads
+	// only that many entries here.
+	entries, err := res.Rest()
+	if err != nil {
+		return nil, err
+	}
+	i := 0
+	return query.ResultsFromIterator(q, query.Iterator{
+		Next: func() (query.Result, bool) {
+			if i >= len(entries) {
+				return query.Result{}, false
+			}
+			e := entries[i]
+			i++
+			c.reads.Add(1)
+			return query.Result{Entry: e}, true
+		},
+	}), nil
+}
+
+func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
+	// prefixBits 0 keeps every key under a single datastore path, so a non-empty
+	// prefix always takes countUpTo's per-key filter branch (BitLen > prefixBits)
+	// while the empty prefix takes the query.Limit-delegation branch. Every key
+	// matches the 1-bit prefix "0", so they are cheap to generate yet numerous
+	// enough that a full scan is plainly distinguishable from an early exit.
+	const total = 512
+	keys := genMultihashesMatchingPrefix("0", total)
+
+	newStore := func(t *testing.T) (Keystore, *countingDatastore) {
+		c := &countingDatastore{Batching: ds.NewMapDatastore()}
+		store, err := NewKeystore(c, WithPrefixBits(0))
+		require.NoError(t, err)
+		_, err = store.Put(context.Background(), keys...)
+		require.NoError(t, err)
+		c.reads.Store(0) // discard reads from setup
+		t.Cleanup(func() { _ = store.Close() })
+		return store, c
+	}
+
+	t.Run("filter branch breaks at the cap", func(t *testing.T) {
+		// "0" matches every key but is longer than prefixBits, so countUpTo filters
+		// per key and relies on its own break to stop. A small cap returns the cap
+		// and reads far fewer than total entries (the cap plus the datastore's
+		// keys-only read-ahead buffer, not the whole bucket).
+		const limit = 3
+		store, c := newStore(t)
+		n, err := store.CountKeysUpTo(context.Background(), "0", limit)
+		require.NoError(t, err)
+		require.Equal(t, limit, n)
+		require.Lessf(t, c.reads.Load(), int64(total),
+			"capped count read %d of %d entries instead of stopping early", c.reads.Load(), total)
+	})
+
+	t.Run("filter branch scans everything when uncapped", func(t *testing.T) {
+		store, c := newStore(t)
+		n, err := store.CountKeysUpTo(context.Background(), "0", 0)
+		require.NoError(t, err)
+		require.Equal(t, total, n)
+		require.Equalf(t, int64(total), c.reads.Load(),
+			"uncapped count read %d entries, expected every one of %d", c.reads.Load(), total)
+	})
+
+	t.Run("short prefix delegates the cap to the query", func(t *testing.T) {
+		// The empty prefix has BitLen 0 (<= prefixBits), so countUpTo sets
+		// query.Limit and the datastore hands back exactly the cap entries.
+		for _, limit := range []int{1, 3, 50} {
+			store, c := newStore(t)
+			n, err := store.CountKeysUpTo(context.Background(), "", limit)
+			require.NoError(t, err)
+			require.Equal(t, limit, n)
+			require.Equalf(t, int64(limit), c.reads.Load(),
+				"short-prefix count read %d entries for cap %d", c.reads.Load(), limit)
+		}
+	})
+}
+
+// failingQueryDatastore makes every datastore query fail once armed. It lets a
+// test drive countUpTo's query down its error path without disturbing the size
+// scan that the keystore runs at startup.
+type failingQueryDatastore struct {
+	ds.Batching
+	fail atomic.Bool
+	err  error
+}
+
+func (d *failingQueryDatastore) Query(ctx context.Context, q query.Query) (query.Results, error) {
+	if d.fail.Load() {
+		return nil, d.err
+	}
+	return d.Batching.Query(ctx, q)
+}
+
+// TestKeystoreCountKeysUpToPropagatesQueryError checks that CountKeysUpTo
+// surfaces a datastore query failure to its caller. The provider reschedules a
+// region when this count fails, so a swallowed error would silently skip that
+// reschedule.
+func TestKeystoreCountKeysUpToPropagatesQueryError(t *testing.T) {
+	ctx := context.Background()
+	wantErr := errors.New("datastore query failed")
+	d := &failingQueryDatastore{Batching: ds.NewMapDatastore(), err: wantErr}
+
+	store, err := NewKeystore(d)
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Size completes the startup size scan, so arming the failure now affects
+	// only the count query that follows.
+	_, err = store.Size(ctx)
+	require.NoError(t, err)
+	d.fail.Store(true)
+
+	n, err := store.CountKeysUpTo(ctx, bitstr.Key("1"), 0)
+	require.ErrorIs(t, err, wantErr)
+	require.Zero(t, n)
+}
+
+// TestKeystoreCountKeysUpToPropagatesDecodeError checks that CountKeysUpTo
+// surfaces a key it cannot decode. A prefix longer than prefixBits makes
+// countUpTo decode every matching datastore key to filter it, so a stored key
+// with a corrupt suffix must turn into an error rather than a wrong count.
+func TestKeystoreCountKeysUpToPropagatesDecodeError(t *testing.T) {
+	ctx := context.Background()
+	const prefixBits = 8
+	d := ds.NewMapDatastore()
+
+	// A key in the all-zero bucket whose final component is not valid base64url.
+	// decodeKey base64-decodes that suffix, so it fails on this key.
+	corrupt := ds.NewKey("/0/0/0/0/0/0/0/0/!not-base64")
+	require.NoError(t, d.Put(ctx, corrupt, []byte("v")))
+
+	store, err := NewKeystore(d, WithPrefixBits(prefixBits))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// A 9-bit prefix exceeds prefixBits, so countUpTo decodes each matching key.
+	n, err := store.CountKeysUpTo(ctx, bitstr.Key(strings.Repeat("0", prefixBits+1)), 0)
+	require.Error(t, err)
+	require.Zero(t, n)
 }
 
 func TestKeystoreDelete(t *testing.T) {

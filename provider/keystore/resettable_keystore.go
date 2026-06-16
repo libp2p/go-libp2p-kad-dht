@@ -338,6 +338,10 @@ func (s *ResettableKeystore) worker() {
 
 			case opSize:
 				op.response <- operationResponse{size: s.size}
+
+			case opCount:
+				n, err := s.countUpTo(op.ctx, op.prefix, op.limit)
+				op.response <- operationResponse{size: n, err: err}
 			}
 		case op := <-s.resetOps:
 			s.handleResetOp(op)

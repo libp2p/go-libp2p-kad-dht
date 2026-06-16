@@ -3,6 +3,7 @@ package keystore
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -205,14 +206,22 @@ func TestKeystoreCountKeysUpTo(t *testing.T) {
 		testKeystoreCountKeysUpToImpl(t, store, bucket, bucketKeys, otherKeys)
 	})
 
-	// Exercise the ResettableKeystore in factory mode, matching how Kubo
-	// constructs it (keystore.WithDatastoreFactory). Factory mode keeps each
-	// namespace in its own datastore with no namespace.Wrap, so keys whose path
-	// starts with the active-namespace digit (e.g. bit 0 under namespace "/0")
-	// still decode correctly for prefixes longer than prefixBits. The default
-	// shared-datastore constructor has a namespace.Wrap round-trip bug on that
-	// path; Kubo sidesteps it by using factory mode, and so does this test.
-	t.Run("ResettableKeystore", func(t *testing.T) {
+	// Exercise the ResettableKeystore in both storage modes. They take
+	// different datastore paths that countUpTo's long-prefix decodeKey/IsPrefix
+	// filter must round-trip correctly: shared mode wraps both reset slots under
+	// the non-colliding "/k0" and "/k1" prefixes via namespace.Wrap (see
+	// sharedSlotPrefix), while factory mode (how Kubo runs it, for full disk
+	// reclamation) keeps each namespace in its own datastore.
+	t.Run("ResettableKeystore/shared", func(t *testing.T) {
+		store, err := NewResettableKeystore(ds.NewMapDatastore(),
+			KeystoreOption(WithPrefixBits(prefixBits)))
+		require.NoError(t, err)
+		defer store.Close()
+
+		testKeystoreCountKeysUpToImpl(t, store, bucket, bucketKeys, otherKeys)
+	})
+
+	t.Run("ResettableKeystore/factory", func(t *testing.T) {
 		create, destroy := mapDatastoreFactory()
 		store, err := NewResettableKeystore(ds.NewMapDatastore(),
 			WithDatastoreFactory(create, destroy),
@@ -381,6 +390,70 @@ func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
 				"short-prefix count read %d entries for cap %d", c.reads.Load(), limit)
 		}
 	})
+}
+
+// failingQueryDatastore makes every datastore query fail once armed. It lets a
+// test drive countUpTo's query down its error path without disturbing the size
+// scan that the keystore runs at startup.
+type failingQueryDatastore struct {
+	ds.Batching
+	fail atomic.Bool
+	err  error
+}
+
+func (d *failingQueryDatastore) Query(ctx context.Context, q query.Query) (query.Results, error) {
+	if d.fail.Load() {
+		return nil, d.err
+	}
+	return d.Batching.Query(ctx, q)
+}
+
+// TestKeystoreCountKeysUpToPropagatesQueryError checks that CountKeysUpTo
+// surfaces a datastore query failure to its caller. The provider reschedules a
+// region when this count fails, so a swallowed error would silently skip that
+// reschedule.
+func TestKeystoreCountKeysUpToPropagatesQueryError(t *testing.T) {
+	ctx := context.Background()
+	wantErr := errors.New("datastore query failed")
+	d := &failingQueryDatastore{Batching: ds.NewMapDatastore(), err: wantErr}
+
+	store, err := NewKeystore(d)
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Size completes the startup size scan, so arming the failure now affects
+	// only the count query that follows.
+	_, err = store.Size(ctx)
+	require.NoError(t, err)
+	d.fail.Store(true)
+
+	n, err := store.CountKeysUpTo(ctx, bitstr.Key("1"), 0)
+	require.ErrorIs(t, err, wantErr)
+	require.Zero(t, n)
+}
+
+// TestKeystoreCountKeysUpToPropagatesDecodeError checks that CountKeysUpTo
+// surfaces a key it cannot decode. A prefix longer than prefixBits makes
+// countUpTo decode every matching datastore key to filter it, so a stored key
+// with a corrupt suffix must turn into an error rather than a wrong count.
+func TestKeystoreCountKeysUpToPropagatesDecodeError(t *testing.T) {
+	ctx := context.Background()
+	const prefixBits = 8
+	d := ds.NewMapDatastore()
+
+	// A key in the all-zero bucket whose final component is not valid base64url.
+	// decodeKey base64-decodes that suffix, so it fails on this key.
+	corrupt := ds.NewKey("/0/0/0/0/0/0/0/0/!not-base64")
+	require.NoError(t, d.Put(ctx, corrupt, []byte("v")))
+
+	store, err := NewKeystore(d, WithPrefixBits(prefixBits))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// A 9-bit prefix exceeds prefixBits, so countUpTo decodes each matching key.
+	n, err := store.CountKeysUpTo(ctx, bitstr.Key(strings.Repeat("0", prefixBits+1)), 0)
+	require.Error(t, err)
+	require.Zero(t, n)
 }
 
 func TestKeystoreDelete(t *testing.T) {

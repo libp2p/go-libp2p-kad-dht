@@ -2276,11 +2276,17 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		require.NoError(t, dht2.host.Close())
 		require.NoError(t, dht1.host.Network().ClosePeer(dht2.self))
 		dht1.routingTable.RemovePeer(dht2.self)
-		require.NotContains(t, dht2.self, dht1.routingTable.ListPeers())
+		require.NotContains(t, dht1.routingTable.ListPeers(), dht2.self)
+
+		// Emptying the routing table automatically triggers fixLowPeers, which
+		// dials the configured bootstrap peer; once it is added, an automatic
+		// refresh discovers the peer the bootstrapper is connected to. This
+		// multi-step async recovery needs a generous deadline so it doesn't
+		// race a tight timeout on slow CI runners.
 		require.Eventually(t, func() bool {
 			return dht1.routingTable.Size() == 2 && dht1.routingTable.Find(bootstrappers[0].self) != "" &&
 				dht1.routingTable.Find(bootstrapcons[0].self) != ""
-		}, 5*time.Second, 500*time.Millisecond)
+		}, 30*time.Second, 100*time.Millisecond)
 
 	}
 
@@ -2317,12 +2323,17 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		connect(t, ctx, dht1, dht2)
 		require.NoError(t, dht2.setMode(modeClient))
 
+		// dht2 switching to client mode makes dht1 drop it from its routing
+		// table, emptying it and automatically triggering bootstrap from the
+		// two configured peers; an automatic refresh then discovers the peers
+		// they are connected to. This multi-step async recovery needs a
+		// generous deadline so it doesn't race a tight timeout on slow CI
+		// runners.
 		require.Eventually(t, func() bool {
 			rt := dht1.routingTable
-
 			return rt.Size() == 4 && rt.Find(bootstrappers[1].self) != "" &&
 				rt.Find(bootstrappers[2].self) != "" && rt.Find(bootstrapcons[1].self) != "" && rt.Find(bootstrapcons[2].self) != ""
-		}, 5*time.Second, 500*time.Millisecond)
+		}, 30*time.Second, 100*time.Millisecond)
 	}
 }
 

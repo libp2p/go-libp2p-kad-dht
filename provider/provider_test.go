@@ -511,6 +511,57 @@ func TestExploreSwarmClusteredPeersCoversAllKeys(t *testing.T) {
 	})
 }
 
+// TestExploreSwarmClusteredPeersBelowBucketSizeCoversAllKeys is the
+// rf < bucketSize variant of #1263. With a custom WithReplicationFactor set
+// below the bucket size, closestPeersToPrefix can satisfy the enough-peers
+// break (len(allClosestPeers) >= replicationFactor) before the requested prefix
+// is broadened, returning a coveredPrefix that points at an empty branch. Unless
+// the covered prefix is clamped to what the gathered peers actually share,
+// RegionsFromPeers walks into that empty branch, returns no regions, and every
+// key for the region is silently dropped.
+func TestExploreSwarmClusteredPeersBelowBucketSizeCoversAllKeys(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// rf below the bucket size, clustered swarm: 12 peers all under "11",
+		// split 6 under "110" and 6 under "111". None under the requested "10".
+		replFactor := 4
+		peers := append(genPeersWithPrefix("110", 6), genPeersWithPrefix("111", 6)...)
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return peers, nil
+			},
+		}
+
+		prov := SweepingProvider{
+			router:            router,
+			logger:            defaultLogger,
+			connectivity:      noopConnectivityChecker(),
+			replicationFactor: replFactor,
+			stats:             newOperationStats(time.Hour, time.Minute),
+		}
+		prov.connectivity.Start()
+		defer prov.connectivity.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		keys := genBalancedMultihashes(2)
+
+		// Reprovide a region that does NOT match the peer cluster.
+		regions, _, err := prov.exploreSwarm("10")
+		require.NoError(t, err)
+
+		regions = keyspace.AssignKeysToRegions(regions, keys)
+
+		assigned := 0
+		for _, r := range regions {
+			assigned += r.Keys.Size()
+		}
+		require.Equalf(t, len(keys), assigned,
+			"keys silently dropped: only %d/%d keys were assigned to a region", assigned, len(keys))
+	})
+}
+
 func TestGroupAndScheduleKeysByPrefix(t *testing.T) {
 	prov := SweepingProvider{
 		order:             bit256.ZeroKey(),

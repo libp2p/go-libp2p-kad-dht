@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"math/rand"
 	"slices"
 	"strconv"
 	"strings"
@@ -582,6 +583,357 @@ func TestExploreSwarmClusteredPeersBelowBucketSizeCoversAllKeys(t *testing.T) {
 		}
 		require.Equalf(t, len(keys), assigned,
 			"keys silently dropped: only %d/%d keys were assigned to a region", assigned, len(keys))
+	})
+}
+
+// TestExploreSwarmPrefixWithEnoughPeersNotOverBroadened guards against
+// over-broadening: when the requested prefix already has >= replicationFactor
+// peers under it, exploreSwarm must NOT widen the covered prefix just because a
+// GetClosestPeers response also returned farther sibling peers (which happens
+// whenever the prefix's subtree is smaller than the bucket size). Over-broadening
+// would make a reprovide of "111" reprovide the whole "1" subtree and collapse
+// the schedule.
+func TestExploreSwarmPrefixWithEnoughPeersNotOverBroadened(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		replFactor := 4
+		// "111" has 5 peers (>= rf). Siblings exist so GetClosestPeers responses
+		// for a "111" query also include peers outside "111".
+		under111 := genPeersWithPrefix("111", 5)
+		peers := slices.Concat(
+			under111,
+			genPeersWithPrefix("110", 3),
+			genPeersWithPrefix("10", 4),
+			genPeersWithPrefix("0", 8),
+		)
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				return peers, nil
+			},
+		}
+
+		prov := SweepingProvider{
+			router:            router,
+			logger:            defaultLogger,
+			connectivity:      noopConnectivityChecker(),
+			replicationFactor: replFactor,
+			stats:             newOperationStats(time.Hour, time.Minute),
+		}
+		prov.connectivity.Start()
+		defer prov.connectivity.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		regions, coveredPrefix, err := prov.exploreSwarm("111")
+		require.NoError(t, err)
+
+		require.Equalf(t, bitstr.Key("111"), coveredPrefix,
+			"requested '111' (5 >= rf peers) but covered prefix widened to %q", coveredPrefix)
+
+		foundPeers := make(map[peer.ID]struct{})
+		for _, r := range regions {
+			for _, p := range keyspace.AllValues(r.Peers, bit256.ZeroKey()) {
+				foundPeers[p] = struct{}{}
+			}
+		}
+		require.Lenf(t, foundPeers, len(under111),
+			"region holds %d peers, expected the %d peers under '111'", len(foundPeers), len(under111))
+		for _, p := range under111 {
+			require.Containsf(t, foundPeers, p, "peer under '111' missing from region")
+		}
+	})
+}
+
+// peersToTrie builds a kademlia-id trie from a list of peers.
+func peersToTrie(peers []peer.ID) *trie.Trie[bit256.Key, peer.ID] {
+	t := trie.New[bit256.Key, peer.ID]()
+	for _, p := range peers {
+		t.Add(keyspace.PeerIDToBit256(p), p)
+	}
+	return t
+}
+
+// peersUnderTrie returns all peers in `peersTrie` whose kademlia id is under
+// `prefix`.
+func peersUnderTrie(peersTrie *trie.Trie[bit256.Key, peer.ID], prefix bitstr.Key) []peer.ID {
+	sub, ok := keyspace.FindSubtrie(peersTrie, prefix)
+	if !ok {
+		return nil
+	}
+	return keyspace.AllValues(sub, bit256.ZeroKey())
+}
+
+// referenceCoveredPrefix independently computes the prefix exploreSwarm should
+// cover for a request: the longest ancestor-or-equal of `prefix` whose subtrie
+// holds at least `rf` peers, or "" if even the whole network has fewer.
+func referenceCoveredPrefix(peersTrie *trie.Trie[bit256.Key, peer.ID], prefix bitstr.Key, rf int) bitstr.Key {
+	cp := prefix
+	for {
+		size := 0
+		if sub, ok := keyspace.FindSubtrie(peersTrie, cp); ok {
+			size = sub.Size()
+		}
+		if size >= rf || len(cp) == 0 {
+			return cp
+		}
+		cp = cp[:len(cp)-1]
+	}
+}
+
+// realisticRouter mimics a real DHT GetClosestPeers: it returns the bucketSize
+// peers closest to the queried key, unlike the all-peers mocks used elsewhere.
+func realisticRouter(peers []peer.ID, bucketSize int) *mockRouter {
+	return &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			sorted := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+			return sorted[:min(bucketSize, len(sorted))], nil
+		},
+	}
+}
+
+// TestExploreSwarmDifferential cross-checks exploreSwarm against an independent
+// reference across many network topologies, requested prefixes, and replication
+// factors, using a realistic SortClosestPeers[:bucketSize] router with
+// rf < bucketSize (the regime where queries also return sibling peers). For
+// every case it asserts the covered prefix equals the reference and the regions
+// hold exactly the peers under it (i.e. the responsible zone was fully explored,
+// neither under- nor over-broadened), and that no key is dropped.
+func TestExploreSwarmDifferential(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bucketSize = 20
+		networks := map[string][]peer.ID{
+			"uniform-100":         random.Peers(100),
+			"uniform-60":          random.Peers(60),
+			"uniform-25":          random.Peers(25),
+			"cluster-10-under-10": genPeersWithPrefix("10", 10),
+			"dense-under-1":       genPeersWithPrefix("1", 50),
+			"split-110-111":       slices.Concat(genPeersWithPrefix("110", 6), genPeersWithPrefix("111", 6)),
+			"skewed-1-vs-11":      slices.Concat(genPeersWithPrefix("100", 1), genPeersWithPrefix("101", 11)),
+			"deep-cluster-1011":   genPeersWithPrefix("1011", 8),
+			"far-clusters":        slices.Concat(genPeersWithPrefix("0", 15), genPeersWithPrefix("111", 5)),
+		}
+		prefixes := []bitstr.Key{"", "0", "1", "00", "01", "10", "11", "000", "001", "010", "011", "100", "101", "110", "111"}
+		rfs := []int{1, 3, 5, 8}
+
+		keys := genBalancedMultihashes(4)
+
+		for name, peers := range networks {
+			peersTrie := peersToTrie(peers)
+			for _, rf := range rfs {
+				prov := SweepingProvider{
+					router:            realisticRouter(peers, bucketSize),
+					order:             bit256.ZeroKey(),
+					logger:            defaultLogger,
+					connectivity:      noopConnectivityChecker(),
+					replicationFactor: rf,
+					stats:             newOperationStats(time.Hour, time.Minute),
+				}
+				prov.connectivity.Start()
+				synctest.Wait()
+				require.True(t, prov.connectivity.IsOnline())
+
+				for _, prefix := range prefixes {
+					regions, coveredPrefix, err := prov.exploreSwarm(prefix)
+					require.NoErrorf(t, err, "net=%s rf=%d prefix=%q", name, rf, prefix)
+
+					wantPrefix := referenceCoveredPrefix(peersTrie, prefix, rf)
+					require.Equalf(t, wantPrefix, coveredPrefix,
+						"net=%s rf=%d prefix=%q: wrong covered prefix", name, rf, prefix)
+
+					regionPeers := []peer.ID{}
+					for _, r := range regions {
+						regionPeers = append(regionPeers, keyspace.AllValues(r.Peers, bit256.ZeroKey())...)
+					}
+					require.ElementsMatchf(t, peersUnderTrie(peersTrie, wantPrefix), regionPeers,
+						"net=%s rf=%d prefix=%q: regions don't hold exactly the peers under %q",
+						name, rf, prefix, wantPrefix)
+
+					// No under-replication: when the covered zone holds enough
+					// peers, every region must too (extractMinimalRegions only
+					// splits when both sides keep >= rf peers).
+					if len(regionPeers) >= rf {
+						for _, r := range regions {
+							require.GreaterOrEqualf(t, r.Peers.Size(), rf,
+								"net=%s rf=%d prefix=%q: region %q has %d < rf peers",
+								name, rf, prefix, r.Prefix, r.Peers.Size())
+						}
+					}
+
+					assigned := 0
+					for _, r := range keyspace.AssignKeysToRegions(regions, keys) {
+						assigned += r.Keys.Size()
+					}
+					require.Equalf(t, len(keys), assigned,
+						"net=%s rf=%d prefix=%q: %d/%d keys dropped", name, rf, prefix, assigned, len(keys))
+				}
+				prov.connectivity.Close()
+			}
+		}
+	})
+}
+
+// TestExploreSwarmFuzz randomizes network size, membership, requested prefix,
+// and replication factor (rf < bucketSize) against the realistic router, and
+// checks the same invariants as the differential test: the covered prefix and
+// the explored peer set must match the independent reference for every case.
+func TestExploreSwarmFuzz(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bucketSize = 20
+		rng := rand.New(rand.NewSource(1))
+		pool := random.Peers(200)
+
+		checker := noopConnectivityChecker()
+		checker.Start()
+		defer checker.Close()
+		synctest.Wait()
+		require.True(t, checker.IsOnline())
+
+		prov := SweepingProvider{
+			order:        bit256.ZeroKey(),
+			logger:       defaultLogger,
+			connectivity: checker,
+			stats:        newOperationStats(time.Hour, time.Minute),
+		}
+
+		for c := range 250 {
+			size := 1 + rng.Intn(len(pool))
+			peers := make([]peer.ID, size)
+			for i, idx := range rng.Perm(len(pool))[:size] {
+				peers[i] = pool[idx]
+			}
+			peersTrie := peersToTrie(peers)
+			rf := 1 + rng.Intn(12)
+
+			var sb strings.Builder
+			for range rng.Intn(7) {
+				sb.WriteByte('0' + byte(rng.Intn(2)))
+			}
+			prefix := bitstr.Key(sb.String())
+
+			prov.router = realisticRouter(peers, bucketSize)
+			prov.replicationFactor = rf
+
+			regions, coveredPrefix, err := prov.exploreSwarm(prefix)
+			require.NoErrorf(t, err, "case=%d size=%d rf=%d prefix=%q", c, size, rf, prefix)
+
+			wantPrefix := referenceCoveredPrefix(peersTrie, prefix, rf)
+			require.Equalf(t, wantPrefix, coveredPrefix,
+				"case=%d size=%d rf=%d prefix=%q: wrong covered prefix", c, size, rf, prefix)
+
+			regionPeers := []peer.ID{}
+			for _, r := range regions {
+				regionPeers = append(regionPeers, keyspace.AllValues(r.Peers, bit256.ZeroKey())...)
+			}
+			require.ElementsMatchf(t, peersUnderTrie(peersTrie, wantPrefix), regionPeers,
+				"case=%d size=%d rf=%d prefix=%q: regions don't hold exactly the peers under %q",
+				c, size, rf, prefix, wantPrefix)
+		}
+	})
+}
+
+// TestExploreSwarmTinyNetwork covers networks smaller than the replication
+// factor: exploreSwarm must broaden all the way to the empty prefix, return
+// every peer, and never drop a key, for any requested prefix.
+func TestExploreSwarmTinyNetwork(t *testing.T) {
+	for _, nPeers := range []int{1, 2, 3} {
+		t.Run(strconv.Itoa(nPeers), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				peers := random.Peers(nPeers)
+				prov := SweepingProvider{
+					router:            realisticRouter(peers, 20),
+					order:             bit256.ZeroKey(),
+					logger:            defaultLogger,
+					connectivity:      noopConnectivityChecker(),
+					replicationFactor: 8, // larger than the network
+					stats:             newOperationStats(time.Hour, time.Minute),
+				}
+				prov.connectivity.Start()
+				defer prov.connectivity.Close()
+				synctest.Wait()
+				require.True(t, prov.connectivity.IsOnline())
+
+				keys := genBalancedMultihashes(3)
+				for _, prefix := range []bitstr.Key{"", "0", "1", "01", "10", "111"} {
+					regions, coveredPrefix, err := prov.exploreSwarm(prefix)
+					require.NoErrorf(t, err, "prefix=%q", prefix)
+					require.Emptyf(t, coveredPrefix,
+						"network smaller than rf must broaden to empty prefix, got %q for %q", coveredPrefix, prefix)
+
+					regionPeers := []peer.ID{}
+					for _, r := range regions {
+						regionPeers = append(regionPeers, keyspace.AllValues(r.Peers, bit256.ZeroKey())...)
+					}
+					require.ElementsMatchf(t, peers, regionPeers, "prefix=%q: not all peers returned", prefix)
+
+					assigned := 0
+					for _, r := range keyspace.AssignKeysToRegions(regions, keys) {
+						assigned += r.Keys.Size()
+					}
+					require.Equalf(t, len(keys), assigned, "prefix=%q: keys dropped", prefix)
+				}
+			})
+		})
+	}
+}
+
+// TestProvidePipelineRoutesKeysToClosestPeers is the end-to-end correctness
+// property: a key explored, regioned, and assigned must land in a region that
+// contains the key's true rf closest peers in the whole network. If exploration
+// missed a peer, mis-split a region, or mis-assigned a key, the record would be
+// sent to the wrong peers — this catches all three.
+func TestProvidePipelineRoutesKeysToClosestPeers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const bucketSize = 20
+		networks := map[string][]peer.ID{
+			"uniform-80":     random.Peers(80),
+			"split-110-111":  slices.Concat(genPeersWithPrefix("110", 7), genPeersWithPrefix("111", 7)),
+			"skewed-1-vs-11": slices.Concat(genPeersWithPrefix("100", 1), genPeersWithPrefix("101", 13)),
+			"far-clusters":   slices.Concat(genPeersWithPrefix("0", 18), genPeersWithPrefix("111", 6)),
+		}
+		keys := genMultihashes(64)
+
+		for _, rf := range []int{3, 6} {
+			for name, peers := range networks {
+				prov := SweepingProvider{
+					router:            realisticRouter(peers, bucketSize),
+					order:             bit256.ZeroKey(),
+					logger:            defaultLogger,
+					connectivity:      noopConnectivityChecker(),
+					replicationFactor: rf,
+					stats:             newOperationStats(time.Hour, time.Minute),
+				}
+				prov.connectivity.Start()
+				synctest.Wait()
+				require.True(t, prov.connectivity.IsOnline())
+
+				for _, k := range keys {
+					prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(k))[:4])
+					regions, _, err := prov.exploreSwarm(prefix)
+					require.NoErrorf(t, err, "net=%s rf=%d key prefix=%q", name, rf, prefix)
+					regions = keyspace.AssignKeysToRegions(regions, []mh.Multihash{k})
+
+					var region *keyspace.Region
+					for i := range regions {
+						if regions[i].Keys.Size() > 0 {
+							region = &regions[i]
+							break
+						}
+					}
+					require.NotNilf(t, region, "net=%s rf=%d: key not assigned to any region", name, rf)
+
+					wantClosest := kb.SortClosestPeers(peers, kb.ConvertKey(string(k)))
+					wantClosest = wantClosest[:min(rf, len(wantClosest))]
+					regionPeers := keyspace.AllValues(region.Peers, bit256.ZeroKey())
+					for _, want := range wantClosest {
+						require.Containsf(t, regionPeers, want,
+							"net=%s rf=%d: key's region %q missing one of its %d closest peers",
+							name, rf, region.Prefix, len(wantClosest))
+					}
+				}
+				prov.connectivity.Close()
+			}
+		}
 	})
 }
 

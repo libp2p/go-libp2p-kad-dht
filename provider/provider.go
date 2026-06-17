@@ -969,31 +969,25 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, b
 			coverageTrie.Add(coveredPrefix, struct{}{})
 		}
 
-		// Widen `prefix` to the zone the gathered peers actually occupy. When the
-		// closest peers to `prefix` sit in a sibling branch (sparse or clustered
-		// swarm, typically with replicationFactor < bucket size), `prefix` would
-		// otherwise be reported covered as soon as one sub-cluster yields enough
-		// peers, leaving the sibling that holds the rest of the responsible peers
-		// unexplored and its keys dropped. Widening here makes the gap check below
-		// explore those branches before breaking.
-		prefix = commonAncestorPrefix(prefix, allClosestPeers)
-
 		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 		fullKeyLogKey := fmt.Sprintf("fullKey[:%d]", maxLoggedKeyLength) // for logging purposes
 		if len(gaps) == 0 {
-			if len(allClosestPeers) >= s.replicationFactor {
-				// We have full coverage of `prefix`.
-				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
-				break
-			}
-			for len(gaps) == 0 && len(prefix) > 0 {
-				// We don't have enough peers, but we have covered the prefix. Let's
-				// cover a shorter prefix.
+			// `prefix` is fully covered. Broaden it while fewer than
+			// replicationFactor gathered peers actually fall under it. When the
+			// closest peers to `prefix` sit in a sibling branch (sparse or clustered
+			// swarm with replicationFactor < bucket size), broadening surfaces that
+			// sibling as a new gap to explore, so every responsible peer is
+			// discovered instead of dropped. We count peers under `prefix` rather
+			// than the whole gathered set, so a prefix that already has enough peers
+			// is not widened just because a GetClosestPeers response also returned
+			// farther siblings.
+			for len(gaps) == 0 && len(prefix) > 0 && peersUnderPrefix(prefix, allClosestPeers) < s.replicationFactor {
 				prefix = prefix[:len(prefix)-1]
 				gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 			}
 			if len(gaps) == 0 {
-				// We don't have enough peers, but we have covered the whole keyspace.
+				// Either `prefix` holds enough peers, or the whole keyspace is
+				// covered with all the peers we could find.
 				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 				break
 			}
@@ -1011,28 +1005,32 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, b
 	}
 	s.logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
 
-	// Safety net for the early-break paths (no fresh peers, or iteration cap)
-	// that bypass the in-loop widening above: the covered prefix must enclose
-	// every gathered peer, otherwise it points at an empty branch and
-	// RegionsFromPeers drops every key for this region.
-	prefix = commonAncestorPrefix(prefix, allClosestPeers)
+	// Safety net for the early-break paths that bypass the in-loop broadening
+	// above: the no-fresh-peers break, the iteration cap, and — most commonly —
+	// a single-peer network (the len(closestPeers)==1 branch never records empty
+	// siblings, so `prefix` is never covered and the in-loop broaden never runs).
+	// Broaden the covered prefix until at least replicationFactor gathered peers
+	// fall under it (or it is empty), so it never points at a branch with too few
+	// peers and RegionsFromPeers never drops keys for this region (#1263).
+	for len(prefix) > 0 && peersUnderPrefix(prefix, allClosestPeers) < s.replicationFactor {
+		prefix = prefix[:len(prefix)-1]
+	}
 	return peers, prefix, nil
 }
 
-// commonAncestorPrefix widens `prefix` to the deepest prefix it shares with
-// every peer in `peers`. The result is an ancestor of, or equal to, `prefix`
-// that encloses all gathered peers, so it never points at a branch the peers
-// don't occupy. An empty `peers` map leaves `prefix` unchanged.
-func commonAncestorPrefix(prefix bitstr.Key, peers map[peer.ID]struct{}) bitstr.Key {
+// peersUnderPrefix counts the peers in `peers` whose kademlia identifier falls
+// under `prefix`. An empty prefix matches every peer.
+func peersUnderPrefix(prefix bitstr.Key, peers map[peer.ID]struct{}) int {
+	if len(prefix) == 0 {
+		return len(peers)
+	}
+	n := 0
 	for p := range peers {
-		if len(prefix) == 0 {
-			break // fully broadened, nothing left to clamp
-		}
-		if cpl := key.CommonPrefixLength(prefix, keyspace.PeerIDToBit256(p)); cpl < len(prefix) {
-			prefix = prefix[:cpl]
+		if keyspace.IsPrefix(prefix, keyspace.PeerIDToBit256(p)) {
+			n++
 		}
 	}
-	return prefix
+	return n
 }
 
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with

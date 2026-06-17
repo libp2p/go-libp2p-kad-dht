@@ -514,17 +514,20 @@ func TestExploreSwarmClusteredPeersCoversAllKeys(t *testing.T) {
 // TestExploreSwarmClusteredPeersBelowBucketSizeCoversAllKeys is the
 // rf < bucketSize variant of #1263. With a custom WithReplicationFactor set
 // below the bucket size, closestPeersToPrefix can satisfy the enough-peers
-// break (len(allClosestPeers) >= replicationFactor) before the requested prefix
-// is broadened, returning a coveredPrefix that points at an empty branch. Unless
-// the covered prefix is clamped to what the gathered peers actually share,
-// RegionsFromPeers walks into that empty branch, returns no regions, and every
-// key for the region is silently dropped.
+// break (len(allClosestPeers) >= replicationFactor) after exploring only one
+// sub-cluster of a clustered swarm. exploreSwarm must keep exploring until the
+// zone the gathered peers actually occupy is fully covered, so that both
+// sub-clusters are discovered. Otherwise the unexplored sibling's peers are
+// missing, its keys are provided to the wrong peers (or dropped), and that
+// sibling is collapsed into the broadened prefix and never reprovided.
 func TestExploreSwarmClusteredPeersBelowBucketSizeCoversAllKeys(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// rf below the bucket size, clustered swarm: 12 peers all under "11",
 		// split 6 under "110" and 6 under "111". None under the requested "10".
 		replFactor := 4
-		peers := append(genPeersWithPrefix("110", 6), genPeersWithPrefix("111", 6)...)
+		under110 := genPeersWithPrefix("110", 6)
+		under111 := genPeersWithPrefix("111", 6)
+		peers := append(append([]peer.ID{}, under110...), under111...)
 
 		router := &mockRouter{
 			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
@@ -548,8 +551,28 @@ func TestExploreSwarmClusteredPeersBelowBucketSizeCoversAllKeys(t *testing.T) {
 		keys := genBalancedMultihashes(2)
 
 		// Reprovide a region that does NOT match the peer cluster.
-		regions, _, err := prov.exploreSwarm("10")
+		regions, coveredPrefix, err := prov.exploreSwarm("10")
 		require.NoError(t, err)
+
+		// The covered prefix must enclose every gathered peer (all peers sit
+		// under "11", so the broadened zone is "1").
+		require.Equalf(t, bitstr.Key("1"), coveredPrefix,
+			"covered prefix %q does not match the peers' common ancestor", coveredPrefix)
+
+		// Both sub-clusters must be fully discovered: missing peers mean keys
+		// would be provided to the wrong peers.
+		foundPeers := make(map[peer.ID]struct{})
+		for _, r := range regions {
+			for _, p := range keyspace.AllValues(r.Peers, bit256.ZeroKey()) {
+				foundPeers[p] = struct{}{}
+			}
+		}
+		require.Lenf(t, foundPeers, len(peers),
+			"exploration found %d/%d peers; a sub-cluster was left unexplored", len(foundPeers), len(peers))
+		for _, p := range peers {
+			require.Containsf(t, foundPeers, p, "peer %s under %s was not discovered", p,
+				key.BitString(keyspace.PeerIDToBit256(p))[:3])
+		}
 
 		regions = keyspace.AssignKeysToRegions(regions, keys)
 

@@ -969,6 +969,15 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, b
 			coverageTrie.Add(coveredPrefix, struct{}{})
 		}
 
+		// Widen `prefix` to the zone the gathered peers actually occupy. When the
+		// closest peers to `prefix` sit in a sibling branch (sparse or clustered
+		// swarm, typically with replicationFactor < bucket size), `prefix` would
+		// otherwise be reported covered as soon as one sub-cluster yields enough
+		// peers, leaving the sibling that holds the rest of the responsible peers
+		// unexplored and its keys dropped. Widening here makes the gap check below
+		// explore those branches before breaking.
+		prefix = commonAncestorPrefix(prefix, allClosestPeers)
+
 		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 		fullKeyLogKey := fmt.Sprintf("fullKey[:%d]", maxLoggedKeyLength) // for logging purposes
 		if len(gaps) == 0 {
@@ -1001,7 +1010,29 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, b
 		peers = append(peers, p)
 	}
 	s.logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
+
+	// Safety net for the early-break paths (no fresh peers, or iteration cap)
+	// that bypass the in-loop widening above: the covered prefix must enclose
+	// every gathered peer, otherwise it points at an empty branch and
+	// RegionsFromPeers drops every key for this region.
+	prefix = commonAncestorPrefix(prefix, allClosestPeers)
 	return peers, prefix, nil
+}
+
+// commonAncestorPrefix widens `prefix` to the deepest prefix it shares with
+// every peer in `peers`. The result is an ancestor of, or equal to, `prefix`
+// that encloses all gathered peers, so it never points at a branch the peers
+// don't occupy. An empty `peers` map leaves `prefix` unchanged.
+func commonAncestorPrefix(prefix bitstr.Key, peers map[peer.ID]struct{}) bitstr.Key {
+	for p := range peers {
+		if len(prefix) == 0 {
+			break // fully broadened, nothing left to clamp
+		}
+		if cpl := key.CommonPrefixLength(prefix, keyspace.PeerIDToBit256(p)); cpl < len(prefix) {
+			prefix = prefix[:cpl]
+		}
+	}
+	return prefix
 }
 
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with

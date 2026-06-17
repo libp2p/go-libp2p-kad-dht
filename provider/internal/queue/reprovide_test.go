@@ -104,8 +104,7 @@ func TestReprovideClearQueue(t *testing.T) {
 		q.Enqueue(k)
 	}
 
-	cleared := q.Clear()
-	require.Equal(t, len(keys), cleared)
+	require.NoError(t, q.Clear())
 	require.True(t, q.IsEmpty())
 	require.Equal(t, 0, q.queue.prefixes.Size())
 	require.Equal(t, 0, q.queue.queue.Len())

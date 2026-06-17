@@ -78,9 +78,9 @@ func (f *fakeProvider) StopProviding(keys ...mh.Multihash) error {
 	return nil
 }
 
-func (f *fakeProvider) Clear() int {
+func (f *fakeProvider) Clear() error {
 	// Unused
-	return 0
+	return nil
 }
 
 func (f *fakeProvider) RefreshSchedule() error {

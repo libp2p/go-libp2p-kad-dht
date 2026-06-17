@@ -68,15 +68,12 @@ func (q *prefixQueue) Size() int {
 	return q.queue.Len()
 }
 
-// Clear removes all keys from the queue and returns the number of keys that
-// were removed.
-func (q *prefixQueue) Clear() int {
-	size := q.Size()
-
+// Clear removes all keys from the queue.
+func (q *prefixQueue) Clear() error {
 	q.queue.Clear()
 	*q.prefixes = trie.Trie[bitstr.Key, struct{}]{}
 
-	return size
+	return nil
 }
 
 // removeSuperstrings finds all superstrings of `prefix` in the trie, removes

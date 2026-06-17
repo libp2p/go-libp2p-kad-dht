@@ -2161,14 +2161,13 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
 	return err
 }
 
-// Clear clears the all the keys from the provide queue and returns the number
-// of keys that were cleared.
+// Clear clears all the keys from the provide queue.
 //
 // The keys are not deleted from the keystore, so they will continue to be
 // reprovided as scheduled.
-func (s *SweepingProvider) Clear() int {
+func (s *SweepingProvider) Clear() error {
 	if s.closed() {
-		return 0
+		return nil
 	}
 	return s.provideQueue.Clear()
 }

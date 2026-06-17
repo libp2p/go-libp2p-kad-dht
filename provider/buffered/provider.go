@@ -4,8 +4,8 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/gammazero/cascadeq"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-dsqueue"
 	"github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-kad-dht/provider/internal"
 	mh "github.com/multiformats/go-multihash"
@@ -36,7 +36,7 @@ type SweepingProvider struct {
 
 	newItems  chan struct{}
 	Provider  internal.Provider
-	queue     *dsqueue.DSQueue
+	queue     *cascadeq.Queue
 	batchSize int
 	logger    *log.ZapEventLogger
 }
@@ -44,23 +44,26 @@ type SweepingProvider struct {
 // New creates a new SweepingProvider that wraps the given provider with
 // buffering capabilities. Operations are queued and processed asynchronously
 // in batches for improved performance.
-func New(prov internal.Provider, ds datastore.Batching, opts ...Option) *SweepingProvider {
+func New(prov internal.Provider, ds datastore.Batching, queuePath string, opts ...Option) (*SweepingProvider, error) {
 	cfg := getOpts(opts)
+
+	queue, err := cascadeq.New(queuePath,
+		cascadeq.WithSnapshotInterval(cfg.idleWriteTime))
+	if err != nil {
+		return nil, err
+	}
 	s := &SweepingProvider{
 		done:   make(chan struct{}),
 		closed: make(chan struct{}),
 
-		newItems: make(chan struct{}, 1),
-		Provider: prov,
-		queue: dsqueue.New(ds, cfg.dsName,
-			dsqueue.WithDedupCacheSize(0), // disable deduplication
-			dsqueue.WithIdleWriteTime(cfg.idleWriteTime),
-		),
+		newItems:  make(chan struct{}, 1),
+		Provider:  prov,
+		queue:     queue,
 		batchSize: cfg.batchSize,
 		logger:    log.Logger(cfg.loggerName),
 	}
 	go s.worker()
-	return s
+	return s, nil
 }
 
 // Close stops the provider and releases all resources.
@@ -136,6 +139,8 @@ func (s *SweepingProvider) executeOperation(f func(...mh.Multihash) error, keys 
 // It runs in a separate goroutine and continues until the provider is closed.
 func (s *SweepingProvider) worker() {
 	defer close(s.done)
+	res := make([][]byte, s.batchSize)
+
 	var emptyQueue bool
 	for {
 		if emptyQueue {
@@ -154,16 +159,15 @@ func (s *SweepingProvider) worker() {
 			}
 		}
 
-		res, err := s.queue.GetN(s.batchSize)
-		if err != nil {
-			s.logger.Warnf("BufferedSweepingProvider unable to dequeue: %v", err)
-			continue
-		}
-		if len(res) < s.batchSize {
+		n := s.queue.Drain(res)
+		if n < s.batchSize {
 			// Queue was fully drained.
 			emptyQueue = true
+			if n == 0 {
+				continue
+			}
 		}
-		ops, err := getOperations(res)
+		ops, err := getOperations(res[:n])
 		if err != nil {
 			s.logger.Warnf("BufferedSweepingProvider unable to parse dequeued item: %v", err)
 			continue
@@ -187,11 +191,16 @@ func (s *SweepingProvider) worker() {
 
 // enqueue adds operations to the queue for asynchronous processing.
 func (s *SweepingProvider) enqueue(op byte, keys ...mh.Multihash) error {
+	data := make([][]byte, 0, len(keys))
 	for _, h := range keys {
-		if err := s.queue.Put(toBytes(op, h)); err != nil {
-			return err
-		}
+		data = append(data, toBytes(op, h))
 	}
+
+	err := s.queue.PutBatch(data)
+	if err != nil {
+		return err
+	}
+
 	select {
 	case s.newItems <- struct{}{}:
 	default:

@@ -12,7 +12,7 @@ type Provider interface {
 	StartProviding(force bool, keys ...mh.Multihash) error
 	StopProviding(keys ...mh.Multihash) error
 	ProvideOnce(keys ...mh.Multihash) error
-	Clear() int
+	Clear() error
 	RefreshSchedule() error
 	Close() error
 }

@@ -208,13 +208,12 @@ func (s *SweepingProvider) StopProviding(keys ...mh.Multihash) error {
 	return nil
 }
 
-// Clear clears the all the keys from the provide queues of both DHTs and
-// returns the number of keys that were cleared (sum of both queues).
+// Clear clears the all the keys from the provide queues of both DHTs.
 //
 // The keys are not deleted from the keystore, so they will continue to be
 // reprovided as scheduled.
-func (s *SweepingProvider) Clear() int {
-	return s.LAN.Clear() + s.WAN.Clear()
+func (s *SweepingProvider) Clear() error {
+	return errors.Join(s.LAN.Clear(), s.WAN.Clear())
 }
 
 // RefreshSchedule scans the Keystore for any keys that are not currently

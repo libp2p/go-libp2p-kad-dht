@@ -191,17 +191,15 @@ func (q *ProvideQueue) NumRegions() int {
 	return q.queue.Size()
 }
 
-// Clear removes all keys from the queue and returns the number of keys that
-// were removed.
-func (q *ProvideQueue) Clear() int {
+// Clear removes all keys from the queue.
+func (q *ProvideQueue) Clear() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	size := q.keys.Size()
 
 	q.queue.Clear()
 	*q.keys = trie.Trie[bit256.Key, mh.Multihash]{}
 
-	return size
+	return nil
 }
 
 // Persist saves the current state of the queue to the provided datastore.

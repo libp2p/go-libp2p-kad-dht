@@ -18,6 +18,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
+	"github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
 	pebble "github.com/ipfs/go-ds-pebble"
 	logging "github.com/ipfs/go-log/v2"
@@ -2439,6 +2440,30 @@ func TestResumeDisabledReprovidesAllRegions(t *testing.T) {
 		require.Len(t, reprovided, nRegions,
 			"resume disabled must reprovide all regions ASAP on restart")
 		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+
+		// Clearing the history on a resume-disabled start must not disable
+		// periodic GC. Each successful reprovide writes a history entry, and GC
+		// prunes entries older than one interval, so the keyspace stays bounded.
+		// Run a few more cycles and check it does not keep growing; a GC throttle
+		// poisoned with a far-future timestamp would let history accumulate every
+		// cycle.
+		countHistory := func() int {
+			res, err := provDs.Query(ctx, query.Query{Prefix: reprovideHistoryKeyPrefix, KeysOnly: true})
+			require.NoError(t, err)
+			defer res.Close()
+			n := 0
+			for r := range res.Next() {
+				require.NoError(t, r.Error)
+				n++
+			}
+			return n
+		}
+
+		time.Sleep(3 * reprovideInterval)
+		synctest.Wait()
+		require.LessOrEqual(t, countHistory(), 2*nRegions,
+			"history GC must keep pruning after a resume-disabled restart")
 		requireNoPendingReprovides()
 	})
 }

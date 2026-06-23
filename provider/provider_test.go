@@ -2292,6 +2292,157 @@ func TestResumeReprovides(t *testing.T) {
 	})
 }
 
+// TestResumeDisabledReprovidesAllRegions verifies the documented behavior of
+// WithResumeCycle(false): on a fresh start the provider must discard the
+// previous reprovide cycle state and reprovide ALL regions matching its keys
+// as soon as it comes online, regardless of when those regions were last
+// reprovided before the restart.
+//
+// This is the counterpart of TestResumeReprovides (which covers
+// WithResumeCycle(true)). Here the provider runs long enough that every region
+// is "recently reprovided" in the persisted history, then restarts with resume
+// disabled. With resume disabled, that history must be ignored and every region
+// reprovided ASAP.
+func TestResumeDisabledReprovidesAllRegions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka") // kadid starts with 16*"0"
+		require.NoError(t, err)
+
+		replicationFactor := 4
+		peerPrefixBitlen := 6
+		require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+		var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
+		peers := make([]peer.ID, nPeers)
+		for i := range nPeers {
+			b := i << (bitsPerByte - peerPrefixBitlen)
+			k := [32]byte{b}
+			peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
+			require.NoError(t, err)
+		}
+
+		reprovideInterval := time.Hour
+
+		router := &mockRouter{
+			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+				sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+				return sortedPeers[:min(replicationFactor, len(peers))], nil
+			},
+		}
+
+		var prov *SweepingProvider
+		getPrefixFromSchedule := func(k bit256.Key) bitstr.Key {
+			prov.activeReprovidesLk.Lock()
+			defer prov.activeReprovidesLk.Unlock()
+			prefix, ok := keyspace.FindPrefixOfKey(prov.activeReprovides, k)
+			require.True(t, ok)
+			return prefix
+		}
+
+		reprovidedLk := sync.Mutex{}
+		reprovided := make(map[bitstr.Key]struct{})
+		msgSender := &mockMsgSender{
+			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+				h, err := mh.Cast(m.GetKey())
+				require.NoError(t, err)
+				k := keyspace.MhToBit256(h)
+				regionalPrefix := getPrefixFromSchedule(k)
+
+				reprovidedLk.Lock()
+				reprovided[regionalPrefix] = struct{}{}
+				reprovidedLk.Unlock()
+				return nil
+			},
+		}
+
+		requireNoPendingReprovides := func() {
+			prov.activeReprovidesLk.Lock()
+			require.Zero(t, prov.activeReprovides.Size())
+			prov.activeReprovidesLk.Unlock()
+			require.Zero(t, prov.reprovideQueue.Size())
+		}
+
+		ds := dssync.MutexWrap(datastore.NewMapDatastore())
+		ks, err := keystore.NewKeystore(ds)
+		provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
+		require.NoError(t, err)
+		defer func() { require.NoError(t, ks.Close()) }()
+
+		mhs := genBalancedMultihashes(10)
+		ks.Put(ctx, mhs...)
+
+		baseOpts := []Option{
+			WithReprovideInterval(reprovideInterval),
+			WithReplicationFactor(replicationFactor),
+			WithMaxWorkers(1),
+			WithDedicatedBurstWorkers(0),
+			WithDedicatedPeriodicWorkers(0),
+			WithPeerID(pid),
+			WithRouter(router),
+			WithMessageSender(msgSender),
+			WithSelfAddrs(getMockAddrs(t)),
+			WithDatastore(provDs),
+			WithKeystore(ks),
+		}
+
+		// First run with resume enabled (the default). Let it run long enough
+		// that every region is reprovided and recorded in the persisted
+		// reprovide history.
+		prov, err = New(baseOpts...)
+		require.NoError(t, err)
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		prov.scheduleLk.Lock()
+		nRegions := prov.schedule.Size()
+		prov.scheduleLk.Unlock()
+		require.Greater(t, nRegions, 1, "test needs multiple regions to be meaningful")
+		require.Len(t, reprovided, nRegions, "initial provide should cover all regions")
+		requireNoPendingReprovides()
+
+		// Run for more than one full cycle so the reprovide history holds a
+		// recent timestamp for every region.
+		time.Sleep(2 * reprovideInterval)
+		synctest.Wait()
+		requireNoPendingReprovides()
+
+		err = prov.Close()
+		require.NoError(t, err)
+
+		// Short downtime, much less than one reprovide interval. With resume
+		// enabled this would reprovide nothing; with resume disabled it must
+		// reprovide everything.
+		time.Sleep(reprovideInterval / 100)
+		synctest.Wait()
+
+		reprovidedLk.Lock()
+		clear(reprovided)
+		reprovidedLk.Unlock()
+
+		// Restart with resume disabled.
+		restartOpts := append([]Option{WithResumeCycle(false)}, baseOpts...)
+		prov, err = New(restartOpts...)
+		require.NoError(t, err)
+		defer prov.Close()
+
+		synctest.Wait()
+		require.True(t, prov.connectivity.IsOnline())
+
+		// The reprovide cycle must restart from the beginning.
+		require.Equal(t, time.Now(), prov.cycleStart,
+			"resume disabled must reset the cycle start to now")
+
+		// And every region must have been reprovided ASAP on startup, even
+		// though all of them were reprovided shortly before the restart.
+		reprovidedLk.Lock()
+		require.Len(t, reprovided, nRegions,
+			"resume disabled must reprovide all regions ASAP on restart")
+		reprovidedLk.Unlock()
+		requireNoPendingReprovides()
+	})
+}
+
 func TestConnectivityCallbacks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// Connectivity state tracked by callbacks

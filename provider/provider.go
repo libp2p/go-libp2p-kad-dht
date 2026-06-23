@@ -130,8 +130,11 @@ var (
 	// avgPrefixLenDatastoreKey is the key storing the average prefix length
 	// computed from the schedule.
 	avgPrefixLenDatastoreKey = datastore.NewKey("avg_prefix_len")
-	// maxTime is the maximum time value.
-	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
+	// maxTime is the maximum time value. math.MaxInt64 is passed as nanoseconds
+	// (not seconds): time.Unix adds the year-1-to-1970 offset to the seconds
+	// argument, so time.Unix(math.MaxInt64, _) overflows int64 and wraps to a
+	// time in the distant past.
+	maxTime = time.Unix(0, math.MaxInt64) // in year 2262
 )
 
 type KadClosestPeersRouter interface {

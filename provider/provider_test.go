@@ -2104,88 +2104,116 @@ func TestSkipBootstrapReprovide(t *testing.T) {
 	}
 }
 
+// resumeFixture holds the setup shared by the resume tests. The provider is
+// created by the caller so each test controls New and Close across restarts;
+// the message sender and helpers always act on the current instance through
+// the prov pointer passed to newResumeFixture.
+type resumeFixture struct {
+	reprovidedLk               *sync.Mutex
+	reprovided                 map[bitstr.Key]struct{}
+	requireNoPendingReprovides func()
+	provDs                     datastore.Batching
+	baseOpts                   []Option
+}
+
+func newResumeFixture(t *testing.T, reprovideInterval time.Duration, prov **SweepingProvider) resumeFixture {
+	pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka") // kadid starts with 16*"0"
+	require.NoError(t, err)
+
+	replicationFactor := 4
+	peerPrefixBitlen := 6
+	require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
+	var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
+	peers := make([]peer.ID, nPeers)
+	for i := range nPeers {
+		b := i << (bitsPerByte - peerPrefixBitlen)
+		k := [32]byte{b}
+		peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
+		require.NoError(t, err)
+	}
+
+	router := &mockRouter{
+		getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
+			sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
+			return sortedPeers[:min(replicationFactor, len(peers))], nil
+		},
+	}
+
+	getPrefixFromSchedule := func(k bit256.Key) bitstr.Key {
+		(*prov).activeReprovidesLk.Lock()
+		defer (*prov).activeReprovidesLk.Unlock()
+		prefix, ok := keyspace.FindPrefixOfKey((*prov).activeReprovides, k)
+		require.True(t, ok)
+		return prefix
+	}
+
+	reprovidedLk := &sync.Mutex{}
+	reprovided := make(map[bitstr.Key]struct{})
+	msgSender := &mockMsgSender{
+		sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
+			h, err := mh.Cast(m.GetKey())
+			require.NoError(t, err)
+			k := keyspace.MhToBit256(h)
+			regionalPrefix := getPrefixFromSchedule(k)
+
+			reprovidedLk.Lock()
+			reprovided[regionalPrefix] = struct{}{}
+			reprovidedLk.Unlock()
+			return nil
+		},
+	}
+
+	requireNoPendingReprovides := func() {
+		(*prov).activeReprovidesLk.Lock()
+		require.Zero(t, (*prov).activeReprovides.Size())
+		(*prov).activeReprovidesLk.Unlock()
+		require.Zero(t, (*prov).reprovideQueue.Size())
+	}
+
+	ds := dssync.MutexWrap(datastore.NewMapDatastore())
+	ks, err := keystore.NewKeystore(ds)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ks.Close()) })
+	provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
+
+	mhs := genBalancedMultihashes(10)
+	_, err = ks.Put(t.Context(), mhs...)
+	require.NoError(t, err)
+
+	baseOpts := []Option{
+		WithReprovideInterval(reprovideInterval),
+		WithReplicationFactor(replicationFactor),
+		WithMaxWorkers(1),
+		WithDedicatedBurstWorkers(0),
+		WithDedicatedPeriodicWorkers(0),
+		WithPeerID(pid),
+		WithRouter(router),
+		WithMessageSender(msgSender),
+		WithSelfAddrs(getMockAddrs(t)),
+		WithDatastore(provDs),
+		WithKeystore(ks),
+	}
+
+	return resumeFixture{
+		reprovidedLk:               reprovidedLk,
+		reprovided:                 reprovided,
+		requireNoPendingReprovides: requireNoPendingReprovides,
+		provDs:                     provDs,
+		baseOpts:                   baseOpts,
+	}
+}
+
 func TestResumeReprovides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
-		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka") // kadid starts with 16*"0"
-		require.NoError(t, err)
-
-		replicationFactor := 4
-		peerPrefixBitlen := 6
-		require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
-		var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
-		peers := make([]peer.ID, nPeers)
-		for i := range nPeers {
-			b := i << (bitsPerByte - peerPrefixBitlen)
-			k := [32]byte{b}
-			peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
-			require.NoError(t, err)
-		}
-
 		reprovideInterval := time.Hour
 
-		router := &mockRouter{
-			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-				sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
-				return sortedPeers[:min(replicationFactor, len(peers))], nil
-			},
-		}
-
 		var prov *SweepingProvider
-		getPrefixFromSchedule := func(k bit256.Key) bitstr.Key {
-			prov.activeReprovidesLk.Lock()
-			defer prov.activeReprovidesLk.Unlock()
-			prefix, ok := keyspace.FindPrefixOfKey(prov.activeReprovides, k)
-			require.True(t, ok)
-			return prefix
-		}
+		fx := newResumeFixture(t, reprovideInterval, &prov)
+		reprovided, reprovidedLk := fx.reprovided, fx.reprovidedLk
+		requireNoPendingReprovides := fx.requireNoPendingReprovides
+		opts := fx.baseOpts
 
-		reprovidedLk := sync.Mutex{}
-		reprovided := make(map[bitstr.Key]struct{})
-		msgSender := &mockMsgSender{
-			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
-				h, err := mh.Cast(m.GetKey())
-				require.NoError(t, err)
-				k := keyspace.MhToBit256(h)
-				regionalPrefix := getPrefixFromSchedule(k)
-
-				reprovidedLk.Lock()
-				reprovided[regionalPrefix] = struct{}{}
-				reprovidedLk.Unlock()
-				return nil
-			},
-		}
-
-		requireNoPendingReprovides := func() {
-			prov.activeReprovidesLk.Lock()
-			require.Zero(t, prov.activeReprovides.Size())
-			prov.activeReprovidesLk.Unlock()
-			require.Zero(t, prov.reprovideQueue.Size())
-		}
-
-		ds := dssync.MutexWrap(datastore.NewMapDatastore())
-		ks, err := keystore.NewKeystore(ds)
-		provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
-		require.NoError(t, err)
-		defer ks.Close()
-
-		mhs := genBalancedMultihashes(10)
-		ks.Put(ctx, mhs...)
-
-		opts := []Option{
-			WithReprovideInterval(reprovideInterval),
-			WithReplicationFactor(replicationFactor),
-			WithMaxWorkers(1),
-			WithDedicatedBurstWorkers(0),
-			WithDedicatedPeriodicWorkers(0),
-			WithPeerID(pid),
-			WithRouter(router),
-			WithMessageSender(msgSender),
-			WithSelfAddrs(getMockAddrs(t)),
-			WithDatastore(provDs),
-			WithKeystore(ks),
-		}
-		prov, err = New(opts...)
+		prov, err := New(opts...)
 		require.NoError(t, err)
 
 		synctest.Wait()
@@ -2306,90 +2334,19 @@ func TestResumeReprovides(t *testing.T) {
 // reprovided ASAP.
 func TestResumeDisabledReprovidesAllRegions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
-		pid, err := peer.Decode("12D3KooWCPQTeFYCDkru8nza3Af6u77aoVLA71Vb74eHxeR91Gka") // kadid starts with 16*"0"
-		require.NoError(t, err)
-
-		replicationFactor := 4
-		peerPrefixBitlen := 6
-		require.LessOrEqual(t, peerPrefixBitlen, bitsPerByte)
-		var nPeers byte = 1 << peerPrefixBitlen // 2**peerPrefixBitlen
-		peers := make([]peer.ID, nPeers)
-		for i := range nPeers {
-			b := i << (bitsPerByte - peerPrefixBitlen)
-			k := [32]byte{b}
-			peers[i], err = kb.GenRandPeerIDWithCPL(k[:], uint(peerPrefixBitlen))
-			require.NoError(t, err)
-		}
-
 		reprovideInterval := time.Hour
 
-		router := &mockRouter{
-			getClosestPeersFunc: func(ctx context.Context, k string) ([]peer.ID, error) {
-				sortedPeers := kb.SortClosestPeers(peers, kb.ConvertKey(k))
-				return sortedPeers[:min(replicationFactor, len(peers))], nil
-			},
-		}
-
 		var prov *SweepingProvider
-		getPrefixFromSchedule := func(k bit256.Key) bitstr.Key {
-			prov.activeReprovidesLk.Lock()
-			defer prov.activeReprovidesLk.Unlock()
-			prefix, ok := keyspace.FindPrefixOfKey(prov.activeReprovides, k)
-			require.True(t, ok)
-			return prefix
-		}
-
-		reprovidedLk := sync.Mutex{}
-		reprovided := make(map[bitstr.Key]struct{})
-		msgSender := &mockMsgSender{
-			sendMessageFunc: func(ctx context.Context, p peer.ID, m *pb.Message) error {
-				h, err := mh.Cast(m.GetKey())
-				require.NoError(t, err)
-				k := keyspace.MhToBit256(h)
-				regionalPrefix := getPrefixFromSchedule(k)
-
-				reprovidedLk.Lock()
-				reprovided[regionalPrefix] = struct{}{}
-				reprovidedLk.Unlock()
-				return nil
-			},
-		}
-
-		requireNoPendingReprovides := func() {
-			prov.activeReprovidesLk.Lock()
-			require.Zero(t, prov.activeReprovides.Size())
-			prov.activeReprovidesLk.Unlock()
-			require.Zero(t, prov.reprovideQueue.Size())
-		}
-
-		ds := dssync.MutexWrap(datastore.NewMapDatastore())
-		ks, err := keystore.NewKeystore(ds)
-		provDs := namespace.Wrap(ds, datastore.NewKey("provider"))
-		require.NoError(t, err)
-		defer func() { require.NoError(t, ks.Close()) }()
-
-		mhs := genBalancedMultihashes(10)
-		ks.Put(ctx, mhs...)
-
-		baseOpts := []Option{
-			WithReprovideInterval(reprovideInterval),
-			WithReplicationFactor(replicationFactor),
-			WithMaxWorkers(1),
-			WithDedicatedBurstWorkers(0),
-			WithDedicatedPeriodicWorkers(0),
-			WithPeerID(pid),
-			WithRouter(router),
-			WithMessageSender(msgSender),
-			WithSelfAddrs(getMockAddrs(t)),
-			WithDatastore(provDs),
-			WithKeystore(ks),
-		}
+		fx := newResumeFixture(t, reprovideInterval, &prov)
+		reprovided, reprovidedLk := fx.reprovided, fx.reprovidedLk
+		requireNoPendingReprovides := fx.requireNoPendingReprovides
+		baseOpts := fx.baseOpts
+		provDs := fx.provDs
 
 		// First run with resume enabled (the default). Let it run long enough
 		// that every region is reprovided and recorded in the persisted
 		// reprovide history.
-		prov, err = New(baseOpts...)
+		prov, err := New(baseOpts...)
 		require.NoError(t, err)
 
 		synctest.Wait()
@@ -2449,7 +2406,7 @@ func TestResumeDisabledReprovidesAllRegions(t *testing.T) {
 		// poisoned with a far-future timestamp would let history accumulate every
 		// cycle.
 		countHistory := func() int {
-			res, err := provDs.Query(ctx, query.Query{Prefix: reprovideHistoryKeyPrefix, KeysOnly: true})
+			res, err := provDs.Query(t.Context(), query.Query{Prefix: reprovideHistoryKeyPrefix, KeysOnly: true})
 			require.NoError(t, err)
 			defer res.Close()
 			n := 0

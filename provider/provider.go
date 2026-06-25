@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -130,8 +129,6 @@ var (
 	// avgPrefixLenDatastoreKey is the key storing the average prefix length
 	// computed from the schedule.
 	avgPrefixLenDatastoreKey = datastore.NewKey("avg_prefix_len")
-	// maxTime is the maximum time value.
-	maxTime = time.Unix(math.MaxInt64, 999999999) // in year 2262
 )
 
 type KadClosestPeersRouter interface {
@@ -359,7 +356,7 @@ func New(opts ...Option) (*SweepingProvider, error) {
 		// Clear any previously stored reprovide logs, since we are off a fresh
 		// start. This results in reproviding all keys in the keystore when the
 		// node comes online.
-		prov.gcReprovideHistoryIfNeeded(maxTime)
+		prov.clearReprovideHistory()
 	}
 
 	// Don't need to start schedule timer yet
@@ -1519,6 +1516,32 @@ func (s *SweepingProvider) loadRecentlyReprovidedRegions(now time.Time) (*trie.T
 		}
 	}
 	return regions, nil
+}
+
+// clearReprovideHistory deletes every persisted reprovide-history entry. A
+// fresh start with resume disabled calls it so no region counts as recently
+// reprovided, and the node reprovides all of them once it comes online. It
+// leaves lastReprovideHistoryGC untouched, so periodic GC keeps running.
+func (s *SweepingProvider) clearReprovideHistory() {
+	q := query.Query{
+		Prefix:   reprovideHistoryKeyPrefix,
+		KeysOnly: true,
+	}
+	res, err := s.datastore.Query(s.ctx, q)
+	if err != nil {
+		s.logger.Warnf("could not query reprovide history to clear it: %s", err)
+		return
+	}
+	defer res.Close()
+	for r := range res.Next() {
+		if r.Error != nil {
+			s.logger.Warnf("could not query reprovide history to clear it: %s", r.Error)
+			return
+		}
+		if err := s.datastore.Delete(s.ctx, datastore.NewKey(r.Key)); err != nil {
+			s.logger.Warnf("could not delete reprovide history entry %s: %s", r.Key, err)
+		}
+	}
 }
 
 // gcReprovideHistoryIfNeeded removes reprovide log entries older than the

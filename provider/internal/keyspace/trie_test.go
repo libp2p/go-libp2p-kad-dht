@@ -1370,32 +1370,31 @@ func TestAllocateToKClosest(t *testing.T) {
 
 func TestRegionsFromPeers(t *testing.T) {
 	// No peers
-	regions, commonPrefix := RegionsFromPeers(nil, 1, bit256.ZeroKey())
+	regions := RegionsFromPeers(nil, 1, bit256.ZeroKey(), "")
 	require.Empty(t, regions)
-	require.Equal(t, bitstr.Key(""), commonPrefix)
 
-	// Single peer
+	// Single peer: the peer fully covers its own key.
 	p0 := random.Peers(1)[0]
-	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0}, 1, bit256.ZeroKey())
-	require.Len(t, regions, 1)
 	bstrPid0 := bitstr.Key(key.BitString(PeerIDToBit256(p0)))
-	require.Equal(t, bstrPid0, commonPrefix)
-
-	// Two peers
-	p1 := random.Peers(1)[0]
-	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0, p1}, 2, bit256.ZeroKey())
+	regions = RegionsFromPeers([]peer.ID{p0}, 1, bit256.ZeroKey(), bstrPid0)
 	require.Len(t, regions, 1)
+	require.Equal(t, bstrPid0, regions[0].Prefix)
+
+	// Two peers: regions are rooted at the peers' common prefix.
+	p1 := random.Peers(1)[0]
 	cpl := key.CommonPrefixLength(bstrPid0, PeerIDToBit256(p1))
 	common := bstrPid0[:cpl]
-	require.Equal(t, common, commonPrefix)
+	regions = RegionsFromPeers([]peer.ID{p0, p1}, 2, bit256.ZeroKey(), common)
+	require.Len(t, regions, 1)
+	require.Equal(t, common, regions[0].Prefix)
 
 	// Three peers
 	p2 := random.Peers(1)[0]
-	regions, commonPrefix = RegionsFromPeers([]peer.ID{p0, p1, p2}, 2, bit256.ZeroKey())
-	require.Len(t, regions, 1)
 	cpl = key.CommonPrefixLength(common, PeerIDToBit256(p2))
 	common = common[:cpl]
-	require.Equal(t, common, commonPrefix)
+	regions = RegionsFromPeers([]peer.ID{p0, p1, p2}, 2, bit256.ZeroKey(), common)
+	require.Len(t, regions, 1)
+	require.Equal(t, common, regions[0].Prefix)
 
 	// From 4 peers onwards, there is a probability of having more than 1
 	// regions. Refer to TestExtractMinimalRegions.
@@ -1495,8 +1494,9 @@ func TestRegionsFromPeersSplitting(t *testing.T) {
 					peers = append(peers, peer.ID(p))
 				}
 			}
-			regions, coveredPrefix := RegionsFromPeers(peers, regionSize, zeroKey)
-			require.Equal(t, tc.expectedCoveredPrefix, coveredPrefix)
+			// The covered prefix (peers' common prefix) is supplied by the
+			// caller; regions are rooted there.
+			regions := RegionsFromPeers(peers, regionSize, zeroKey, tc.expectedCoveredPrefix)
 			require.Equal(t, tc.expectedNumRegions, len(regions))
 			totalSize := 0
 			for _, r := range regions {

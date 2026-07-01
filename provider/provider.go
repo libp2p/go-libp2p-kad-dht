@@ -861,14 +861,14 @@ func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitst
 // returned regions combined. It is different to the supplied `prefix` if there
 // aren't enough peers matching `prefix`.
 func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.Region, coveredPrefix bitstr.Key, err error) {
-	peers, err := s.closestPeersToPrefix(prefix)
+	peers, coveredPrefix, err := s.closestPeersToPrefix(prefix)
 	if err != nil {
 		return nil, "", fmt.Errorf("exploreSwarm '%s': %w", prefix, err)
 	}
 	if len(peers) == 0 {
 		return nil, "", fmt.Errorf("no peers found when exploring prefix %s", prefix)
 	}
-	regions, coveredPrefix = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order)
+	regions = keyspace.RegionsFromPeers(peers, s.replicationFactor, s.order, coveredPrefix)
 	s.logger.Debugw("exploreSwarm", "requestedPrefix", prefix, "coveredPrefix", coveredPrefix, "numRegions", len(regions))
 	for _, r := range regions {
 		s.stats.regionSize.Add(int64(r.Peers.Size()))
@@ -881,7 +881,13 @@ func (s *SweepingProvider) exploreSwarm(prefix bitstr.Key) (regions []keyspace.R
 // prefix. In the case there aren't enough peers matching the provided prefix,
 // it will find and return the closest peers to the prefix, even if they don't
 // exactly match it.
-func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, error) {
+//
+// It also returns the covered prefix: the keyspace zone the returned peers are
+// responsible for. It equals the requested prefix when enough matching peers
+// are found, and is broadened (a shorter prefix, possibly empty) when the
+// prefix had to be widened to gather enough peers. The covered prefix is always
+// an ancestor of, or equal to, the requested prefix.
+func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, bitstr.Key, error) {
 	allClosestPeers := make(map[peer.ID]struct{})
 
 	nextPrefix := prefix
@@ -893,20 +899,20 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 	// Go down the trie to fully cover prefix.
 	for ; i < maxExplorationPrefixSearches; i++ {
 		if s.closed() {
-			return nil, ErrClosed
+			return nil, "", ErrClosed
 		}
 		if !s.connectivity.IsOnline() {
-			return nil, errors.New("node is offline")
+			return nil, "", errors.New("node is offline")
 		}
 		fullKey := keyspace.FirstFullKeyWithPrefix(nextPrefix, s.order)
 		closestPeers, err := s.closestPeersToKey(fullKey)
 		if err != nil {
 			// We only get an err if something really bad happened, e.g no peers in
 			// routing table, invalid key, etc.
-			return nil, err
+			return nil, "", err
 		}
 		if len(closestPeers) == 0 {
-			return nil, errors.New("dht lookup did not return any peers")
+			return nil, "", errors.New("dht lookup did not return any peers")
 		}
 
 		var coveredPrefix bitstr.Key
@@ -963,19 +969,22 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 		fullKeyLogKey := fmt.Sprintf("fullKey[:%d]", maxLoggedKeyLength) // for logging purposes
 		if len(gaps) == 0 {
-			if len(allClosestPeers) >= s.replicationFactor {
-				// We have full coverage of `prefix`.
-				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
-				break
-			}
-			for len(gaps) == 0 && len(prefix) > 0 {
-				// We don't have enough peers, but we have covered the prefix. Let's
-				// cover a shorter prefix.
+			// `prefix` is fully covered. Broaden it while fewer than
+			// replicationFactor gathered peers actually fall under it. When the
+			// closest peers to `prefix` sit in a sibling branch (sparse or clustered
+			// swarm with replicationFactor < bucket size), broadening surfaces that
+			// sibling as a new gap to explore, so every responsible peer is
+			// discovered instead of dropped. We count peers under `prefix` rather
+			// than the whole gathered set, so a prefix that already has enough peers
+			// is not widened just because a GetClosestPeers response also returned
+			// farther siblings.
+			for len(gaps) == 0 && len(prefix) > 0 && peersUnderPrefix(prefix, allClosestPeers) < s.replicationFactor {
 				prefix = prefix[:len(prefix)-1]
 				gaps = keyspace.TrieGaps(coverageTrie, prefix, s.order)
 			}
 			if len(gaps) == 0 {
-				// We don't have enough peers, but we have covered the whole keyspace.
+				// Either `prefix` holds enough peers, or the whole keyspace is
+				// covered with all the peers we could find.
 				s.logger.Debugw("closestPeersToPrefix", "i", i, "prefix", prefix, "prevPrefix", nextPrefix, fullKeyLogKey, fullKey[:maxLoggedKeyLength], "coveredPrefix", coveredPrefix, "len(coveredPeers)", len(coveredPeers), "len(allClosestPeers)", len(allClosestPeers), "gaps", gaps)
 				break
 			}
@@ -992,7 +1001,33 @@ func (s *SweepingProvider) closestPeersToPrefix(prefix bitstr.Key) ([]peer.ID, e
 		peers = append(peers, p)
 	}
 	s.logger.Debugf("region %s exploration required %d requests to discover %d peers in %s", prefix, i+1, len(allClosestPeers), time.Since(startTime))
-	return peers, nil
+
+	// Safety net for the early-break paths that bypass the in-loop broadening
+	// above: the no-fresh-peers break, the iteration cap, and — most commonly —
+	// a single-peer network (the len(closestPeers)==1 branch never records empty
+	// siblings, so `prefix` is never covered and the in-loop broaden never runs).
+	// Broaden the covered prefix until at least replicationFactor gathered peers
+	// fall under it (or it is empty), so it never points at a branch with too few
+	// peers and RegionsFromPeers never drops keys for this region (#1263).
+	for len(prefix) > 0 && peersUnderPrefix(prefix, allClosestPeers) < s.replicationFactor {
+		prefix = prefix[:len(prefix)-1]
+	}
+	return peers, prefix, nil
+}
+
+// peersUnderPrefix counts the peers in `peers` whose kademlia identifier falls
+// under `prefix`. An empty prefix matches every peer.
+func peersUnderPrefix(prefix bitstr.Key, peers map[peer.ID]struct{}) int {
+	if len(prefix) == 0 {
+		return len(peers)
+	}
+	n := 0
+	for p := range peers {
+		if keyspace.IsPrefix(prefix, keyspace.PeerIDToBit256(p)) {
+			n++
+		}
+	}
+	return n
 }
 
 // closestPeersToKey returns a valid peer ID sharing a long common prefix with

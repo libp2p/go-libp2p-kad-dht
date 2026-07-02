@@ -450,6 +450,14 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	// query successful, try to add to RT
 	q.dht.validPeerFound(p)
 
+	// Cap the number of closer peers accepted from a single response. Honest
+	// peers return at most bucketSize closer peers; a longer list can only come
+	// from a peer trying to inflate our query state, where every extra entry
+	// costs a peerstore write and an O(n) insertion into the query peerset.
+	if maxCloserPeers := 2 * q.dht.bucketSize; len(newPeers) > maxCloserPeers {
+		newPeers = newPeers[:maxCloserPeers]
+	}
+
 	if q.maxPeersPerIPGroup != 0 {
 		newPeers = filterPeersByIPDiversity(newPeers, q.maxPeersPerIPGroup)
 	}

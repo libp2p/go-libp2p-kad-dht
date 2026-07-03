@@ -411,7 +411,7 @@ func loadProviderSet(ctx context.Context, dstore ds.Datastore, provideValidity t
 		case now.Sub(t) > provideValidity:
 			// or just expired
 			err = dstore.Delete(ctx, ds.RawKey(e.Key))
-			if err != nil && errors.Is(err, ds.ErrNotFound) {
+			if err != nil && !errors.Is(err, ds.ErrNotFound) {
 				log.Error("failed to remove provider record from disk: ", err)
 			}
 			continue
@@ -423,7 +423,7 @@ func loadProviderSet(ctx context.Context, dstore ds.Datastore, provideValidity t
 		if err != nil {
 			log.Error("base32 decoding error: ", err)
 			err = dstore.Delete(ctx, ds.RawKey(e.Key))
-			if err != nil && errors.Is(err, ds.ErrNotFound) {
+			if err != nil && !errors.Is(err, ds.ErrNotFound) {
 				log.Error("failed to remove provider record from disk: ", err)
 			}
 			continue

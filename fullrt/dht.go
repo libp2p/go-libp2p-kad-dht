@@ -1476,9 +1476,7 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo, 
 	newAddrs := make([]ma.Multiaddr, 0)
 
 	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		addrsSoFar := make(map[string]struct{})
 		for {
 			select {
@@ -1498,7 +1496,7 @@ func (dht *FullRT) FindPeer(ctx context.Context, id peer.ID) (pi peer.AddrInfo, 
 				return
 			}
 		}
-	}()
+	})
 
 	fn := func(ctx context.Context, p peer.ID) error {
 		// For DHT query command

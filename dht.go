@@ -472,9 +472,7 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 
 // runFixLowPeersLoop manages simultaneous requests to fixLowPeers
 func (dht *IpfsDHT) runFixLowPeersLoop() {
-	dht.wg.Add(1)
-	go func() {
-		defer dht.wg.Done()
+	dht.wg.Go(func() {
 
 		dht.fixLowPeers()
 
@@ -491,7 +489,7 @@ func (dht *IpfsDHT) runFixLowPeersLoop() {
 
 			dht.fixLowPeers()
 		}
-	}()
+	})
 }
 
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold
@@ -606,9 +604,7 @@ func (dht *IpfsDHT) putLocal(ctx context.Context, key string, rec *recpb.Record)
 }
 
 func (dht *IpfsDHT) rtPeerLoop() {
-	dht.wg.Add(1)
-	go func() {
-		defer dht.wg.Done()
+	dht.wg.Go(func() {
 
 		var bootstrapCount uint
 		var isBootsrapping bool
@@ -654,7 +650,7 @@ func (dht *IpfsDHT) rtPeerLoop() {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // peerFound verifies whether the found peer advertises DHT protocols

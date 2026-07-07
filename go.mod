@@ -13,7 +13,7 @@ require (
 	github.com/ipfs/go-cid v0.6.1
 	github.com/ipfs/go-datastore v0.9.2
 	github.com/ipfs/go-detect-race v0.0.1
-	github.com/ipfs/go-ds-pebble v0.5.11
+	github.com/ipfs/go-ds-pebble v0.5.12
 	github.com/ipfs/go-libdht v0.5.0
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/ipfs/go-test v0.3.0

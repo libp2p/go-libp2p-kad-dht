@@ -106,16 +106,14 @@ func (r *RtRefreshManager) Close() error {
 // error and close. The channel is buffered and safe to ignore.
 func (r *RtRefreshManager) Refresh(force bool) <-chan error {
 	resp := make(chan error, 1)
-	r.refcount.Add(1)
-	go func() {
-		defer r.refcount.Done()
+	r.refcount.Go(func() {
 		select {
 		case r.triggerRefresh <- &triggerRefreshReq{respCh: resp, forceCplRefresh: force}:
 		case <-r.ctx.Done():
 			resp <- r.ctx.Err()
 			close(resp)
 		}
-	}()
+	})
 
 	return resp
 }

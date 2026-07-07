@@ -353,11 +353,9 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 		lanErr    error
 		lanWaiter sync.WaitGroup
 	)
-	lanWaiter.Add(1)
-	go func() {
-		defer lanWaiter.Done()
+	lanWaiter.Go(func() {
 		lanVal, lanErr = d.LAN.GetValue(lanCtx, key, opts...)
-	}()
+	})
 
 	wanVal, wanErr := d.WAN.GetValue(ctx, key, opts...)
 	if wanErr == nil {

@@ -1982,9 +1982,7 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 		wg := sync.WaitGroup{}
 		success := atomic.Bool{}
 		for _, key := range keys {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_, err := s.vanillaProvide(key, reprovide)
 				if err == nil {
 					success.Store(true)
@@ -1992,7 +1990,7 @@ func (s *SweepingProvider) individualProvide(prefix bitstr.Key, keys []mh.Multih
 					// Individual provide failed, put key back in provide queue.
 					s.failedProvide(prefix, []mh.Multihash{key}, err)
 				}
-			}()
+			})
 		}
 		wg.Wait()
 

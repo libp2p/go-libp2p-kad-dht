@@ -9,13 +9,37 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p/core/test"
 
+	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-test/random"
 	record "github.com/libp2p/go-libp2p-record"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/multiformats/go-base32"
+	"google.golang.org/protobuf/proto"
 )
+
+// plantRawRecord writes rec directly into the DHT's datastore, bypassing the
+// ValueStore's validation (both the put and read/serve paths validate now, so a
+// bad record cannot be introduced through them). The seeded record is discarded
+// on the next read: these tests therefore verify that a bad local record never
+// yields a bad key. Client-side rejection of a bad record *received from a peer*
+// — the defence against a genuinely malicious server — is covered separately by
+// TestGetValueRejectsInvalidRecordFromPeer.
+func plantRawRecord(t *testing.T, ctx context.Context, dht *IpfsDHT, key string, rec *recpb.Record) {
+	t.Helper()
+	rec.TimeReceived = internal.FormatRFC3339(time.Now())
+	data, err := proto.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dskey := ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(key)))
+	if err := dht.datastore.Put(ctx, dskey, data); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Check that GetPublicKey() correctly retrieves a public key from the peerstore
 func TestPubkeyPeerstore(t *testing.T) {
@@ -176,12 +200,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 	}
 
 	// Store incorrect public key on node B
-	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = internal.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(ctx, pkkey, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plantRawRecord(t, ctx, dhtB, pkkey, record.MakePutRecord(pkkey, wrongbytes))
 
 	// Retrieve public key from node A
 	_, err = dhtA.GetPublicKey(ctx, id)
@@ -215,12 +234,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 	}
 
 	// Store incorrect public key on node B
-	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = internal.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(ctx, pkkey, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plantRawRecord(t, ctx, dhtB, pkkey, record.MakePutRecord(pkkey, wrongbytes))
 
 	// Retrieve public key from node A
 	pubk, err := dhtA.GetPublicKey(ctx, dhtB.self)

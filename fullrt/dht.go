@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
@@ -32,7 +31,6 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	logging "github.com/ipfs/go-log/v2"
-	"google.golang.org/protobuf/proto"
 
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/amino"
@@ -84,6 +82,7 @@ type FullRT struct {
 	Validator                     record.Validator
 	ProviderManager               *records.ProviderManager
 	datastore                     ds.Datastore
+	valueStore                    *records.ValueStore
 	h                             host.Host
 
 	crawlerInterval time.Duration
@@ -207,6 +206,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		Validator:       dhtcfg.Validator,
 		ProviderManager: pm,
 		datastore:       dhtcfg.Datastore,
+		valueStore:      records.NewValueStore(dhtcfg.Datastore, dhtcfg.Validator, dhtcfg.MaxRecordAge),
 		h:               h,
 		crawler:         fullrtcfg.crawler,
 		messageSender:   ms,
@@ -1563,64 +1563,17 @@ var _ routing.Routing = (*FullRT)(nil)
 func (dht *FullRT) getLocal(ctx context.Context, key string) (*recpb.Record, error) {
 	logger.Debugw("finding value in datastore", "key", internal.LoggableRecordKeyString(key))
 
-	rec, err := dht.getRecordFromDatastore(ctx, mkDsKey(key))
+	rec, err := dht.valueStore.Get(ctx, key)
 	if err != nil {
 		logger.Warnw("get local failed", "key", internal.LoggableRecordKeyString(key), "error", err)
 		return nil, err
-	}
-
-	// Double check the key. Can't hurt.
-	if rec != nil && string(rec.GetKey()) != key {
-		logger.Errorw("BUG: found a DHT record that didn't match it's key", "expected", internal.LoggableRecordKeyString(key), "got", rec.GetKey())
-		return nil, nil
-
 	}
 	return rec, nil
 }
 
 // putLocal stores the key value pair in the datastore
 func (dht *FullRT) putLocal(ctx context.Context, key string, rec *recpb.Record) error {
-	data, err := proto.Marshal(rec)
-	if err != nil {
-		logger.Warnw("failed to put marshal record for local put", "error", err, "key", internal.LoggableRecordKeyString(key))
-		return err
-	}
-
-	return dht.datastore.Put(ctx, mkDsKey(key), data)
-}
-
-func mkDsKey(s string) ds.Key {
-	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
-}
-
-// returns nil, nil when either nothing is found or the value found doesn't properly validate.
-// returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *FullRT) getRecordFromDatastore(ctx context.Context, dskey ds.Key) (*recpb.Record, error) {
-	buf, err := dht.datastore.Get(ctx, dskey)
-	if err == ds.ErrNotFound {
-		return nil, nil
-	}
-	if err != nil {
-		logger.Errorw("error retrieving record from datastore", "key", dskey, "error", err)
-		return nil, err
-	}
-	rec := new(recpb.Record)
-	err = proto.Unmarshal(buf, rec)
-	if err != nil {
-		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
-		logger.Errorw("failed to unmarshal record from datastore", "key", dskey, "error", err)
-		return nil, nil
-	}
-
-	err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue())
-	if err != nil {
-		// Invalid record in datastore, probably expired but don't return an error,
-		// we'll just overwrite it
-		logger.Debugw("local record verify failed", "key", rec.GetKey(), "error", err)
-		return nil, nil
-	}
-
-	return rec, nil
+	return dht.valueStore.Put(ctx, key, rec)
 }
 
 // FindLocal looks for a peer with a given ID connected to this dht and returns the peer and the table it was found in.

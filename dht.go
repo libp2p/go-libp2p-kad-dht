@@ -33,10 +33,8 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -87,6 +85,9 @@ type IpfsDHT struct {
 	routingTable *kb.RoutingTable // Array of routing tables for differently distanced nodes
 	// providerStore stores & manages the provider records for this Dht peer.
 	providerStore records.ProviderStore
+	// valueStore persists value records (e.g. /pk, /ipns), applying the
+	// Validator and record-age policy on read and write.
+	valueStore *records.ValueStore
 
 	// manages Routing Table refresh
 	rtRefreshManager *rtrefresh.RtRefreshManager
@@ -101,8 +102,6 @@ type IpfsDHT struct {
 
 	protoMessenger *pb.ProtocolMessenger
 	msgSender      pb.MessageSenderWithDisconnect
-
-	stripedPutLocks [256]sync.Mutex
 
 	// DHT protocols we query with. We'll only add peers to our routing
 	// table if they speak these protocols.
@@ -208,6 +207,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.disableFixLowPeers = cfg.DisableFixLowPeers
 
 	dht.Validator = cfg.Validator
+	dht.valueStore = records.NewValueStore(dht.datastore, cfg.Validator, cfg.MaxRecordAge)
 	dht.msgSender = cfg.MsgSenderBuilder(h, dht.protocols)
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender)
 	if err != nil {
@@ -577,30 +577,17 @@ func (dht *IpfsDHT) persistRTPeersInPeerStore() {
 func (dht *IpfsDHT) getLocal(ctx context.Context, key string) (*recpb.Record, error) {
 	logger.Debugw("finding value in datastore", "key", internal.LoggableRecordKeyString(key))
 
-	rec, err := dht.getRecordFromDatastore(ctx, mkDsKey(key))
+	rec, err := dht.valueStore.Get(ctx, key)
 	if err != nil {
 		logger.Warnw("get local failed", "key", internal.LoggableRecordKeyString(key), "error", err)
 		return nil, err
-	}
-
-	// Double check the key. Can't hurt.
-	if rec != nil && string(rec.GetKey()) != key {
-		logger.Errorw("BUG: found a DHT record that didn't match it's key", "expected", internal.LoggableRecordKeyString(key), "got", rec.GetKey())
-		return nil, nil
-
 	}
 	return rec, nil
 }
 
 // putLocal stores the key value pair in the datastore
 func (dht *IpfsDHT) putLocal(ctx context.Context, key string, rec *recpb.Record) error {
-	data, err := proto.Marshal(rec)
-	if err != nil {
-		logger.Warnw("failed to put marshal record for local put", "error", err, "key", internal.LoggableRecordKeyString(key))
-		return err
-	}
-
-	return dht.datastore.Put(ctx, mkDsKey(key), data)
+	return dht.valueStore.Put(ctx, key, rec)
 }
 
 func (dht *IpfsDHT) rtPeerLoop() {
@@ -881,10 +868,6 @@ func (dht *IpfsDHT) Close() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-func mkDsKey(s string) ds.Key {
-	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }
 
 // PeerID returns the DHT node's Peer ID.

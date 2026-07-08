@@ -4,17 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 
-	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
-	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/multiformats/go-base32"
-	"google.golang.org/protobuf/proto"
 )
 
 // dhthandler specifies the signature of functions that handle DHT messages.
@@ -59,7 +54,7 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	// setup response
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
-	rec, err := dht.checkLocalDatastore(ctx, k)
+	rec, err := dht.valueStore.Get(ctx, string(k))
 	if err != nil {
 		return nil, err
 	}
@@ -86,68 +81,10 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return resp, nil
 }
 
-func (dht *IpfsDHT) checkLocalDatastore(ctx context.Context, k []byte) (*recpb.Record, error) {
-	logger.Debugf("%s handleGetValue looking into ds", dht.self)
-	dskey := convertToDsKey(k)
-	buf, err := dht.datastore.Get(ctx, dskey)
-	logger.Debugf("%s handleGetValue looking into ds GOT %v", dht.self, buf)
-
-	if err == ds.ErrNotFound {
-		return nil, nil
-	}
-
-	// if we got an unexpected error, bail.
-	if err != nil {
-		return nil, err
-	}
-
-	// if we have the value, send it back
-	logger.Debugf("%s handleGetValue success!", dht.self)
-
-	rec := new(recpb.Record)
-	err = proto.Unmarshal(buf, rec)
-	if err != nil {
-		logger.Debug("failed to unmarshal DHT record from datastore")
-		return nil, err
-	}
-
-	var recordIsBad bool
-	recvtime, err := internal.ParseRFC3339(rec.GetTimeReceived())
-	if err != nil {
-		logger.Info("either no receive time set on record, or it was invalid: ", err)
-		recordIsBad = true
-	}
-
-	if time.Since(recvtime) > dht.maxRecordAge {
-		logger.Debug("old record found, tossing.")
-		recordIsBad = true
-	}
-
-	// NOTE: We do not verify the record here beyond checking these timestamps.
-	// we put the burden of checking the records on the requester as checking a record
-	// may be computationally expensive
-
-	if recordIsBad {
-		err := dht.datastore.Delete(ctx, dskey)
-		if err != nil {
-			logger.Error("Failed to delete bad record from datastore: ", err)
-		}
-
-		return nil, nil // can treat this as not having the record at all
-	}
-
-	return rec, nil
-}
-
-// Cleans the record (to avoid storing arbitrary data).
-func cleanRecord(rec *recpb.Record) {
-	rec.TimeReceived = ""
-}
-
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	if len(pmes.GetKey()) == 0 {
-		return nil, errors.New("handleGetValue but no key was provided")
+		return nil, errors.New("handlePutValue but no key was provided")
 	}
 
 	rec := pmes.GetRecord()
@@ -160,88 +97,12 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		return nil, errors.New("put key doesn't match record key")
 	}
 
-	cleanRecord(rec)
-
-	// Make sure the record is valid (not expired, valid signature etc)
-	if err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
-		logger.Infow("bad dht record in PUT", "from", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()), "error", err)
+	if err := dht.valueStore.Put(ctx, string(rec.GetKey()), rec); err != nil {
+		logger.Infow("failed to store PUT_VALUE record", "from", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()), "error", err)
 		return nil, err
 	}
 
-	dskey := convertToDsKey(rec.GetKey())
-
-	// fetch the striped lock for this key
-	var indexForLock byte
-	if len(rec.GetKey()) == 0 {
-		indexForLock = 0
-	} else {
-		indexForLock = rec.GetKey()[len(rec.GetKey())-1]
-	}
-	lk := &dht.stripedPutLocks[indexForLock]
-	lk.Lock()
-	defer lk.Unlock()
-
-	// Make sure the new record is "better" than the record we have locally.
-	// This prevents a record with for example a lower sequence number from
-	// overwriting a record with a higher sequence number.
-	existing, err := dht.getRecordFromDatastore(ctx, dskey)
-	if err != nil {
-		return nil, err
-	}
-
-	if existing != nil {
-		recs := [][]byte{rec.GetValue(), existing.GetValue()}
-		i, err := dht.Validator.Select(string(rec.GetKey()), recs)
-		if err != nil {
-			logger.Warnw("dht record passed validation but failed select", "from", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()), "error", err)
-			return nil, err
-		}
-		if i != 0 {
-			logger.Infow("DHT record in PUT older than existing record (ignoring)", "peer", p, "key", internal.LoggableRecordKeyBytes(rec.GetKey()))
-			return nil, errors.New("old record")
-		}
-	}
-
-	// record the time we receive every record
-	rec.TimeReceived = internal.FormatRFC3339(time.Now())
-
-	data, err := proto.Marshal(rec)
-	if err != nil {
-		return nil, err
-	}
-
-	err = dht.datastore.Put(ctx, dskey, data)
-	return pmes, err
-}
-
-// returns nil, nil when either nothing is found or the value found doesn't properly validate.
-// returns nil, some_error when there's a *datastore* error (i.e., something goes very wrong)
-func (dht *IpfsDHT) getRecordFromDatastore(ctx context.Context, dskey ds.Key) (*recpb.Record, error) {
-	buf, err := dht.datastore.Get(ctx, dskey)
-	if err == ds.ErrNotFound {
-		return nil, nil
-	}
-	if err != nil {
-		logger.Errorw("error retrieving record from datastore", "key", dskey, "error", err)
-		return nil, err
-	}
-	rec := new(recpb.Record)
-	err = proto.Unmarshal(buf, rec)
-	if err != nil {
-		// Bad data in datastore, log it but don't return an error, we'll just overwrite it
-		logger.Errorw("failed to unmarshal record from datastore", "key", dskey, "error", err)
-		return nil, nil
-	}
-
-	err = dht.Validator.Validate(string(rec.GetKey()), rec.GetValue())
-	if err != nil {
-		// Invalid record in datastore, probably expired but don't return an error,
-		// we'll just overwrite it
-		logger.Debugw("local record verify failed", "key", rec.GetKey(), "error", err)
-		return nil, nil
-	}
-
-	return rec, nil
+	return pmes, nil
 }
 
 func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
@@ -357,8 +218,4 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 	}
 
 	return nil, nil
-}
-
-func convertToDsKey(s []byte) ds.Key {
-	return ds.NewKey(base32.RawStdEncoding.EncodeToString(s))
 }

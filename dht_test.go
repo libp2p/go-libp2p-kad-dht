@@ -1407,8 +1407,9 @@ func TestBadProtoMessages(t *testing.T) {
 func TestAtomicPut(t *testing.T) {
 	ctx := t.Context()
 
-	d := setupDHT(ctx, t, false)
-	d.Validator = testAtomicPutValidator{}
+	// Configure the validator at construction so both the DHT and its value
+	// store use it (reassigning d.Validator afterwards would not reach the store).
+	d := setupDHT(ctx, t, false, Validator(testAtomicPutValidator{}))
 
 	// fnc to put a record
 	key := "testkey"
@@ -1446,6 +1447,51 @@ func TestAtomicPut(t *testing.T) {
 	if string(msg.GetRecord().Value) != "newer7" {
 		t.Fatalf("Expected 'newer7' got '%s'", string(msg.GetRecord().Value))
 	}
+}
+
+// A peer may serve a record it never validated (a malicious server bypasses the
+// serve-side check). The requester must still reject the invalid record; this
+// guards the client-side validation in getValues that the ValueStore extraction
+// must not have weakened.
+func TestGetValueRejectsInvalidRecordFromPeer(t *testing.T) {
+	ctx := t.Context()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+	connect(t, ctx, dhtA, dhtB)
+
+	// A /pk key whose served value is a different peer's public key: valid bytes,
+	// but they fail PublicKeyValidator for this key.
+	_, pub, err := crypto.GenerateKeyPair(crypto.RSA, 2048)
+	require.NoError(t, err)
+	id, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	pkkey := routing.KeyForPublicKey(id)
+
+	_, wrongPub, err := crypto.GenerateKeyPair(crypto.RSA, 2048)
+	require.NoError(t, err)
+	wrongBytes, err := crypto.MarshalPublicKey(wrongPub)
+	require.NoError(t, err)
+
+	// Install a message sender on A that answers any GET_VALUE with the
+	// mismatched record, simulating a peer that serves without validating.
+	impl := net.NewMessageSenderImpl(dhtA.host, dhtA.protocols)
+	dhtA.protoMessenger, err = pb.NewProtocolMessenger(&testMessageSender{
+		sendMessage: impl.SendMessage,
+		sendRequest: func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+			if pmes.GetType() == pb.Message_GET_VALUE {
+				resp := pb.NewMessage(pb.Message_GET_VALUE, pmes.GetKey(), 0)
+				resp.Record = record.MakePutRecord(string(pmes.GetKey()), wrongBytes)
+				return resp, nil
+			}
+			return impl.SendRequest(ctx, p, pmes)
+		},
+	})
+	require.NoError(t, err)
+
+	val, err := dhtA.GetValue(ctx, pkkey)
+	require.ErrorIsf(t, err, routing.ErrNotFound, "invalid record from a peer must be rejected")
+	require.Nil(t, val)
 }
 
 func TestClientModeConnect(t *testing.T) {

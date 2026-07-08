@@ -37,20 +37,25 @@ type RouteTableFilterFunc func(dht any, p peer.ID) bool
 
 // Config is a structure containing all the options that can be used when constructing a DHT.
 type Config struct {
-	Datastore              ds.Batching
-	Validator              record.Validator
-	ValidatorChanged       bool // if true implies that the validator has been changed and that Defaults should not be used
-	Mode                   ModeOpt
-	ProtocolPrefix         protocol.ID
-	V1ProtocolOverride     protocol.ID
-	BucketSize             int
-	Concurrency            int
-	Resiliency             int
-	MaxRecordAge           time.Duration
-	EnableProviders        bool
-	EnableValues           bool
-	ProviderManagerOpts    []records.Option
-	ProviderStore          records.ProviderStore
+	Datastore           ds.Batching
+	Validator           record.Validator
+	ValidatorChanged    bool // if true implies that the validator has been changed and that Defaults should not be used
+	Mode                ModeOpt
+	ProtocolPrefix      protocol.ID
+	V1ProtocolOverride  protocol.ID
+	BucketSize          int
+	Concurrency         int
+	Resiliency          int
+	MaxRecordAge        time.Duration
+	EnableProviders     bool
+	EnableValues        bool
+	ProviderManagerOpts []records.Option
+	// ValueDatastore and ProviderDatastore optionally give the value store and
+	// the provider store their own physical datastore. When nil, each falls back
+	// to Datastore. Record keys are namespaced by a per-record-type prefix, so a
+	// shared Datastore stays collision-free.
+	ValueDatastore         ds.Batching
+	ProviderDatastore      ds.Batching
 	QueryPeerFilter        QueryFilterFunc
 	LookupCheckConcurrency int
 	MsgSenderBuilder       func(h host.Host, protos []protocol.ID) pb.MessageSenderWithDisconnect

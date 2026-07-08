@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -14,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
+	"github.com/multiformats/go-base32"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
@@ -428,4 +430,26 @@ func writeRaw(t *testing.T, dstore ds.Datastore, key string, rec *recpb.Record) 
 	data, err := proto.Marshal(rec)
 	require.NoError(t, err)
 	require.NoError(t, dstore.Put(t.Context(), valueDsKey(key), data))
+}
+
+// TestValueDsKeyNamespaced checks value records are keyed under their record
+// namespace verbatim ("/pk/…", "/ipns/…"), and never collide with the reserved
+// provider namespace.
+func TestValueDsKeyNamespaced(t *testing.T) {
+	for key, wantNS := range map[string]string{
+		"/pk/abc":      "pk",
+		"/ipns/abc":    "ipns",
+		"/dnslink/abc": "dnslink",
+	} {
+		got := valueDsKey(key).String()
+		wantEnc := base32.RawStdEncoding.EncodeToString([]byte(key))
+		require.Equalf(t, "/"+wantNS+"/"+wantEnc, got, "valueDsKey(%q)", key)
+		require.Falsef(t, strings.HasPrefix(got, ProvidersKeyPrefix),
+			"value key %q collides with the provider namespace", got)
+	}
+
+	// A value record that (non-standardly) uses the reserved provider namespace
+	// is base32-encoded, so it stays out of the /providers/ subtree.
+	reserved := valueDsKey("/" + providerNamespace + "/x").String()
+	require.False(t, strings.HasPrefix(reserved, ProvidersKeyPrefix))
 }

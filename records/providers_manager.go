@@ -23,9 +23,12 @@ import (
 )
 
 const (
-	// ProvidersKeyPrefix is the prefix/namespace for ALL provider record
-	// keys stored in the data store.
-	ProvidersKeyPrefix = "/providers/"
+	// providerNamespace is the reserved datastore key namespace for provider
+	// records. No value record may use it (see valueDsKey), so a shared datastore
+	// stays collision-free.
+	providerNamespace = "providers"
+	// ProvidersKeyPrefix is the datastore key prefix for ALL provider records.
+	ProvidersKeyPrefix = "/" + providerNamespace + "/"
 )
 
 var (

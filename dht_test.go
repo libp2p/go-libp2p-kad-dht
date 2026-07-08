@@ -38,6 +38,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	dsq "github.com/ipfs/go-datastore/query"
+	dssync "github.com/ipfs/go-datastore/sync"
 	detectrace "github.com/ipfs/go-detect-race"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -2561,4 +2564,98 @@ func TestAddrFilter(t *testing.T) {
 		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
 	}
 	require.Equal(t, len(publicAddrs)+len(privAddrs), len(d3.host.Peerstore().Addrs(peerid)))
+}
+
+// recordKeys returns every physical key stored in dstore.
+func recordKeys(t *testing.T, ctx context.Context, dstore ds.Datastore) []string {
+	t.Helper()
+	res, err := dstore.Query(ctx, dsq.Query{KeysOnly: true})
+	require.NoError(t, err)
+	defer res.Close()
+
+	var keys []string
+	for e := range res.Next() {
+		require.NoError(t, e.Error)
+		keys = append(keys, e.Key)
+	}
+	return keys
+}
+
+// TestValueDatastoreOverride checks that ValueDatastore sends value records to
+// the override datastore while providers stay on the main datastore, and that
+// values round-trip through the DHT's store.
+func TestValueDatastoreOverride(t *testing.T) {
+	ctx := t.Context()
+	main := dssync.MutexWrap(ds.NewMapDatastore())
+	values := dssync.MutexWrap(ds.NewMapDatastore())
+
+	d := setupDHT(ctx, t, false, Datastore(main), ValueDatastore(values))
+
+	key := "/v/somekey"
+	rec := record.MakePutRecord(key, []byte("hello"))
+	require.NoError(t, d.valueStore.Put(ctx, key, rec))
+
+	got, err := d.valueStore.Get(ctx, key)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, []byte("hello"), got.GetValue())
+
+	// The value physically landed in the override, not the main datastore.
+	require.NotEmpty(t, recordKeys(t, ctx, values))
+	require.Empty(t, recordKeys(t, ctx, main))
+}
+
+// TestProviderDatastoreOverride checks that ProviderDatastore sends provider
+// records to the override datastore while the main datastore stays empty.
+func TestProviderDatastoreOverride(t *testing.T) {
+	ctx := t.Context()
+	main := dssync.MutexWrap(ds.NewMapDatastore())
+	providers := dssync.MutexWrap(ds.NewMapDatastore())
+
+	d := setupDHT(ctx, t, false, Datastore(main), ProviderDatastore(providers))
+
+	key := []byte("override-provider-key")
+	require.NoError(t, d.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: d.self}))
+
+	got, err := d.providerStore.GetProviders(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, d.self, got[0].ID)
+
+	require.NotEmpty(t, recordKeys(t, ctx, providers))
+	require.Empty(t, recordKeys(t, ctx, main))
+}
+
+// TestSharedDatastoreNamespacing checks that with a single shared datastore,
+// value and provider records coexist without collision under their per-type
+// prefixes.
+func TestSharedDatastoreNamespacing(t *testing.T) {
+	ctx := t.Context()
+	shared := dssync.MutexWrap(ds.NewMapDatastore())
+
+	d := setupDHT(ctx, t, false, Datastore(shared))
+
+	vkey := "/v/coexist"
+	require.NoError(t, d.valueStore.Put(ctx, vkey, record.MakePutRecord(vkey, []byte("v"))))
+	pkey := []byte("coexist-provider")
+	require.NoError(t, d.providerStore.AddProvider(ctx, pkey, peer.AddrInfo{ID: d.self}))
+
+	gotVal, err := d.valueStore.Get(ctx, vkey)
+	require.NoError(t, err)
+	require.Equal(t, []byte("v"), gotVal.GetValue())
+	gotProvs, err := d.providerStore.GetProviders(ctx, pkey)
+	require.NoError(t, err)
+	require.Len(t, gotProvs, 1)
+
+	// Provider records live under "/providers/…"; values under their own prefix.
+	var providerKeys, otherKeys int
+	for _, k := range recordKeys(t, ctx, shared) {
+		if strings.HasPrefix(k, "/providers/") {
+			providerKeys++
+		} else {
+			otherKeys++
+		}
+	}
+	require.Positive(t, providerKeys)
+	require.Positive(t, otherKeys)
 }

@@ -180,10 +180,20 @@ func (v *ValueStore) discardIfUnchanged(ctx context.Context, key string, dskey d
 	}
 }
 
-// valueDsKey encodes a record key as its datastore key, base32-encoding the
-// full key at the datastore root.
+// valueDsKey encodes a record key as its datastore key:
+// "/" + <namespace> + "/" + base32(fullkey). Value records are stored under
+// their record namespace verbatim ("/pk/…", "/ipns/…"), which is readable and,
+// because record namespaces are distinct, keeps a shared datastore
+// collision-free. providerNamespace is reserved, so a value record that
+// (non-standardly) uses it is base32-encoded to keep it out of the "/providers/"
+// subtree. base32-encoding the full key keeps the record key recoverable and the
+// ValueStore.Get key check valid. A malformed key (no namespace) lands at root.
 func valueDsKey(key string) ds.Key {
-	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(key)))
+	ns, _, _ := record.SplitKey(key)
+	if ns == providerNamespace {
+		ns = base32.RawStdEncoding.EncodeToString([]byte(ns))
+	}
+	return ds.NewKey("/" + ns + "/" + base32.RawStdEncoding.EncodeToString([]byte(key)))
 }
 
 // lockIndex maps a key to one of the striped Put locks by its last byte.

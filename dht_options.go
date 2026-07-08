@@ -41,10 +41,24 @@ const DefaultPrefix protocol.ID = amino.ProtocolPrefix
 
 type Option = dhtcfg.Option
 
-// ProviderStore sets the provider storage manager.
-func ProviderStore(ps records.ProviderStore) Option {
+// ValueDatastore gives the value store (records under /pk, /ipns, …) its own
+// physical datastore. When unset, values share the datastore configured with
+// Datastore. Value records are namespaced by a per-record-type key prefix, so a
+// shared datastore never collides with provider records.
+func ValueDatastore(dstore ds.Batching) Option {
 	return func(c *dhtcfg.Config) error {
-		c.ProviderStore = ps
+		c.ValueDatastore = dstore
+		return nil
+	}
+}
+
+// ProviderDatastore gives the provider store its own physical datastore. When
+// unset, provider records share the datastore configured with Datastore. This
+// is useful, for example, to keep ephemeral provider records off a durable
+// value datastore.
+func ProviderDatastore(dstore ds.Batching) Option {
+	return func(c *dhtcfg.Config) error {
+		c.ProviderDatastore = dstore
 		return nil
 	}
 }

@@ -412,3 +412,41 @@ func TestWriteUpdatesCache(t *testing.T) {
 		t.Fatalf("expected h1 to be provided by 2 peers, is by %d", len(c1Provs))
 	}
 }
+
+// rawKeys returns every physical key stored in dstore.
+func rawKeys(t *testing.T, ctx context.Context, dstore ds.Datastore) []string {
+	t.Helper()
+	res, err := dstore.Query(ctx, dsq.Query{KeysOnly: true})
+	require.NoError(t, err)
+	defer res.Close()
+
+	var keys []string
+	for e := range res.Next() {
+		require.NoError(t, e.Error)
+		keys = append(keys, e.Key)
+	}
+	return keys
+}
+
+// TestProviderKeyScheme verifies provider records are stored under the
+// "/providers/" namespace prefix, one datastore key per (key, provider) pair.
+func TestProviderKeyScheme(t *testing.T) {
+	ctx := t.Context()
+	store := dssync.MutexWrap(ds.NewMapDatastore())
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, store)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+	key := internal.Hash([]byte("cid"))
+	prov := peer.ID("prov")
+	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: prov}))
+	// GetProviders flushes the write buffer to the datastore.
+	got, err := pm.GetProviders(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	require.Equal(t, "/providers/", ProvidersKeyPrefix)
+	require.Equal(t, []string{mkProvKeyFor(key, prov)}, rawKeys(t, ctx, store))
+}

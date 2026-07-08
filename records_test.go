@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p/core/test"
 
-	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-test/random"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -17,8 +15,6 @@ import (
 	ci "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
-	"github.com/multiformats/go-base32"
-	"google.golang.org/protobuf/proto"
 )
 
 // plantRawRecord writes rec directly into the DHT's datastore, bypassing the
@@ -30,13 +26,16 @@ import (
 // TestGetValueRejectsInvalidRecordFromPeer.
 func plantRawRecord(t *testing.T, ctx context.Context, dht *IpfsDHT, key string, rec *recpb.Record) {
 	t.Helper()
-	rec.TimeReceived = internal.FormatRFC3339(time.Now())
-	data, err := proto.Marshal(rec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dskey := ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(key)))
-	if err := dht.datastore.Put(ctx, dskey, data); err != nil {
+	// Plant through a permissive value store so the record lands at the real
+	// datastore key (the namespaced layout) without the DHT's validator
+	// rejecting it. The DHT's own value store discards it on the next read when
+	// its validator rejects the bytes.
+	//
+	// dht.datastore is the value store's backing only while no ValueDatastore
+	// override is set (the case for every caller here). If a test ever pairs
+	// this helper with ValueDatastore(...), plant into that datastore instead.
+	planter := records.NewValueStore(dht.datastore, blankValidator{}, 0)
+	if err := planter.Put(ctx, key, rec); err != nil {
 		t.Fatal(err)
 	}
 }

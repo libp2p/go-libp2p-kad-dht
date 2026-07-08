@@ -207,7 +207,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	dht.disableFixLowPeers = cfg.DisableFixLowPeers
 
 	dht.Validator = cfg.Validator
-	dht.valueStore = records.NewValueStore(dht.datastore, cfg.Validator, cfg.MaxRecordAge)
+	dht.valueStore = records.NewValueStore(datastoreOr(cfg.ValueDatastore, cfg.Datastore), cfg.Validator, cfg.MaxRecordAge)
 	dht.msgSender = cfg.MsgSenderBuilder(h, dht.protocols)
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender)
 	if err != nil {
@@ -278,6 +278,16 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 		panic(err)
 	}
 	return dht
+}
+
+// datastoreOr returns primary when it is set, otherwise fallback. It selects
+// the physical datastore for a record store: the per-store override when given,
+// else the shared injected datastore.
+func datastoreOr(primary, fallback ds.Batching) ds.Batching {
+	if primary != nil {
+		return primary
+	}
+	return fallback
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
@@ -362,13 +372,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		return nil, fmt.Errorf("failed to construct RT Refresh Manager,err=%s", err)
 	}
 
-	if cfg.ProviderStore != nil {
-		dht.providerStore = cfg.ProviderStore
-	} else {
-		dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.Datastore, cfg.ProviderManagerOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
-		}
+	dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, datastoreOr(cfg.ProviderDatastore, cfg.Datastore), cfg.ProviderManagerOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("initializing default provider manager (%v)", err)
 	}
 
 	dht.rtFreezeTimeout = rtFreezeTimeout

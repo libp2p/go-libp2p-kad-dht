@@ -135,8 +135,6 @@ type IpfsDHT struct {
 	// connecting to the network).
 	bootstrapPeers func() []peer.AddrInfo
 
-	maxRecordAge time.Duration
-
 	// Allows disabling dht subsystems. These should _only_ be set on
 	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
 	// networks).
@@ -201,13 +199,13 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
-	dht.maxRecordAge = cfg.MaxRecordAge
 	dht.enableProviders = cfg.EnableProviders
 	dht.enableValues = cfg.EnableValues
 	dht.disableFixLowPeers = cfg.DisableFixLowPeers
 
 	dht.Validator = cfg.Validator
 	dht.valueStore = records.NewValueStore(datastoreOr(cfg.ValueDatastore, cfg.Datastore), cfg.Validator, cfg.MaxRecordAge)
+	dht.valueStore.StartGC(dht.ctx, cfg.ValueGCInterval)
 	dht.msgSender = cfg.MsgSenderBuilder(h, dht.protocols)
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender)
 	if err != nil {
@@ -858,6 +856,7 @@ func (dht *IpfsDHT) Close() error {
 	closes := [...]func() error{
 		dht.rtRefreshManager.Close,
 		dht.providerStore.Close,
+		dht.valueStore.Close,
 	}
 	for _, c := range closes {
 		go func(c func() error) {

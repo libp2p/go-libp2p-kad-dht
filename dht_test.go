@@ -2659,3 +2659,29 @@ func TestSharedDatastoreNamespacing(t *testing.T) {
 	require.Positive(t, providerKeys)
 	require.Positive(t, otherKeys)
 }
+
+// TestValueGCRemovesExpiredRecords checks the MaxRecordAge / ValueGCInterval
+// options flow through New into the value store's background sweep, so an
+// expired value record is deleted from the datastore without anyone reading it.
+func TestValueGCRemovesExpiredRecords(t *testing.T) {
+	ctx := t.Context()
+	main := dssync.MutexWrap(ds.NewMapDatastore())
+	d := setupDHT(ctx, t, false, Datastore(main),
+		MaxRecordAge(time.Millisecond), ValueGCInterval(10*time.Millisecond))
+
+	key := "/v/gc-target"
+	require.NoError(t, d.putLocal(ctx, key, record.MakePutRecord(key, []byte("stale"))))
+
+	hasValueKey := func() bool {
+		for _, k := range recordKeys(t, ctx, main) {
+			if strings.HasPrefix(k, "/v/") {
+				return true
+			}
+		}
+		return false
+	}
+	require.Truef(t, hasValueKey(), "record must be stored before GC runs")
+
+	require.Eventuallyf(t, func() bool { return !hasValueKey() },
+		2*time.Second, 10*time.Millisecond, "value GC must sweep the expired record")
+}

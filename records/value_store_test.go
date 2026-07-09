@@ -453,3 +453,228 @@ func TestValueDsKeyNamespaced(t *testing.T) {
 	reserved := valueDsKey("/" + providerNamespace + "/x").String()
 	require.False(t, strings.HasPrefix(reserved, ProvidersKeyPrefix))
 }
+
+const (
+	gcMaxAge     = time.Hour
+	gcInterval   = 10 * time.Minute
+	pastMaxAge   = gcMaxAge + gcInterval // enough real time for a sweep to fire after expiry
+	withinMaxAge = gcMaxAge / 2
+)
+
+// hasKey reports whether dstore holds an entry at the datastore key.
+func hasKey(t *testing.T, dstore ds.Datastore, key ds.Key) bool {
+	t.Helper()
+	has, err := dstore.Has(t.Context(), key)
+	require.NoError(t, err)
+	return has
+}
+
+// TestValueStoreGCSweepsExpired checks the background sweep proactively deletes
+// an expired value record without anyone reading it first.
+func TestValueStoreGCSweepsExpired(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, dstore := newTestStore(gcMaxAge)
+		mustPut(t, s, "/pk/k", "hello")
+
+		s.StartGC(t.Context(), gcInterval)
+		defer func() { require.NoError(t, s.Close()) }()
+
+		time.Sleep(pastMaxAge)
+		synctest.Wait()
+
+		require.Falsef(t, hasKey(t, dstore, valueDsKey("/pk/k")),
+			"expired record must be swept without a prior read")
+	})
+}
+
+// TestValueStoreGCKeepsFresh checks the sweep leaves records still within
+// maxRecordAge in place.
+func TestValueStoreGCKeepsFresh(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, dstore := newTestStore(gcMaxAge)
+		mustPut(t, s, "/pk/k", "hello")
+
+		s.StartGC(t.Context(), gcInterval)
+		defer func() { require.NoError(t, s.Close()) }()
+
+		time.Sleep(withinMaxAge)
+		synctest.Wait()
+
+		require.Truef(t, hasKey(t, dstore, valueDsKey("/pk/k")),
+			"a record within maxRecordAge must survive GC")
+	})
+}
+
+// TestValueStoreGCLeavesProviderRecords checks the value sweep never touches the
+// reserved provider subtree, so value and provider records can share a
+// datastore.
+func TestValueStoreGCLeavesProviderRecords(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, dstore := newTestStore(gcMaxAge)
+		mustPut(t, s, "/pk/k", "hello")
+
+		provKey := ds.NewKey(ProvidersKeyPrefix + "somecid/someprovider")
+		require.NoError(t, dstore.Put(t.Context(), provKey, []byte("provider-entry")))
+
+		s.StartGC(t.Context(), gcInterval)
+		defer func() { require.NoError(t, s.Close()) }()
+
+		time.Sleep(pastMaxAge)
+		synctest.Wait()
+
+		require.Falsef(t, hasKey(t, dstore, valueDsKey("/pk/k")), "expired value must be swept")
+		require.Truef(t, hasKey(t, dstore, provKey), "provider records must never be swept by value GC")
+	})
+}
+
+// TestValueStoreGCScopesToNamespaces checks that when the validator is
+// namespaced the sweep queries only the value namespaces, leaving unrelated
+// datastore entries untouched.
+func TestValueStoreGCScopesToNamespaces(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dstore := dssync.MutexWrap(ds.NewMapDatastore())
+		nsval := record.NamespacedValidator{"pk": lenValidator{}}
+		s := NewValueStore(dstore, nsval, gcMaxAge)
+		mustPut(t, s, "/pk/k", "hello")
+
+		foreign := ds.NewKey("/unrelated/entry")
+		require.NoError(t, dstore.Put(t.Context(), foreign, []byte("not a value record")))
+
+		s.StartGC(t.Context(), gcInterval)
+		defer func() { require.NoError(t, s.Close()) }()
+
+		time.Sleep(pastMaxAge)
+		synctest.Wait()
+
+		require.Falsef(t, hasKey(t, dstore, valueDsKey("/pk/k")), "expired value must be swept")
+		require.Truef(t, hasKey(t, dstore, foreign),
+			"entries outside the value namespaces must be left untouched")
+	})
+}
+
+// TestValueStoreGCDisabled checks StartGC is a no-op when age expiry or the
+// interval is off, and that Close is safe to call regardless.
+func TestValueStoreGCDisabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxAge   time.Duration
+		interval time.Duration
+	}{
+		{"age expiry disabled", 0, gcInterval},
+		{"interval disabled", gcMaxAge, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, dstore := newTestStore(tt.maxAge)
+				mustPut(t, s, "/pk/k", "hello")
+
+				s.StartGC(t.Context(), tt.interval)
+				defer func() { require.NoError(t, s.Close()) }()
+
+				time.Sleep(pastMaxAge)
+				synctest.Wait()
+
+				require.Truef(t, hasKey(t, dstore, valueDsKey("/pk/k")),
+					"no sweep must run when GC is disabled")
+			})
+		})
+	}
+}
+
+// TestValueStoreCloseWithoutGC checks Close is safe when StartGC was never
+// called.
+func TestValueStoreCloseWithoutGC(t *testing.T) {
+	s, _ := newTestStore(gcMaxAge)
+	require.NoError(t, s.Close())
+	require.NoError(t, s.Close(), "Close must be idempotent")
+}
+
+// TestValueStoreCloseIdempotentAfterStartGC checks Close joins the sweeper and
+// that a second Close after a started sweep still returns cleanly.
+func TestValueStoreCloseIdempotentAfterStartGC(t *testing.T) {
+	s, _ := newTestStore(gcMaxAge)
+	s.StartGC(t.Context(), gcInterval)
+	require.NoError(t, s.Close())
+	require.NoError(t, s.Close(), "Close after a started sweep must be idempotent")
+}
+
+// TestValueStoreGCWholeStoreLeavesNonOwnEntries drives the whole-datastore scan
+// (non-namespaced validator) and checks its safety guards: entries that are not
+// well-formed records, or are filed under the wrong datastore key, are left
+// alone; only the store's own expired records are swept.
+func TestValueStoreGCWholeStoreLeavesNonOwnEntries(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, dstore := newTestStore(time.Minute) // lenValidator -> whole-store scan
+		ctx := t.Context()
+
+		// An expired record the store itself owns: must be swept.
+		mine := record.MakePutRecord("/pk/mine", []byte("stale"))
+		mine.TimeReceived = internal.FormatRFC3339(time.Now().Add(-2 * time.Minute))
+		mineData, err := proto.Marshal(mine)
+		require.NoError(t, err)
+		require.NoError(t, dstore.Put(ctx, valueDsKey("/pk/mine"), mineData))
+
+		// Non-protobuf bytes: unmarshal fails, so the sweep must leave them.
+		garbage := valueDsKey("/pk/garbage")
+		require.NoError(t, dstore.Put(ctx, garbage, []byte("not a protobuf")))
+
+		// A record filed under the wrong datastore key: the round-trip check keeps
+		// the sweep from deleting it (Get discards such anomalies on read; GC, being
+		// conservative, does not).
+		misfiled := valueDsKey("/pk/here")
+		other := record.MakePutRecord("/pk/other", []byte("value"))
+		other.TimeReceived = internal.FormatRFC3339(time.Now().Add(-2 * time.Minute))
+		otherData, err := proto.Marshal(other)
+		require.NoError(t, err)
+		require.NoError(t, dstore.Put(ctx, misfiled, otherData))
+
+		s.StartGC(ctx, gcInterval)
+		defer func() { require.NoError(t, s.Close()) }()
+
+		time.Sleep(pastMaxAge)
+		synctest.Wait()
+
+		require.Falsef(t, hasKey(t, dstore, valueDsKey("/pk/mine")), "expired own record must be swept")
+		require.Truef(t, hasKey(t, dstore, garbage), "non-protobuf entry must survive the sweep")
+		require.Truef(t, hasKey(t, dstore, misfiled), "misfiled record must survive the sweep")
+	})
+}
+
+// TestValueStoreGCConcurrentPutSurvives checks the sweep cannot clobber a record
+// written by a concurrent Put: the safe delete only removes bytes it still sees,
+// so a freshly re-Put (non-expired) record always survives. Runs under -race.
+func TestValueStoreGCConcurrentPutSurvives(t *testing.T) {
+	s, dstore := newTestStore(time.Minute)
+	const key = "/pk/race"
+
+	// Seed an already-expired record the sweep wants to delete.
+	expired := record.MakePutRecord(key, []byte("old"))
+	expired.TimeReceived = internal.FormatRFC3339(time.Now().Add(-2 * time.Minute))
+	data, err := proto.Marshal(expired)
+	require.NoError(t, err)
+	require.NoError(t, dstore.Put(t.Context(), valueDsKey(key), data))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			s.collectExpired(context.Background())
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			// A fresh record is never expired, so it must survive the sweep.
+			_ = s.Put(context.Background(), key, record.MakePutRecord(key, []byte("keepme")))
+		}
+	}()
+	wg.Wait()
+
+	// The last write is a fresh Put, so the key still holds a fresh record.
+	rec, err := s.Get(t.Context(), key)
+	require.NoError(t, err)
+	require.NotNilf(t, rec, "a concurrently-Put fresh record must never be swept by GC")
+	require.Equal(t, []byte("keepme"), rec.GetValue())
+}

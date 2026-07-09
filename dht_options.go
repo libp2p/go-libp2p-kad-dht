@@ -244,6 +244,17 @@ func MaxRecordAge(maxAge time.Duration) Option {
 	}
 }
 
+// ValueGCInterval sets how often the DHT sweeps the datastore to delete value
+// records older than MaxRecordAge. A non-positive interval, or a non-positive
+// MaxRecordAge, disables the background sweep; expired records are still
+// discarded lazily when read. Defaults to amino.DefaultValueGCInterval.
+func ValueGCInterval(interval time.Duration) Option {
+	return func(c *dhtcfg.Config) error {
+		c.ValueGCInterval = interval
+		return nil
+	}
+}
+
 // DisableAutoRefresh completely disables 'auto-refresh' on the DHT routing
 // table. This means that we will neither refresh the routing table periodically
 // nor when the routing table size goes below the minimum threshold.

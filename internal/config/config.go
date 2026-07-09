@@ -47,6 +47,7 @@ type Config struct {
 	Concurrency         int
 	Resiliency          int
 	MaxRecordAge        time.Duration
+	ValueGCInterval     time.Duration
 	EnableProviders     bool
 	EnableValues        bool
 	ProviderManagerOpts []records.Option
@@ -134,7 +135,8 @@ var Defaults = func(o *Config) error {
 	o.RoutingTable.AutoRefresh = true
 	o.RoutingTable.PeerFilter = EmptyRTFilter
 
-	o.MaxRecordAge = amino.DefaultProvideValidity
+	o.MaxRecordAge = amino.DefaultMaxRecordAge
+	o.ValueGCInterval = amino.DefaultValueGCInterval
 
 	o.BucketSize = amino.DefaultBucketSize
 	o.Concurrency = amino.DefaultConcurrency

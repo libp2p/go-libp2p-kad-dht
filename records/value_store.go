@@ -5,10 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
+	dsq "github.com/ipfs/go-datastore/query"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
@@ -33,6 +37,21 @@ type ValueStore struct {
 	validator    record.Validator
 	maxRecordAge time.Duration
 	putLocks     [256]sync.Mutex
+
+	// namespaces are the value record namespaces the background GC sweeps. It is
+	// derived from validator at construction so the sweep only scans keys the
+	// store owns; it is empty for a non-namespaced validator, which makes the
+	// sweep fall back to a whole-datastore scan. Namespaces registered on the
+	// validator after construction are not swept by the background GC (they are
+	// still expired lazily on read).
+	namespaces []string
+
+	// GC lifecycle: gcMu guards the fields below, set up by StartGC and torn down
+	// by Close, so the two are safe to call from different goroutines.
+	gcMu      sync.Mutex
+	gcStarted bool
+	gcCancel  context.CancelFunc
+	gcClosed  chan struct{}
 }
 
 // NewValueStore returns a ValueStore backed by dstore. It uses validator to
@@ -43,7 +62,20 @@ func NewValueStore(dstore ds.Datastore, validator record.Validator, maxRecordAge
 		ds:           dstore,
 		validator:    validator,
 		maxRecordAge: maxRecordAge,
+		namespaces:   valueNamespaces(validator),
 	}
+}
+
+// valueNamespaces returns the record namespaces a namespaced validator knows
+// about (e.g. "pk", "ipns"), sorted for a deterministic sweep order. It returns
+// nil for any other validator, since the set of value namespaces is then
+// unknown.
+func valueNamespaces(validator record.Validator) []string {
+	nsval, ok := validator.(record.NamespacedValidator)
+	if !ok {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(nsval))
 }
 
 // Get returns the record stored under key. It returns (nil, nil) when there is
@@ -128,6 +160,9 @@ func (v *ValueStore) Put(ctx context.Context, key string, rec *recpb.Record) err
 // existingForSelect reads the record currently stored at dskey for comparison
 // during Put. Unlike Get it does not age-check or delete: a missing, corrupt,
 // or invalid record is reported as absent so the incoming record replaces it.
+// This means a stored record blocks a worse incoming one via Select regardless
+// of its age; once it passes maxRecordAge, GC (like Get) removes it, so an
+// expired record offers no rollback guarantee against an older incoming record.
 func (v *ValueStore) existingForSelect(ctx context.Context, dskey ds.Key) (*recpb.Record, error) {
 	buf, err := v.ds.Get(ctx, dskey)
 	if err == ds.ErrNotFound {
@@ -180,20 +215,127 @@ func (v *ValueStore) discardIfUnchanged(ctx context.Context, key string, dskey d
 	}
 }
 
+// StartGC launches a background sweep that periodically deletes value records
+// older than maxRecordAge, bounded by ctx. It is a no-op when age expiry is
+// disabled (maxRecordAge <= 0) or interval <= 0, and starts at most one
+// sweeper. Stop the sweeper with Close.
+func (v *ValueStore) StartGC(ctx context.Context, interval time.Duration) {
+	if v.maxRecordAge <= 0 || interval <= 0 {
+		return
+	}
+	v.gcMu.Lock()
+	defer v.gcMu.Unlock()
+	if v.gcStarted {
+		return
+	}
+	v.gcStarted = true
+	ctx, v.gcCancel = context.WithCancel(ctx)
+	v.gcClosed = make(chan struct{})
+	go v.gcLoop(ctx, interval, v.gcClosed)
+}
+
+// Close stops the background sweep started by StartGC and waits for it to exit.
+// It is safe to call when StartGC was never called or was a no-op, and is
+// idempotent and safe to call concurrently with StartGC.
+func (v *ValueStore) Close() error {
+	v.gcMu.Lock()
+	cancel, closed := v.gcCancel, v.gcClosed
+	v.gcMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	<-closed
+	return nil
+}
+
+func (v *ValueStore) gcLoop(ctx context.Context, interval time.Duration, closed chan struct{}) {
+	defer close(closed)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			v.collectExpired(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// collectExpired deletes every expired value record in one pass. When the value
+// namespaces are known it queries each one's subtree; otherwise it scans the
+// whole datastore while skipping the reserved provider subtree.
+func (v *ValueStore) collectExpired(ctx context.Context) {
+	if len(v.namespaces) == 0 {
+		v.sweep(ctx, "")
+		return
+	}
+	for _, ns := range v.namespaces {
+		v.sweep(ctx, valueNsPrefix(ns))
+	}
+}
+
+// sweep deletes expired value records whose datastore key starts with prefix.
+// An empty prefix scans the whole datastore. Provider records and entries that
+// are not this store's own value records are left untouched, so a datastore may
+// be shared with the provider store and other data.
+func (v *ValueStore) sweep(ctx context.Context, prefix string) {
+	res, err := v.ds.Query(ctx, dsq.Query{Prefix: prefix})
+	if err != nil {
+		log.Errorw("value GC query failed", "prefix", prefix, "error", err)
+		return
+	}
+	defer func() { _ = res.Close() }()
+
+	for e := range res.Next() {
+		if ctx.Err() != nil {
+			return
+		}
+		if e.Error != nil {
+			log.Errorw("value GC query result error", "error", e.Error)
+			continue
+		}
+		if strings.HasPrefix(e.Key, ProvidersKeyPrefix) {
+			continue // reserved for provider records
+		}
+		rec := new(recpb.Record)
+		if proto.Unmarshal(e.Value, rec) != nil {
+			continue // not a well-formed record; Get discards it on read
+		}
+		// Only touch entries this store itself filed here, and only once expired.
+		key := string(rec.GetKey())
+		dskey := valueDsKey(key)
+		if dskey.String() != e.Key || !v.expired(rec) {
+			continue
+		}
+		v.discardIfUnchanged(ctx, key, dskey, e.Value)
+	}
+}
+
 // valueDsKey encodes a record key as its datastore key:
 // "/" + <namespace> + "/" + base32(fullkey). Value records are stored under
 // their record namespace verbatim ("/pk/…", "/ipns/…"), which is readable and,
 // because record namespaces are distinct, keeps a shared datastore
-// collision-free. providerNamespace is reserved, so a value record that
-// (non-standardly) uses it is base32-encoded to keep it out of the "/providers/"
-// subtree. base32-encoding the full key keeps the record key recoverable and the
-// ValueStore.Get key check valid. A malformed key (no namespace) lands at root.
+// collision-free. base32-encoding the full key keeps the record key recoverable
+// and the ValueStore.Get key check valid. A malformed key (no namespace) lands
+// at root.
 func valueDsKey(key string) ds.Key {
 	ns, _, _ := record.SplitKey(key)
+	return ds.NewKey(valueNsPrefix(ns) + "/" + base32.RawStdEncoding.EncodeToString([]byte(key)))
+}
+
+// valueNsPrefix returns the datastore key prefix under which value records of
+// namespace ns are stored, so the GC can sweep a namespace's subtree. The
+// reserved provider namespace is base32-encoded to keep such a (non-standard)
+// value record out of the "/providers/" subtree; every other namespace is used
+// verbatim.
+func valueNsPrefix(ns string) string {
 	if ns == providerNamespace {
 		ns = base32.RawStdEncoding.EncodeToString([]byte(ns))
 	}
-	return ds.NewKey("/" + ns + "/" + base32.RawStdEncoding.EncodeToString([]byte(key)))
+	return "/" + ns
 }
 
 // lockIndex maps a key to one of the striped Put locks by its last byte.

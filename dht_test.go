@@ -1901,9 +1901,8 @@ func TestProvideDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				provs, _ := dhtB.ProviderStore().GetProviders(ctx, kHash)
-				if len(provs) != 0 {
-					t.Fatal("node B should not have found local providers")
+				if dhtB.ProviderStore() != nil {
+					t.Fatal("node B should not have a provider store")
 				}
 			}
 
@@ -1912,17 +1911,54 @@ func TestProvideDisabled(t *testing.T) {
 				if len(provs) != 0 {
 					t.Fatal("node A should not have found providers")
 				}
+				provAddrs, _ := dhtA.ProviderStore().GetProviders(ctx, kHash)
+				if len(provAddrs) != 0 {
+					t.Fatal("node A should not have found local providers")
+				}
 			} else {
 				if err != routing.ErrNotSupported {
 					t.Fatal("node A should not have found providers")
 				}
-			}
-			provAddrs, _ := dhtA.ProviderStore().GetProviders(ctx, kHash)
-			if len(provAddrs) != 0 {
-				t.Fatal("node A should not have found local providers")
+				if dhtA.ProviderStore() != nil {
+					t.Fatal("node A should not have a provider store")
+				}
 			}
 		})
 	}
+}
+
+// TestDefaultPrefixRequiresValueAndProviderStores pins the invariant that store
+// presence now depends on: an Amino (default-prefix) DHT can never be built with
+// a nil value/provider store, because Validate forces both subsystems on. Only a
+// forked DHT with a custom prefix may disable them and end up with absent stores.
+func TestDefaultPrefixRequiresValueAndProviderStores(t *testing.T) {
+	ctx := t.Context()
+
+	newHost := func(t *testing.T) *bhost.BasicHost {
+		h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+		require.NoError(t, err)
+		h.Start()
+		t.Cleanup(func() { h.Close() })
+		return h
+	}
+
+	t.Run("DisableValues rejected on default prefix", func(t *testing.T) {
+		_, err := New(ctx, newHost(t), DisableValues())
+		require.ErrorContains(t, err, "must have values enabled")
+	})
+
+	t.Run("DisableProviders rejected on default prefix", func(t *testing.T) {
+		_, err := New(ctx, newHost(t), DisableProviders())
+		require.ErrorContains(t, err, "must have providers enabled")
+	})
+
+	t.Run("custom prefix allows disabling both", func(t *testing.T) {
+		d, err := New(ctx, newHost(t), ProtocolPrefix("/custom"), DisableValues(), DisableProviders())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, d.Close()) })
+		require.Nil(t, d.valueStore)
+		require.Nil(t, d.providerStore)
+	})
 }
 
 func TestHandleRemotePeerProtocolChanges(t *testing.T) {

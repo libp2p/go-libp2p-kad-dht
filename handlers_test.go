@@ -33,6 +33,63 @@ func TestBadMessage(t *testing.T) {
 	}
 }
 
+// TestHandlerForMsgTypeGatedByStorePresence checks that value/provider RPC
+// support follows the presence of the corresponding store: a disabled subsystem
+// has no store, so its message types resolve to no handler (unsupported RPC).
+func TestHandlerForMsgTypeGatedByStorePresence(t *testing.T) {
+	ctx := t.Context()
+
+	valueTypes := []pb.Message_MessageType{pb.Message_GET_VALUE, pb.Message_PUT_VALUE}
+	providerTypes := []pb.Message_MessageType{pb.Message_ADD_PROVIDER, pb.Message_GET_PROVIDERS}
+
+	assertSupport := func(t *testing.T, d *IpfsDHT, types []pb.Message_MessageType, want bool) {
+		t.Helper()
+		for _, mt := range types {
+			if supported := d.handlerForMsgType(mt) != nil; supported != want {
+				t.Fatalf("handler for %s: supported=%v, want %v", mt, supported, want)
+			}
+		}
+	}
+
+	t.Run("all enabled", func(t *testing.T) {
+		d := setupDHT(ctx, t, false)
+		if d.valueStore == nil || d.providerStore == nil {
+			t.Fatal("both stores should be present when enabled")
+		}
+		assertSupport(t, d, valueTypes, true)
+		assertSupport(t, d, providerTypes, true)
+	})
+
+	t.Run("values disabled", func(t *testing.T) {
+		d := setupDHT(ctx, t, false, DisableValues())
+		if d.valueStore != nil {
+			t.Fatal("value store should be absent when disabled")
+		}
+		assertSupport(t, d, valueTypes, false)
+		assertSupport(t, d, providerTypes, true)
+	})
+
+	t.Run("providers disabled", func(t *testing.T) {
+		d := setupDHT(ctx, t, false, DisableProviders())
+		if d.providerStore != nil {
+			t.Fatal("provider store should be absent when disabled")
+		}
+		assertSupport(t, d, providerTypes, false)
+		assertSupport(t, d, valueTypes, true)
+	})
+
+	t.Run("both disabled", func(t *testing.T) {
+		// Both stores absent: only FIND_NODE/PING remain; Close (via setupDHT's
+		// cleanup) must tolerate the both-nil case.
+		d := setupDHT(ctx, t, false, DisableValues(), DisableProviders())
+		if d.valueStore != nil || d.providerStore != nil {
+			t.Fatal("both stores should be absent when disabled")
+		}
+		assertSupport(t, d, valueTypes, false)
+		assertSupport(t, d, providerTypes, false)
+	})
+}
+
 func BenchmarkHandleFindPeer(b *testing.B) {
 	ctx := b.Context()
 	h, err := libp2p.New()

@@ -36,7 +36,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	ctx, end := tracer.PutValue(dhtName, ctx, key, value, opts...)
 	defer func() { end(err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return routing.ErrNotSupported
 	}
 
@@ -111,7 +111,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	ctx, end := tracer.GetValue(dhtName, ctx, key, opts...)
 	defer func() { end(result, err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return nil, routing.ErrNotSupported
 	}
 
@@ -148,7 +148,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	ctx, end := tracer.SearchValue(dhtName, ctx, key, opts...)
 	defer func() { ch, err = end(ch, err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return nil, routing.ErrNotSupported
 	}
 
@@ -389,7 +389,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	ctx, end := tracer.Provide(dhtName, ctx, key, brdcst)
 	defer func() { end(err) }()
 
-	if !dht.enableProviders {
+	if dht.providerStore == nil {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
 		return errors.New("invalid cid: undefined")
@@ -478,7 +478,7 @@ func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihas
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	if !dht.enableProviders {
+	if dht.providerStore == nil {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
 		return nil, errors.New("invalid cid: undefined")
@@ -501,7 +501,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 	defer func() { ch = end(ch, nil) }()
 
 	peerOut := make(chan peer.AddrInfo)
-	if !dht.enableProviders || !key.Defined() {
+	if dht.providerStore == nil || !key.Defined() {
 		close(peerOut)
 		return peerOut
 	}

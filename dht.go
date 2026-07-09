@@ -135,11 +135,6 @@ type IpfsDHT struct {
 	// connecting to the network).
 	bootstrapPeers func() []peer.AddrInfo
 
-	// Allows disabling dht subsystems. These should _only_ be set on
-	// "forked" DHTs (e.g., DHTs with custom protocols and/or private
-	// networks).
-	enableProviders, enableValues bool
-
 	disableFixLowPeers bool
 	fixLowPeersChan    chan struct{}
 
@@ -199,13 +194,16 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
-	dht.enableProviders = cfg.EnableProviders
-	dht.enableValues = cfg.EnableValues
 	dht.disableFixLowPeers = cfg.DisableFixLowPeers
 
 	dht.Validator = cfg.Validator
-	dht.valueStore = records.NewValueStore(datastoreOr(cfg.ValueDatastore, cfg.Datastore), cfg.Validator, cfg.MaxRecordAge)
-	dht.valueStore.StartGC(dht.ctx, cfg.ValueGCInterval)
+	// A nil valueStore marks the value subsystem as absent: value RPCs are then
+	// reported unsupported. It stays nil only on forked DHTs that opt out with
+	// DisableValues; the Amino DHT always enables values (enforced by Validate).
+	if cfg.EnableValues {
+		dht.valueStore = records.NewValueStore(datastoreOr(cfg.ValueDatastore, cfg.Datastore), cfg.Validator, cfg.MaxRecordAge)
+		dht.valueStore.StartGC(dht.ctx, cfg.ValueGCInterval)
+	}
 	dht.msgSender = cfg.MsgSenderBuilder(h, dht.protocols)
 	dht.protoMessenger, err = pb.NewProtocolMessenger(dht.msgSender)
 	if err != nil {
@@ -370,9 +368,15 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		return nil, fmt.Errorf("failed to construct RT Refresh Manager,err=%s", err)
 	}
 
-	dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, datastoreOr(cfg.ProviderDatastore, cfg.Datastore), cfg.ProviderManagerOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("initializing default provider manager (%v)", err)
+	// A nil providerStore marks the provider subsystem as absent: provider RPCs
+	// are then reported unsupported. It stays nil only on forked DHTs that opt
+	// out with DisableProviders; the Amino DHT always enables providers
+	// (enforced by Validate).
+	if cfg.EnableProviders {
+		dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, datastoreOr(cfg.ProviderDatastore, cfg.Datastore), cfg.ProviderManagerOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
+		}
 	}
 
 	dht.rtFreezeTimeout = rtFreezeTimeout
@@ -459,7 +463,9 @@ func makeRoutingTable(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutbound
 	return rt, err
 }
 
-// ProviderStore returns the provider storage object for storing and retrieving provider records.
+// ProviderStore returns the provider storage object for storing and retrieving
+// provider records. It returns nil on a forked DHT that disabled providers with
+// DisableProviders; the Amino DHT always has a provider store.
 func (dht *IpfsDHT) ProviderStore() records.ProviderStore {
 	return dht.providerStore
 }
@@ -853,10 +859,14 @@ func (dht *IpfsDHT) Close() error {
 	dht.wg.Wait()
 
 	errc := make(chan error)
-	closes := [...]func() error{
-		dht.rtRefreshManager.Close,
-		dht.providerStore.Close,
-		dht.valueStore.Close,
+	// providerStore and valueStore are absent on forked DHTs that disable the
+	// corresponding subsystem, so only close the ones that were constructed.
+	closes := []func() error{dht.rtRefreshManager.Close}
+	if dht.providerStore != nil {
+		closes = append(closes, dht.providerStore.Close)
+	}
+	if dht.valueStore != nil {
+		closes = append(closes, dht.valueStore.Close)
 	}
 	for _, c := range closes {
 		go func(c func() error) {

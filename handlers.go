@@ -23,7 +23,7 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 		return dht.handlePing
 	}
 
-	if dht.enableValues {
+	if dht.valueStore != nil {
 		switch t {
 		case pb.Message_GET_VALUE:
 			return dht.handleGetValue
@@ -32,7 +32,7 @@ func (dht *IpfsDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 		}
 	}
 
-	if dht.enableProviders {
+	if dht.providerStore != nil {
 		switch t {
 		case pb.Message_ADD_PROVIDER:
 			return dht.handleAddProvider

@@ -342,9 +342,8 @@ func TestValuesDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				rec, _ := dhtB.getLocal(ctx, pkkey)
-				if rec != nil {
-					t.Fatal("node B should not have found the value locally")
+				if dhtB.valueStore != nil {
+					t.Fatal("node B should not have a value store")
 				}
 			}
 
@@ -353,14 +352,17 @@ func TestValuesDisabled(t *testing.T) {
 				if err != routing.ErrNotFound {
 					t.Fatal("node A should not have found the value")
 				}
+				rec, _ := dhtA.getLocal(ctx, pkkey)
+				if rec != nil {
+					t.Fatal("node A should not have found the value locally")
+				}
 			} else {
 				if err != routing.ErrNotSupported {
 					t.Fatal("node A should not have found the value")
 				}
-			}
-			rec, _ := dhtA.getLocal(ctx, pkkey)
-			if rec != nil {
-				t.Fatal("node A should not have found the value locally")
+				if dhtA.valueStore != nil {
+					t.Fatal("node A should not have a value store")
+				}
 			}
 		})
 	}

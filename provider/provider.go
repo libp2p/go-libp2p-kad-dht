@@ -19,6 +19,7 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"path"
@@ -39,11 +40,11 @@ import (
 	"github.com/ipfs/go-datastore/query"
 	dssync "github.com/ipfs/go-datastore/sync"
 	"github.com/ipfs/go-log/v2"
-	"github.com/ipfs/go-test/random"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multihash"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/ipfs/go-libdht/kad/key"
@@ -701,7 +702,9 @@ func (s *SweepingProvider) approxPrefixLen() {
 	for range approxPrefixLenGCPCount {
 		go func() {
 			defer wg.Done()
-			randomMh := random.Multihashes(1)[0]
+			var b [32]byte
+			rand.Read(b[:])
+			randomMh, _ := multihash.Encode(b[:], multihash.SHA2_256)
 			for {
 				if s.closed() || !s.connectivity.IsOnline() {
 					return

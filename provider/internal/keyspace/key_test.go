@@ -176,10 +176,11 @@ func TestShortestCoveredPrefix(t *testing.T) {
 
 	// Test with random peer ids
 	nIterations := 64
+	rnd := random.New()
 	for range nIterations {
 		minCpl := KeyLen
 		largestCplCount := 0
-		peers = random.Peers(nPeers)
+		peers = rnd.Peers(nPeers)
 		peers = kb.SortClosestPeers(peers, target[:])
 		for i := range peers {
 			cpl = kb.CommonPrefixLen(kb.ConvertPeerID(peers[i]), target[:])
@@ -203,7 +204,7 @@ func TestShortestCoveredPrefix(t *testing.T) {
 
 	// Supply a single peer exactly matching the target, it should be returned
 	// and covered prefix should match the target.
-	p := random.Peers(1)[0]
+	p := rnd.Peers(1)[0]
 	bstrTarget = bitstr.Key(key.BitString(PeerIDToBit256(p)))
 	peers = []peer.ID{p}
 	prefix, coveredPeers = ShortestCoveredPrefix(bstrTarget, peers)

@@ -16,7 +16,7 @@ require (
 	github.com/ipfs/go-dsqueue v0.2.0
 	github.com/ipfs/go-libdht v0.5.0
 	github.com/ipfs/go-log/v2 v2.9.2
-	github.com/ipfs/go-test v0.3.0
+	github.com/ipfs/go-test v0.3.1-0.20260710003812-19fc05678b70
 	github.com/libp2p/go-libp2p v0.48.0
 	github.com/libp2p/go-libp2p-kbucket v0.8.0
 	github.com/libp2p/go-libp2p-record v0.3.1

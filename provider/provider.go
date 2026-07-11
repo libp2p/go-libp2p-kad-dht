@@ -44,7 +44,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/multiformats/go-multihash"
 	mh "github.com/multiformats/go-multihash"
 
 	"github.com/ipfs/go-libdht/kad/key"
@@ -704,7 +703,7 @@ func (s *SweepingProvider) approxPrefixLen() {
 			defer wg.Done()
 			var b [32]byte
 			rand.Read(b[:])
-			randomMh, _ := multihash.Encode(b[:], multihash.SHA2_256)
+			randomMh, _ := mh.Encode(b[:], mh.SHA2_256)
 			for {
 				if s.closed() || !s.connectivity.IsOnline() {
 					return

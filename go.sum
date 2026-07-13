@@ -162,8 +162,8 @@ github.com/ipfs/go-libdht v0.5.0/go.mod h1:L3YiuFXecLeZZFuuVRM0hjg1GgVhARzUdahFs
 github.com/ipfs/go-log v0.0.1/go.mod h1:kL1d2/hzSpI0thNYjiKfjanbVNU+IIGA/WnNESY9leM=
 github.com/ipfs/go-log/v2 v2.9.2 h1:O/5BB0elpkRILvT24rCJ5976wWd7u0nJ436T3rdYdc4=
 github.com/ipfs/go-log/v2 v2.9.2/go.mod h1:RziRwwXWhndlk8L75RnEe0zeAYaq2heKtEMc3jqUov0=
-github.com/ipfs/go-test v0.3.1-0.20260710003812-19fc05678b70 h1:TuI1kKVWMz3PgGYocqQ3YK4HLFR/ShkrekUvBYZKJSs=
-github.com/ipfs/go-test v0.3.1-0.20260710003812-19fc05678b70/go.mod h1:JK+U8pRpATZb7lsYNSJlCj3WYB3cFfWIbI6nWRM/GFk=
+github.com/ipfs/go-test v0.4.0 h1:9tXekF1a80k5mCFZ4+Whc43FTtJJ7WqPz57vXezAg/E=
+github.com/ipfs/go-test v0.4.0/go.mod h1:JK+U8pRpATZb7lsYNSJlCj3WYB3cFfWIbI6nWRM/GFk=
 github.com/ipld/go-ipld-prime v0.24.0 h1:6th8Z6Peh5bCWuRAVZcDO1sHzZdVF6F2cCCDG3681tg=
 github.com/ipld/go-ipld-prime v0.24.0/go.mod h1:DYZxr/5caLNFbcuU6zLOgwSW7CgUEoC4wJiZMEU8Zhs=
 github.com/jackpal/go-nat-pmp v1.0.2 h1:KzKSgb7qkJvOUTqYl9/Hg/me3pWgBmERKrTGD7BdWus=

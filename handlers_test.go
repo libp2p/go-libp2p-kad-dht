@@ -309,3 +309,65 @@ func TestHandleGetProvidersBudgetIncludesCloserPeers(t *testing.T) {
 	require.Greaterf(t, len(resp.ProviderPeers), 0, "some providers should fit in the remaining budget")
 	require.Lessf(t, len(resp.ProviderPeers), len(providers), "providers must be truncated by the closer-peer budget")
 }
+
+// providerIDs extracts the provider peer-ID bytes from a GET_PROVIDERS response.
+func providerIDs(resp *pb.Message) [][]byte {
+	ids := make([][]byte, len(resp.ProviderPeers))
+	for i, p := range resp.ProviderPeers {
+		ids[i] = p.Id
+	}
+	return ids
+}
+
+// TestHandleGetProvidersTruncationSurvivorDependsOnOrder is a regression test
+// for response bounding when a key holds providers whose records carry large
+// address lists. The response is always held within network.MessageSizeMax by
+// dropping a tail of provider records, so WHICH providers survive the bound
+// depends on their order in the set: a target ordered after enough large
+// records to fill the budget is dropped, while the same target ordered first
+// survives — in both cases within the size bound. This is the reason the
+// provider store returns providers in randomized order (records: GetProviders
+// shuffle) rather than the datastore query's fixed lexicographic-by-peer-ID
+// order; a fixed order would leave a fixed subset permanently unreachable
+// whenever a key's records exceed the message size.
+func TestHandleGetProvidersTruncationSurvivorDependsOnOrder(t *testing.T) {
+	ctx := t.Context()
+	d := setupDHT(ctx, t, false)
+	// Keep the synthetic oversized addresses intact through the handler.
+	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
+
+	target := peer.AddrInfo{
+		ID:    peer.ID("target-provider"),
+		Addrs: []ma.Multiaddr{ma.StringCast("/ip4/1.2.3.4/tcp/4001")},
+	}
+
+	// Enough ~400 KiB records to overflow the 4 MiB cap several times over.
+	bigAddrs := hugeAddrs(200)
+	const bulk = 24
+	bulky := make([]peer.AddrInfo, bulk)
+	for i := range bulky {
+		bulky[i] = peer.AddrInfo{ID: peer.ID(fmt.Sprintf("bulk-%02d", i)), Addrs: bigAddrs}
+	}
+
+	// Target last: the large records exhaust the budget before the loop reaches
+	// it, so truncation drops the target.
+	buried := make([]peer.AddrInfo, 0, bulk+1)
+	buried = append(buried, bulky...)
+	buried = append(buried, target)
+	resp := serveGetProviders(ctx, t, d, d.self, buried)
+	require.LessOrEqualf(t, proto.Size(resp), network.MessageSizeMax,
+		"response (%d bytes) must not exceed the message size max", proto.Size(resp))
+	require.NotContainsf(t, providerIDs(resp), []byte(target.ID),
+		"a target ordered after a budget-filling set of large records is truncated away")
+
+	// Target first: it is admitted before the large records fill the budget, so
+	// it survives within the same size bound.
+	surfaced := make([]peer.AddrInfo, 0, bulk+1)
+	surfaced = append(surfaced, target)
+	surfaced = append(surfaced, bulky...)
+	resp = serveGetProviders(ctx, t, d, d.self, surfaced)
+	require.LessOrEqualf(t, proto.Size(resp), network.MessageSizeMax,
+		"response (%d bytes) must not exceed the message size max", proto.Size(resp))
+	require.Equalf(t, []byte(target.ID), resp.ProviderPeers[0].Id,
+		"a target ordered first survives truncation within the size bound")
+}

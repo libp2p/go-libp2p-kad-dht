@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math/rand"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,12 +79,13 @@ type FullRT struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	enableValues, enableProviders bool
-	Validator                     record.Validator
-	ProviderManager               *records.ProviderManager
-	datastore                     ds.Datastore
-	valueStore                    *records.ValueStore
-	h                             host.Host
+	Validator record.Validator
+	// ProviderManager is nil when providers are disabled, which is possible on
+	// any protocol prefix but the Amino one, since Validate only enforces
+	// providers there. Check for nil before using it.
+	ProviderManager *records.ProviderManager
+	valueStore      *records.ValueStore
+	h               host.Host
 
 	crawlerInterval time.Duration
 	lastCrawlTime   time.Time
@@ -118,6 +120,11 @@ type FullRT struct {
 	peerConnectednessSubscriber event.Subscription
 
 	ipDiversityFilterLimit int
+
+	// shuffle randomises the provider order received from queried peers before
+	// the count cap, so the providers we keep and surface are spread across the
+	// returned set rather than always its first entries.
+	shuffle func(n int, swap func(i, j int))
 }
 
 // NewFullRT creates a DHT client that tracks the full network. It takes a protocol prefix for the given network,
@@ -184,10 +191,29 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 	ctx, cancel := context.WithCancel(context.Background())
 
 	self := h.ID()
-	pm, err := records.NewProviderManager(ctx, self, h.Peerstore(), dhtcfg.Datastore, fullrtcfg.pmOpts...)
-	if err != nil {
-		cancel()
-		return nil, err
+
+	// A nil store marks its subsystem as absent, which is what the routing
+	// methods below gate on. Stores stay nil only when the caller disables the
+	// subsystem, which Validate permits on any prefix but the Amino one.
+	var pm *records.ProviderManager
+	if dhtcfg.EnableProviders {
+		// Options are last-wins, so the fullrt-native ones override any that
+		// arrived through DHTOption.
+		pmOpts := slices.Concat(dhtcfg.ProviderManagerOpts, fullrtcfg.pmOpts)
+		pm, err = records.NewProviderManager(ctx, self, h.Peerstore(), dhtcfg.ProviderDS(), pmOpts...)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+	}
+
+	// FullRT builds its config by hand rather than from Defaults, so MaxRecordAge
+	// is zero unless the caller sets it and no value GC ever runs. At the default
+	// value records never expire; a caller who sets MaxRecordAge gets lazy expiry
+	// on read, but records are still never swept from disk.
+	var valueStore *records.ValueStore
+	if dhtcfg.EnableValues {
+		valueStore = records.NewValueStore(dhtcfg.ValueDS(), dhtcfg.Validator, dhtcfg.MaxRecordAge)
 	}
 
 	var bsPeers []*peer.AddrInfo
@@ -201,17 +227,15 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		ctx:    ctx,
 		cancel: cancel,
 
-		enableValues:    dhtcfg.EnableValues,
-		enableProviders: dhtcfg.EnableProviders,
 		Validator:       dhtcfg.Validator,
 		ProviderManager: pm,
-		datastore:       dhtcfg.Datastore,
-		valueStore:      records.NewValueStore(dhtcfg.Datastore, dhtcfg.Validator, dhtcfg.MaxRecordAge),
+		valueStore:      valueStore,
 		h:               h,
 		crawler:         fullrtcfg.crawler,
 		messageSender:   ms,
 		protoMessenger:  protoMessenger,
 		filterFromTable: kaddht.PublicQueryFilter,
+		shuffle:         rand.Shuffle,
 		rt:              trie.New(),
 		keyToPeerMap:    make(map[string]peer.ID),
 		bucketSize:      dhtcfg.BucketSize,
@@ -395,7 +419,16 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 func (dht *FullRT) Close() error {
 	dht.cancel()
 	dht.wg.Wait()
-	return dht.ProviderManager.Close()
+
+	// A disabled subsystem has no store, so only close the ones constructed.
+	var errs []error
+	if dht.ProviderManager != nil {
+		errs = append(errs, dht.ProviderManager.Close())
+	}
+	if dht.valueStore != nil {
+		errs = append(errs, dht.valueStore.Close())
+	}
+	return errors.Join(errs...)
 }
 
 func (dht *FullRT) Bootstrap(ctx context.Context) (err error) {
@@ -554,7 +587,7 @@ func (dht *FullRT) PutValue(ctx context.Context, key string, value []byte, opts 
 	ctx, end := tracer.PutValue(dhtName, ctx, key, value, opts...)
 	defer func() { end(err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return routing.ErrNotSupported
 	}
 
@@ -622,7 +655,7 @@ func (dht *FullRT) GetValue(ctx context.Context, key string, opts ...routing.Opt
 	ctx, end := tracer.GetValue(dhtName, ctx, key, opts...)
 	defer func() { end(result, err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return nil, routing.ErrNotSupported
 	}
 
@@ -659,7 +692,7 @@ func (dht *FullRT) SearchValue(ctx context.Context, key string, opts ...routing.
 	ctx, end := tracer.SearchValue(dhtName, ctx, key, opts...)
 	defer func() { ch, err = end(ch, err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return nil, routing.ErrNotSupported
 	}
 
@@ -890,7 +923,7 @@ func (dht *FullRT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err e
 	ctx, end := tracer.Provide(dhtName, ctx, key, brdcst)
 	defer func() { end(err) }()
 
-	if !dht.enableProviders {
+	if dht.ProviderManager == nil {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
 		return errors.New("invalid cid: undefined")
@@ -1034,7 +1067,7 @@ func (dht *FullRT) ProvideMany(ctx context.Context, keys []multihash.Multihash) 
 	ctx, end := tracer.ProvideMany(dhtName, ctx, keys)
 	defer func() { end(err) }()
 
-	if !dht.enableProviders {
+	if dht.ProviderManager == nil {
 		return routing.ErrNotSupported
 	}
 
@@ -1070,7 +1103,7 @@ func (dht *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) 
 	ctx, span := internal.StartSpan(ctx, "FullRT.PutMany", trace.WithAttributes(attribute.Int("NumKeys", len(keys))))
 	defer span.End()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return routing.ErrNotSupported
 	}
 
@@ -1300,7 +1333,7 @@ func divideByChunkSize(keys []peer.ID, chunkSize int) [][]peer.ID {
 
 // FindProviders searches until the context expires.
 func (dht *FullRT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	if !dht.enableProviders {
+	if dht.ProviderManager == nil {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
 		return nil, errors.New("invalid cid: undefined")
@@ -1322,7 +1355,7 @@ func (dht *FullRT) FindProvidersAsync(ctx context.Context, key cid.Cid, count in
 	ctx, end := tracer.FindProvidersAsync(dhtName, ctx, key, count)
 	defer func() { ch = end(ch, nil) }()
 
-	if !dht.enableProviders || !key.Defined() {
+	if dht.ProviderManager == nil || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
 		return peerOut
@@ -1409,6 +1442,12 @@ func (dht *FullRT) findProvidersAsyncRoutine(ctx context.Context, key multihash.
 		}
 
 		logger.Debugf("%d provider entries", len(provs))
+
+		// The remote returns providers in an unspecified order. Shuffle before
+		// the count-capped loop below so the subset we keep and surface is
+		// spread across the returned providers rather than always the first
+		// ones the remote happened to list.
+		dht.shuffle(len(provs), func(i, j int) { provs[i], provs[j] = provs[j], provs[i] })
 
 		// Add unique providers from request, up to 'count'
 		for _, prov := range provs {

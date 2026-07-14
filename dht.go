@@ -206,7 +206,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	// reported unsupported. It stays nil only on forked DHTs that opt out with
 	// DisableValues; the Amino DHT always enables values (enforced by Validate).
 	if cfg.EnableValues {
-		dht.valueStore = records.NewValueStore(datastoreOr(cfg.ValueDatastore, cfg.Datastore), cfg.Validator, cfg.MaxRecordAge)
+		dht.valueStore = records.NewValueStore(cfg.ValueDS(), cfg.Validator, cfg.MaxRecordAge)
 		dht.valueStore.StartGC(dht.ctx, cfg.ValueGCInterval)
 	}
 	dht.msgSender = cfg.MsgSenderBuilder(h, dht.protocols)
@@ -279,16 +279,6 @@ func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT
 		panic(err)
 	}
 	return dht
-}
-
-// datastoreOr returns primary when it is set, otherwise fallback. It selects
-// the physical datastore for a record store: the per-store override when given,
-// else the shared injected datastore.
-func datastoreOr(primary, fallback ds.Batching) ds.Batching {
-	if primary != nil {
-		return primary
-	}
-	return fallback
 }
 
 func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
@@ -379,7 +369,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	// out with DisableProviders; the Amino DHT always enables providers
 	// (enforced by Validate).
 	if cfg.EnableProviders {
-		dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, datastoreOr(cfg.ProviderDatastore, cfg.Datastore), cfg.ProviderManagerOpts...)
+		dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.ProviderDS(), cfg.ProviderManagerOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
 		}

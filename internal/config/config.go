@@ -86,6 +86,24 @@ type Config struct {
 func EmptyQueryFilter(_ any, ai peer.AddrInfo) bool { return true }
 func EmptyRTFilter(_ any, p peer.ID) bool           { return true }
 
+// ValueDS returns the datastore backing the value store: the ValueDatastore
+// override when set, else the shared Datastore.
+func (c *Config) ValueDS() ds.Batching {
+	if c.ValueDatastore != nil {
+		return c.ValueDatastore
+	}
+	return c.Datastore
+}
+
+// ProviderDS returns the datastore backing the provider store: the
+// ProviderDatastore override when set, else the shared Datastore.
+func (c *Config) ProviderDS() ds.Batching {
+	if c.ProviderDatastore != nil {
+		return c.ProviderDatastore
+	}
+	return c.Datastore
+}
+
 // Apply applies the given options to this Option
 func (c *Config) Apply(opts ...Option) error {
 	for i, opt := range opts {

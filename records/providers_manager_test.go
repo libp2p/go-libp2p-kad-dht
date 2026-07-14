@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -584,4 +587,103 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 	for _, key := range expiring {
 		require.Zerof(t, countKeys(key), "expiring record %x should be GC'd", key)
 	}
+}
+
+// sortedQueryDS returns query results ordered lexicographically by key, the way
+// a real on-disk datastore (leveldb, badger) does. MapDatastore leaves results
+// in random map-iteration order, which would mask whether GetProviders reorders
+// them, so tests that assert on ordering wrap it in this.
+type sortedQueryDS struct {
+	ds.Batching
+}
+
+func (s sortedQueryDS) Query(ctx context.Context, q dsq.Query) (dsq.Results, error) {
+	res, err := s.Batching.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := res.Rest()
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(entries, func(a, b dsq.Entry) int { return strings.Compare(a.Key, b.Key) })
+	return dsq.ResultsWithEntries(q, entries), nil
+}
+
+// TestGetProvidersInvokesShuffle pins the wiring: every read — cache miss and
+// cache hit alike — runs the injected shuffle exactly once over the full
+// provider set, so ordering can never be served straight from the datastore.
+func TestGetProvidersInvokesShuffle(t *testing.T) {
+	ctx := t.Context()
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+	var seenN []int
+	pm.shuffle = func(n int, _ func(i, j int)) { seenN = append(seenN, n) }
+
+	key := internal.Hash([]byte("cid"))
+	const n = 5
+	for i := range n {
+		require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID(fmt.Sprintf("prov-%d", i))}))
+	}
+
+	got, err := pm.GetProviders(ctx, key) // cache miss: loads from datastore
+	require.NoError(t, err)
+	require.Len(t, got, n)
+
+	_, err = pm.GetProviders(ctx, key) // cache hit
+	require.NoError(t, err)
+
+	require.Equal(t, []int{n, n}, seenN, "both cache-miss and cache-hit reads must shuffle the full set")
+}
+
+// TestGetProvidersShufflesDatastoreOrder verifies that the lexicographic
+// peer-ID order a real datastore returns is not passed straight through to
+// callers, and that the returned order genuinely depends on the rand source —
+// so client load is spread across a key's providers instead of always
+// preferring the same few.
+func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
+	ctx := t.Context()
+	key := internal.Hash([]byte("cid"))
+
+	provs := make([]peer.ID, 12)
+	for i := range provs {
+		provs[i] = peer.ID(fmt.Sprintf("prov-%02d", i))
+	}
+	// Provider keys are base32(peerID) under a common prefix, and base32 is
+	// order-preserving, so the datastore hands them back sorted by peer ID.
+	lexOrder := slices.Clone(provs)
+	slices.SortFunc(lexOrder, func(a, b peer.ID) int { return strings.Compare(string(a), string(b)) })
+
+	get := func(seed int64) []peer.ID {
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		pm, err := NewProviderManager(ctx, peer.ID("self"), ps,
+			sortedQueryDS{dssync.MutexWrap(ds.NewMapDatastore())})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, pm.Close()) })
+		pm.shuffle = rand.New(rand.NewSource(seed)).Shuffle
+
+		for _, p := range provs {
+			require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: p}))
+		}
+		got, err := pm.GetProviders(ctx, key)
+		require.NoError(t, err)
+		ids := make([]peer.ID, len(got))
+		for i, ai := range got {
+			ids[i] = ai.ID
+		}
+		return ids
+	}
+
+	orderA := get(1)
+	orderB := get(2)
+
+	require.ElementsMatch(t, provs, orderA, "shuffle must preserve the provider set")
+	require.ElementsMatch(t, provs, orderB, "shuffle must preserve the provider set")
+	require.NotEqual(t, lexOrder, orderA, "datastore lex order must not pass through")
+	require.NotEqual(t, orderA, orderB, "different rand sources must yield different order")
 }

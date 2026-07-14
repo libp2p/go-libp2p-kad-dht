@@ -157,6 +157,11 @@ type IpfsDHT struct {
 	// Mostly used to filter out localhost and local addresses.
 	addrFilter func([]ma.Multiaddr) []ma.Multiaddr
 
+	// shuffle randomises the provider order received from queried peers before
+	// the count cap, so the providers we keep and surface are spread across the
+	// returned set rather than always its first entries.
+	shuffle func(n int, swap func(i, j int))
+
 	onRequestHook func(ctx context.Context, s network.Stream, req *pb.Message)
 }
 
@@ -315,6 +320,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		routingTablePeerFilter: cfg.RoutingTable.PeerFilter,
 		rtPeerDiversityFilter:  cfg.RoutingTable.DiversityFilter,
 		addrFilter:             cfg.AddressFilter,
+		shuffle:                rand.Shuffle,
 		onRequestHook:          cfg.OnRequestHook,
 
 		fixLowPeersChan: make(chan struct{}, 1),
@@ -483,7 +489,6 @@ func (dht *IpfsDHT) Mode() ModeOpt {
 // runFixLowPeersLoop manages simultaneous requests to fixLowPeers
 func (dht *IpfsDHT) runFixLowPeersLoop() {
 	dht.wg.Go(func() {
-
 		dht.fixLowPeers()
 
 		ticker := time.NewTicker(periodicBootstrapInterval)
@@ -602,7 +607,6 @@ func (dht *IpfsDHT) putLocal(ctx context.Context, key string, rec *recpb.Record)
 
 func (dht *IpfsDHT) rtPeerLoop() {
 	dht.wg.Go(func() {
-
 		var bootstrapCount uint
 		var isBootsrapping bool
 		var timerCh <-chan time.Time

@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -144,6 +147,15 @@ func (dht *IpfsDHT) handleFindPeer(ctx context.Context, from peer.ID, pmes *pb.M
 	return resp, nil
 }
 
+// providerPeersField is the protobuf field number of Message.provider_peers
+// (see pb/dht.proto); used to size each provider record's framed contribution
+// when bounding a GET_PROVIDERS response to network.MessageSizeMax.
+const providerPeersField protowire.Number = 9
+
+// providerPeersTagSize is the (constant) serialized size of a provider_peers
+// field tag, added once per record alongside its length-prefixed bytes.
+var providerPeersTagSize = protowire.SizeTag(providerPeersField)
+
 func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {
 	key := pmes.GetKey()
 	if len(key) > 80 {
@@ -154,27 +166,39 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
+	// Add the closest DHT servers we know about first and exactly once, so the
+	// provider-record budget below accounts for their serialized size.
+	closestPeers := dht.closestPeersToQuery(pmes, p, dht.bucketSize)
+	if closestPeers != nil {
+		infos := peerstore.AddrInfos(dht.peerstore, closestPeers)
+		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
+	}
+
 	// setup providers
 	providers, err := dht.providerStore.GetProviders(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := make([]peer.AddrInfo, len(providers))
-	for i, provider := range providers {
-		filtered[i] = peer.AddrInfo{
+	// Append provider records until the next would push the serialized message
+	// past the transport's soft maximum. GetProviders returns providers in random
+	// order, so when the set doesn't all fit the records we keep are an arbitrary
+	// subset that varies between requests rather than a fixed prefix. Converting
+	// records lazily and tracking the running size incrementally (base + each
+	// record's framed contribution) keeps the loop O(n) and does no work on the
+	// records past the cap.
+	size := proto.Size(resp) // key, type and CloserPeers already counted
+	for _, provider := range providers {
+		pbProv := pb.PeerInfoToPBPeer(dht.host.Network(), peer.AddrInfo{
 			ID:    provider.ID,
 			Addrs: dht.filterAddrs(provider.Addrs),
+		})
+		// A repeated embedded message adds its tag, a length prefix and its bytes.
+		size += providerPeersTagSize + protowire.SizeBytes(proto.Size(pbProv))
+		if size > network.MessageSizeMax {
+			break
 		}
-	}
-
-	resp.ProviderPeers = pb.PeerInfosToPBPeers(dht.host.Network(), filtered)
-
-	// Also send closest dht servers we know about.
-	closestPeers := dht.closestPeersToQuery(pmes, p, dht.bucketSize)
-	if closestPeers != nil {
-		infos := peerstore.AddrInfos(dht.peerstore, closestPeers)
-		resp.CloserPeers = pb.PeerInfosToPBPeers(dht.host.Network(), infos)
+		resp.ProviderPeers = append(resp.ProviderPeers, pbProv)
 	}
 
 	return resp, nil

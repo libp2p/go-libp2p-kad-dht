@@ -583,6 +583,12 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 			logger.Debugf("%d provider entries", len(provs))
 
+			// The remote returns providers in an unspecified order. Shuffle
+			// before the count-capped loop below so the subset we keep and
+			// surface is spread across the returned providers rather than
+			// always the first ones the remote happened to list.
+			dht.shuffle(len(provs), func(i, j int) { provs[i], provs[j] = provs[j], provs[i] })
+
 			// Add unique providers from request, up to 'count'
 			for _, prov := range provs {
 				dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)

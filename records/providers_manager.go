@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"slices"
 	"strings"
 	"sync"
@@ -67,6 +68,14 @@ type ProviderManager struct {
 	cache  lru.LRUCache
 	pstore peerstore.Peerstore
 	dstore ds.Batching
+
+	// shuffle randomises the provider order returned by GetProviders, so client
+	// load is spread across a key's providers instead of always preferring the
+	// datastore query's (lexicographic peer-ID) order. Defaults to the global,
+	// concurrency-safe rand.Shuffle; tests inject a seeded source for
+	// deterministic ordering. It is invoked under mu, so a test-injected
+	// non-thread-safe source stays race-free.
+	shuffle func(n int, swap func(i, j int))
 
 	providerAddrTTL time.Duration
 	provideValidity time.Duration
@@ -139,6 +148,7 @@ func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peersto
 		pstore:          ps,
 		dstore:          dstore,
 		cache:           cache,
+		shuffle:         rand.Shuffle,
 		providerAddrTTL: amino.DefaultProviderAddrTTL,
 		provideValidity: amino.DefaultProvideValidity,
 		cleanupInterval: defaultCleanupInterval,
@@ -216,6 +226,12 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.A
 		return nil, nil
 	}
 	provs := slices.Clone(pset.providers)
+	// The datastore query (and thus the cached set built from it) yields
+	// providers in an unspecified order that, for a datastore-backed store,
+	// tends to be lexicographic by peer ID. Shuffle so callers spread load
+	// across providers rather than always preferring the same ones; downstream
+	// code must treat the order as arbitrary.
+	pm.shuffle(len(provs), func(i, j int) { provs[i], provs[j] = provs[j], provs[i] })
 	pm.mu.Unlock()
 
 	infos := make([]peer.AddrInfo, len(provs))

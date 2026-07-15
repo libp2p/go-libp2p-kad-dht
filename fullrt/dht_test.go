@@ -591,8 +591,12 @@ func TestProviderDatastoreOverride(t *testing.T) {
 // routed through DHTOption are applied, and that fullrt's own
 // WithProviderManagerOptions still wins on conflict because it is applied last.
 //
-// ProvideValidity is asserted through behavior: a validity of one nanosecond
-// expires a provider record immediately, so GetProviders serves nothing.
+// ProvideValidity is asserted through behavior: a negative validity expires a
+// provider record the moment it is written, so GetProviders serves nothing. A
+// tiny positive validity would not do. The record round-trips through the
+// datastore, which drops the monotonic reading, so expiry compares the wall
+// clocks of the write and the read — and Windows advances its wall clock only
+// every ~15ms, making both readings identical and the record still valid.
 func TestProviderManagerOptsReachTheManager(t *testing.T) {
 	addAndGet := func(t *testing.T, frt *FullRT) []peer.AddrInfo {
 		t.Helper()
@@ -604,13 +608,13 @@ func TestProviderManagerOptsReachTheManager(t *testing.T) {
 	}
 
 	t.Run("applied from DHTOption", func(t *testing.T) {
-		frt := newTestFullRT(t, DHTOption(kaddht.ProviderManagerOpts(records.ProvideValidity(time.Nanosecond))))
+		frt := newTestFullRT(t, DHTOption(kaddht.ProviderManagerOpts(records.ProvideValidity(-time.Second))))
 		require.Empty(t, addAndGet(t, frt), "records must expire immediately, so the option reached the manager")
 	})
 
 	t.Run("fullrt-native option wins", func(t *testing.T) {
 		frt := newTestFullRT(t,
-			DHTOption(kaddht.ProviderManagerOpts(records.ProvideValidity(time.Nanosecond))),
+			DHTOption(kaddht.ProviderManagerOpts(records.ProvideValidity(-time.Second))),
 			WithProviderManagerOptions(records.ProvideValidity(time.Hour)),
 		)
 		require.Len(t, addAndGet(t, frt), 1, "the fullrt-native validity must override the DHTOption one")

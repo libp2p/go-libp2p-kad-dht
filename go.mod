@@ -18,7 +18,7 @@ require (
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/ipfs/go-test v0.4.0
 	github.com/libp2p/go-libp2p v0.48.0
-	github.com/libp2p/go-libp2p-kbucket v0.8.0
+	github.com/libp2p/go-libp2p-kbucket v0.9.0
 	github.com/libp2p/go-libp2p-record v0.3.1
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.5
 	github.com/libp2p/go-libp2p-testing v0.12.0

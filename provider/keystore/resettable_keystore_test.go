@@ -43,7 +43,9 @@ func TestKeystoreReset(t *testing.T) {
 		require.NoError(t, err)
 		first[i] = h
 	}
-	_, err = store.Put(context.Background(), first...)
+
+	ctx := t.Context()
+	_, err = store.Put(ctx, first...)
 	require.NoError(t, err)
 
 	const numSecondKeys = 2
@@ -58,14 +60,14 @@ func TestKeystoreReset(t *testing.T) {
 	}
 	close(secondChan)
 
-	err = store.ResetCids(context.Background(), secondChan)
+	err = store.ResetCids(ctx, secondChan)
 	require.NoError(t, err)
 
 	// old hashes should not be present
 	const prefixBits = 6
 	for _, h := range first {
 		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixBits])
-		got, err := store.Get(context.Background(), prefix)
+		got, err := store.Get(ctx, prefix)
 		require.NoError(t, err)
 		for _, m := range got {
 			require.NotEqual(t, string(m), string(h), "expected old hash %v to be removed", h)
@@ -75,7 +77,7 @@ func TestKeystoreReset(t *testing.T) {
 	// new hashes should be retrievable
 	for _, h := range second {
 		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:prefixBits])
-		got, err := store.Get(context.Background(), prefix)
+		got, err := store.Get(ctx, prefix)
 		require.NoError(t, err)
 		found := false
 		for _, m := range got {
@@ -96,11 +98,12 @@ func TestKeystoreResetSize(t *testing.T) {
 	require.NoError(t, err)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Add initial keys
 	const initialKeys = 100
-	initial := random.Multihashes(initialKeys)
+	initial := rnd.Multihashes(initialKeys)
 	_, err = store.Put(ctx, initial...)
 	require.NoError(t, err)
 
@@ -111,7 +114,7 @@ func TestKeystoreResetSize(t *testing.T) {
 	// Reset with fewer keys
 	const firstResetKeys = 50
 	resetChan := make(chan cid.Cid, firstResetKeys)
-	resetMhs := random.Multihashes(firstResetKeys)
+	resetMhs := rnd.Multihashes(firstResetKeys)
 	for _, h := range resetMhs {
 		resetChan <- cid.NewCidV1(cid.Raw, h)
 	}
@@ -128,7 +131,7 @@ func TestKeystoreResetSize(t *testing.T) {
 	// Reset with more keys
 	const secondResetKeys = 200
 	resetChan2 := make(chan cid.Cid, secondResetKeys)
-	resetMhs2 := random.Multihashes(secondResetKeys)
+	resetMhs2 := rnd.Multihashes(secondResetKeys)
 	for _, h := range resetMhs2 {
 		resetChan2 <- cid.NewCidV1(cid.Raw, h)
 	}
@@ -162,12 +165,13 @@ func TestKeystoreResetSizeAcrossMultipleCycles(t *testing.T) {
 	require.NoError(t, err)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// First reset with 100 keys
 	const firstResetKeys = 100
 	resetChan := make(chan cid.Cid, firstResetKeys)
-	firstMhs := random.Multihashes(firstResetKeys)
+	firstMhs := rnd.Multihashes(firstResetKeys)
 	for _, h := range firstMhs {
 		resetChan <- cid.NewCidV1(cid.Raw, h)
 	}
@@ -189,7 +193,7 @@ func TestKeystoreResetSizeAcrossMultipleCycles(t *testing.T) {
 	for i := range overlappingKeys {
 		resetChan2 <- cid.NewCidV1(cid.Raw, firstMhs[i])
 	}
-	newMhs := random.Multihashes(newKeys)
+	newMhs := rnd.Multihashes(newKeys)
 	for _, h := range newMhs {
 		resetChan2 <- cid.NewCidV1(cid.Raw, h)
 	}
@@ -212,11 +216,12 @@ func TestKeystoreResetSizeWithConcurrentPuts(t *testing.T) {
 	require.NoError(t, err)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Add initial keys
 	const initialKeys = 50
-	initial := random.Multihashes(initialKeys)
+	initial := rnd.Multihashes(initialKeys)
 	_, err = store.Put(ctx, initial...)
 	require.NoError(t, err)
 
@@ -224,8 +229,8 @@ func TestKeystoreResetSizeWithConcurrentPuts(t *testing.T) {
 	const resetKeys = 80
 	const concurrentKeys = 30
 	resetChan := make(chan cid.Cid)
-	resetMhs := random.Multihashes(resetKeys)
-	newMhs := random.Multihashes(concurrentKeys)
+	resetMhs := rnd.Multihashes(resetKeys)
+	newMhs := rnd.Multihashes(concurrentKeys)
 
 	// Start reset in a goroutine first
 	resetDone := make(chan error, 1)
@@ -266,7 +271,7 @@ func TestKeystoreResetSizePersistence(t *testing.T) {
 	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add keys WITHOUT reset
 	const numKeys = 75
@@ -296,7 +301,8 @@ func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Create initial keystore
 	store, err := NewResettableKeystore(ds)
@@ -304,7 +310,7 @@ func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
 
 	// Add initial keys
 	const initialKeys = 50
-	initialMhs := random.Multihashes(initialKeys)
+	initialMhs := rnd.Multihashes(initialKeys)
 	_, err = store.Put(ctx, initialMhs...)
 	require.NoError(t, err)
 
@@ -315,7 +321,7 @@ func TestKeystoreActiveNamespacePersistenceX(t *testing.T) {
 
 	// Perform reset with different keys
 	const resetKeys = 75
-	resetMhs := random.Multihashes(resetKeys)
+	resetMhs := rnd.Multihashes(resetKeys)
 	resetChan := make(chan cid.Cid, resetKeys)
 	for _, h := range resetMhs {
 		resetChan <- cid.NewCidV1(cid.Raw, h)
@@ -375,7 +381,8 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 	ds := ds.NewMapDatastore()
 	defer ds.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Create initial keystore
 	store, err := NewResettableKeystore(ds)
@@ -383,7 +390,7 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 
 	// Perform first reset
 	const firstResetKeys = 100
-	firstResetMhs := random.Multihashes(firstResetKeys)
+	firstResetMhs := rnd.Multihashes(firstResetKeys)
 	resetChan1 := make(chan cid.Cid, firstResetKeys)
 	for _, h := range firstResetMhs {
 		resetChan1 <- cid.NewCidV1(cid.Raw, h)
@@ -407,7 +414,7 @@ func TestKeystoreActiveNamespacePersistenceMultipleResets(t *testing.T) {
 
 	// Perform second reset
 	const secondResetKeys = 50
-	secondResetMhs := random.Multihashes(secondResetKeys)
+	secondResetMhs := rnd.Multihashes(secondResetKeys)
 	resetChan2 := make(chan cid.Cid, secondResetKeys)
 	for _, h := range secondResetMhs {
 		resetChan2 <- cid.NewCidV1(cid.Raw, h)
@@ -468,7 +475,7 @@ func TestKeystoreCloseDuringReset(t *testing.T) {
 	store, err := NewResettableKeystore(ds)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a slow channel that will feed keys gradually
 	const resetKeys = 1000
@@ -511,7 +518,7 @@ func TestKeystoreCloseDuringReset(t *testing.T) {
 }
 
 func TestKeystoreFactoryMode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	baseDir := t.TempDir()
 
 	// Meta datastore for the active-namespace marker, owned by the caller.
@@ -535,7 +542,8 @@ func TestKeystoreFactoryMode(t *testing.T) {
 	require.NoError(t, err)
 
 	const initialKeys = 50
-	initialMhs := random.Multihashes(initialKeys)
+	rnd := random.New()
+	initialMhs := rnd.Multihashes(initialKeys)
 	_, err = store.Put(ctx, initialMhs...)
 	require.NoError(t, err)
 
@@ -546,7 +554,7 @@ func TestKeystoreFactoryMode(t *testing.T) {
 	// --- Phase 2: reset with new keys ---
 
 	const resetKeys = 30
-	resetMhs := random.Multihashes(resetKeys)
+	resetMhs := rnd.Multihashes(resetKeys)
 	resetChan := make(chan cid.Cid, resetKeys)
 	for _, h := range resetMhs {
 		resetChan <- cid.NewCidV1(cid.Raw, h)
@@ -629,7 +637,7 @@ func TestKeystoreFactoryMode(t *testing.T) {
 }
 
 func TestKeystoreFactoryModeCrashRecovery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	baseDir := t.TempDir()
 
 	metaDs := ds.NewMapDatastore()
@@ -648,7 +656,8 @@ func TestKeystoreFactoryModeCrashRecovery(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	initialMhs := random.Multihashes(20)
+	rnd := random.New()
+	initialMhs := rnd.Multihashes(20)
 	_, err = store.Put(ctx, initialMhs...)
 	require.NoError(t, err)
 
@@ -658,7 +667,7 @@ func TestKeystoreFactoryModeCrashRecovery(t *testing.T) {
 	// garbage keys from an incomplete prior reset.
 	staleDs, err := create("1")
 	require.NoError(t, err)
-	staleMhs := random.Multihashes(10)
+	staleMhs := rnd.Multihashes(10)
 	b, err := staleDs.Batch(ctx)
 	require.NoError(t, err)
 	for _, h := range staleMhs {
@@ -676,7 +685,7 @@ func TestKeystoreFactoryModeCrashRecovery(t *testing.T) {
 	require.NoError(t, err)
 
 	const resetKeys = 15
-	freshMhs := random.Multihashes(resetKeys)
+	freshMhs := rnd.Multihashes(resetKeys)
 	ch := make(chan cid.Cid, resetKeys)
 	for _, h := range freshMhs {
 		ch <- cid.NewCidV1(cid.Raw, h)
@@ -718,7 +727,7 @@ func (d *closeErrDs) Close() error {
 }
 
 func TestKeystoreFactoryModeTeardownCloseError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	baseDir := t.TempDir()
 
 	metaDs := ds.NewMapDatastore()
@@ -745,7 +754,8 @@ func TestKeystoreFactoryModeTeardownCloseError(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, err = store.Put(ctx, random.Multihashes(10)...)
+	rnd := random.New()
+	_, err = store.Put(ctx, rnd.Multihashes(10)...)
 	require.NoError(t, err)
 
 	// Enable close errors. The alt datastore created during reset (and the
@@ -754,7 +764,7 @@ func TestKeystoreFactoryModeTeardownCloseError(t *testing.T) {
 	failClose = true
 
 	ch := make(chan cid.Cid, 5)
-	for _, h := range random.Multihashes(5) {
+	for _, h := range rnd.Multihashes(5) {
 		ch <- cid.NewCidV1(cid.Raw, h)
 	}
 	close(ch)
@@ -775,7 +785,7 @@ func TestKeystoreFactoryModeTeardownCloseError(t *testing.T) {
 }
 
 func TestKeystoreCorruptedMarkerRecovery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("shared datastore mode", func(t *testing.T) {
 		metaDs := ds.NewMapDatastore()
@@ -809,7 +819,8 @@ func TestKeystoreCorruptedMarkerRecovery(t *testing.T) {
 		// Create a stale datastore at "0" with leftover keys.
 		staleDs, err := pebble.NewDatastore(filepath.Join(baseDir, "0"), nil)
 		require.NoError(t, err)
-		staleMhs := random.Multihashes(5)
+		rnd := random.New()
+		staleMhs := rnd.Multihashes(5)
 		b, err := staleDs.Batch(ctx)
 		require.NoError(t, err)
 		for _, h := range staleMhs {
@@ -842,11 +853,11 @@ func TestKeystoreCorruptedMarkerRecovery(t *testing.T) {
 		require.Equal(t, 0, size, "stale data should be purged on corrupted marker")
 
 		// Verify put + reset cycle works on the recovered keystore.
-		freshMhs := random.Multihashes(10)
+		freshMhs := rnd.Multihashes(10)
 		_, err = store.Put(ctx, freshMhs...)
 		require.NoError(t, err)
 
-		resetMhs := random.Multihashes(5)
+		resetMhs := rnd.Multihashes(5)
 		ch := make(chan cid.Cid, len(resetMhs))
 		for _, h := range resetMhs {
 			ch <- cid.NewCidV1(cid.Raw, h)
@@ -863,7 +874,7 @@ func TestKeystoreCorruptedMarkerRecovery(t *testing.T) {
 }
 
 func TestKeystoreOptionAdapter(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	baseDir := t.TempDir()
 
 	metaDs := ds.NewMapDatastore()
@@ -986,16 +997,17 @@ func TestKeystoreWorkerResponsiveWhileAltDsWedged(t *testing.T) {
 		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		ctx := t.Context()
+		rnd := random.New()
 
 		// Pre-populate primary so Size has a non-zero baseline.
 		const initial = 10
-		_, err = store.Put(ctx, random.Multihashes(initial)...)
+		_, err = store.Put(ctx, rnd.Multihashes(initial)...)
 		require.NoError(t, err)
 
 		// Start a reset. ResetCids' first altPutBlind reaches altDs.Sync,
 		// which blocks until release is closed.
 		resetChan := make(chan cid.Cid, 1)
-		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		resetChan <- cid.NewCidV1(cid.Raw, rnd.Multihashes(1)[0])
 		close(resetChan)
 		resetDone := make(chan error, 1)
 		go func() {
@@ -1020,7 +1032,7 @@ func TestKeystoreWorkerResponsiveWhileAltDsWedged(t *testing.T) {
 			require.Equal(t, expected, size)
 
 			const probePuts = 3
-			_, err = store.Put(probeCtx, random.Multihashes(probePuts)...)
+			_, err = store.Put(probeCtx, rnd.Multihashes(probePuts)...)
 			require.NoError(t, err, "Put must return while altDs is wedged")
 			expected += probePuts
 		}
@@ -1072,11 +1084,12 @@ func TestKeystoreResetBufferBackpressure(t *testing.T) {
 		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		ctx := t.Context()
+		rnd := random.New()
 
 		// Start a reset that wedges in Phase A's altDs.Sync so it can't drain
 		// the buffer.
 		resetChan := make(chan cid.Cid, 1)
-		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		resetChan <- cid.NewCidV1(cid.Raw, rnd.Multihashes(1)[0])
 		close(resetChan)
 		resetDone := make(chan error, 1)
 		go func() {
@@ -1093,7 +1106,7 @@ func TestKeystoreResetBufferBackpressure(t *testing.T) {
 		}
 
 		// Fill the buffer exactly to capacity.
-		_, err = store.Put(ctx, random.Multihashes(bufCap)...)
+		_, err = store.Put(ctx, rnd.Multihashes(bufCap)...)
 		require.NoError(t, err, "filling the buffer to capacity should succeed")
 
 		// The next Put must block; it cannot be accepted without dropping
@@ -1102,7 +1115,7 @@ func TestKeystoreResetBufferBackpressure(t *testing.T) {
 		// than any wall-clock delay.
 		blocked := make(chan error, 1)
 		go func() {
-			_, err := store.Put(ctx, random.Multihashes(1)...)
+			_, err := store.Put(ctx, rnd.Multihashes(1)...)
 			blocked <- err
 		}()
 		synctest.Wait()
@@ -1153,9 +1166,10 @@ func TestKeystoreResetBufferLargerThanCap(t *testing.T) {
 		slow.slowPrefix = sharedSlotPrefix[1-store.activeNamespace].String()
 
 		ctx := t.Context()
+		rnd := random.New()
 
 		resetChan := make(chan cid.Cid, 1)
-		resetMh := random.Multihashes(1)[0]
+		resetMh := rnd.Multihashes(1)[0]
 		resetChan <- cid.NewCidV1(cid.Raw, resetMh)
 		close(resetChan)
 		resetDone := make(chan error, 1)
@@ -1177,7 +1191,7 @@ func TestKeystoreResetBufferLargerThanCap(t *testing.T) {
 		// drains.
 		const factor = 2
 		putN := factor * bufCap
-		putMhs := random.Multihashes(putN)
+		putMhs := rnd.Multihashes(putN)
 		putDone := make(chan error, 1)
 		go func() {
 			_, err := store.Put(ctx, putMhs...)
@@ -1251,8 +1265,9 @@ func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
 		resetCtx, resetCancel := context.WithCancel(t.Context())
 		defer resetCancel()
 
+		rnd := random.New()
 		resetChan := make(chan cid.Cid, 1)
-		resetChan <- cid.NewCidV1(cid.Raw, random.Multihashes(1)[0])
+		resetChan <- cid.NewCidV1(cid.Raw, rnd.Multihashes(1)[0])
 		close(resetChan)
 		resetDone := make(chan error, 1)
 		go func() {
@@ -1270,7 +1285,7 @@ func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
 		ctx := t.Context()
 
 		// Fill the buffer exactly to capacity.
-		_, err = store.Put(ctx, random.Multihashes(bufCap)...)
+		_, err = store.Put(ctx, rnd.Multihashes(bufCap)...)
 		require.NoError(t, err, "filling the buffer to capacity should succeed")
 
 		// One more Put must block in bufferKeys: buffer is full, no drain
@@ -1278,7 +1293,7 @@ func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
 		// keysChan is already drained).
 		blocked := make(chan error, 1)
 		go func() {
-			_, err := store.Put(ctx, random.Multihashes(1)...)
+			_, err := store.Put(ctx, rnd.Multihashes(1)...)
 			blocked <- err
 		}()
 		synctest.Wait()
@@ -1300,7 +1315,7 @@ func TestKeystoreResetCtxCancelDoesNotDeadlock(t *testing.T) {
 
 		// Keystore must remain responsive after the cancelled reset.
 		const post = 3
-		_, err = store.Put(ctx, random.Multihashes(post)...)
+		_, err = store.Put(ctx, rnd.Multihashes(post)...)
 		require.NoError(t, err)
 		size, err := store.Size(ctx)
 		require.NoError(t, err)
@@ -1334,10 +1349,12 @@ func TestKeystoreResetPhaseATickerDrainsSlowKeysChan(t *testing.T) {
 			resetDone <- store.ResetCids(ctx, resetChan)
 		}()
 
+		rnd := random.New()
+
 		// Deliver one key so the channel send unblocks once Phase A picks it
 		// up — guarantees opStart finished and resetInProgress is true before
 		// the concurrent Put fires.
-		syncMh := random.Multihashes(1)[0]
+		syncMh := rnd.Multihashes(1)[0]
 		resetChan <- cid.NewCidV1(cid.Raw, syncMh)
 
 		// Concurrent Put of 5x capacity keys, more than the 3x ceiling
@@ -1347,7 +1364,7 @@ func TestKeystoreResetPhaseATickerDrainsSlowKeysChan(t *testing.T) {
 		// would never drain and the Put would block until close(resetChan).
 		const factor = 5
 		putN := factor * bufCap
-		putMhs := random.Multihashes(putN)
+		putMhs := rnd.Multihashes(putN)
 		putDone := make(chan error, 1)
 		go func() {
 			_, err := store.Put(ctx, putMhs...)
@@ -1494,9 +1511,10 @@ func mhStrings(mhs []mh.Multihash) []string {
 // pickMhsWithBits picks n multihashes whose leading Kademlia bits equal bits.
 func pickMhsWithBits(t *testing.T, bits []int, n int) []mh.Multihash {
 	t.Helper()
+	rnd := random.New()
 	out := make([]mh.Multihash, 0, n)
 	for tries := 0; tries < 1<<16 && len(out) < n; tries++ {
-		h := random.Multihashes(1)[0]
+		h := rnd.Multihashes(1)[0]
 		k := keyspace.MhToBit256(h)
 		match := true
 		for i, b := range bits {

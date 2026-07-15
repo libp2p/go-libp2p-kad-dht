@@ -1086,7 +1086,14 @@ func TestProvidesMany(t *testing.T) {
 
 	errchan := make(chan error)
 
-	ctxT, cancel = context.WithTimeout(ctx, 15*time.Second)
+	// Every lookup below shares this deadline, so it bounds how long the whole
+	// batch of len(testCaseCids)*nDHTs lookups takes, not how long any single
+	// one takes. That total tracks machine load: ~5s idle, but ~64s on a
+	// heavily contended machine, so the previous 15s timed out a tail of
+	// lookups on a busy CI runner (#760). It is only a backstop against a
+	// lookup that hangs forever — when they behave the batch finishes long
+	// before this, so a generous value costs nothing.
+	ctxT, cancel = context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	var wg sync.WaitGroup

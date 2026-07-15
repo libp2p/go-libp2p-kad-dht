@@ -44,6 +44,8 @@ func TestKeystorePutAndGet(t *testing.T) {
 }
 
 func testKeyStorePutAndGetImpl(t *testing.T, store Keystore) {
+	ctx := t.Context()
+
 	mhs := make([]mh.Multihash, 6)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
@@ -51,17 +53,17 @@ func testKeyStorePutAndGetImpl(t *testing.T, store Keystore) {
 		mhs[i] = h
 	}
 
-	added, err := store.Put(context.Background(), mhs...)
+	added, err := store.Put(ctx, mhs...)
 	require.NoError(t, err)
 	require.Len(t, added, len(mhs))
 
-	added, err = store.Put(context.Background(), mhs...)
+	added, err = store.Put(ctx, mhs...)
 	require.NoError(t, err)
 	require.Empty(t, added)
 
 	for _, h := range mhs {
 		prefix := bitstr.Key(key.BitString(keyspace.MhToBit256(h))[:6])
-		got, err := store.Get(context.Background(), prefix)
+		got, err := store.Get(ctx, prefix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,12 +78,12 @@ func testKeyStorePutAndGetImpl(t *testing.T, store Keystore) {
 	}
 
 	p := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:3])
-	res, err := store.Get(context.Background(), p)
+	res, err := store.Get(ctx, p)
 	require.NoError(t, err)
 	require.NotEmpty(t, res, "expected results for prefix %s", p)
 
 	longPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:15])
-	res, err = store.Get(context.Background(), longPrefix)
+	res, err = store.Get(ctx, longPrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +94,10 @@ func testKeyStorePutAndGetImpl(t *testing.T, store Keystore) {
 }
 
 func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
+	rnd := random.New()
 	mhs := make([]mh.Multihash, 0, n)
 	for i := 0; len(mhs) < n; i++ {
-		h := random.Multihashes(1)[0]
+		h := rnd.Multihashes(1)[0]
 		k := keyspace.MhToBit256(h)
 		if keyspace.IsPrefix(prefix, k) {
 			mhs = append(mhs, h)
@@ -146,7 +149,7 @@ func TestKeyStoreContainsPrefix(t *testing.T) {
 }
 
 func testKeystoreContainsPrefixImpl(t *testing.T, store Keystore) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ok, err := store.ContainsPrefix(ctx, bitstr.Key("0000"))
 	require.NoError(t, err)
@@ -234,7 +237,7 @@ func TestKeystoreCountKeysUpTo(t *testing.T) {
 }
 
 func testKeystoreCountKeysUpToImpl(t *testing.T, store Keystore, bucket bitstr.Key, bucketKeys, otherKeys []mh.Multihash) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Empty keystore counts zero (limit 0 means no cap).
 	n, err := store.CountKeysUpTo(ctx, bitstr.Key("1"), 0)
@@ -336,6 +339,7 @@ func (c *countingDatastore) Query(ctx context.Context, q query.Query) (query.Res
 }
 
 func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
+	ctx := t.Context()
 	// prefixBits 0 keeps every key under a single datastore path, so a non-empty
 	// prefix always takes countUpTo's per-key filter branch (BitLen > prefixBits)
 	// while the empty prefix takes the query.Limit-delegation branch. Every key
@@ -348,7 +352,7 @@ func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
 		c := &countingDatastore{Batching: ds.NewMapDatastore()}
 		store, err := NewKeystore(c, WithPrefixBits(0))
 		require.NoError(t, err)
-		_, err = store.Put(context.Background(), keys...)
+		_, err = store.Put(ctx, keys...)
 		require.NoError(t, err)
 		c.reads.Store(0) // discard reads from setup
 		t.Cleanup(func() { _ = store.Close() })
@@ -362,7 +366,7 @@ func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
 		// keys-only read-ahead buffer, not the whole bucket).
 		const limit = 3
 		store, c := newStore(t)
-		n, err := store.CountKeysUpTo(context.Background(), "0", limit)
+		n, err := store.CountKeysUpTo(ctx, "0", limit)
 		require.NoError(t, err)
 		require.Equal(t, limit, n)
 		require.Lessf(t, c.reads.Load(), int64(total),
@@ -371,7 +375,7 @@ func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
 
 	t.Run("filter branch scans everything when uncapped", func(t *testing.T) {
 		store, c := newStore(t)
-		n, err := store.CountKeysUpTo(context.Background(), "0", 0)
+		n, err := store.CountKeysUpTo(ctx, "0", 0)
 		require.NoError(t, err)
 		require.Equal(t, total, n)
 		require.Equalf(t, int64(total), c.reads.Load(),
@@ -383,7 +387,7 @@ func TestKeystoreCountKeysUpToStopsEarly(t *testing.T) {
 		// query.Limit and the datastore hands back exactly the cap entries.
 		for _, limit := range []int{1, 3, 50} {
 			store, c := newStore(t)
-			n, err := store.CountKeysUpTo(context.Background(), "", limit)
+			n, err := store.CountKeysUpTo(ctx, "", limit)
 			require.NoError(t, err)
 			require.Equal(t, limit, n)
 			require.Equalf(t, int64(limit), c.reads.Load(),
@@ -413,7 +417,7 @@ func (d *failingQueryDatastore) Query(ctx context.Context, q query.Query) (query
 // region when this count fails, so a swallowed error would silently skip that
 // reschedule.
 func TestKeystoreCountKeysUpToPropagatesQueryError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	wantErr := errors.New("datastore query failed")
 	d := &failingQueryDatastore{Batching: ds.NewMapDatastore(), err: wantErr}
 
@@ -437,7 +441,7 @@ func TestKeystoreCountKeysUpToPropagatesQueryError(t *testing.T) {
 // countUpTo decode every matching datastore key to filter it, so a stored key
 // with a corrupt suffix must turn into an error rather than a wrong count.
 func TestKeystoreCountKeysUpToPropagatesDecodeError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const prefixBits = 8
 	d := ds.NewMapDatastore()
 
@@ -479,20 +483,23 @@ func TestKeystoreDelete(t *testing.T) {
 }
 
 func testKeystoreDeleteImpl(t *testing.T, store Keystore) {
-	mhs := random.Multihashes(3)
+	ctx := t.Context()
+	rnd := random.New()
+
+	mhs := rnd.Multihashes(3)
 	for i := range mhs {
 		h, err := mh.Sum([]byte{byte(i)}, mh.SHA2_256, -1)
 		require.NoError(t, err)
 		mhs[i] = h
 	}
-	_, err := store.Put(context.Background(), mhs...)
+	_, err := store.Put(ctx, mhs...)
 	require.NoError(t, err)
 
 	delPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[0]))[:6])
-	err = store.Delete(context.Background(), mhs[0])
+	err = store.Delete(ctx, mhs[0])
 	require.NoError(t, err)
 
-	res, err := store.Get(context.Background(), delPrefix)
+	res, err := store.Get(ctx, delPrefix)
 	require.NoError(t, err)
 	for _, h := range res {
 		require.NotEqual(t, string(h), string(mhs[0]), "expected deleted hash to be gone")
@@ -500,7 +507,7 @@ func testKeystoreDeleteImpl(t *testing.T, store Keystore) {
 
 	// other hashes should still be retrievable
 	otherPrefix := bitstr.Key(key.BitString(keyspace.MhToBit256(mhs[1]))[:6])
-	res, err = store.Get(context.Background(), otherPrefix)
+	res, err = store.Get(ctx, otherPrefix)
 	require.NoError(t, err)
 	require.NotEmpty(t, res, "expected remaining hashes for other prefix")
 }
@@ -528,9 +535,10 @@ func TestKeystoreSize(t *testing.T) {
 }
 
 func testKeystoreSizeImpl(t *testing.T, store Keystore) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
-	mhs0 := random.Multihashes(128)
+	mhs0 := rnd.Multihashes(128)
 	_, err := store.Put(ctx, mhs0...)
 	require.NoError(t, err)
 
@@ -541,7 +549,7 @@ func testKeystoreSizeImpl(t *testing.T, store Keystore) {
 	nKeys := 1 << 12
 	batches := 1 << 6
 	for range batches {
-		mhs1 := random.Multihashes(nKeys / batches)
+		mhs1 := rnd.Multihashes(nKeys / batches)
 		_, err = store.Put(ctx, mhs1...)
 		require.NoError(t, err)
 	}
@@ -572,14 +580,15 @@ func TestKeystoreSizePersistence(t *testing.T) {
 }
 
 func testKeystoreSizePersistenceImpl(t *testing.T, datastore ds.Batching, newStore func(ds.Batching) (Keystore, error)) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Create keystore, add keys, and close it
 	store, err := newStore(datastore)
 	require.NoError(t, err)
 
 	const initialKeys = 100
-	mhs := random.Multihashes(initialKeys)
+	mhs := rnd.Multihashes(initialKeys)
 	_, err = store.Put(ctx, mhs...)
 	require.NoError(t, err)
 
@@ -603,7 +612,7 @@ func testKeystoreSizePersistenceImpl(t *testing.T, datastore ds.Batching, newSto
 
 	// Add more keys to verify it continues to work
 	const additionalKeys = 50
-	moreMhs := random.Multihashes(additionalKeys)
+	moreMhs := rnd.Multihashes(additionalKeys)
 	_, err = store2.Put(ctx, moreMhs...)
 	require.NoError(t, err)
 
@@ -644,14 +653,15 @@ func TestKeystoreSizeFallbackOnCorruption(t *testing.T) {
 }
 
 func testKeystoreSizeMissingKeyImpl(t *testing.T, datastore ds.Batching, newStore func(ds.Batching) (Keystore, error)) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Create keystore and add keys, but don't close it (simulates crash)
 	store, err := newStore(datastore)
 	require.NoError(t, err)
 
 	const numKeys = 50
-	mhs := random.Multihashes(numKeys)
+	mhs := rnd.Multihashes(numKeys)
 	_, err = store.Put(ctx, mhs...)
 	require.NoError(t, err)
 
@@ -669,14 +679,15 @@ func testKeystoreSizeMissingKeyImpl(t *testing.T, datastore ds.Batching, newStor
 }
 
 func testKeystoreSizeCleanRestartImpl(t *testing.T, datastore ds.Batching, newStore func(ds.Batching) (Keystore, error)) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Create keystore, add keys, and properly close
 	store, err := newStore(datastore)
 	require.NoError(t, err)
 
 	const numKeys = 75
-	mhs := random.Multihashes(numKeys)
+	mhs := rnd.Multihashes(numKeys)
 	_, err = store.Put(ctx, mhs...)
 	require.NoError(t, err)
 
@@ -729,11 +740,12 @@ func TestKeystoreSizeWithDeleteAndEmpty(t *testing.T) {
 }
 
 func testKeystoreSizeAfterDeletesImpl(t *testing.T, store Keystore) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Add keys
 	const totalKeys = 100
-	mhs := random.Multihashes(totalKeys)
+	mhs := rnd.Multihashes(totalKeys)
 	_, err := store.Put(ctx, mhs...)
 	require.NoError(t, err)
 
@@ -769,11 +781,12 @@ func testKeystoreSizeAfterDeletesImpl(t *testing.T, store Keystore) {
 }
 
 func testKeystoreSizeAfterEmptyImpl(t *testing.T, store Keystore) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	// Add keys
 	const initialKeys = 200
-	mhs := random.Multihashes(initialKeys)
+	mhs := rnd.Multihashes(initialKeys)
 	_, err := store.Put(ctx, mhs...)
 	require.NoError(t, err)
 
@@ -791,7 +804,7 @@ func testKeystoreSizeAfterEmptyImpl(t *testing.T, store Keystore) {
 
 	// Verify we can add keys again
 	const keysAfterEmpty = 50
-	newMhs := random.Multihashes(keysAfterEmpty)
+	newMhs := rnd.Multihashes(keysAfterEmpty)
 	_, err = store.Put(ctx, newMhs...)
 	require.NoError(t, err)
 
@@ -801,10 +814,11 @@ func testKeystoreSizeAfterEmptyImpl(t *testing.T, store Keystore) {
 }
 
 func testKeystoreSizeWithDuplicatePutsImpl(t *testing.T, store Keystore) {
-	ctx := context.Background()
+	ctx := t.Context()
+	rnd := random.New()
 
 	const initialKeys = 50
-	mhs := random.Multihashes(initialKeys)
+	mhs := rnd.Multihashes(initialKeys)
 
 	// First put
 	added, err := store.Put(ctx, mhs...)
@@ -827,7 +841,7 @@ func testKeystoreSizeWithDuplicatePutsImpl(t *testing.T, store Keystore) {
 	// Mixed put: some new, some existing
 	const newKeysInMix = 30
 	const existingKeysInMix = 20
-	newMhs := random.Multihashes(newKeysInMix)
+	newMhs := rnd.Multihashes(newKeysInMix)
 	mixed := append(mhs[:existingKeysInMix], newMhs...)
 	added, err = store.Put(ctx, mixed...)
 	require.NoError(t, err)

@@ -18,15 +18,19 @@ import (
 )
 
 func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
+	rnd := random.New()
 	mhs := make([]mh.Multihash, 0, n)
-	for i := 0; len(mhs) < n; i++ {
-		h := random.Multihashes(1)[0]
-		k := keyspace.MhToBit256(h)
-		if keyspace.IsPrefix(prefix, k) {
-			mhs = append(mhs, h)
+	for {
+		for _, h := range rnd.Multihashes(max(n-len(mhs), 8)) {
+			k := keyspace.MhToBit256(h)
+			if keyspace.IsPrefix(prefix, k) {
+				mhs = append(mhs, h)
+				if len(mhs) == n {
+					return mhs
+				}
+			}
 		}
 	}
-	return mhs
 }
 
 func TestProvideEnqueueSimple(t *testing.T) {

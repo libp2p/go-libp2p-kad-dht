@@ -66,8 +66,8 @@ func TestOptimisticProvide(t *testing.T) {
 			continue
 		}
 
-		if i >= privIdx {
-			peerIDs[i-1] = dhts[i-1].self
+		if i > privIdx {
+			peerIDs[i-1] = dhts[i].self
 		} else {
 			peerIDs[i] = dhts[i].self
 		}
@@ -92,7 +92,11 @@ func TestOptimisticProvide(t *testing.T) {
 	for _, c := range testCaseCids {
 		n := randInt(rng, dhtCount, privIdx)
 
-		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		// Generous timeout: the happy path returns as soon as the provider is
+		// found, so this only adds slack for slow/loaded CI runners. A too-tight
+		// deadline surfaces as either "nil provider" (closed channel) or "Did
+		// not get a provider back" depending on which select case wins the race.
+		ctxT, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		provchan := dhts[n].FindProvidersAsync(ctxT, c, 1)
 

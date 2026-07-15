@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
@@ -212,7 +212,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	// 100 sync https://gist.github.com/jbenet/6c59e7c15426e48aaedd
 	// probably because results compound
 
-	start := rand.Intn(len(dhts)) // randomize to decrease bias.
+	start := rand.IntN(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
 		select {
@@ -1089,7 +1089,14 @@ func TestProvidesMany(t *testing.T) {
 
 	errchan := make(chan error)
 
-	ctxT, cancel = context.WithTimeout(ctx, 15*time.Second)
+	// Every lookup below shares this deadline, so it bounds how long the whole
+	// batch of len(testCaseCids)*nDHTs lookups takes, not how long any single
+	// one takes. That total tracks machine load: ~5s idle, but ~64s on a
+	// heavily contended machine, so the previous 15s timed out a tail of
+	// lookups on a busy CI runner (#760). It is only a backstop against a
+	// lookup that hangs forever — when they behave the batch finishes long
+	// before this, so a generous value costs nothing.
+	ctxT, cancel = context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -1715,7 +1722,7 @@ func testFindPeerQuery(t *testing.T,
 
 	t.Log("connecting")
 
-	mrand := rand.New(rand.NewSource(42))
+	mrand := rand.New(rand.NewPCG(42, 42))
 	guy := dhts[0]
 	others := dhts[1:]
 	for i := range leafs {

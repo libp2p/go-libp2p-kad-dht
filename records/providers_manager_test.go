@@ -525,9 +525,11 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
 	t.Cleanup(func() { ps.Close() })
-	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, store,
+	gcCtx, stopGC := context.WithCancel(ctx)
+	pm, err := NewProviderManager(gcCtx, peer.ID("self"), ps, store,
 		ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
 	prov := peer.ID("prov")
 	// expiring records are added once and never refreshed; GC must reclaim them.
@@ -562,7 +564,11 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 	wg.Wait()
 
 	// Stop GC before inspecting the datastore so the physical state is stable.
-	require.NoError(t, pm.Close())
+	// Cancelling the construction context stops the GC goroutine without
+	// fencing the manager the way Close would, so the re-provides below still
+	// go through.
+	stopGC()
+	<-pm.closed
 
 	// GC deletes without the write lock, so a live key whose writer was starved
 	// past provideValidity mid-run could have been reclaimed — the sanctioned
@@ -587,6 +593,28 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 	for _, key := range expiring {
 		require.Zerof(t, countKeys(key), "expiring record %x should be GC'd", key)
 	}
+}
+
+// TestCloseFencesDatastoreAccess pins the Close contract: once Close returns,
+// AddProvider and GetProviders no longer touch the datastore and report
+// ErrClosed, so the backing datastore can be closed right after the manager.
+func TestCloseFencesDatastoreAccess(t *testing.T) {
+	ctx := t.Context()
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { ps.Close() })
+	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	require.NoError(t, err)
+
+	key := internal.Hash([]byte("cid"))
+	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID("prov")}))
+	require.NoError(t, pm.Close())
+
+	require.ErrorIs(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID("prov2")}), ErrClosed)
+	_, err = pm.GetProviders(ctx, key)
+	require.ErrorIs(t, err, ErrClosed)
+
+	require.NoError(t, pm.Close(), "Close must stay idempotent with the fence in place")
 }
 
 // sortedQueryDS returns query results ordered lexicographically by key, the way

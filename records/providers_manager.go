@@ -38,6 +38,9 @@ var (
 	log                    = logging.Logger("providers")
 )
 
+// ErrClosed is returned by AddProvider and GetProviders after Close.
+var ErrClosed = errors.New("provider manager closed")
+
 // ProviderStore represents a store that associates peers and their addresses to keys.
 type ProviderStore interface {
 	AddProvider(ctx context.Context, key []byte, prov peer.AddrInfo) error
@@ -61,13 +64,15 @@ type ProviderStore interface {
 type ProviderManager struct {
 	self peer.ID
 
-	// mu guards cache and the providerSets it holds, and serialises AddProvider
-	// and GetProviders access to the datastore so the cache stays consistent with
-	// it. The background GC never takes mu (it only sweeps the datastore).
-	mu     sync.Mutex
-	cache  lru.LRUCache
-	pstore peerstore.Peerstore
-	dstore ds.Batching
+	// mu guards cache (and the providerSets it holds) and stopped, and
+	// serialises AddProvider and GetProviders access to the datastore so the
+	// cache stays consistent with it. The background GC never takes mu (it only
+	// sweeps the datastore).
+	mu      sync.Mutex
+	stopped bool
+	cache   lru.LRUCache
+	pstore  peerstore.Peerstore
+	dstore  ds.Batching
 
 	// shuffle randomises the provider order returned by GetProviders, so client
 	// load is spread across a key's providers instead of always preferring the
@@ -162,16 +167,23 @@ func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peersto
 	return pm, nil
 }
 
-// Close stops the background GC and waits for it to exit. It is idempotent.
+// Close stops the background GC, waits for it to exit, and fences the
+// datastore: once Close returns, no AddProvider or GetProviders call touches
+// the datastore, and late calls return ErrClosed. The backing datastore can
+// therefore be closed as soon as Close returns. It is idempotent.
 func (pm *ProviderManager) Close() error {
 	pm.cancel()
 	<-pm.closed
+	pm.mu.Lock()
+	pm.stopped = true
+	pm.mu.Unlock()
 	return nil
 }
 
 // AddProvider adds a provider for key k. The provider's addresses are recorded
 // in the peerstore, and the (key, provider) pair is written to the cache (when
-// the key is already cached) and the datastore.
+// the key is already cached) and the datastore. It returns ErrClosed after
+// Close.
 func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
 	ctx, span := internal.StartSpan(ctx, "ProviderManager.AddProvider")
 	defer span.End()
@@ -183,6 +195,9 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo p
 	now := time.Now()
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+	if pm.stopped {
+		return ErrClosed
+	}
 	if provs, ok := pm.cache.Get(string(k)); ok {
 		provs.(*providerSet).setVal(provInfo.ID, now)
 	} // else not cached, just write through
@@ -211,12 +226,16 @@ func mkProvKey(k []byte) string {
 // slice is a fresh copy the caller may retain and modify. A datastore read
 // failure yields an empty result rather than an error: the record simply
 // appears absent, so a GET_PROVIDERS query falls back to other peers instead of
-// failing.
+// failing. It returns ErrClosed after Close.
 func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.AddrInfo, error) {
 	ctx, span := internal.StartSpan(ctx, "ProviderManager.GetProviders")
 	defer span.End()
 
 	pm.mu.Lock()
+	if pm.stopped {
+		pm.mu.Unlock()
+		return nil, ErrClosed
+	}
 	pset, err := pm.getProviderSetForKey(ctx, k)
 	if err != nil {
 		pm.mu.Unlock()

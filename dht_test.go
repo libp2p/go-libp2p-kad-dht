@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
@@ -209,7 +209,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	// 100 sync https://gist.github.com/jbenet/6c59e7c15426e48aaedd
 	// probably because results compound
 
-	start := rand.Intn(len(dhts)) // randomize to decrease bias.
+	start := rand.IntN(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
 		select {
@@ -1673,7 +1673,7 @@ func testFindPeerQuery(t *testing.T,
 
 	t.Log("connecting")
 
-	mrand := rand.New(rand.NewSource(42))
+	mrand := rand.New(rand.NewPCG(42, 42))
 	guy := dhts[0]
 	others := dhts[1:]
 	for i := range leafs {

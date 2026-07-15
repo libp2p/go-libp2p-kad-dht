@@ -94,6 +94,11 @@ type IpfsDHT struct {
 
 	birth time.Time // When this peer started up
 
+	// Validator applies validation and selection to records fetched from and
+	// stored in the DHT. It is set from the Validator option and must not be
+	// reassigned after New: the value store captures it at construction, so a
+	// later assignment changes lookup-side behavior only and splits validation
+	// between the two.
 	Validator record.Validator
 
 	ctx    context.Context
@@ -847,7 +852,11 @@ func (dht *IpfsDHT) BucketSize() int {
 	return dht.bucketSize
 }
 
-// Close calls Process Close.
+// Close shuts down the DHT's background routines and closes its record
+// stores. In-flight RPC handlers are owned by the libp2p host, not awaited
+// here: the provider store fences them off, but a handler mid-request may
+// still read from the value datastore after Close returns. Close the host
+// before closing any datastore handed to the DHT.
 func (dht *IpfsDHT) Close() error {
 	dht.cancel()
 	dht.wg.Wait()

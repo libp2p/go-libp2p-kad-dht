@@ -58,6 +58,9 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	// setup response
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
 
+	// Get validates the record before serving it. Requesters validate on their
+	// side anyway (a malicious server could skip this check), so this keeps our
+	// own store clean rather than acting as a trust boundary.
 	rec, err := dht.valueStore.Get(ctx, string(k))
 	if err != nil {
 		return nil, err

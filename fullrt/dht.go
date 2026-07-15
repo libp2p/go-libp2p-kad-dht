@@ -79,6 +79,11 @@ type FullRT struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	// Validator applies validation and selection to records fetched from and
+	// stored in the DHT. It is set from the DHT Validator option and must not
+	// be reassigned after NewFullRT: the value store captures it at
+	// construction, so a later assignment changes lookup-side behavior only and
+	// splits validation between the two.
 	Validator record.Validator
 	// ProviderManager is nil when providers are disabled, which is possible on
 	// any protocol prefix but the Amino one, since Validate only enforces

@@ -56,6 +56,12 @@ func ValueDatastore(dstore ds.Batching) Option {
 // unset, provider records share the datastore configured with Datastore. This
 // is useful, for example, to keep ephemeral provider records off a durable
 // value datastore.
+//
+// Custom ProviderStore implementations cannot be injected; the DHT always runs
+// the built-in provider manager, configured through this option and
+// ProviderManagerOpts. DHT instances given the same provider datastore see
+// each other's provider records, and records.Cache controls the read cache in
+// front of it.
 func ProviderDatastore(dstore ds.Batching) Option {
 	return func(c *dhtcfg.Config) error {
 		c.ProviderDatastore = dstore

@@ -30,6 +30,11 @@ var ErrOldRecord = errors.New("old record")
 // against on write, validated and age-checked on read, and stamped with the
 // time they were received. Invalid or expired records are discarded on access.
 //
+// Validation runs on every read, including reads that serve remote GET_VALUE
+// requests. With signature-verifying validators (such as ipns), each Get costs
+// a signature verification; the store trades that CPU for never serving or
+// retaining a record that no longer validates.
+//
 // A ValueStore is safe for concurrent use. Writes to the same key are
 // serialised so that a concurrent Put cannot overwrite a better record.
 type ValueStore struct {
@@ -237,6 +242,10 @@ func (v *ValueStore) StartGC(ctx context.Context, interval time.Duration) {
 // Close stops the background sweep started by StartGC and waits for it to exit.
 // It is safe to call when StartGC was never called or was a no-op, and is
 // idempotent and safe to call concurrently with StartGC.
+//
+// Close does not fence reads and writes: Get and Put issued after (or racing)
+// Close still reach the backing datastore. Stop issuing them before closing
+// the datastore itself.
 func (v *ValueStore) Close() error {
 	v.gcMu.Lock()
 	cancel, closed := v.gcCancel, v.gcClosed

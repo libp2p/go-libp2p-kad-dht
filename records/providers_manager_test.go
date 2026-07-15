@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"slices"
 	"strings"
@@ -658,14 +658,14 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 	lexOrder := slices.Clone(provs)
 	slices.SortFunc(lexOrder, func(a, b peer.ID) int { return strings.Compare(string(a), string(b)) })
 
-	get := func(seed int64) []peer.ID {
+	get := func(seed uint64) []peer.ID {
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
 		pm, err := NewProviderManager(ctx, peer.ID("self"), ps,
 			sortedQueryDS{dssync.MutexWrap(ds.NewMapDatastore())})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, pm.Close()) })
-		pm.shuffle = rand.New(rand.NewSource(seed)).Shuffle
+		pm.shuffle = rand.New(rand.NewPCG(seed, seed)).Shuffle
 
 		for _, p := range provs {
 			require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: p}))

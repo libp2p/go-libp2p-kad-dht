@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"math/rand"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -787,7 +787,7 @@ func TestExploreSwarmDifferential(t *testing.T) {
 func TestExploreSwarmFuzz(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const bucketSize = 20
-		rng := rand.New(rand.NewSource(1))
+		rng := rand.New(rand.NewPCG(1, 1))
 		pool := random.Peers(200)
 
 		checker := noopConnectivityChecker()
@@ -804,17 +804,17 @@ func TestExploreSwarmFuzz(t *testing.T) {
 		}
 
 		for c := range 250 {
-			size := 1 + rng.Intn(len(pool))
+			size := 1 + rng.IntN(len(pool))
 			peers := make([]peer.ID, size)
 			for i, idx := range rng.Perm(len(pool))[:size] {
 				peers[i] = pool[idx]
 			}
 			peersTrie := peersToTrie(peers)
-			rf := 1 + rng.Intn(12)
+			rf := 1 + rng.IntN(12)
 
 			var sb strings.Builder
-			for range rng.Intn(7) {
-				sb.WriteByte('0' + byte(rng.Intn(2)))
+			for range rng.IntN(7) {
+				sb.WriteByte('0' + byte(rng.IntN(2)))
 			}
 			prefix := bitstr.Key(sb.String())
 

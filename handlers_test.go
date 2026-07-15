@@ -3,7 +3,7 @@ package dht
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -99,7 +99,7 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	rng := rand.New(rand.NewSource(150))
+	rng := rand.NewChaCha8([32]byte{150})
 	var peers []peer.ID
 	for i := range 1000 {
 		_, pubk, _ := crypto.GenerateEd25519Key(rng)

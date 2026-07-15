@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -176,6 +177,19 @@ func hugeAddrs(n int) []ma.Multiaddr {
 	return addrs
 }
 
+// fatAddrs returns a ~6 KiB address list: big enough that a few hundred records
+// carrying it overflow the message cap, yet small enough to stay well inside the
+// 8 KiB per-record size bound the pb layer will apply once #1281 lands, so these
+// records reach the handler untrimmed either way. Message pressure therefore
+// comes from the NUMBER of records rather than from any single oversized one,
+// which is the only regime in which the response bound stays reachable once a
+// record can no longer exceed the cap on its own.
+func fatAddrs() []ma.Multiaddr { return hugeAddrs(3) }
+
+// fatProviderCount is comfortably more than the ~690 fatAddrs records that fill
+// the 4 MiB message cap, so a set this size is always truncated.
+const fatProviderCount = 900
+
 // TestHandleGetProvidersTruncatesToMessageSizeMax verifies the serve-side
 // response bound: when the providers for a key carry enough address bytes to
 // blow past the transport's soft message maximum, handleGetProviders drops a
@@ -194,14 +208,13 @@ func TestHandleGetProvidersTruncatesToMessageSizeMax(t *testing.T) {
 	small := peer.ID("small-provider")
 	smallAddr := ma.StringCast("/ip4/1.2.3.4/tcp/4001")
 
-	// Each bulk record carries ~400 KiB of addresses, so a couple dozen exceed
-	// the 4 MiB cap.
-	bigAddrs := hugeAddrs(200)
+	// Each bulk record carries ~6 KiB of addresses, so several hundred of them
+	// exceed the 4 MiB cap.
+	bigAddrs := fatAddrs()
 	providers := []peer.AddrInfo{{ID: small, Addrs: []ma.Multiaddr{smallAddr}}}
-	const bulk = 24
-	for i := range bulk {
+	for i := range fatProviderCount {
 		providers = append(providers, peer.AddrInfo{
-			ID:    peer.ID(fmt.Sprintf("bulk-%02d", i)),
+			ID:    peer.ID(fmt.Sprintf("bulk-%03d", i)),
 			Addrs: bigAddrs,
 		})
 	}
@@ -249,64 +262,122 @@ func TestHandleGetProvidersServesAllUnderCap(t *testing.T) {
 	require.Empty(t, empty.ProviderPeers, "an empty provider set yields no provider records")
 }
 
-// TestHandleGetProvidersDropsSingleOversizedProvider pins the degenerate edge:
-// a lone provider whose own record already exceeds the cap is dropped entirely
-// rather than served over-size (or panicking on an empty truncation).
-func TestHandleGetProvidersDropsSingleOversizedProvider(t *testing.T) {
-	ctx := t.Context()
-	d := setupDHT(ctx, t, false)
-	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
+// TestAppendFittingProviderPeersDropsOversizedRecord pins the degenerate edge of
+// the response bound: a record whose framed size alone exceeds the cap is
+// dropped rather than served over-size, and the resulting empty truncation must
+// not panic.
+//
+// The guard is driven directly, with a hand-built record, rather than through
+// handleGetProviders: once #1281 lands the pb constructors bound a record's
+// address list, so a record this large can no longer be produced from a
+// peer.AddrInfo and the handler cannot reach this path from real input. The
+// guard is kept as defence in depth — it is what holds the response within the
+// cap if a record ever grows past it again.
+func TestAppendFittingProviderPeersDropsOversizedRecord(t *testing.T) {
+	resp := pb.NewMessage(pb.Message_GET_PROVIDERS, []byte("some-key"), 0)
 
-	// ~5 MiB of addresses on a single provider — bigger than the 4 MiB cap.
-	providers := []peer.AddrInfo{{ID: peer.ID("whale"), Addrs: hugeAddrs(2600)}}
+	// ~5 MiB of addresses on a single record — bigger than the 4 MiB cap.
+	whale := &pb.Message_Peer{Id: []byte("whale")}
+	for _, a := range hugeAddrs(2600) {
+		whale.Addrs = append(whale.Addrs, a.Bytes())
+	}
+	require.Greaterf(t, proto.Size(whale), network.MessageSizeMax,
+		"the record must exceed the cap for this test to be meaningful")
 
-	resp := serveGetProviders(ctx, t, d, d.self, providers)
-	require.Empty(t, resp.ProviderPeers, "a single over-cap provider must not be served")
+	require.NotPanics(t, func() {
+		appendFittingProviderPeers(resp, slices.Values([]*pb.Message_Peer{whale}))
+	})
+	require.Empty(t, resp.ProviderPeers, "a single over-cap record must not be served")
 	require.LessOrEqual(t, proto.Size(resp), network.MessageSizeMax)
+}
+
+// TestAppendFittingProviderPeersServesFittingRecords is the positive companion:
+// records that fit are appended in order, and the iterator is not drained past
+// the cap.
+func TestAppendFittingProviderPeersServesFittingRecords(t *testing.T) {
+	resp := pb.NewMessage(pb.Message_GET_PROVIDERS, []byte("some-key"), 0)
+
+	recs := make([]*pb.Message_Peer, fatProviderCount)
+	addrs := fatAddrs()
+	for i := range recs {
+		rec := &pb.Message_Peer{Id: []byte(fmt.Sprintf("prov-%03d", i))}
+		for _, a := range addrs {
+			rec.Addrs = append(rec.Addrs, a.Bytes())
+		}
+		recs[i] = rec
+	}
+
+	var pulled int
+	appendFittingProviderPeers(resp, func(yield func(*pb.Message_Peer) bool) {
+		for _, rec := range recs {
+			pulled++
+			if !yield(rec) {
+				return
+			}
+		}
+	})
+
+	require.LessOrEqual(t, proto.Size(resp), network.MessageSizeMax)
+	require.NotEmpty(t, resp.ProviderPeers, "records that fit must be served")
+	require.Lessf(t, len(resp.ProviderPeers), len(recs), "the over-cap tail must be dropped")
+	require.Equalf(t, recs[0].Id, resp.ProviderPeers[0].Id, "fitting records keep their order")
+	require.Equalf(t, len(resp.ProviderPeers)+1, pulled,
+		"the iterator must stop at the first record that does not fit, not drain the set")
 }
 
 // TestHandleGetProvidersBudgetIncludesCloserPeers checks that CloserPeers are
 // built once BEFORE the provider loop and their serialized size counts against
-// the message budget. A few closer peers carrying large address lists consume
-// most of the 4 MiB; if their size were ignored while admitting providers, the
-// final message would exceed the cap.
+// the message budget. Providers alone fill the cap, so if the closer peers'
+// bytes were not already counted when admitting providers, appending them would
+// push the finished message past the cap.
 func TestHandleGetProvidersBudgetIncludesCloserPeers(t *testing.T) {
 	ctx := t.Context()
 	d := setupDHT(ctx, t, false)
 	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
 
-	// A few routing-table peers with ~1.2 MiB address lists each -> CloserPeers
-	// occupies roughly 3 MiB of the budget.
-	bigAddrs := hugeAddrs(600)
-	rng := rand.New(rand.NewSource(42))
-	for range 3 {
+	// Routing-table peers carrying a full address list each, so CloserPeers take
+	// up a non-trivial slice of the budget.
+	closerAddrs := fatAddrs()
+	rng := rand.NewChaCha8([32]byte{42})
+	for range 20 {
 		_, pub, err := crypto.GenerateEd25519Key(rng)
 		require.NoError(t, err)
 		id, err := peer.IDFromPublicKey(pub)
 		require.NoError(t, err)
-		d.host.Peerstore().AddAddrs(id, bigAddrs, time.Hour)
+		d.host.Peerstore().AddAddrs(id, closerAddrs, time.Hour)
 		_, err = d.routingTable.TryAddPeer(id, true, false)
 		require.NoError(t, err)
 	}
 
-	// Many ~2 KiB providers: far more than the ~1 MiB left after closer peers.
-	provAddr := hugeAddrs(1)
-	providers := make([]peer.AddrInfo, 1500)
+	// Far more providers than fit, so the provider loop runs right up to the cap.
+	provAddrs := fatAddrs()
+	providers := make([]peer.AddrInfo, fatProviderCount)
 	for i := range providers {
-		providers[i] = peer.AddrInfo{ID: peer.ID(fmt.Sprintf("prov-%04d", i)), Addrs: provAddr}
+		providers[i] = peer.AddrInfo{ID: peer.ID(fmt.Sprintf("prov-%03d", i)), Addrs: provAddrs}
 	}
 
 	resp := serveGetProviders(ctx, t, d, peer.ID("requester"), providers)
 
 	require.NotEmpty(t, resp.CloserPeers, "closer peers must be present for this test to be meaningful")
 	closerOnly := &pb.Message{CloserPeers: resp.CloserPeers}
-	require.Greaterf(t, proto.Size(closerOnly), network.MessageSizeMax/4,
-		"closer peers must materially consume the budget (else the guard is untested)")
+	closerSize := proto.Size(closerOnly)
 
 	require.LessOrEqualf(t, proto.Size(resp), network.MessageSizeMax,
 		"response (%d bytes) must stay within the cap with closer peers counted", proto.Size(resp))
 	require.Greaterf(t, len(resp.ProviderPeers), 0, "some providers should fit in the remaining budget")
-	require.Lessf(t, len(resp.ProviderPeers), len(providers), "providers must be truncated by the closer-peer budget")
+	require.Lessf(t, len(resp.ProviderPeers), len(providers), "providers must be truncated by the budget")
+
+	// The loop stops within one record of the cap, so the closer peers must
+	// outweigh that leftover slack for the assertion below to discriminate.
+	require.Greaterf(t, closerSize, 10*proto.Size(resp.ProviderPeers[0]),
+		"closer peers must outweigh the loop's leftover slack, else the budget assertion is vacuous")
+
+	// The providers admitted must leave room for the closer peers already in the
+	// message: had the loop ignored them, it would have filled the cap with
+	// providers alone and the closer-peer bytes would have overflowed it.
+	provsOnly := &pb.Message{ProviderPeers: resp.ProviderPeers}
+	require.LessOrEqualf(t, proto.Size(provsOnly), network.MessageSizeMax-closerSize,
+		"the provider budget must be reduced by the %d bytes of closer peers", closerSize)
 }
 
 // providerIDs extracts the provider peer-ID bytes from a GET_PROVIDERS response.
@@ -340,17 +411,16 @@ func TestHandleGetProvidersTruncationSurvivorDependsOnOrder(t *testing.T) {
 		Addrs: []ma.Multiaddr{ma.StringCast("/ip4/1.2.3.4/tcp/4001")},
 	}
 
-	// Enough ~400 KiB records to overflow the 4 MiB cap several times over.
-	bigAddrs := hugeAddrs(200)
-	const bulk = 24
-	bulky := make([]peer.AddrInfo, bulk)
+	// Enough ~6 KiB records to overflow the 4 MiB cap comfortably.
+	bigAddrs := fatAddrs()
+	bulky := make([]peer.AddrInfo, fatProviderCount)
 	for i := range bulky {
-		bulky[i] = peer.AddrInfo{ID: peer.ID(fmt.Sprintf("bulk-%02d", i)), Addrs: bigAddrs}
+		bulky[i] = peer.AddrInfo{ID: peer.ID(fmt.Sprintf("bulk-%03d", i)), Addrs: bigAddrs}
 	}
 
 	// Target last: the large records exhaust the budget before the loop reaches
 	// it, so truncation drops the target.
-	buried := make([]peer.AddrInfo, 0, bulk+1)
+	buried := make([]peer.AddrInfo, 0, fatProviderCount+1)
 	buried = append(buried, bulky...)
 	buried = append(buried, target)
 	resp := serveGetProviders(ctx, t, d, d.self, buried)
@@ -361,7 +431,7 @@ func TestHandleGetProvidersTruncationSurvivorDependsOnOrder(t *testing.T) {
 
 	// Target first: it is admitted before the large records fill the budget, so
 	// it survives within the same size bound.
-	surfaced := make([]peer.AddrInfo, 0, bulk+1)
+	surfaced := make([]peer.AddrInfo, 0, fatProviderCount+1)
 	surfaced = append(surfaced, target)
 	surfaced = append(surfaced, bulky...)
 	resp = serveGetProviders(ctx, t, d, d.self, surfaced)

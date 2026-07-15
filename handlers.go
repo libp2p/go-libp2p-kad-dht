@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"iter"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -183,25 +184,39 @@ func (dht *IpfsDHT) handleGetProviders(ctx context.Context, p peer.ID, pmes *pb.
 	// Append provider records until the next would push the serialized message
 	// past the transport's soft maximum. GetProviders returns providers in random
 	// order, so when the set doesn't all fit the records we keep are an arbitrary
-	// subset that varies between requests rather than a fixed prefix. Converting
-	// records lazily and tracking the running size incrementally (base + each
-	// record's framed contribution) keeps the loop O(n) and does no work on the
-	// records past the cap.
-	size := proto.Size(resp) // key, type and CloserPeers already counted
-	for _, provider := range providers {
-		pbProv := pb.PeerInfoToPBPeer(dht.host.Network(), peer.AddrInfo{
-			ID:    provider.ID,
-			Addrs: dht.filterAddrs(provider.Addrs),
-		})
-		// A repeated embedded message adds its tag, a length prefix and its bytes.
-		size += providerPeersTagSize + protowire.SizeBytes(proto.Size(pbProv))
-		if size > network.MessageSizeMax {
-			break
+	// subset that varies between requests rather than a fixed prefix.
+	appendFittingProviderPeers(resp, func(yield func(*pb.Message_Peer) bool) {
+		for _, provider := range providers {
+			pbProv := pb.PeerInfoToPBPeer(dht.host.Network(), peer.AddrInfo{
+				ID:    provider.ID,
+				Addrs: dht.filterAddrs(provider.Addrs),
+			})
+			if !yield(pbProv) {
+				return
+			}
 		}
-		resp.ProviderPeers = append(resp.ProviderPeers, pbProv)
-	}
+	})
 
 	return resp, nil
+}
+
+// appendFittingProviderPeers appends records from recs to resp.ProviderPeers,
+// stopping at the first one that would push the serialized message past
+// network.MessageSizeMax. A record that does not fit is dropped rather than
+// served over-size, so a set that cannot fit at all yields no provider records.
+// recs is pulled lazily and the running size tracked incrementally (base plus
+// each record's framed contribution), so the append is O(n) and pulls nothing
+// past the cap.
+func appendFittingProviderPeers(resp *pb.Message, recs iter.Seq[*pb.Message_Peer]) {
+	size := proto.Size(resp) // key, type and CloserPeers already counted
+	for rec := range recs {
+		// A repeated embedded message adds its tag, a length prefix and its bytes.
+		size += providerPeersTagSize + protowire.SizeBytes(proto.Size(rec))
+		if size > network.MessageSizeMax {
+			return
+		}
+		resp.ProviderPeers = append(resp.ProviderPeers, rec)
+	}
 }
 
 func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, _err error) {

@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -10,9 +10,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func randInt(rng *rand.Rand, n, except int) int {
+func randInt(n, except int) int {
 	for {
-		r := rng.Intn(n)
+		r := rand.IntN(n)
 		if r != except {
 			return r
 		}
@@ -20,8 +20,6 @@ func randInt(rng *rand.Rand, n, except int) int {
 }
 
 func TestOptimisticProvide(t *testing.T) {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	// Order of events:
 	// 1. setup DHTs
 	// 2. connect each DHT with three others (but not to itself)
@@ -46,7 +44,7 @@ func TestOptimisticProvide(t *testing.T) {
 	// connect each DHT with three random others
 	for i, dht := range dhts {
 		for range nInitialConnections {
-			r := randInt(rng, dhtCount, i)
+			r := randInt(dhtCount, i)
 			connect(t, ctx, dhts[r], dht)
 		}
 	}
@@ -57,7 +55,7 @@ func TestOptimisticProvide(t *testing.T) {
 	bootstrap(t, ctx, dhts)
 
 	// select privileged DHT that will perform the provide operation
-	privIdx := rng.Intn(dhtCount)
+	privIdx := rand.IntN(dhtCount)
 	privDHT := dhts[privIdx]
 
 	peerIDs := make([]peer.ID, dhtCount-1)
@@ -90,7 +88,7 @@ func TestOptimisticProvide(t *testing.T) {
 	}
 
 	for _, c := range testCaseCids {
-		n := randInt(rng, dhtCount, privIdx)
+		n := randInt(dhtCount, privIdx)
 
 		// Generous timeout: the happy path returns as soon as the provider is
 		// found, so this only adds slack for slow/loaded CI runners. A too-tight

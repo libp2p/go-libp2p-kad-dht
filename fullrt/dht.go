@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"

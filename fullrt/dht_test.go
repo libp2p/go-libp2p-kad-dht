@@ -26,6 +26,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -422,7 +423,7 @@ func TestFindProvidersAsyncShufflesRemoteProviders(t *testing.T) {
 	// order, so the shuffle runs exactly once and deterministically.
 	frt.protoMessenger, err = dht_pb.NewProtocolMessenger(&testMessageSender{
 		sendRequest: func(_ context.Context, _ peer.ID, req *dht_pb.Message) (*dht_pb.Message, error) {
-			require.Equal(t, dht_pb.Message_GET_PROVIDERS, req.Type)
+			assert.Equal(t, dht_pb.Message_GET_PROVIDERS, req.Type)
 			resp := dht_pb.NewMessage(req.Type, req.Key, 0)
 			resp.ProviderPeers = dht_pb.RawPeerInfosToPBPeers(remote)
 			return resp, nil

@@ -2773,8 +2773,12 @@ func TestSharedDatastoreNamespacing(t *testing.T) {
 func TestValueGCRemovesExpiredRecords(t *testing.T) {
 	ctx := t.Context()
 	main := dssync.MutexWrap(ds.NewMapDatastore())
+	// MaxRecordAge is comfortably longer than the store-then-check below takes,
+	// so the record is still fresh when we assert it was stored; it then ages
+	// out and the 10ms GC sweeps it. A near-zero age would let a GC tick delete
+	// the record before that first assertion, racing it.
 	d := setupDHT(ctx, t, false, Datastore(main),
-		MaxRecordAge(time.Millisecond), ValueGCInterval(10*time.Millisecond))
+		MaxRecordAge(100*time.Millisecond), ValueGCInterval(10*time.Millisecond))
 
 	key := "/v/gc-target"
 	require.NoError(t, d.putLocal(ctx, key, record.MakePutRecord(key, []byte("stale"))))

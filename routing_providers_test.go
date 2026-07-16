@@ -8,6 +8,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multihash"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -37,7 +38,7 @@ func TestFindProvidersAsyncShufflesRemoteProviders(t *testing.T) {
 	// once (single-threaded, hence deterministic).
 	dhts[0].protoMessenger, _ = pb.NewProtocolMessenger(&testMessageSender{
 		sendRequest: func(_ context.Context, _ peer.ID, req *pb.Message) (*pb.Message, error) {
-			require.Equal(t, pb.Message_GET_PROVIDERS, req.Type)
+			assert.Equal(t, pb.Message_GET_PROVIDERS, req.Type)
 			resp := pb.NewMessage(req.Type, req.Key, 0)
 			resp.ProviderPeers = pb.RawPeerInfosToPBPeers(remote)
 			return resp, nil
@@ -98,7 +99,7 @@ func TestFindProvidersAsyncSurfacesProviderListedLast(t *testing.T) {
 
 		dhts[0].protoMessenger, _ = pb.NewProtocolMessenger(&testMessageSender{
 			sendRequest: func(_ context.Context, _ peer.ID, req *pb.Message) (*pb.Message, error) {
-				require.Equal(t, pb.Message_GET_PROVIDERS, req.Type)
+				assert.Equal(t, pb.Message_GET_PROVIDERS, req.Type)
 				resp := pb.NewMessage(req.Type, req.Key, 0)
 				resp.ProviderPeers = pb.RawPeerInfosToPBPeers(remote)
 				return resp, nil

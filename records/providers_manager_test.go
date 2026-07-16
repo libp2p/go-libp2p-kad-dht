@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
 	"github.com/stretchr/testify/require"
 
+	"github.com/multiformats/go-base32"
 	mh "github.com/multiformats/go-multihash"
 
 	ds "github.com/ipfs/go-datastore"
@@ -702,10 +703,17 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 	for i := range provs {
 		provs[i] = peer.ID(fmt.Sprintf("prov-%02d", i))
 	}
-	// Provider keys are base32(peerID) under a common prefix, and base32 is
-	// order-preserving, so the datastore hands them back sorted by peer ID.
-	lexOrder := slices.Clone(provs)
-	slices.SortFunc(lexOrder, func(a, b peer.ID) int { return strings.Compare(string(a), string(b)) })
+	// Provider keys are base32(peerID) under a common prefix, and the datastore
+	// returns them sorted by that key. base32's alphabet (A-Z2-7) does not sort
+	// like the raw peer-ID bytes, so the pass-through order to beat is the
+	// base32-key order, not a raw peer-ID sort.
+	dsOrder := slices.Clone(provs)
+	slices.SortFunc(dsOrder, func(a, b peer.ID) int {
+		return strings.Compare(
+			base32.RawStdEncoding.EncodeToString([]byte(a)),
+			base32.RawStdEncoding.EncodeToString([]byte(b)),
+		)
+	})
 
 	get := func(seed uint64) []peer.ID {
 		ps, err := pstoremem.NewPeerstore()
@@ -733,6 +741,6 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 
 	require.ElementsMatch(t, provs, orderA, "shuffle must preserve the provider set")
 	require.ElementsMatch(t, provs, orderB, "shuffle must preserve the provider set")
-	require.NotEqual(t, lexOrder, orderA, "datastore lex order must not pass through")
+	require.NotEqual(t, dsOrder, orderA, "datastore order must not pass through")
 	require.NotEqual(t, orderA, orderB, "different rand sources must yield different order")
 }

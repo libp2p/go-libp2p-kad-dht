@@ -13,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
@@ -71,7 +72,7 @@ func TestFindProvidersAsyncQueryEventResponsesRace(t *testing.T) {
 	// queryFn closure always has a non-trivial slice to publish.
 	dhts[0].protoMessenger, _ = pb.NewProtocolMessenger(&testMessageSender{
 		sendRequest: func(_ context.Context, _ peer.ID, req *pb.Message) (*pb.Message, error) {
-			require.Equal(t, pb.Message_GET_PROVIDERS, req.Type)
+			assert.Equal(t, pb.Message_GET_PROVIDERS, req.Type)
 			resp := pb.NewMessage(req.Type, req.Key, 0)
 			resp.CloserPeers = pb.RawPeerInfosToPBPeers(fakeCloser)
 			return resp, nil

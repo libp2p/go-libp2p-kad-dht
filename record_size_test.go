@@ -31,8 +31,6 @@ func bigAddrBytes(n int) [][]byte {
 func TestHandleAddProviderBoundsIngestedAddrs(t *testing.T) {
 	ctx := t.Context()
 	d := setupDHT(ctx, t, false)
-	// Keep the synthetic oversized addresses intact through the address filter.
-	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
 
 	// A provider announcing itself under a valid peer ID with a ~4 MiB addr list.
 	_, pub, err := crypto.GenerateEd25519Key(rand.NewChaCha8([32]byte{7}))

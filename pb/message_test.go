@@ -75,6 +75,61 @@ func TestBoundPeerRecordAddrsNilSafe(t *testing.T) {
 	require.NotPanics(t, func() { boundPeerRecordAddrs(nil) })
 }
 
+// peerSerializingTo builds a Message_Peer with the given connection flag whose
+// serialized size is exactly total bytes. It carries a fixed peer ID, a small
+// leading "anchor" address that always survives trimming and a trailing "filler"
+// address padded to hit total, so trimming drops the filler first.
+func peerSerializingTo(t *testing.T, total int, conn Message_ConnectionType) *Message_Peer {
+	t.Helper()
+	id := bytes.Repeat([]byte{0x01}, 32)
+	anchor := bytes.Repeat([]byte{0xAB}, 64)
+
+	fixed := &Message_Peer{Id: id, Connection: conn, Addrs: [][]byte{anchor}}
+	// A filler length in the two-byte varint range frames as tag(1)+len(2)+bytes,
+	// so subtract that 3-byte framing to land the whole record exactly on total.
+	filler := bytes.Repeat([]byte{0xCD}, total-proto.Size(fixed)-3)
+
+	pbp := &Message_Peer{Id: id, Connection: conn, Addrs: [][]byte{anchor, filler}}
+	require.Equalf(t, total, proto.Size(pbp), "constructed record must serialize to %d bytes", total)
+	return pbp
+}
+
+func TestBoundPeerRecordAddrsAtCapBoundary(t *testing.T) {
+	t.Run("exactly at the cap keeps every address", func(t *testing.T) {
+		pbp := peerSerializingTo(t, MaxPeerRecordSize, Message_CONNECTED)
+		kept := len(pbp.Addrs)
+
+		boundPeerRecordAddrs(pbp)
+
+		require.Lenf(t, pbp.Addrs, kept, "a record exactly at the cap must keep every address")
+		require.Equalf(t, MaxPeerRecordSize, proto.Size(pbp), "an untrimmed record keeps its size")
+	})
+
+	t.Run("one byte over the cap trims one address", func(t *testing.T) {
+		pbp := peerSerializingTo(t, MaxPeerRecordSize+1, Message_CONNECTED)
+		kept := len(pbp.Addrs)
+
+		boundPeerRecordAddrs(pbp)
+
+		require.Lenf(t, pbp.Addrs, kept-1, "a record one byte over the cap must trim exactly one address")
+		require.LessOrEqualf(t, proto.Size(pbp), MaxPeerRecordSize, "the trimmed record must fit the cap")
+	})
+}
+
+// TestBoundPeerRecordAddrsReservesConnection covers what PeerInfosToPBPeers does:
+// it bounds a record before setting Connection, so the bound must reserve room
+// for the connection field. A record bounded right at the cap with Connection
+// still unset must keep fitting once Connection is set to a non-default value.
+func TestBoundPeerRecordAddrsReservesConnection(t *testing.T) {
+	pbp := peerSerializingTo(t, MaxPeerRecordSize, Message_NOT_CONNECTED)
+
+	boundPeerRecordAddrs(pbp)
+	pbp.Connection = Message_CANNOT_CONNECT // set after bounding, as PeerInfosToPBPeers does
+
+	require.LessOrEqualf(t, proto.Size(pbp), MaxPeerRecordSize,
+		"setting Connection after bounding must not push the record past the cap")
+}
+
 // manyMultiaddrs builds n distinct valid multiaddrs whose combined size far
 // exceeds MaxPeerRecordSize.
 func manyMultiaddrs(t *testing.T, n int) []ma.Multiaddr {

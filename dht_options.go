@@ -243,6 +243,10 @@ func LookupCheckConcurrency(n int) Option {
 // For example, a record may contain an ipns entry with an EOL saying its valid
 // until the year 2020 (a great time in the future). For that record to stick around
 // it must be rebroadcasted more frequently than once every 'MaxRecordAge'
+//
+// A non-positive maxAge disables age-based expiry: records are then kept
+// regardless of age (subject to any other validity they carry, such as an ipns
+// EOL), rather than being treated as immediately expired.
 func MaxRecordAge(maxAge time.Duration) Option {
 	return func(c *dhtcfg.Config) error {
 		c.MaxRecordAge = maxAge

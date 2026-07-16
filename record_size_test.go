@@ -2,7 +2,7 @@ package dht
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -35,7 +35,7 @@ func TestHandleAddProviderBoundsIngestedAddrs(t *testing.T) {
 	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
 
 	// A provider announcing itself under a valid peer ID with a ~4 MiB addr list.
-	_, pub, err := crypto.GenerateEd25519Key(rand.New(rand.NewSource(7)))
+	_, pub, err := crypto.GenerateEd25519Key(rand.NewChaCha8([32]byte{7}))
 	require.NoError(t, err)
 	p, err := peer.IDFromPublicKey(pub)
 	require.NoError(t, err)

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/records"
@@ -719,6 +720,39 @@ func TestHandleAddProviderReportsWriteFailure(t *testing.T) {
 
 	_, err := d.handleAddProvider(ctx, provider.self, pmes)
 	require.Errorf(t, err, "a failed write must not be reported as a successful add")
+}
+
+// New must tear down the value store and provider manager GC goroutines when
+// construction fails after they have started. Each failed New tears its
+// sweepers down via the deferred cleanup, so repeated failures do not grow the
+// goroutine count; without the cleanup each call would leak one.
+func TestNewClosesBackgroundGoroutinesOnError(t *testing.T) {
+	h, err := libp2p.New()
+	require.NoError(t, err)
+	defer h.Close()
+
+	// A custom protocol prefix relaxes config validation, so an invalid Mode
+	// slips past Validate and fails New only at the mode switch — which runs
+	// after the GC goroutines have started.
+	failingNew := func() {
+		_, err := New(context.Background(), h,
+			ProtocolPrefix("/test/leak"),
+			Mode(ModeOpt(99)),
+		)
+		require.Errorf(t, err, "an invalid mode must fail construction")
+	}
+
+	failingNew() // warm up any lazily-started host goroutines before the baseline
+	baseline := runtime.NumGoroutine()
+	for range 30 {
+		failingNew()
+	}
+
+	require.Eventuallyf(t, func() bool {
+		return runtime.NumGoroutine() <= baseline+5
+	}, 2*time.Second, 20*time.Millisecond,
+		"failed New() calls leaked GC goroutines: baseline %d, now %d",
+		baseline, runtime.NumGoroutine())
 }
 
 func TestLocalProvides(t *testing.T) {

@@ -201,6 +201,15 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
 	}
+	// makeDHT started the provider manager's GC, and StartGC below starts the
+	// value store sweeper; both are bound to dht.ctx. If the rest of
+	// construction fails, tear them down instead of leaking the goroutines.
+	success := false
+	defer func() {
+		if !success {
+			_ = dht.Close()
+		}
+	}()
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh
 
@@ -261,6 +270,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		dht.runFixLowPeersLoop()
 	}
 
+	success = true
 	return dht, nil
 }
 

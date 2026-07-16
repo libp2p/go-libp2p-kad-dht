@@ -145,13 +145,6 @@ func TestValueStoreGetDiscardsBadRecords(t *testing.T) {
 			},
 		},
 		{
-			name: "fails validation",
-			key:  "/pk/invalid",
-			write: func(t *testing.T, dstore ds.Datastore, key string) {
-				writeRaw(t, dstore, key, record.MakePutRecord(key, []byte("bad-value")))
-			},
-		},
-		{
 			name: "key mismatch",
 			key:  "/pk/mismatch",
 			write: func(t *testing.T, dstore ds.Datastore, key string) {
@@ -177,6 +170,22 @@ func TestValueStoreGetDiscardsBadRecords(t *testing.T) {
 			require.ErrorIsf(t, err, ds.ErrNotFound, "bad record must be discarded on read")
 		})
 	}
+}
+
+// Get must not run the validator: a value is verified once, when Put stores it,
+// so Get trusts the stored value and only re-checks its age. A fresh, correctly
+// filed record whose value the validator would reject is still served.
+func TestValueStoreGetSkipsValidation(t *testing.T) {
+	s, _ := newTestStore(time.Hour)
+	const key = "/pk/unverified"
+
+	// Written directly to the datastore, bypassing Put's validation.
+	writeRaw(t, s.ds, key, record.MakePutRecord(key, []byte("bad-value")))
+
+	rec, err := s.Get(t.Context(), key)
+	require.NoError(t, err)
+	require.NotNilf(t, rec, "Get must serve a stored record without re-validating it")
+	require.Equal(t, []byte("bad-value"), rec.GetValue())
 }
 
 func TestValueStoreGetExpiry(t *testing.T) {

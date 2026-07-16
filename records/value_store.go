@@ -27,13 +27,15 @@ var ErrOldRecord = errors.New("old record")
 // ValueStore persists DHT value records (such as /pk and /ipns) in a
 // datastore. It owns the validate / select / time-stamping policy that used to
 // be inlined across the DHT value handlers: records are validated and selected
-// against on write, validated and age-checked on read, and stamped with the
-// time they were received. Invalid or expired records are discarded on access.
+// against on write, age-checked on read, and stamped with the time they were
+// received. Corrupt, misfiled, or expired records are discarded on access.
 //
-// Validation runs on every read, including reads that serve remote GET_VALUE
-// requests. With signature-verifying validators (such as ipns), each Get costs
-// a signature verification; the store trades that CPU for never serving or
-// retaining a record that no longer validates.
+// The validator runs on write, not on read. A record's value is verified once,
+// when Put stores it, so Get trusts the stored value and only re-checks its
+// age. This keeps reads that serve a remote GET_VALUE cheap: a signature-
+// verifying validator (such as ipns) would otherwise cost a signature
+// verification per served record, and requesters validate every record they
+// receive regardless.
 //
 // A ValueStore is safe for concurrent use. Writes to the same key are
 // serialised so that a concurrent Put cannot overwrite a better record.
@@ -84,9 +86,14 @@ func valueNamespaces(validator record.Validator) []string {
 }
 
 // Get returns the record stored under key. It returns (nil, nil) when there is
-// no record, or when the stored record is corrupt, fails validation, or is
-// older than maxRecordAge; such records are deleted as a side effect. A
-// non-nil error indicates a datastore failure.
+// no record, or when the stored record is corrupt, is filed under the wrong
+// key, or is older than maxRecordAge; such records are deleted as a side
+// effect. A non-nil error indicates a datastore failure.
+//
+// Get does not run the validator. A record's value is verified once, when Put
+// stores it, so Get trusts the stored value and only re-checks its age. This
+// keeps serving a remote GET_VALUE cheap (no signature verification per served
+// record), and requesters validate every record they receive regardless.
 func (v *ValueStore) Get(ctx context.Context, key string) (*recpb.Record, error) {
 	dskey := valueDsKey(key)
 	buf, err := v.ds.Get(ctx, dskey)
@@ -105,11 +112,6 @@ func (v *ValueStore) Get(ctx context.Context, key string) (*recpb.Record, error)
 
 	// The stored record must belong to the key it is filed under.
 	if string(rec.GetKey()) != key {
-		v.discardIfUnchanged(ctx, key, dskey, buf)
-		return nil, nil
-	}
-
-	if err := v.validator.Validate(key, rec.GetValue()); err != nil {
 		v.discardIfUnchanged(ctx, key, dskey, buf)
 		return nil, nil
 	}

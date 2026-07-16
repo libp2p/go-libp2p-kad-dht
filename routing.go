@@ -398,7 +398,9 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	if err := dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self}); err != nil {
+		logger.Warnw("failed to add self as provider", "mh", internal.LoggableProviderRecordBytes(keyMH), "error", err)
+	}
 	if !brdcst {
 		return nil
 	}

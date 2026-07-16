@@ -691,6 +691,36 @@ func TestHandleAddProviderAddressFilter(t *testing.T) {
 	}
 }
 
+// A failed provider-record write must not be reported as success: when the only
+// provider's write fails, handleAddProvider returns its no-valid-provider error
+// rather than silently claiming the record was stored.
+func TestHandleAddProviderReportsWriteFailure(t *testing.T) {
+	ctx := context.Background()
+
+	d := setupDHT(ctx, t, false)
+	provider := setupDHT(ctx, t, false)
+
+	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
+
+	writeErr := errors.New("datastore write failed")
+	d.providerStore = &testProviderManager{
+		addProvider: func(context.Context, []byte, peer.AddrInfo) error { return writeErr },
+		close:       func() error { return nil },
+	}
+
+	pmes := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("test-key"),
+		ProviderPeers: pb.RawPeerInfosToPBPeers([]peer.AddrInfo{{
+			ID:    provider.self,
+			Addrs: []ma.Multiaddr{ma.StringCast("/ip4/55.55.55.55/tcp/5555")},
+		}}),
+	}
+
+	_, err := d.handleAddProvider(ctx, provider.self, pmes)
+	require.Errorf(t, err, "a failed write must not be reported as a successful add")
+}
+
 func TestLocalProvides(t *testing.T) {
 	ctx := t.Context()
 

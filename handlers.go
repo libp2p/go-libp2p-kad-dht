@@ -253,7 +253,10 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 		// transient nodes with varying /p2p-circuit addresses to still have their
 		// announcement go through.
 		addrs := dht.filterAddrs(pi.Addrs)
-		dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs})
+		if err := dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs}); err != nil {
+			logger.Warnw("failed to store provider record", "from", p, "key", internal.LoggableProviderRecordBytes(key), "error", err)
+			continue
+		}
 		success = true
 	}
 	if !success {

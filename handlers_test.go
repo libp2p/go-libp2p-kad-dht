@@ -13,6 +13,7 @@ import (
 	crypto "github.com/libp2p/go-libp2p/core/crypto"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -84,6 +85,43 @@ func TestBadMessage(t *testing.T) {
 			t.Fatalf("expected processing message to fail for type %s", pb.Message_FIND_NODE)
 		}
 	}
+}
+
+func TestStripPeerRecords(t *testing.T) {
+	pmes := &pb.Message{
+		Type:          pb.Message_PING,
+		CloserPeers:   []*pb.Message_Peer{{Id: []byte("closer")}},
+		ProviderPeers: []*pb.Message_Peer{{Id: []byte("provider")}},
+	}
+
+	stripPeerRecords(pmes)
+
+	require.Nilf(t, pmes.CloserPeers, "closer peers must be dropped")
+	require.Nilf(t, pmes.ProviderPeers, "provider peers must be dropped")
+	require.Equalf(t, pb.Message_PING, pmes.Type, "other fields must be left intact")
+}
+
+// TestHandlePingDropsStuffedPeerRecords checks that handlePing, which echoes the
+// request back, does not re-emit peer records a peer stuffed into the request,
+// keeping every record this node emits bounded.
+func TestHandlePingDropsStuffedPeerRecords(t *testing.T) {
+	ctx := t.Context()
+	d := setupDHT(ctx, t, false)
+
+	stuffed := []*pb.Message_Peer{{
+		Id:    []byte("stuffed-peer-id"),
+		Addrs: [][]byte{[]byte("/ip4/1.2.3.4/tcp/1")},
+	}}
+	req := &pb.Message{
+		Type:          pb.Message_PING,
+		CloserPeers:   stuffed,
+		ProviderPeers: stuffed,
+	}
+
+	resp, err := d.handlePing(ctx, d.Host().ID(), req)
+	require.NoError(t, err)
+	require.Emptyf(t, resp.CloserPeers, "ping response must not echo closer peers")
+	require.Emptyf(t, resp.ProviderPeers, "ping response must not echo provider peers")
 }
 
 func BenchmarkHandleFindPeer(b *testing.B) {

@@ -28,14 +28,9 @@ const (
 	peerConnectionField protowire.Number = 3
 )
 
-var (
-	peerAddrsTagSize = protowire.SizeTag(peerAddrsField)
-	// connectionFieldSize is the serialized size of the connection field. Every
-	// ConnectionType is a single-byte varint, so it is the field tag plus one
-	// byte. It is reserved up front because callers set Connection after the
-	// record is built, keeping the address bound valid for the finished record.
-	connectionFieldSize = protowire.SizeTag(peerConnectionField) + 1
-)
+// peerAddrsTagSize is a repeated address field's tag size, added once per
+// address when sizing a record.
+var peerAddrsTagSize = protowire.SizeTag(peerAddrsField)
 
 // boundPeerRecordAddrs trims pbp.Addrs in place, dropping trailing addresses
 // until the peer ID, addresses and connection flag serialize within
@@ -50,7 +45,13 @@ func boundPeerRecordAddrs(pbp *Message_Peer) {
 		return
 	}
 	// SizeBytes covers each length-delimited field's length prefix and bytes;
-	// SizeTag covers its field tag.
+	// SizeTag covers its field tag. The connection flag is an open proto3 enum,
+	// so a remote peer can send a value that serializes to as many as 10 bytes;
+	// size it from the actual value rather than assuming a single byte. On the
+	// send path Connection is set after bounding, but only ever to a trusted
+	// single-byte value, so the finished record stays within the bound.
+	connectionFieldSize := protowire.SizeTag(peerConnectionField) +
+		protowire.SizeVarint(uint64(int64(pbp.Connection)))
 	size := protowire.SizeTag(peerIDField) + protowire.SizeBytes(len(pbp.Id)) + connectionFieldSize
 	for i, addr := range pbp.Addrs {
 		size += peerAddrsTagSize + protowire.SizeBytes(len(addr))

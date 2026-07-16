@@ -226,10 +226,15 @@ func mkProvKey(k []byte) string {
 // slice is a fresh copy the caller may retain and modify. A datastore read
 // failure yields an empty result rather than an error: the record simply
 // appears absent, so a GET_PROVIDERS query falls back to other peers instead of
-// failing. It returns ErrClosed after Close.
+// failing. It returns ErrClosed after Close, and the context's error if ctx is
+// cancelled.
 func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.AddrInfo, error) {
 	ctx, span := internal.StartSpan(ctx, "ProviderManager.GetProviders")
 	defer span.End()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	pm.mu.Lock()
 	if pm.stopped {
@@ -239,6 +244,9 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.A
 	pset, err := pm.getProviderSetForKey(ctx, k)
 	if err != nil {
 		pm.mu.Unlock()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if !errors.Is(err, ds.ErrNotFound) {
 			log.Error("error reading providers: ", err)
 		}

@@ -617,6 +617,27 @@ func TestCloseFencesDatastoreAccess(t *testing.T) {
 	require.NoError(t, pm.Close(), "Close must stay idempotent with the fence in place")
 }
 
+// GetProviders must honour context cancellation: a cancelled ctx yields the
+// context error rather than a silent empty result, so callers' error checks are
+// live rather than dead code.
+func TestGetProvidersRespectsContextCancellation(t *testing.T) {
+	ctx := t.Context()
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { ps.Close() })
+	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+	key := internal.Hash([]byte("cid"))
+	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID("prov")}))
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = pm.GetProviders(canceled, key)
+	require.ErrorIsf(t, err, context.Canceled, "a cancelled context must surface its error")
+}
+
 // sortedQueryDS returns query results ordered lexicographically by key, the way
 // a real on-disk datastore (leveldb, badger) does. MapDatastore leaves results
 // in random map-iteration order, which would mask whether GetProviders reorders

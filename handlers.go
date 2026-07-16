@@ -89,6 +89,16 @@ func (dht *IpfsDHT) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 	return resp, nil
 }
 
+// stripPeerRecords drops the peer-record-bearing fields of a message. The PING
+// and PUT_VALUE handlers echo the request back as their response; a peer could
+// stuff CloserPeers or ProviderPeers into such a request, and echoing them would
+// re-emit peer records that never passed boundPeerRecordAddrs. Neither response
+// carries peer records legitimately, so they are safe to drop.
+func stripPeerRecords(pmes *pb.Message) {
+	pmes.CloserPeers = nil
+	pmes.ProviderPeers = nil
+}
+
 // Store a value in this peer local storage
 func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 	if len(pmes.GetKey()) == 0 {
@@ -110,11 +120,13 @@ func (dht *IpfsDHT) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Mess
 		return nil, err
 	}
 
+	stripPeerRecords(pmes)
 	return pmes, nil
 }
 
 func (dht *IpfsDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	logger.Debugf("%s Responding to ping from %s!\n", dht.self, p)
+	stripPeerRecords(pmes)
 	return pmes, nil
 }
 

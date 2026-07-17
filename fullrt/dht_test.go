@@ -432,7 +432,7 @@ func TestFindProvidersAsyncShufflesRemoteProviders(t *testing.T) {
 	require.NoError(t, err)
 
 	// A reversing shuffle stands in for the injected rand source. It must not be
-	// a seeded *rand.Rand: execOnMany may call this concurrently.
+	// a globally seeded *rand.Rand: execOnMany may call this concurrently.
 	frt.shuffle = func(k int, swap func(i, j int)) {
 		for i := range k / 2 {
 			swap(i, k-1-i)

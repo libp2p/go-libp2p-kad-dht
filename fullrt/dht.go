@@ -205,9 +205,10 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		// Options are last-wins, so the fullrt-native ones override any that
 		// arrived through DHTOption.
 		pmOpts := slices.Concat(dhtcfg.ProviderManagerOpts, fullrtcfg.pmOpts)
-		pm, err = records.NewProviderManager(ctx, self, h.Peerstore(), dhtcfg.ProviderDS(), pmOpts...)
+		pm, err = records.NewProviderManager(self, h.Peerstore(), dhtcfg.ProviderDS(), pmOpts...)
 		if err != nil {
 			cancel()
+			_ = sub.Close()
 			return nil, err
 		}
 	}

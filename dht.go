@@ -184,7 +184,13 @@ var (
 // Please note that being connected to a DHT peer does not necessarily imply that it's also in the DHT Routing Table.
 // If the Routing Table has more than "minRTRefreshThreshold" peers, we consider a peer as a Routing Table candidate ONLY when
 // we successfully get a query response from it OR if it send us a query.
-func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) {
+//
+// The DHT runs until Close is called. Close blocks until all long-lived
+// internal components have shut down: the background loops, the routing
+// table refresh manager, and the record stores.
+//
+// If New returns an error, no component it started is left running.
+func New(h host.Host, options ...Option) (_ *IpfsDHT, err error) {
 	var cfg dhtcfg.Config
 	if err := cfg.Apply(append([]Option{dhtcfg.Defaults}, options...)...); err != nil {
 		return nil, err
@@ -197,17 +203,16 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		return nil, err
 	}
 
-	dht, err := makeDHT(ctx, h, cfg)
+	dht, err := makeDHT(h, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
+		return nil, fmt.Errorf("failed to create DHT: %w", err)
 	}
 	// makeDHT started the provider manager's GC, and StartGC below starts the
-	// value store sweeper; both are bound to dht.ctx. If the rest of
-	// construction fails, tear them down instead of leaking the goroutines.
-	success := false
+	// value store sweeper. If the rest of construction fails, tear them down
+	// instead of leaking the goroutines: the caller gets no handle to Close.
 	defer func() {
-		if !success {
-			_ = dht.Close()
+		if err != nil {
+			err = errors.Join(err, dht.Close())
 		}
 	}()
 
@@ -254,7 +259,7 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 
 	// go-routine to make sure we ALWAYS have RT peer addresses in the peerstore
 	// since RT membership is decoupled from connectivity
-	go dht.persistRTPeersInPeerStore()
+	dht.wg.Go(dht.persistRTPeersInPeerStore)
 
 	dht.rtPeerLoop()
 
@@ -270,15 +275,14 @@ func New(ctx context.Context, h host.Host, options ...Option) (*IpfsDHT, error) 
 		dht.runFixLowPeersLoop()
 	}
 
-	success = true
 	return dht, nil
 }
 
 // NewDHT creates a new DHT object with the given peer as the 'local' host.
 // IpfsDHT's initialized with this function will respond to DHT requests,
 // whereas IpfsDHT's initialized with NewDHTClient will not.
-func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, Datastore(dstore))
+func NewDHT(h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(h, Datastore(dstore))
 	if err != nil {
 		panic(err)
 	}
@@ -288,15 +292,15 @@ func NewDHT(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
 // NewDHTClient creates a new DHT object with the given peer as the 'local'
 // host. IpfsDHT clients initialized with this function will not respond to DHT
 // requests. If you need a peer to respond to DHT requests, use NewDHT instead.
-func NewDHTClient(ctx context.Context, h host.Host, dstore ds.Batching) *IpfsDHT {
-	dht, err := New(ctx, h, Datastore(dstore), Mode(ModeClient))
+func NewDHTClient(h host.Host, dstore ds.Batching) *IpfsDHT {
+	dht, err := New(h, Datastore(dstore), Mode(ModeClient))
 	if err != nil {
 		panic(err)
 	}
 	return dht
 }
 
-func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
+func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 	var protocols, serverProtocols []protocol.ID
 
 	v1proto := cfg.ProtocolPrefix + kad1
@@ -369,9 +373,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 		dht.optProvJobsPool = make(chan struct{}, cfg.OptimisticProvideJobsPoolSize)
 	}
 
-	// create a tagged context derived from the original context
-	// the DHT context should be done when the process is closed
-	dht.ctx, dht.cancel = context.WithCancel(dht.newContextWithLocalTags(ctx))
+	// the DHT's internal lifetime context, cancelled by Close
+	dht.ctx, dht.cancel = context.WithCancel(dht.newContextWithLocalTags(context.Background()))
 
 	// rt refresh manager
 	dht.rtRefreshManager, err = makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
@@ -384,7 +387,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	// out with DisableProviders; the Amino DHT always enables providers
 	// (enforced by Validate).
 	if cfg.EnableProviders {
-		dht.providerStore, err = records.NewProviderManager(dht.ctx, h.ID(), dht.peerstore, cfg.ProviderDS(), cfg.ProviderManagerOpts...)
+		dht.providerStore, err = records.NewProviderManager(h.ID(), dht.peerstore, cfg.ProviderDS(), cfg.ProviderManagerOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("initializing default provider manager (%v)", err)
 		}
@@ -421,7 +424,6 @@ func makeRtRefreshManager(dht *IpfsDHT, cfg dhtcfg.Config, maxLastSuccessfulOutb
 	}
 
 	r, err := rtrefresh.NewRtRefreshManager(
-		dht.ctx,
 		dht.host, dht.routingTable, cfg.RoutingTable.AutoRefresh,
 		keyGenFnc,
 		queryFnc,
@@ -847,7 +849,10 @@ func (dht *IpfsDHT) getMode() mode {
 	return dht.mode
 }
 
-// Context returns the DHT's context.
+// Context returns the DHT's internal lifetime context. It is cancelled when
+// Close is called, but does not signal that shutdown has completed.
+//
+// Deprecated: use Close, which blocks until shutdown is complete.
 func (dht *IpfsDHT) Context() context.Context {
 	return dht.ctx
 }
@@ -862,16 +867,19 @@ func (dht *IpfsDHT) BucketSize() int {
 	return dht.bucketSize
 }
 
-// Close shuts down the DHT's background routines and closes its record
-// stores. In-flight RPC handlers are owned by the libp2p host, not awaited
-// here: the provider store fences them off, but a handler mid-request may
-// still read from the value datastore after Close returns. Close the host
-// before closing any datastore handed to the DHT.
+// Close shuts the DHT down. It blocks until all long-lived internal
+// components have stopped: the background loops, the routing table refresh
+// manager, and the record stores. Transient per-query goroutines are
+// cancelled and wind down asynchronously.
+//
+// In-flight RPC handlers are owned by the libp2p host, not awaited here: the
+// provider store fences them off, but a handler mid-request may still read
+// from the value datastore after Close returns. Close the host before closing
+// any datastore handed to the DHT.
 func (dht *IpfsDHT) Close() error {
 	dht.cancel()
 	dht.wg.Wait()
 
-	errc := make(chan error)
 	// providerStore and valueStore are absent on forked DHTs that disable the
 	// corresponding subsystem, so only close the ones that were constructed.
 	closes := []func() error{dht.rtRefreshManager.Close}
@@ -881,6 +889,8 @@ func (dht *IpfsDHT) Close() error {
 	if dht.valueStore != nil {
 		closes = append(closes, dht.valueStore.Close)
 	}
+
+	errc := make(chan error)
 	for _, c := range closes {
 		go func(c func() error) {
 			errc <- c()

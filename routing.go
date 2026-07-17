@@ -189,7 +189,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 			return
 		}
 
-		dht.updatePeerValues(dht.Context(), key, best, updatePeers)
+		dht.updatePeerValues(dht.ctx, key, best, updatePeers)
 	}()
 
 	return out, nil

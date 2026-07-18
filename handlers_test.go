@@ -141,7 +141,7 @@ func BenchmarkHandleFindPeer(b *testing.B) {
 	}
 	defer h.Close()
 
-	d, err := New(ctx, h)
+	d, err := New(h)
 	if err != nil {
 		b.Fatal(err)
 	}

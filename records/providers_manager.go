@@ -142,8 +142,9 @@ func Cache(c lru.LRUCache) Option {
 	}
 }
 
-// NewProviderManager constructor
-func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peerstore, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
+// NewProviderManager creates a ProviderManager that runs until Close is
+// called.
+func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batching, opts ...Option) (*ProviderManager, error) {
 	cache, err := lru.NewLRU(lruCacheSize, nil)
 	if err != nil {
 		return nil, err
@@ -162,7 +163,8 @@ func NewProviderManager(ctx context.Context, local peer.ID, ps peerstore.Peersto
 	if err := pm.applyOptions(opts...); err != nil {
 		return nil, err
 	}
-	ctx, pm.cancel = context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	pm.cancel = cancel
 	go pm.gcLoop(ctx)
 	return pm, nil
 }

@@ -133,7 +133,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option)
 	host.Start()
 	t.Cleanup(func() { host.Close() })
 
-	d, err := New(ctx, host, append(baseOpts, options...)...)
+	d, err := New(host, append(baseOpts, options...)...)
 	require.NoError(t, err)
 	t.Cleanup(func() { d.Close() })
 	return d
@@ -735,7 +735,7 @@ func TestNewClosesBackgroundGoroutinesOnError(t *testing.T) {
 	// slips past Validate and fails New only at the mode switch — which runs
 	// after the GC goroutines have started.
 	failingNew := func() {
-		_, err := New(context.Background(), h,
+		_, err := New(h,
 			ProtocolPrefix("/test/leak"),
 			Mode(ModeOpt(99)),
 		)
@@ -942,7 +942,6 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 
 	// enable auto bootstrap on A
 	dhtA, err := New(
-		ctx,
 		host,
 		testPrefix,
 		Mode(ModeServer),
@@ -2003,8 +2002,6 @@ func TestProvideDisabled(t *testing.T) {
 // a nil value/provider store, because Validate forces both subsystems on. Only a
 // forked DHT with a custom prefix may disable them and end up with absent stores.
 func TestDefaultPrefixRequiresValueAndProviderStores(t *testing.T) {
-	ctx := t.Context()
-
 	newHost := func(t *testing.T) *bhost.BasicHost {
 		h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
 		require.NoError(t, err)
@@ -2014,17 +2011,17 @@ func TestDefaultPrefixRequiresValueAndProviderStores(t *testing.T) {
 	}
 
 	t.Run("DisableValues rejected on default prefix", func(t *testing.T) {
-		_, err := New(ctx, newHost(t), DisableValues())
+		_, err := New(newHost(t), DisableValues())
 		require.ErrorContains(t, err, "must have values enabled")
 	})
 
 	t.Run("DisableProviders rejected on default prefix", func(t *testing.T) {
-		_, err := New(ctx, newHost(t), DisableProviders())
+		_, err := New(newHost(t), DisableProviders())
 		require.ErrorContains(t, err, "must have providers enabled")
 	})
 
 	t.Run("custom prefix allows disabling both", func(t *testing.T) {
-		d, err := New(ctx, newHost(t), ProtocolPrefix("/custom"), DisableValues(), DisableProviders())
+		d, err := New(newHost(t), ProtocolPrefix("/custom"), DisableValues(), DisableProviders())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, d.Close()) })
 		require.Nil(t, d.valueStore)
@@ -2047,7 +2044,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	require.NoError(t, err)
 	hA.Start()
 	defer hA.Close()
-	dhtA, err := New(ctx, hA, os...)
+	dhtA, err := New(hA, os...)
 	require.NoError(t, err)
 	defer dhtA.Close()
 
@@ -2056,7 +2053,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	require.NoError(t, err)
 	hB.Start()
 	defer hB.Close()
-	dhtB, err := New(ctx, hB, os...)
+	dhtB, err := New(hB, os...)
 	require.NoError(t, err)
 	defer dhtB.Close()
 
@@ -2096,7 +2093,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hA.Start()
 		defer hA.Close()
-		dhtA, err := New(ctx, hA, os...)
+		dhtA, err := New(hA, os...)
 		require.NoError(t, err)
 		defer dhtA.Close()
 
@@ -2104,7 +2101,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hB.Start()
 		defer hB.Close()
-		dhtB, err := New(ctx, hB, os...)
+		dhtB, err := New(hB, os...)
 		require.NoError(t, err)
 		defer dhtB.Close()
 
@@ -2129,7 +2126,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hA.Start()
 		defer hA.Close()
-		dhtA, err := New(ctx, hA, []Option{
+		dhtA, err := New(hA, []Option{
 			ProtocolPrefix("/esh"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
@@ -2142,7 +2139,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hB.Start()
 		defer hB.Close()
-		dhtB, err := New(ctx, hB, []Option{
+		dhtB, err := New(hB, []Option{
 			ProtocolPrefix("/lsr"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
@@ -2412,7 +2409,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		require.NoError(t, err)
 		h1.Start()
 		dht1, err := New(
-			ctx,
 			h1,
 			testPrefix,
 			NamespacedValidator("v", blankValidator{}),
@@ -2459,7 +2455,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		require.NoError(t, err)
 		h1.Start()
 		dht1, err := New(
-			ctx,
 			h1,
 			testPrefix,
 			NamespacedValidator("v", blankValidator{}),
@@ -2545,7 +2540,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	defer h2.Close()
 
 	// Setup first DHT
-	d1, err := New(ctx, h1, opts...)
+	d1, err := New(h1, opts...)
 	require.NoError(t, err)
 	defer d1.Close()
 
@@ -2563,7 +2558,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	}, 10*time.Second, time.Millisecond)
 
 	// Setup the second DHT
-	d2, err := New(ctx, h2, opts...)
+	d2, err := New(h2, opts...)
 	require.NoError(t, err)
 	defer h2.Close()
 

@@ -38,7 +38,7 @@ func TestProviderManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(ctx, mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +70,26 @@ func TestProviderManager(t *testing.T) {
 	p.Close()
 }
 
+func TestProviderManagerClosed(t *testing.T) {
+	ctx := t.Context()
+
+	mid := peer.ID("testing")
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { ps.Close() })
+
+	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	require.NoError(t, err)
+	require.NoError(t, p.Close())
+
+	// calls after Close must fail fast instead of blocking forever
+	err = p.AddProvider(ctx, internal.Hash([]byte("test")), peer.AddrInfo{ID: mid})
+	require.ErrorIs(t, err, ErrClosed)
+
+	_, err = p.GetProviders(ctx, internal.Hash([]byte("test")))
+	require.ErrorIs(t, err, ErrClosed)
+}
+
 func TestProvidersDatastore(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 10
@@ -83,7 +103,7 @@ func TestProvidersDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProviderManager(ctx, mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +183,7 @@ func TestProvidesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewProviderManager(ctx, mid, ps, ds, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
+	p, err := NewProviderManager(mid, ps, ds, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +267,7 @@ func TestProvidesCacheExpire(t *testing.T) {
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
 		t.Cleanup(func() { ps.Close() })
-		p, err := NewProviderManager(ctx, mid, ps, dstore, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
+		p, err := NewProviderManager(mid, ps, dstore, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 		require.NoError(t, err)
 		t.Cleanup(func() { p.Close() })
 
@@ -333,7 +353,7 @@ func TestLargeProvidersSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProviderManager(ctx, mid, ps, dstore)
+	p, err := NewProviderManager(mid, ps, dstore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +392,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm, err := NewProviderManager(ctx, p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +420,7 @@ func TestWriteUpdatesCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm, err := NewProviderManager(ctx, p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +460,7 @@ func TestProviderKeyScheme(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, store)
+	pm, err := NewProviderManager(peer.ID("self"), ps, store)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
@@ -467,7 +487,7 @@ func TestProviderManagerConcurrentAccess(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { ps.Close() })
 
-	pm, err := NewProviderManager(ctx, peer.ID("self"), ps,
+	pm, err := NewProviderManager(peer.ID("self"), ps,
 		dssync.MutexWrap(ds.NewMapDatastore()),
 		// GC aggressively so its cache purge and datastore sweep overlap the
 		// readers and writers.
@@ -529,8 +549,7 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
 		t.Cleanup(func() { ps.Close() })
-		gcCtx, stopGC := context.WithCancel(ctx)
-		pm, err := NewProviderManager(gcCtx, peer.ID("self"), ps, store,
+		pm, err := NewProviderManager(peer.ID("self"), ps, store,
 			ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, pm.Close()) })
@@ -570,7 +589,7 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 		wg.Wait()
 
 		// Stop GC before inspecting the datastore so the physical state is stable.
-		stopGC()
+		pm.cancel()
 		<-pm.closed
 
 		countKeys := func(key mh.Multihash) int {
@@ -598,7 +617,7 @@ func TestCloseFencesDatastoreAccess(t *testing.T) {
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
 	t.Cleanup(func() { ps.Close() })
-	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
 
 	key := internal.Hash([]byte("cid"))
@@ -620,7 +639,7 @@ func TestGetProvidersRespectsContextCancellation(t *testing.T) {
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
 	t.Cleanup(func() { ps.Close() })
-	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
@@ -661,7 +680,7 @@ func TestGetProvidersInvokesShuffle(t *testing.T) {
 	ctx := t.Context()
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	pm, err := NewProviderManager(ctx, peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
@@ -712,7 +731,7 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 	get := func(seed uint64) []peer.ID {
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
-		pm, err := NewProviderManager(ctx, peer.ID("self"), ps,
+		pm, err := NewProviderManager(peer.ID("self"), ps,
 			sortedQueryDS{dssync.MutexWrap(ds.NewMapDatastore())})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, pm.Close()) })

@@ -538,81 +538,75 @@ func TestProviderManagerConcurrentAccess(t *testing.T) {
 // records while a concurrent writer keeps refreshing a separate live set, which
 // must survive untouched.
 func TestProviderGCUnderConcurrentWrites(t *testing.T) {
-	provideValidity := 300 * time.Millisecond
-	cleanupInterval := 50 * time.Millisecond
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			provideValidity = 300 * time.Millisecond
+			cleanupInterval = 50 * time.Millisecond
+		)
+		ctx := t.Context()
 
-	store := dssync.MutexWrap(ds.NewMapDatastore())
-	ps, err := pstoremem.NewPeerstore()
-	require.NoError(t, err)
-	t.Cleanup(func() { ps.Close() })
-	pm, err := NewProviderManager(peer.ID("self"), ps, store,
-		ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+		store := dssync.MutexWrap(ds.NewMapDatastore())
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { ps.Close() })
+		pm, err := NewProviderManager(peer.ID("self"), ps, store,
+			ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
-	prov := peer.ID("prov")
-	// expiring records are added once and never refreshed; GC must reclaim them.
-	expiring := make([]mh.Multihash, 5)
-	for i := range expiring {
-		expiring[i] = internal.Hash(fmt.Append(nil, 1000+i))
-		require.NoError(t, pm.AddProvider(ctx, expiring[i], peer.AddrInfo{ID: prov}))
-	}
-	// live records are refreshed by a concurrent writer; GC must never drop them.
-	live := make([]mh.Multihash, 5)
-	for i := range live {
-		live[i] = internal.Hash(fmt.Append(nil, 2000+i))
-	}
-
-	writerCtx, stopWriter := context.WithCancel(ctx)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for writerCtx.Err() == nil {
-			for _, key := range live {
-				pm.AddProvider(writerCtx, key, peer.AddrInfo{ID: prov})
-			}
-			time.Sleep(cleanupInterval / 2)
+		prov := peer.ID("prov")
+		// expiring records are added once and never refreshed; GC must reclaim them.
+		expiring := make([]mh.Multihash, 5)
+		for i := range expiring {
+			expiring[i] = internal.Hash(fmt.Append(nil, 1000+i))
+			require.NoError(t, pm.AddProvider(ctx, expiring[i], peer.AddrInfo{ID: prov}))
 		}
-	}()
+		// live records are refreshed by a concurrent writer; GC must never drop them.
+		live := make([]mh.Multihash, 5)
+		for i := range live {
+			live[i] = internal.Hash(fmt.Append(nil, 2000+i))
+		}
 
-	// Let the expiring records age out and GC run several times while the writer
-	// keeps the live records fresh.
-	time.Sleep(provideValidity + 4*cleanupInterval)
-	stopWriter()
-	wg.Wait()
+		writerCtx, stopWriter := context.WithCancel(ctx)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for writerCtx.Err() == nil {
+				for _, key := range live {
+					pm.AddProvider(writerCtx, key, peer.AddrInfo{ID: prov})
+				}
+				time.Sleep(cleanupInterval / 2)
+			}
+		}()
 
-	// Stop GC before inspecting the datastore so the physical state is stable.
-	// Cancelling the manager's internal context stops the GC goroutine without
-	// fencing the manager the way Close would, so the re-provides below still
-	// go through.
-	pm.cancel()
-	<-pm.closed
+		// Let the expiring records age out and GC run several times while the writer
+		// keeps the live records fresh. Synthetic time makes this instant, and the
+		// writer refreshes every cleanupInterval/2, so every live record is at most
+		// that old at each GC sweep and none is ever starved past provideValidity.
+		time.Sleep(provideValidity + 4*cleanupInterval)
+		stopWriter()
+		wg.Wait()
 
-	// GC deletes without the write lock, so a live key whose writer was starved
-	// past provideValidity mid-run could have been reclaimed — the sanctioned
-	// GC-vs-write race that self-heals on the next provide. Re-provide each live
-	// key now that GC is stopped so the assertion tests that self-heal guarantee
-	// deterministically rather than the exact-survival negation of the race.
-	for _, key := range live {
-		require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: prov}))
-	}
+		// Stop GC before inspecting the datastore so the physical state is stable.
+		pm.cancel()
+		<-pm.closed
 
-	countKeys := func(key mh.Multihash) int {
-		res, err := store.Query(ctx, dsq.Query{Prefix: mkProvKey(key)})
-		require.NoError(t, err)
-		rest, err := res.Rest()
-		require.NoError(t, err)
-		return len(rest)
-	}
+		countKeys := func(key mh.Multihash) int {
+			res, err := store.Query(ctx, dsq.Query{Prefix: mkProvKey(key)})
+			require.NoError(t, err)
+			rest, err := res.Rest()
+			require.NoError(t, err)
+			return len(rest)
+		}
 
-	for _, key := range live {
-		require.Equalf(t, 1, countKeys(key), "live record %x should survive/self-heal", key)
-	}
-	for _, key := range expiring {
-		require.Zerof(t, countKeys(key), "expiring record %x should be GC'd", key)
-	}
+		for _, key := range live {
+			require.Equalf(t, 1, countKeys(key), "live record %x should survive GC", key)
+		}
+		for _, key := range expiring {
+			require.Zerof(t, countKeys(key), "expiring record %x should be GC'd", key)
+		}
+	})
 }
 
 // TestCloseFencesDatastoreAccess pins the Close contract: once Close returns,

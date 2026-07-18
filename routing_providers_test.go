@@ -118,6 +118,7 @@ func TestFindProvidersAsyncSurfacesProviderListedLast(t *testing.T) {
 		for ai := range dhts[0].FindProvidersAsync(ctx, key, count) {
 			if ai.ID == target {
 				surfaced = true
+				break
 			}
 		}
 		require.Equalf(t, wantSurfaced, surfaced,

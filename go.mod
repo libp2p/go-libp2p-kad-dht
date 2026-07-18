@@ -9,14 +9,14 @@ require (
 	github.com/guillaumemichel/reservedpool v0.3.0
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/ipfs/boxo v0.41.0
-	github.com/ipfs/go-cid v0.6.1
+	github.com/ipfs/go-cid v0.6.2
 	github.com/ipfs/go-datastore v0.9.2
 	github.com/ipfs/go-detect-race v0.0.1
 	github.com/ipfs/go-ds-pebble v0.5.12
 	github.com/ipfs/go-dsqueue v0.2.0
 	github.com/ipfs/go-libdht v0.5.0
 	github.com/ipfs/go-log/v2 v2.9.2
-	github.com/ipfs/go-test v0.4.0
+	github.com/ipfs/go-test v0.4.1
 	github.com/libp2p/go-libp2p v0.48.0
 	github.com/libp2p/go-libp2p-kbucket v0.9.0
 	github.com/libp2p/go-libp2p-record v0.3.1
@@ -71,7 +71,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
-	github.com/ipfs/go-block-format v0.2.3 // indirect
+	github.com/ipfs/go-block-format v0.2.4 // indirect
 	github.com/ipld/go-ipld-prime v0.24.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
@@ -136,14 +136,14 @@ require (
 	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260508192327-42602be52be6 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

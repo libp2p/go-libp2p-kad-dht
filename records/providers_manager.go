@@ -255,13 +255,13 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.A
 		return nil, nil
 	}
 	provs := slices.Clone(pset.providers)
+	pm.mu.Unlock()
 	// The datastore query (and thus the cached set built from it) yields
 	// providers in an unspecified order that, for a datastore-backed store,
 	// tends to be lexicographic by peer ID. Shuffle so callers spread load
 	// across providers rather than always preferring the same ones; downstream
 	// code must treat the order as arbitrary.
 	pm.shuffle(len(provs), func(i, j int) { provs[i], provs[j] = provs[j], provs[i] })
-	pm.mu.Unlock()
 
 	infos := make([]peer.AddrInfo, len(provs))
 	for i, pid := range provs {

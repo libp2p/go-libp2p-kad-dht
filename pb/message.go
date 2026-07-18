@@ -120,15 +120,23 @@ func RawPeerInfosToPBPeers(peers []peer.AddrInfo) []*Message_Peer {
 	return pbpeers
 }
 
-// PeersToPBPeers converts given []peer.Peer into a set of []*Message_Peer,
-// which can be written to a message and sent out. the key thing this function
-// does (in addition to PeersToPBPeers) is set the ConnectionType with
+// PeerInfoToPBPeer converts a single peer.AddrInfo into a *Message_Peer ready to
+// go out on the wire, setting the ConnectionType from the given network.Network.
+// It is the one-peer form of PeerInfosToPBPeers.
+func PeerInfoToPBPeer(n network.Network, p peer.AddrInfo) *Message_Peer {
+	pbp := peerInfoToPBPeer(p)
+	pbp.Connection = ConnectionType(n.Connectedness(p.ID))
+	return pbp
+}
+
+// PeerInfosToPBPeers converts given []peer.AddrInfo into a set of []*Message_Peer,
+// which can be written to a message and sent out. The key thing this function
+// does (in addition to RawPeerInfosToPBPeers) is set the ConnectionType with
 // information from the given network.Network.
 func PeerInfosToPBPeers(n network.Network, peers []peer.AddrInfo) []*Message_Peer {
-	pbps := RawPeerInfosToPBPeers(peers)
-	for i := range pbps {
-		c := ConnectionType(n.Connectedness(peers[i].ID))
-		pbps[i].Connection = c
+	pbps := make([]*Message_Peer, len(peers))
+	for i, p := range peers {
+		pbps[i] = PeerInfoToPBPeer(n, p)
 	}
 	return pbps
 }

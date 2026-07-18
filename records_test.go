@@ -4,18 +4,41 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
-	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	"github.com/libp2p/go-libp2p-kad-dht/records"
 	"github.com/libp2p/go-libp2p/core/test"
 
 	"github.com/ipfs/go-test/random"
 	record "github.com/libp2p/go-libp2p-record"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	ci "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 )
+
+// plantRawRecord writes rec directly into the DHT's datastore, bypassing the
+// ValueStore's validation (both the put and read/serve paths validate now, so a
+// bad record cannot be introduced through them). The seeded record is discarded
+// on the next read: these tests therefore verify that a bad local record never
+// yields a bad key. Client-side rejection of a bad record *received from a peer*
+// — the defence against a genuinely malicious server — is covered separately by
+// TestGetValueRejectsInvalidRecordFromPeer.
+func plantRawRecord(t *testing.T, ctx context.Context, dht *IpfsDHT, key string, rec *recpb.Record) {
+	t.Helper()
+	// Plant through a permissive value store so the record lands at the real
+	// datastore key (the namespaced layout) without the DHT's validator
+	// rejecting it. The DHT's own value store discards it on the next read when
+	// its validator rejects the bytes.
+	//
+	// dht.datastore is the value store's backing only while no ValueDatastore
+	// override is set (the case for every caller here). If a test ever pairs
+	// this helper with ValueDatastore(...), plant into that datastore instead.
+	planter := records.NewValueStore(dht.datastore, blankValidator{}, 0)
+	if err := planter.Put(ctx, key, rec); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Check that GetPublicKey() correctly retrieves a public key from the peerstore
 func TestPubkeyPeerstore(t *testing.T) {
@@ -176,12 +199,7 @@ func TestPubkeyBadKeyFromDHT(t *testing.T) {
 	}
 
 	// Store incorrect public key on node B
-	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = internal.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(ctx, pkkey, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plantRawRecord(t, ctx, dhtB, pkkey, record.MakePutRecord(pkkey, wrongbytes))
 
 	// Retrieve public key from node A
 	_, err = dhtA.GetPublicKey(ctx, id)
@@ -215,12 +233,7 @@ func TestPubkeyBadKeyFromDHTGoodKeyDirect(t *testing.T) {
 	}
 
 	// Store incorrect public key on node B
-	rec := record.MakePutRecord(pkkey, wrongbytes)
-	rec.TimeReceived = internal.FormatRFC3339(time.Now())
-	err = dhtB.putLocal(ctx, pkkey, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plantRawRecord(t, ctx, dhtB, pkkey, record.MakePutRecord(pkkey, wrongbytes))
 
 	// Retrieve public key from node A
 	pubk, err := dhtA.GetPublicKey(ctx, dhtB.self)
@@ -329,9 +342,8 @@ func TestValuesDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				rec, _ := dhtB.getLocal(ctx, pkkey)
-				if rec != nil {
-					t.Fatal("node B should not have found the value locally")
+				if dhtB.valueStore != nil {
+					t.Fatal("node B should not have a value store")
 				}
 			}
 
@@ -340,14 +352,17 @@ func TestValuesDisabled(t *testing.T) {
 				if err != routing.ErrNotFound {
 					t.Fatal("node A should not have found the value")
 				}
+				rec, _ := dhtA.getLocal(ctx, pkkey)
+				if rec != nil {
+					t.Fatal("node A should not have found the value locally")
+				}
 			} else {
 				if err != routing.ErrNotSupported {
 					t.Fatal("node A should not have found the value")
 				}
-			}
-			rec, _ := dhtA.getLocal(ctx, pkkey)
-			if rec != nil {
-				t.Fatal("node A should not have found the value locally")
+				if dhtA.valueStore != nil {
+					t.Fatal("node A should not have a value store")
+				}
 			}
 		})
 	}

@@ -36,7 +36,7 @@ func (dht *IpfsDHT) PutValue(ctx context.Context, key string, value []byte, opts
 	ctx, end := tracer.PutValue(dhtName, ctx, key, value, opts...)
 	defer func() { end(err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return routing.ErrNotSupported
 	}
 
@@ -111,7 +111,7 @@ func (dht *IpfsDHT) GetValue(ctx context.Context, key string, opts ...routing.Op
 	ctx, end := tracer.GetValue(dhtName, ctx, key, opts...)
 	defer func() { end(result, err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return nil, routing.ErrNotSupported
 	}
 
@@ -148,7 +148,7 @@ func (dht *IpfsDHT) SearchValue(ctx context.Context, key string, opts ...routing
 	ctx, end := tracer.SearchValue(dhtName, ctx, key, opts...)
 	defer func() { ch, err = end(ch, err) }()
 
-	if !dht.enableValues {
+	if dht.valueStore == nil {
 		return nil, routing.ErrNotSupported
 	}
 
@@ -389,7 +389,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	ctx, end := tracer.Provide(dhtName, ctx, key, brdcst)
 	defer func() { end(err) }()
 
-	if !dht.enableProviders {
+	if dht.providerStore == nil {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
 		return errors.New("invalid cid: undefined")
@@ -398,7 +398,9 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	if err := dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self}); err != nil {
+		logger.Warnw("failed to add self as provider", "mh", internal.LoggableProviderRecordBytes(keyMH), "error", err)
+	}
 	if !brdcst {
 		return nil
 	}
@@ -478,7 +480,7 @@ func (dht *IpfsDHT) classicProvide(ctx context.Context, keyMH multihash.Multihas
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	if !dht.enableProviders {
+	if dht.providerStore == nil {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
 		return nil, errors.New("invalid cid: undefined")
@@ -501,7 +503,7 @@ func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count i
 	defer func() { ch = end(ch, nil) }()
 
 	peerOut := make(chan peer.AddrInfo)
-	if !dht.enableProviders || !key.Defined() {
+	if dht.providerStore == nil || !key.Defined() {
 		close(peerOut)
 		return peerOut
 	}
@@ -582,6 +584,12 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 			}
 
 			logger.Debugf("%d provider entries", len(provs))
+
+			// The remote returns providers in an unspecified order. Shuffle
+			// before the count-capped loop below so the subset we keep and
+			// surface is spread across the returned providers rather than
+			// always the first ones the remote happened to list.
+			dht.shuffle(len(provs), func(i, j int) { provs[i], provs[j] = provs[j], provs[i] })
 
 			// Add unique providers from request, up to 'count'
 			for _, prov := range provs {

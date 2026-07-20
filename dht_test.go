@@ -521,6 +521,57 @@ func TestValueGetInvalid(t *testing.T) {
 	testSetGet("valid", "newer", nil)
 }
 
+// TestSearchValueLocalInvalid ensures a locally stored record that has become
+// invalid since it was stored (e.g. an IPNS record passing its EOL) is not
+// emitted by SearchValue. The value store only age-checks records on read, so
+// the search path must re-validate the local record just as it validates
+// records received from the network.
+func TestSearchValueLocalInvalid(t *testing.T) {
+	ctx := t.Context()
+
+	d := setupDHT(ctx, t, false)
+	defer d.Close()
+	defer d.host.Close()
+
+	searchValue := func() ([]byte, bool) {
+		t.Helper()
+
+		ctxT, cancel := context.WithTimeout(ctx, time.Second*2)
+		defer cancel()
+		valCh, err := d.SearchValue(ctxT, "/v/hello", Quorum(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case v, ok := <-valCh:
+			return v, ok
+		case <-ctxT.Done():
+			t.Fatal(ctxT.Err())
+			return nil, false
+		}
+	}
+
+	// Store a record that is valid at write time. The node has no peers, so
+	// PutValue errors on the network phase after the local write succeeded.
+	d.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
+	err := d.PutValue(ctx, "/v/hello", []byte("expired"))
+	if err == nil {
+		t.Fatal("expected network error from PutValue on a peerless node")
+	}
+
+	// Control: while the record validates, the local record is emitted.
+	if v, ok := searchValue(); !ok || string(v) != "expired" {
+		t.Fatalf("expected local record to be found while valid, got %q (ok=%v)", v, ok)
+	}
+
+	// The record now becomes invalid, as if it expired after being stored.
+	d.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
+
+	if v, ok := searchValue(); ok {
+		t.Fatalf("SearchValue emitted invalid local record %q", v)
+	}
+}
+
 func TestProvides(t *testing.T) {
 	ctx := t.Context()
 

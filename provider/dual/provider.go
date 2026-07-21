@@ -61,8 +61,8 @@ func New(d *dual.DHT, opts ...Option) (*SweepingProvider, error) {
 			provider.WithReplicationFactor(dht.BucketSize()),
 			provider.WithSelfAddrs(dht.FilteredAddrs),
 			provider.WithRouter(dht),
-			provider.WithAddLocalRecord(func(h mh.Multihash) error {
-				return dht.Provide(context.Background(), cid.NewCidV1(cid.Raw, h), false)
+			provider.WithAddLocalRecord(func(ctx context.Context, h mh.Multihash) error {
+				return dht.Provide(ctx, cid.NewCidV1(cid.Raw, h), false)
 			}),
 			provider.WithResumeCycle(cfg.resumeCycle[i]),
 			provider.WithMessageSender(cfg.msgSenders[i]),

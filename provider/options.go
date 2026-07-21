@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -62,7 +63,7 @@ type config struct {
 
 	msgSender      pb.MessageSender
 	selfAddrs      func() []ma.Multiaddr
-	addLocalRecord func(mh.Multihash) error
+	addLocalRecord func(context.Context, mh.Multihash) error
 
 	maxWorkers               int
 	dedicatedPeriodicWorkers int
@@ -93,7 +94,7 @@ func getOpts(opts []Option) (config, error) {
 		dedicatedBurstWorkers:    1,
 		maxProvideConnsPerWorker: 20,
 
-		addLocalRecord: func(mh mh.Multihash) error { return nil },
+		addLocalRecord: func(context.Context, mh.Multihash) error { return nil },
 
 		resumeCycle: true,
 	}
@@ -273,8 +274,8 @@ func WithSelfAddrs(f func() []ma.Multiaddr) Option {
 }
 
 // WithAddLocalRecord sets the function that adds a provider record to the
-// local provider record store.
-func WithAddLocalRecord(f func(mh.Multihash) error) Option {
+// local provider record store with the provider's lifecycle context.
+func WithAddLocalRecord(f func(context.Context, mh.Multihash) error) Option {
 	return func(cfg *config) error {
 		if f == nil {
 			return errors.New("provider config: add local record function cannot be nil")

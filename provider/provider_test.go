@@ -1082,7 +1082,7 @@ func TestIndividualProvideSingle(t *testing.T) {
 		schedule:                  trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:             time.NewTimer(time.Hour),
 		getSelfAddrs:              func() []ma.Multiaddr { return nil },
-		addLocalRecord:            func(mh mh.Multihash) error { return nil },
+		addLocalRecord:            func(context.Context, mh.Multihash) error { return nil },
 		provideCounter:            provideCounter(),
 		logger:                    defaultLogger,
 	}
@@ -1126,6 +1126,69 @@ func TestIndividualProvideSingle(t *testing.T) {
 	dequeued, ok := r.reprovideQueue.Dequeue()
 	require.True(t, ok)
 	require.Equal(t, prefix, dequeued)
+}
+
+func TestAddLocalRecordReceivesProviderContext(t *testing.T) {
+	t.Run("individual provide", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+
+		var receivedCtx context.Context
+		prov := SweepingProvider{
+			ctx: ctx,
+			addLocalRecord: func(ctx context.Context, _ mh.Multihash) error {
+				receivedCtx = ctx
+				return nil
+			},
+			router: &mockRouter{
+				getClosestPeersFunc: func(context.Context, string) ([]peer.ID, error) {
+					return nil, errors.New("expected")
+				},
+			},
+		}
+
+		_, err := prov.vanillaProvide(genMultihashes(1)[0], false)
+		require.Error(t, err)
+		require.Equal(t, ctx, receivedCtx)
+
+		cancel()
+		require.ErrorIs(t, receivedCtx.Err(), context.Canceled)
+	})
+
+	t.Run("region provide", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+
+		p, err := peer.Decode("12BoooooPEER")
+		require.NoError(t, err)
+		peers := trie.New[bit256.Key, peer.ID]()
+		peers.Add(keyspace.PeerIDToBit256(p), p)
+		key := genMultihashes(1)[0]
+		regions := keyspace.AssignKeysToRegions([]keyspace.Region{{Peers: peers}}, []mh.Multihash{key})
+
+		var receivedCtx context.Context
+		prov := SweepingProvider{
+			ctx:                       ctx,
+			order:                     bit256.ZeroKey(),
+			replicationFactor:         1,
+			maxProvideConnsPerWorker:  1,
+			sendProviderRecordTimeout: DefaultSendProviderRecordTimeout,
+			msgSender:                 &mockMsgSender{},
+			addLocalRecord: func(ctx context.Context, _ mh.Multihash) error {
+				receivedCtx = ctx
+				return nil
+			},
+			provideCounter: provideCounter(),
+			logger:         defaultLogger,
+			stats:          newOperationStats(time.Hour, time.Minute),
+		}
+
+		require.True(t, prov.provideRegions(regions, peer.AddrInfo{ID: p}, false))
+		require.Equal(t, ctx, receivedCtx)
+
+		cancel()
+		require.ErrorIs(t, receivedCtx.Err(), context.Canceled)
+	})
 }
 
 func TestIndividualProvideMultiple(t *testing.T) {
@@ -1174,7 +1237,7 @@ func TestIndividualProvideMultiple(t *testing.T) {
 		schedule:                  trie.New[bitstr.Key, time.Duration](),
 		scheduleTimer:             time.NewTimer(time.Hour),
 		getSelfAddrs:              func() []ma.Multiaddr { return nil },
-		addLocalRecord:            func(mh mh.Multihash) error { return nil },
+		addLocalRecord:            func(context.Context, mh.Multihash) error { return nil },
 		provideCounter:            provideCounter(),
 		stats:                     newOperationStats(reprovideInterval, maxDelay),
 		datastore:                 ds,

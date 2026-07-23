@@ -1426,7 +1426,7 @@ func TestClose(t *testing.T) {
 		require.ErrorIs(t, err, ErrClosed)
 		err = prov.ProvideOnce(newMh)
 		require.ErrorIs(t, err, ErrClosed)
-		require.Equal(t, 0, prov.Clear())
+		require.NoError(t, prov.Clear())
 
 		err = prov.workerPool.Acquire(burstWorker)
 		require.ErrorIs(t, err, reservedpool.ErrClosed)

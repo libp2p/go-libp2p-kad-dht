@@ -61,9 +61,8 @@ func (q *ReprovideQueue) Size() int {
 	return q.queue.Size()
 }
 
-// Clear removes all prefixes from the queue and returns the number of removed
-// prefixes.
-func (q *ReprovideQueue) Clear() int {
+// Clear removes all prefixes from the queue.
+func (q *ReprovideQueue) Clear() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.queue.Clear()

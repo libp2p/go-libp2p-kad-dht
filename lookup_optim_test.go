@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -10,9 +10,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func randInt(rng *rand.Rand, n, except int) int {
+func randInt(n, except int) int {
 	for {
-		r := rng.Intn(n)
+		r := rand.IntN(n)
 		if r != except {
 			return r
 		}
@@ -20,8 +20,6 @@ func randInt(rng *rand.Rand, n, except int) int {
 }
 
 func TestOptimisticProvide(t *testing.T) {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	// Order of events:
 	// 1. setup DHTs
 	// 2. connect each DHT with three others (but not to itself)
@@ -46,7 +44,7 @@ func TestOptimisticProvide(t *testing.T) {
 	// connect each DHT with three random others
 	for i, dht := range dhts {
 		for range nInitialConnections {
-			r := randInt(rng, dhtCount, i)
+			r := randInt(dhtCount, i)
 			connect(t, ctx, dhts[r], dht)
 		}
 	}
@@ -57,7 +55,7 @@ func TestOptimisticProvide(t *testing.T) {
 	bootstrap(t, ctx, dhts)
 
 	// select privileged DHT that will perform the provide operation
-	privIdx := rng.Intn(dhtCount)
+	privIdx := rand.IntN(dhtCount)
 	privDHT := dhts[privIdx]
 
 	peerIDs := make([]peer.ID, dhtCount-1)
@@ -66,8 +64,8 @@ func TestOptimisticProvide(t *testing.T) {
 			continue
 		}
 
-		if i >= privIdx {
-			peerIDs[i-1] = dhts[i-1].self
+		if i > privIdx {
+			peerIDs[i-1] = dhts[i].self
 		} else {
 			peerIDs[i] = dhts[i].self
 		}
@@ -90,9 +88,13 @@ func TestOptimisticProvide(t *testing.T) {
 	}
 
 	for _, c := range testCaseCids {
-		n := randInt(rng, dhtCount, privIdx)
+		n := randInt(dhtCount, privIdx)
 
-		ctxT, cancel := context.WithTimeout(ctx, time.Second)
+		// Generous timeout: the happy path returns as soon as the provider is
+		// found, so this only adds slack for slow/loaded CI runners. A too-tight
+		// deadline surfaces as either "nil provider" (closed channel) or "Did
+		// not get a provider back" depending on which select case wins the race.
+		ctxT, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		provchan := dhts[n].FindProvidersAsync(ctxT, c, 1)
 

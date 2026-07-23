@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/records"
@@ -38,6 +39,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 
 	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	dsq "github.com/ipfs/go-datastore/query"
+	dssync "github.com/ipfs/go-datastore/sync"
 	detectrace "github.com/ipfs/go-detect-race"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -129,7 +133,7 @@ func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option)
 	host.Start()
 	t.Cleanup(func() { host.Close() })
 
-	d, err := New(ctx, host, append(baseOpts, options...)...)
+	d, err := New(host, append(baseOpts, options...)...)
 	require.NoError(t, err)
 	t.Cleanup(func() { d.Close() })
 	return d
@@ -209,7 +213,7 @@ func bootstrap(t *testing.T, ctx context.Context, dhts []*IpfsDHT) {
 	// 100 sync https://gist.github.com/jbenet/6c59e7c15426e48aaedd
 	// probably because results compound
 
-	start := rand.Intn(len(dhts)) // randomize to decrease bias.
+	start := rand.IntN(len(dhts)) // randomize to decrease bias.
 	for i := range dhts {
 		dht := dhts[(start+i)%len(dhts)]
 		select {
@@ -517,6 +521,57 @@ func TestValueGetInvalid(t *testing.T) {
 	testSetGet("valid", "newer", nil)
 }
 
+// TestSearchValueLocalInvalid ensures a locally stored record that has become
+// invalid since it was stored (e.g. an IPNS record passing its EOL) is not
+// emitted by SearchValue. The value store only age-checks records on read, so
+// the search path must re-validate the local record just as it validates
+// records received from the network.
+func TestSearchValueLocalInvalid(t *testing.T) {
+	ctx := t.Context()
+
+	d := setupDHT(ctx, t, false)
+	defer d.Close()
+	defer d.host.Close()
+
+	searchValue := func() ([]byte, bool) {
+		t.Helper()
+
+		ctxT, cancel := context.WithTimeout(ctx, time.Second*2)
+		defer cancel()
+		valCh, err := d.SearchValue(ctxT, "/v/hello", Quorum(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case v, ok := <-valCh:
+			return v, ok
+		case <-ctxT.Done():
+			t.Fatal(ctxT.Err())
+			return nil, false
+		}
+	}
+
+	// Store a record that is valid at write time. The node has no peers, so
+	// PutValue errors on the network phase after the local write succeeded.
+	d.Validator.(record.NamespacedValidator)["v"] = blankValidator{}
+	err := d.PutValue(ctx, "/v/hello", []byte("expired"))
+	if err == nil {
+		t.Fatal("expected network error from PutValue on a peerless node")
+	}
+
+	// Control: while the record validates, the local record is emitted.
+	if v, ok := searchValue(); !ok || string(v) != "expired" {
+		t.Fatalf("expected local record to be found while valid, got %q (ok=%v)", v, ok)
+	}
+
+	// The record now becomes invalid, as if it expired after being stored.
+	d.Validator.(record.NamespacedValidator)["v"] = test.TestValidator{}
+
+	if v, ok := searchValue(); ok {
+		t.Fatalf("SearchValue emitted invalid local record %q", v)
+	}
+}
+
 func TestProvides(t *testing.T) {
 	ctx := t.Context()
 
@@ -686,6 +741,69 @@ func TestHandleAddProviderAddressFilter(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout")
 	}
+}
+
+// A failed provider-record write must not be reported as success: when the only
+// provider's write fails, handleAddProvider returns its no-valid-provider error
+// rather than silently claiming the record was stored.
+func TestHandleAddProviderReportsWriteFailure(t *testing.T) {
+	ctx := context.Background()
+
+	d := setupDHT(ctx, t, false)
+	provider := setupDHT(ctx, t, false)
+
+	d.addrFilter = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
+
+	writeErr := errors.New("datastore write failed")
+	d.providerStore = &testProviderManager{
+		addProvider: func(context.Context, []byte, peer.AddrInfo) error { return writeErr },
+		close:       func() error { return nil },
+	}
+
+	pmes := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("test-key"),
+		ProviderPeers: pb.RawPeerInfosToPBPeers([]peer.AddrInfo{{
+			ID:    provider.self,
+			Addrs: []ma.Multiaddr{ma.StringCast("/ip4/55.55.55.55/tcp/5555")},
+		}}),
+	}
+
+	_, err := d.handleAddProvider(ctx, provider.self, pmes)
+	require.Errorf(t, err, "a failed write must not be reported as a successful add")
+}
+
+// New must tear down the value store and provider manager GC goroutines when
+// construction fails after they have started. Each failed New tears its
+// sweepers down via the deferred cleanup, so repeated failures do not grow the
+// goroutine count; without the cleanup each call would leak one.
+func TestNewClosesBackgroundGoroutinesOnError(t *testing.T) {
+	h, err := libp2p.New()
+	require.NoError(t, err)
+	defer h.Close()
+
+	// A custom protocol prefix relaxes config validation, so an invalid Mode
+	// slips past Validate and fails New only at the mode switch — which runs
+	// after the GC goroutines have started.
+	failingNew := func() {
+		_, err := New(h,
+			ProtocolPrefix("/test/leak"),
+			Mode(ModeOpt(99)),
+		)
+		require.Errorf(t, err, "an invalid mode must fail construction")
+	}
+
+	failingNew() // warm up any lazily-started host goroutines before the baseline
+	baseline := runtime.NumGoroutine()
+	for range 30 {
+		failingNew()
+	}
+
+	require.Eventuallyf(t, func() bool {
+		return runtime.NumGoroutine() <= baseline+5
+	}, 2*time.Second, 20*time.Millisecond,
+		"failed New() calls leaked GC goroutines: baseline %d, now %d",
+		baseline, runtime.NumGoroutine())
 }
 
 func TestLocalProvides(t *testing.T) {
@@ -875,7 +993,6 @@ func TestRefreshBelowMinRTThreshold(t *testing.T) {
 
 	// enable auto bootstrap on A
 	dhtA, err := New(
-		ctx,
 		host,
 		testPrefix,
 		Mode(ModeServer),
@@ -1086,7 +1203,14 @@ func TestProvidesMany(t *testing.T) {
 
 	errchan := make(chan error)
 
-	ctxT, cancel = context.WithTimeout(ctx, 15*time.Second)
+	// Every lookup below shares this deadline, so it bounds how long the whole
+	// batch of len(testCaseCids)*nDHTs lookups takes, not how long any single
+	// one takes. That total tracks machine load: ~5s idle, but ~64s on a
+	// heavily contended machine, so the previous 15s timed out a tail of
+	// lookups on a busy CI runner (#760). It is only a backstop against a
+	// lookup that hangs forever — when they behave the batch finishes long
+	// before this, so a generous value costs nothing.
+	ctxT, cancel = context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -1407,8 +1531,9 @@ func TestBadProtoMessages(t *testing.T) {
 func TestAtomicPut(t *testing.T) {
 	ctx := t.Context()
 
-	d := setupDHT(ctx, t, false)
-	d.Validator = testAtomicPutValidator{}
+	// Configure the validator at construction so both the DHT and its value
+	// store use it (reassigning d.Validator afterwards would not reach the store).
+	d := setupDHT(ctx, t, false, Validator(testAtomicPutValidator{}))
 
 	// fnc to put a record
 	key := "testkey"
@@ -1446,6 +1571,51 @@ func TestAtomicPut(t *testing.T) {
 	if string(msg.GetRecord().Value) != "newer7" {
 		t.Fatalf("Expected 'newer7' got '%s'", string(msg.GetRecord().Value))
 	}
+}
+
+// A peer may serve a record it never validated (a malicious server bypasses the
+// serve-side check). The requester must still reject the invalid record; this
+// guards the client-side validation in getValues that the ValueStore extraction
+// must not have weakened.
+func TestGetValueRejectsInvalidRecordFromPeer(t *testing.T) {
+	ctx := t.Context()
+
+	dhtA := setupDHT(ctx, t, false)
+	dhtB := setupDHT(ctx, t, false)
+	connect(t, ctx, dhtA, dhtB)
+
+	// A /pk key whose served value is a different peer's public key: valid bytes,
+	// but they fail PublicKeyValidator for this key.
+	_, pub, err := crypto.GenerateKeyPair(crypto.RSA, 2048)
+	require.NoError(t, err)
+	id, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	pkkey := routing.KeyForPublicKey(id)
+
+	_, wrongPub, err := crypto.GenerateKeyPair(crypto.RSA, 2048)
+	require.NoError(t, err)
+	wrongBytes, err := crypto.MarshalPublicKey(wrongPub)
+	require.NoError(t, err)
+
+	// Install a message sender on A that answers any GET_VALUE with the
+	// mismatched record, simulating a peer that serves without validating.
+	impl := net.NewMessageSenderImpl(dhtA.host, dhtA.protocols)
+	dhtA.protoMessenger, err = pb.NewProtocolMessenger(&testMessageSender{
+		sendMessage: impl.SendMessage,
+		sendRequest: func(ctx context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
+			if pmes.GetType() == pb.Message_GET_VALUE {
+				resp := pb.NewMessage(pb.Message_GET_VALUE, pmes.GetKey(), 0)
+				resp.Record = record.MakePutRecord(string(pmes.GetKey()), wrongBytes)
+				return resp, nil
+			}
+			return impl.SendRequest(ctx, p, pmes)
+		},
+	})
+	require.NoError(t, err)
+
+	val, err := dhtA.GetValue(ctx, pkkey)
+	require.ErrorIsf(t, err, routing.ErrNotFound, "invalid record from a peer must be rejected")
+	require.Nil(t, val)
 }
 
 func TestClientModeConnect(t *testing.T) {
@@ -1666,7 +1836,7 @@ func testFindPeerQuery(t *testing.T,
 
 	t.Log("connecting")
 
-	mrand := rand.New(rand.NewSource(42))
+	mrand := rand.New(rand.NewPCG(42, 42))
 	guy := dhts[0]
 	others := dhts[1:]
 	for i := range leafs {
@@ -1852,9 +2022,8 @@ func TestProvideDisabled(t *testing.T) {
 				if err != routing.ErrNotSupported {
 					t.Fatal("get should have failed on node B")
 				}
-				provs, _ := dhtB.ProviderStore().GetProviders(ctx, kHash)
-				if len(provs) != 0 {
-					t.Fatal("node B should not have found local providers")
+				if dhtB.ProviderStore() != nil {
+					t.Fatal("node B should not have a provider store")
 				}
 			}
 
@@ -1863,17 +2032,52 @@ func TestProvideDisabled(t *testing.T) {
 				if len(provs) != 0 {
 					t.Fatal("node A should not have found providers")
 				}
+				provAddrs, _ := dhtA.ProviderStore().GetProviders(ctx, kHash)
+				if len(provAddrs) != 0 {
+					t.Fatal("node A should not have found local providers")
+				}
 			} else {
 				if err != routing.ErrNotSupported {
 					t.Fatal("node A should not have found providers")
 				}
-			}
-			provAddrs, _ := dhtA.ProviderStore().GetProviders(ctx, kHash)
-			if len(provAddrs) != 0 {
-				t.Fatal("node A should not have found local providers")
+				if dhtA.ProviderStore() != nil {
+					t.Fatal("node A should not have a provider store")
+				}
 			}
 		})
 	}
+}
+
+// TestDefaultPrefixRequiresValueAndProviderStores pins the invariant that store
+// presence now depends on: an Amino (default-prefix) DHT can never be built with
+// a nil value/provider store, because Validate forces both subsystems on. Only a
+// forked DHT with a custom prefix may disable them and end up with absent stores.
+func TestDefaultPrefixRequiresValueAndProviderStores(t *testing.T) {
+	newHost := func(t *testing.T) *bhost.BasicHost {
+		h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+		require.NoError(t, err)
+		h.Start()
+		t.Cleanup(func() { h.Close() })
+		return h
+	}
+
+	t.Run("DisableValues rejected on default prefix", func(t *testing.T) {
+		_, err := New(newHost(t), DisableValues())
+		require.ErrorContains(t, err, "must have values enabled")
+	})
+
+	t.Run("DisableProviders rejected on default prefix", func(t *testing.T) {
+		_, err := New(newHost(t), DisableProviders())
+		require.ErrorContains(t, err, "must have providers enabled")
+	})
+
+	t.Run("custom prefix allows disabling both", func(t *testing.T) {
+		d, err := New(newHost(t), ProtocolPrefix("/custom"), DisableValues(), DisableProviders())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, d.Close()) })
+		require.Nil(t, d.valueStore)
+		require.Nil(t, d.providerStore)
+	})
 }
 
 func TestHandleRemotePeerProtocolChanges(t *testing.T) {
@@ -1891,7 +2095,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	require.NoError(t, err)
 	hA.Start()
 	defer hA.Close()
-	dhtA, err := New(ctx, hA, os...)
+	dhtA, err := New(hA, os...)
 	require.NoError(t, err)
 	defer dhtA.Close()
 
@@ -1900,7 +2104,7 @@ func TestHandleRemotePeerProtocolChanges(t *testing.T) {
 	require.NoError(t, err)
 	hB.Start()
 	defer hB.Close()
-	dhtB, err := New(ctx, hB, os...)
+	dhtB, err := New(hB, os...)
 	require.NoError(t, err)
 	defer dhtB.Close()
 
@@ -1940,7 +2144,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hA.Start()
 		defer hA.Close()
-		dhtA, err := New(ctx, hA, os...)
+		dhtA, err := New(hA, os...)
 		require.NoError(t, err)
 		defer dhtA.Close()
 
@@ -1948,7 +2152,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hB.Start()
 		defer hB.Close()
-		dhtB, err := New(ctx, hB, os...)
+		dhtB, err := New(hB, os...)
 		require.NoError(t, err)
 		defer dhtB.Close()
 
@@ -1973,7 +2177,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hA.Start()
 		defer hA.Close()
-		dhtA, err := New(ctx, hA, []Option{
+		dhtA, err := New(hA, []Option{
 			ProtocolPrefix("/esh"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
@@ -1986,7 +2190,7 @@ func TestGetSetPluggedProtocol(t *testing.T) {
 		require.NoError(t, err)
 		hB.Start()
 		defer hB.Close()
-		dhtB, err := New(ctx, hB, []Option{
+		dhtB, err := New(hB, []Option{
 			ProtocolPrefix("/lsr"),
 			Mode(ModeServer),
 			NamespacedValidator("v", blankValidator{}),
@@ -2256,7 +2460,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		require.NoError(t, err)
 		h1.Start()
 		dht1, err := New(
-			ctx,
 			h1,
 			testPrefix,
 			NamespacedValidator("v", blankValidator{}),
@@ -2303,7 +2506,6 @@ func TestBootStrapWhenRTIsEmpty(t *testing.T) {
 		require.NoError(t, err)
 		h1.Start()
 		dht1, err := New(
-			ctx,
 			h1,
 			testPrefix,
 			NamespacedValidator("v", blankValidator{}),
@@ -2389,7 +2591,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	defer h2.Close()
 
 	// Setup first DHT
-	d1, err := New(ctx, h1, opts...)
+	d1, err := New(h1, opts...)
 	require.NoError(t, err)
 	defer d1.Close()
 
@@ -2407,7 +2609,7 @@ func TestPreconnectedNodes(t *testing.T) {
 	}, 10*time.Second, time.Millisecond)
 
 	// Setup the second DHT
-	d2, err := New(ctx, h2, opts...)
+	d2, err := New(h2, opts...)
 	require.NoError(t, err)
 	defer h2.Close()
 
@@ -2515,4 +2717,128 @@ func TestAddrFilter(t *testing.T) {
 		require.Contains(t, d3.host.Peerstore().Addrs(peerid), a)
 	}
 	require.Equal(t, len(publicAddrs)+len(privAddrs), len(d3.host.Peerstore().Addrs(peerid)))
+}
+
+// recordKeys returns every physical key stored in dstore.
+func recordKeys(t *testing.T, ctx context.Context, dstore ds.Datastore) []string {
+	t.Helper()
+	res, err := dstore.Query(ctx, dsq.Query{KeysOnly: true})
+	require.NoError(t, err)
+	defer res.Close()
+
+	var keys []string
+	for e := range res.Next() {
+		require.NoError(t, e.Error)
+		keys = append(keys, e.Key)
+	}
+	return keys
+}
+
+// TestValueDatastoreOverride checks that ValueDatastore sends value records to
+// the override datastore while providers stay on the main datastore, and that
+// values round-trip through the DHT's store.
+func TestValueDatastoreOverride(t *testing.T) {
+	ctx := t.Context()
+	main := dssync.MutexWrap(ds.NewMapDatastore())
+	values := dssync.MutexWrap(ds.NewMapDatastore())
+
+	d := setupDHT(ctx, t, false, Datastore(main), ValueDatastore(values))
+
+	key := "/v/somekey"
+	rec := record.MakePutRecord(key, []byte("hello"))
+	require.NoError(t, d.valueStore.Put(ctx, key, rec))
+
+	got, err := d.valueStore.Get(ctx, key)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, []byte("hello"), got.GetValue())
+
+	// The value physically landed in the override, not the main datastore.
+	require.NotEmpty(t, recordKeys(t, ctx, values))
+	require.Empty(t, recordKeys(t, ctx, main))
+}
+
+// TestProviderDatastoreOverride checks that ProviderDatastore sends provider
+// records to the override datastore while the main datastore stays empty.
+func TestProviderDatastoreOverride(t *testing.T) {
+	ctx := t.Context()
+	main := dssync.MutexWrap(ds.NewMapDatastore())
+	providers := dssync.MutexWrap(ds.NewMapDatastore())
+
+	d := setupDHT(ctx, t, false, Datastore(main), ProviderDatastore(providers))
+
+	key := []byte("override-provider-key")
+	require.NoError(t, d.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: d.self}))
+
+	got, err := d.providerStore.GetProviders(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, d.self, got[0].ID)
+
+	require.NotEmpty(t, recordKeys(t, ctx, providers))
+	require.Empty(t, recordKeys(t, ctx, main))
+}
+
+// TestSharedDatastoreNamespacing checks that with a single shared datastore,
+// value and provider records coexist without collision under their per-type
+// prefixes.
+func TestSharedDatastoreNamespacing(t *testing.T) {
+	ctx := t.Context()
+	shared := dssync.MutexWrap(ds.NewMapDatastore())
+
+	d := setupDHT(ctx, t, false, Datastore(shared))
+
+	vkey := "/v/coexist"
+	require.NoError(t, d.valueStore.Put(ctx, vkey, record.MakePutRecord(vkey, []byte("v"))))
+	pkey := []byte("coexist-provider")
+	require.NoError(t, d.providerStore.AddProvider(ctx, pkey, peer.AddrInfo{ID: d.self}))
+
+	gotVal, err := d.valueStore.Get(ctx, vkey)
+	require.NoError(t, err)
+	require.Equal(t, []byte("v"), gotVal.GetValue())
+	gotProvs, err := d.providerStore.GetProviders(ctx, pkey)
+	require.NoError(t, err)
+	require.Len(t, gotProvs, 1)
+
+	// Provider records live under "/providers/…"; values under their own prefix.
+	var providerKeys, otherKeys int
+	for _, k := range recordKeys(t, ctx, shared) {
+		if strings.HasPrefix(k, "/providers/") {
+			providerKeys++
+		} else {
+			otherKeys++
+		}
+	}
+	require.Positive(t, providerKeys)
+	require.Positive(t, otherKeys)
+}
+
+// TestValueGCRemovesExpiredRecords checks the MaxRecordAge / ValueGCInterval
+// options flow through New into the value store's background sweep, so an
+// expired value record is deleted from the datastore without anyone reading it.
+func TestValueGCRemovesExpiredRecords(t *testing.T) {
+	ctx := t.Context()
+	main := dssync.MutexWrap(ds.NewMapDatastore())
+	// MaxRecordAge is comfortably longer than the store-then-check below takes,
+	// so the record is still fresh when we assert it was stored; it then ages
+	// out and the 10ms GC sweeps it. A near-zero age would let a GC tick delete
+	// the record before that first assertion, racing it.
+	d := setupDHT(ctx, t, false, Datastore(main),
+		MaxRecordAge(100*time.Millisecond), ValueGCInterval(10*time.Millisecond))
+
+	key := "/v/gc-target"
+	require.NoError(t, d.putLocal(ctx, key, record.MakePutRecord(key, []byte("stale"))))
+
+	hasValueKey := func() bool {
+		for _, k := range recordKeys(t, ctx, main) {
+			if strings.HasPrefix(k, "/v/") {
+				return true
+			}
+		}
+		return false
+	}
+	require.Truef(t, hasValueKey(), "record must be stored before GC runs")
+
+	require.Eventuallyf(t, func() bool { return !hasValueKey() },
+		2*time.Second, 10*time.Millisecond, "value GC must sweep the expired record")
 }

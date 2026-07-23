@@ -21,7 +21,7 @@ func TestInvalidRemotePeers(t *testing.T) {
 	hosts := mn.Hosts()
 
 	os := []Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}
-	d, err := New(ctx, hosts[0], os...)
+	d, err := New(hosts[0], os...)
 	if err != nil {
 		t.Fatal(err)
 	}

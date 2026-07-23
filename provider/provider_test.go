@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"math/rand"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -88,23 +88,28 @@ func genBalancedMultihashes(exponent int) []mh.Multihash {
 }
 
 func genMultihashesMatchingPrefix(prefix bitstr.Key, n int) []mh.Multihash {
+	rnd := random.New()
 	mhs := make([]mh.Multihash, 0, n)
-	for i := 0; len(mhs) < n; i++ {
-		h := random.Multihashes(1)[0]
-		k := keyspace.MhToBit256(h)
-		if keyspace.IsPrefix(prefix, k) {
-			mhs = append(mhs, h)
+	for {
+		for _, h := range rnd.Multihashes(max(n-len(mhs), 8)) {
+			k := keyspace.MhToBit256(h)
+			if keyspace.IsPrefix(prefix, k) {
+				mhs = append(mhs, h)
+				if len(mhs) == n {
+					return mhs
+				}
+			}
 		}
 	}
-	return mhs
 }
 
 // genPeersWithPrefix generates n peer IDs whose kademlia identifiers all share
 // the given common prefix, simulating a small clustered DHT.
 func genPeersWithPrefix(prefix bitstr.Key, n int) []peer.ID {
+	rnd := random.New()
 	peers := make([]peer.ID, 0, n)
 	for len(peers) < n {
-		p := random.Peers(1)[0]
+		p := rnd.Peers(1)[0]
 		if keyspace.IsPrefix(prefix, keyspace.PeerIDToBit256(p)) {
 			peers = append(peers, p)
 		}
@@ -703,10 +708,11 @@ func realisticRouter(peers []peer.ID, bucketSize int) *mockRouter {
 func TestExploreSwarmDifferential(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const bucketSize = 20
+		rnd := random.New()
 		networks := map[string][]peer.ID{
-			"uniform-100":         random.Peers(100),
-			"uniform-60":          random.Peers(60),
-			"uniform-25":          random.Peers(25),
+			"uniform-100":         rnd.Peers(100),
+			"uniform-60":          rnd.Peers(60),
+			"uniform-25":          rnd.Peers(25),
 			"cluster-10-under-10": genPeersWithPrefix("10", 10),
 			"dense-under-1":       genPeersWithPrefix("1", 50),
 			"split-110-111":       slices.Concat(genPeersWithPrefix("110", 6), genPeersWithPrefix("111", 6)),
@@ -781,7 +787,7 @@ func TestExploreSwarmDifferential(t *testing.T) {
 func TestExploreSwarmFuzz(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const bucketSize = 20
-		rng := rand.New(rand.NewSource(1))
+		rng := rand.New(rand.NewPCG(1, 1))
 		pool := random.Peers(200)
 
 		checker := noopConnectivityChecker()
@@ -798,17 +804,17 @@ func TestExploreSwarmFuzz(t *testing.T) {
 		}
 
 		for c := range 250 {
-			size := 1 + rng.Intn(len(pool))
+			size := 1 + rng.IntN(len(pool))
 			peers := make([]peer.ID, size)
 			for i, idx := range rng.Perm(len(pool))[:size] {
 				peers[i] = pool[idx]
 			}
 			peersTrie := peersToTrie(peers)
-			rf := 1 + rng.Intn(12)
+			rf := 1 + rng.IntN(12)
 
 			var sb strings.Builder
-			for range rng.Intn(7) {
-				sb.WriteByte('0' + byte(rng.Intn(2)))
+			for range rng.IntN(7) {
+				sb.WriteByte('0' + byte(rng.IntN(2)))
 			}
 			prefix := bitstr.Key(sb.String())
 

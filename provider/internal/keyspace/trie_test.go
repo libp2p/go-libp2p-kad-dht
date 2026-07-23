@@ -1373,15 +1373,17 @@ func TestRegionsFromPeers(t *testing.T) {
 	regions := RegionsFromPeers(nil, 1, bit256.ZeroKey(), "")
 	require.Empty(t, regions)
 
+	randPeers := random.Peers(3)
+
 	// Single peer: the peer fully covers its own key.
-	p0 := random.Peers(1)[0]
+	p0 := randPeers[0]
 	bstrPid0 := bitstr.Key(key.BitString(PeerIDToBit256(p0)))
 	regions = RegionsFromPeers([]peer.ID{p0}, 1, bit256.ZeroKey(), bstrPid0)
 	require.Len(t, regions, 1)
 	require.Equal(t, bstrPid0, regions[0].Prefix)
 
 	// Two peers: regions are rooted at the peers' common prefix.
-	p1 := random.Peers(1)[0]
+	p1 := randPeers[1]
 	cpl := key.CommonPrefixLength(bstrPid0, PeerIDToBit256(p1))
 	common := bstrPid0[:cpl]
 	regions = RegionsFromPeers([]peer.ID{p0, p1}, 2, bit256.ZeroKey(), common)
@@ -1389,7 +1391,7 @@ func TestRegionsFromPeers(t *testing.T) {
 	require.Equal(t, common, regions[0].Prefix)
 
 	// Three peers
-	p2 := random.Peers(1)[0]
+	p2 := randPeers[2]
 	cpl = key.CommonPrefixLength(common, PeerIDToBit256(p2))
 	common = common[:cpl]
 	regions = RegionsFromPeers([]peer.ID{p0, p1, p2}, 2, bit256.ZeroKey(), common)

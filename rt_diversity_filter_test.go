@@ -67,7 +67,6 @@ func TestRoutingTableEndToEndMaxPerCpl(t *testing.T) {
 	r := NewRTPeerDiversityFilter(h, 1, 2)
 
 	d, err := New(
-		ctx,
 		h,
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),
@@ -126,7 +125,6 @@ func TestRoutingTableEndToEndMaxPerTable(t *testing.T) {
 	r := NewRTPeerDiversityFilter(h, 100, 3)
 
 	d, err := New(
-		ctx,
 		h,
 		testPrefix,
 		NamespacedValidator("v", blankValidator{}),

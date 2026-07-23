@@ -2,12 +2,15 @@ package dual
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
+	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	test "github.com/libp2p/go-libp2p-kad-dht/internal/testing"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
@@ -70,7 +73,7 @@ func setupDHTWithFilters(ctx context.Context, t *testing.T, options ...dht.Optio
 		dht.DisableAutoRefresh(),
 		dht.RoutingTableFilter(wanFilter),
 	}
-	wan, err := dht.New(ctx, h, wanOpts...)
+	wan, err := dht.New(h, wanOpts...)
 	require.NoError(t, err)
 
 	lanFilter, lanRef := MkFilterForPeer()
@@ -82,7 +85,7 @@ func setupDHTWithFilters(ctx context.Context, t *testing.T, options ...dht.Optio
 		dht.RoutingTableFilter(lanFilter),
 		dht.Mode(dht.ModeServer),
 	}
-	lan, err := dht.New(ctx, h, lanOpts...)
+	lan, err := dht.New(h, lanOpts...)
 	require.NoError(t, err)
 
 	impl := DHT{wan, lan}
@@ -104,13 +107,51 @@ func setupDHT(ctx context.Context, t *testing.T, options ...dht.Option) *DHT {
 	}
 
 	d, err := New(
-		ctx,
 		host,
 		append([]Option{DHTOption(baseOpts...)}, DHTOption(options...))...,
 	)
 	require.NoError(t, err)
 
 	return d
+}
+
+// New starts the WAN DHT before it builds the LAN one, and a failed New
+// returns no handle to Close the WAN with.
+func TestNewErrorPathClosesWAN(t *testing.T) {
+	host, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	require.NoError(t, err)
+	host.Start()
+	t.Cleanup(func() { host.Close() })
+
+	baseOpts := []dht.Option{
+		dht.NamespacedValidator("v", blankValidator{}),
+		dht.ProtocolPrefix("/test"),
+		dht.DisableAutoRefresh(),
+	}
+	failLAN := func(*dhtcfg.Config) error { return errors.New("lan boom") }
+
+	baseline := runtime.NumGoroutine()
+
+	const failures = 10
+	for range failures {
+		_, err := New(host, DHTOption(baseOpts...), LanDHTOption(failLAN))
+		require.ErrorContains(t, err, "lan boom")
+	}
+
+	// New closes the WAN synchronously on the error path (wan.Close blocks
+	// until its goroutines are joined), so a clean run returns to the pre-loop
+	// count no matter how many times New failed. A stranded WAN, by contrast,
+	// leaks a fixed set of goroutines per failure, growing the count by roughly
+	// failures times a single DHT's footprint. runtime.NumGoroutine is
+	// process-wide, so Eventually lets unrelated goroutines settle and slack
+	// absorbs scheduler churn; slack stays well under one DHT's worth of
+	// goroutines so even a single stranded WAN trips the assertion.
+	const slack = 5
+	require.Eventuallyf(t, func() bool {
+		return runtime.NumGoroutine() <= baseline+slack
+	}, 10*time.Second, 50*time.Millisecond,
+		"New stranded the WAN DHT: %d goroutines before, %d after %d failures",
+		baseline, runtime.NumGoroutine(), failures)
 }
 
 func connect(ctx context.Context, t *testing.T, a, b *dht.IpfsDHT) {
@@ -155,7 +196,6 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 	t.Cleanup(func() { whost.Close() })
 
 	wan, err := dht.New(
-		ctx,
 		whost,
 		append(baseOpts, dht.Mode(dht.ModeServer))...,
 	)
@@ -171,7 +211,6 @@ func setupTier(ctx context.Context, t *testing.T) (*DHT, *dht.IpfsDHT, *dht.Ipfs
 	t.Cleanup(func() { lhost.Close() })
 
 	lan, err := dht.New(
-		ctx,
 		lhost,
 		append(baseOpts, dht.Mode(dht.ModeServer), dht.ProtocolExtension("/lan"))...,
 	)

@@ -203,7 +203,7 @@ type SweepingProvider struct {
 
 	msgSender      pb.MessageSender
 	getSelfAddrs   func() []ma.Multiaddr
-	addLocalRecord func(mh.Multihash) error
+	addLocalRecord func(context.Context, mh.Multihash) error
 
 	provideCounter metric.Int64Counter
 	logger         *log.ZapEventLogger
@@ -816,7 +816,7 @@ func loadAvgPrefixLen(ctx context.Context, ds datastore.Batching) (int, error) {
 func (s *SweepingProvider) vanillaProvide(k mh.Multihash, reprovide bool) (bitstr.Key, error) {
 	keys := []mh.Multihash{k}
 	// Add provider record to local provider store.
-	s.addLocalRecord(k)
+	s.addLocalRecord(s.ctx, k)
 	// Get peers to which the record will be allocated.
 	peers, err := s.router.GetClosestPeers(s.ctx, string(k))
 	if err != nil {
@@ -2034,7 +2034,7 @@ func (s *SweepingProvider) provideRegions(regions []keyspace.Region, addrInfo pe
 		gatherKeys := !reprovide || s.logger.Level() <= zapcore.DebugLevel
 		nKeys := 0
 		for h := range keyspace.ValuesIter(r.Keys, s.order) {
-			s.addLocalRecord(h)
+			s.addLocalRecord(s.ctx, h)
 			nKeys++
 			if gatherKeys {
 				keys = append(keys, h)

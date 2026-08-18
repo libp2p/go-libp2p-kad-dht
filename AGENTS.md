@@ -2,7 +2,7 @@
 
 Notes for anyone, human or agent, changing this repository.
 
-go-libp2p-kad-dht is the Kademlia DHT behind the public IPFS network, known as
+go-libp2p-kad-dht is the Kademlia DHT implementation behind the public IPFS network, known as
 the Amino DHT. It implements the [IPFS Kademlia DHT
 spec](https://specs.ipfs.tech/routing/kad-dht/), which extends the [libp2p
 kad-dht spec](https://github.com/libp2p/specs/tree/master/kad-dht) with the
@@ -11,8 +11,9 @@ routing table and diversity limits, lookup termination, and record validation.
 For anything served under `/ipfs/kad/1.0.0`, check the IPFS spec. Measurements
 of the live network are at [probelab.io](https://probelab.io/ipfs/dht/).
 Consumers include [kubo](https://github.com/ipfs/kubo),
-[boxo](https://github.com/ipfs/boxo), and
-[someguy](https://github.com/ipfs/someguy).
+[boxo](https://github.com/ipfs/boxo),
+[someguy](https://github.com/ipfs/someguy), and
+[spegel](https://github.com/spegel-org/spegel)
 
 Two things follow. This code must stay compatible with every other Kademlia
 implementation on the network, and with years-old nodes that will never
@@ -140,7 +141,7 @@ peers' tables, and the peer record bound keeps records a predictable size on
 the wire.
 
 The node also keeps the two protocol lists apart: `serverProtocols` is what it
-answers, `protocols` is what it queries, so older peers can be served without
+answers, `protocols` is what it queries, so client peers can be served without
 being queried. See `moveToServerMode` in `dht.go`. Today both lists hold the
 same protocol. Do not collapse them.
 

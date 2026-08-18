@@ -113,6 +113,20 @@ func (testAtomicPutValidator) Select(_ string, bs [][]byte) (int, error) {
 	return index, nil
 }
 
+// testPeerID returns a valid peer ID wrapping name as an identity multihash:
+// no real keypair, but a real, validly-structured peer ID, so provider
+// records built from it round-trip through the datastore like a real peer ID
+// would. Same name always yields the same ID; distinct names always yield
+// distinct IDs.
+func testPeerID(t testing.TB, name string) peer.ID {
+	t.Helper()
+	digest, err := multihash.Sum([]byte(name), multihash.IDENTITY, -1)
+	require.NoError(t, err)
+	id, err := peer.IDFromBytes(digest)
+	require.NoError(t, err)
+	return id
+}
+
 var testPrefix = ProtocolPrefix("/test")
 
 func setupDHT(ctx context.Context, t *testing.T, client bool, options ...Option) *IpfsDHT {
@@ -1627,7 +1641,7 @@ func TestClientModeConnect(t *testing.T) {
 	connectNoSync(t, ctx, a, b)
 
 	c := testCaseCids[0]
-	p := peer.ID("TestPeer")
+	p := testPeerID(t, "TestPeer")
 	a.ProviderStore().AddProvider(ctx, c.Hash(), peer.AddrInfo{ID: p})
 	time.Sleep(time.Millisecond * 5) // just in case...
 
@@ -1703,7 +1717,7 @@ func TestInvalidServer(t *testing.T) {
 
 	// add a provider (p) for a key (k) to s0
 	k := testCaseCids[0]
-	p := peer.ID("TestPeer")
+	p := testPeerID(t, "TestPeer")
 	s0.ProviderStore().AddProvider(ctx, k.Hash(), peer.AddrInfo{ID: p})
 	time.Sleep(time.Millisecond * 5) // just in case...
 
@@ -2775,6 +2789,7 @@ func TestProviderDatastoreOverride(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, d.self, got[0].ID)
 
+	require.NoError(t, d.providerStore.Close())
 	require.NotEmpty(t, recordKeys(t, ctx, providers))
 	require.Empty(t, recordKeys(t, ctx, main))
 }
@@ -2800,6 +2815,7 @@ func TestSharedDatastoreNamespacing(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, gotProvs, 1)
 
+	require.NoError(t, d.providerStore.Close())
 	// Provider records live under "/providers/…"; values under their own prefix.
 	var providerKeys, otherKeys int
 	for _, k := range recordKeys(t, ctx, shared) {

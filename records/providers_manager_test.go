@@ -30,10 +30,24 @@ import (
 	// lds "github.com/ipfs/go-ds-leveldb"
 )
 
+// testPeerID returns a valid libp2p peer ID wrapping name as an identity
+// multihash: no real keypair, but a real, validly-structured peer ID, so
+// provider records built from it survive decodeProvKeyPeer's multihash
+// validation the way a real peer ID would. Same name always yields the same
+// ID; distinct names always yield distinct IDs.
+func testPeerID(t testing.TB, name string) peer.ID {
+	t.Helper()
+	digest, err := mh.Sum([]byte(name), mh.IDENTITY, -1)
+	require.NoError(t, err)
+	id, err := peer.IDFromBytes(digest)
+	require.NoError(t, err)
+	return id
+}
+
 func TestProviderManager(t *testing.T) {
 	ctx := t.Context()
 
-	mid := peer.ID("testing")
+	mid := testPeerID(t, "testing")
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
 		t.Fatal(err)
@@ -43,40 +57,43 @@ func TestProviderManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := internal.Hash([]byte("test"))
-	p.AddProvider(ctx, a, peer.AddrInfo{ID: peer.ID("testingprovider")})
+	require.NoError(t, p.AddProvider(ctx, a, peer.AddrInfo{ID: testPeerID(t, "testingprovider")}))
 
 	// Not cached
 	// TODO verify that cache is empty
-	resp, _ := p.GetProviders(ctx, a)
+	resp, err := p.GetProviders(ctx, a)
+	require.NoError(t, err)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
 
 	// Cached
 	// TODO verify that cache is populated
-	resp, _ = p.GetProviders(ctx, a)
+	resp, err = p.GetProviders(ctx, a)
+	require.NoError(t, err)
 	if len(resp) != 1 {
 		t.Fatal("Could not retrieve provider.")
 	}
 
-	p.AddProvider(ctx, a, peer.AddrInfo{ID: peer.ID("testingprovider2")})
-	p.AddProvider(ctx, a, peer.AddrInfo{ID: peer.ID("testingprovider3")})
+	require.NoError(t, p.AddProvider(ctx, a, peer.AddrInfo{ID: testPeerID(t, "testingprovider2")}))
+	require.NoError(t, p.AddProvider(ctx, a, peer.AddrInfo{ID: testPeerID(t, "testingprovider3")}))
 	// TODO verify that cache is already up to date
-	resp, _ = p.GetProviders(ctx, a)
+	resp, err = p.GetProviders(ctx, a)
+	require.NoError(t, err)
 	if len(resp) != 3 {
 		t.Fatalf("Should have got 3 providers, got %d", len(resp))
 	}
 
-	p.Close()
+	require.NoError(t, p.Close())
 }
 
 func TestProviderManagerClosed(t *testing.T) {
 	ctx := t.Context()
 
-	mid := peer.ID("testing")
+	mid := testPeerID(t, "testing")
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	t.Cleanup(func() { ps.Close() })
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
 
 	p, err := NewProviderManager(mid, ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
@@ -97,7 +114,7 @@ func TestProvidersDatastore(t *testing.T) {
 
 	ctx := t.Context()
 
-	mid := peer.ID("testing")
+	mid := testPeerID(t, "testing")
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
 		t.Fatal(err)
@@ -107,18 +124,19 @@ func TestProvidersDatastore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer p.Close()
+	defer func() { require.NoError(t, p.Close()) }()
 
-	friend := peer.ID("friend")
+	friend := testPeerID(t, "friend")
 	var mhs []mh.Multihash
 	for i := range 100 {
 		h := internal.Hash(fmt.Append(nil, i))
 		mhs = append(mhs, h)
-		p.AddProvider(ctx, h, peer.AddrInfo{ID: friend})
+		require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: friend}))
 	}
 
 	for _, c := range mhs {
-		resp, _ := p.GetProviders(ctx, c)
+		resp, err := p.GetProviders(ctx, c)
+		require.NoError(t, err)
 		if len(resp) != 1 {
 			t.Fatal("Could not retrieve provider.")
 		}
@@ -132,8 +150,8 @@ func TestProvidersSerialization(t *testing.T) {
 	dstore := dssync.MutexWrap(ds.NewMapDatastore())
 
 	k := internal.Hash(([]byte("my key!")))
-	p1 := peer.ID("peer one")
-	p2 := peer.ID("peer two")
+	p1 := testPeerID(t, "peer one")
+	p2 := testPeerID(t, "peer two")
 	pt1 := time.Now()
 	pt2 := pt1.Add(time.Hour)
 
@@ -175,10 +193,20 @@ func TestProvidesExpire(t *testing.T) {
 	provideValidity := time.Second / 2
 	cleanupInterval := time.Second / 10
 
+	// Flush every write straight to disk, as the sustained ADD_PROVIDER rate
+	// this buffer is sized for would in practice: Close no longer prunes
+	// pending before flushing, so a write left buffered past provideValidity
+	// (as this test's handful of writes would be, against the default
+	// batchBufferSize) lands on disk stale and waits for the next GC pass
+	// instead of being caught at Close.
+	oldBatch := batchBufferSize
+	batchBufferSize = 1
+	t.Cleanup(func() { batchBufferSize = oldBatch })
+
 	ctx := t.Context()
 
 	ds := dssync.MutexWrap(ds.NewMapDatastore())
-	mid := peer.ID("testing")
+	mid := testPeerID(t, "testing")
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +216,7 @@ func TestProvidesExpire(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	peers := []peer.ID{"a", "b"}
+	peers := []peer.ID{testPeerID(t, "a"), testPeerID(t, "b")}
 	var mhs []mh.Multihash
 	for i := range 10 {
 		h := internal.Hash(fmt.Append(nil, i))
@@ -196,19 +224,20 @@ func TestProvidesExpire(t *testing.T) {
 	}
 
 	for _, h := range mhs[:5] {
-		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
-		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]})
+		require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]}))
+		require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]}))
 	}
 
 	time.Sleep(provideValidity / 2)
 
 	for _, h := range mhs[5:] {
-		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
-		p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]})
+		require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]}))
+		require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[1]}))
 	}
 
 	for _, h := range mhs {
-		out, _ := p.GetProviders(ctx, h)
+		out, err := p.GetProviders(ctx, h)
+		require.NoError(t, err)
 		if len(out) != 2 {
 			t.Fatal("expected providers to still be there")
 		}
@@ -221,14 +250,16 @@ func TestProvidesExpire(t *testing.T) {
 	time.Sleep(provideValidity/2 + cleanupInterval)
 
 	for _, h := range mhs[:5] {
-		out, _ := p.GetProviders(ctx, h)
+		out, err := p.GetProviders(ctx, h)
+		require.NoError(t, err)
 		if len(out) > 0 {
 			t.Fatal("expected providers to be cleaned up, got: ", out)
 		}
 	}
 
 	for _, h := range mhs[5:] {
-		out, _ := p.GetProviders(ctx, h)
+		out, err := p.GetProviders(ctx, h)
+		require.NoError(t, err)
 		if len(out) != 2 {
 			t.Fatal("expected providers to still be there")
 		}
@@ -237,7 +268,7 @@ func TestProvidesExpire(t *testing.T) {
 	time.Sleep(provideValidity)
 
 	// Stop to prevent data races
-	p.Close()
+	require.NoError(t, p.Close())
 
 	// GC no longer purges the cache; expired entries are filtered out on read
 	// and age out of the LRU, so cache.Len() may still be non-zero here. The
@@ -263,29 +294,30 @@ func TestProvidesCacheExpire(t *testing.T) {
 		cleanupInterval := 5 * 24 * time.Hour // 5 days
 
 		dstore := dssync.MutexWrap(ds.NewMapDatastore())
-		mid := peer.ID("testing")
+		mid := testPeerID(t, "testing")
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
-		t.Cleanup(func() { ps.Close() })
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
 		p, err := NewProviderManager(mid, ps, dstore, ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 		require.NoError(t, err)
-		t.Cleanup(func() { p.Close() })
+		t.Cleanup(func() { require.NoError(t, p.Close()) })
 
 		mhs := make([]mh.Multihash, 2)
 		for i := range mhs {
 			mhs[i] = internal.Hash(fmt.Append(nil, i))
 		}
 
-		peers := []peer.ID{"a", "b"}
+		peers := []peer.ID{testPeerID(t, "a"), testPeerID(t, "b")}
 		for i, h := range mhs {
-			p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]})
-			p.GetProviders(ctx, h)
+			require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: peers[0]}))
+			_, err := p.GetProviders(ctx, h)
+			require.NoError(t, err)
 			require.Len(t, p.cache.Keys(), i+1)
 		}
 
 		time.Sleep(provideValidity / 2)
 
-		p.AddProvider(ctx, mhs[0], peer.AddrInfo{ID: peers[1]})
+		require.NoError(t, p.AddProvider(ctx, mhs[0], peer.AddrInfo{ID: peers[1]}))
 		// AddProvider updates the cached providerSet synchronously; wait for the
 		// background GC goroutine to settle before reading the cache directly.
 		synctest.Wait()
@@ -296,12 +328,14 @@ func TestProvidesCacheExpire(t *testing.T) {
 		// time.Since(v)>provideValidity triggers for the first batch.
 		time.Sleep(provideValidity/2 + time.Millisecond)
 
-		out, _ := p.GetProviders(ctx, mhs[0])
+		out, err := p.GetProviders(ctx, mhs[0])
+		require.NoError(t, err)
 		require.Len(t, out, 1, "expected one provider to have expired")
 		cached, _ = p.cache.Get(string(mhs[0]))
 		require.Len(t, cached.(*providerSet).providers, 1)
 
-		out, _ = p.GetProviders(ctx, mhs[1])
+		out, err = p.GetProviders(ctx, mhs[1])
+		require.NoError(t, err)
 		require.Empty(t, out, "expected all providers to have expired")
 		cached, _ = p.cache.Get(string(mhs[1]))
 		require.Empty(t, cached.(*providerSet).providers)
@@ -344,10 +378,10 @@ func TestLargeProvidersSet(t *testing.T) {
 	ctx := context.Background()
 	var peers []peer.ID
 	for i := range 3000 {
-		peers = append(peers, peer.ID(fmt.Sprint(i)))
+		peers = append(peers, testPeerID(t, fmt.Sprint(i)))
 	}
 
-	mid := peer.ID("myself")
+	mid := testPeerID(t, "myself")
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
 		t.Fatal(err)
@@ -357,21 +391,22 @@ func TestLargeProvidersSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer p.Close()
+	defer func() { require.NoError(t, p.Close()) }()
 
 	var mhs []mh.Multihash
 	for i := range 1000 {
 		h := internal.Hash(fmt.Append(nil, i))
 		mhs = append(mhs, h)
 		for _, pid := range peers {
-			p.AddProvider(ctx, h, peer.AddrInfo{ID: pid})
+			require.NoError(t, p.AddProvider(ctx, h, peer.AddrInfo{ID: pid}))
 		}
 	}
 
 	for range 5 {
 		start := time.Now()
 		for _, h := range mhs {
-			_, _ = p.GetProviders(ctx, h)
+			_, err := p.GetProviders(ctx, h)
+			require.NoError(t, err)
 		}
 		elapsed := time.Since(start)
 		fmt.Printf("query %f ms\n", elapsed.Seconds()*1000)
@@ -384,7 +419,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	defer func() { lruCacheSize = old }()
 	ctx := t.Context()
 
-	p1, p2 := peer.ID("a"), peer.ID("b")
+	p1, p2 := testPeerID(t, "a"), testPeerID(t, "b")
 	h1 := internal.Hash([]byte("1"))
 	h2 := internal.Hash([]byte("2"))
 	ps, err := pstoremem.NewPeerstore()
@@ -398,13 +433,14 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	}
 
 	// add provider
-	pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p1})
+	require.NoError(t, pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p1}))
 	// make the cached provider for h1 go to datastore
-	pm.AddProvider(ctx, h2, peer.AddrInfo{ID: p1})
+	require.NoError(t, pm.AddProvider(ctx, h2, peer.AddrInfo{ID: p1}))
 	// now just offloaded record should be brought back and joined with p2
-	pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p2})
+	require.NoError(t, pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p2}))
 
-	h1Provs, _ := pm.GetProviders(ctx, h1)
+	h1Provs, err := pm.GetProviders(ctx, h1)
+	require.NoError(t, err)
 	if len(h1Provs) != 2 {
 		t.Fatalf("expected h1 to be provided by 2 peers, is by %d", len(h1Provs))
 	}
@@ -413,7 +449,7 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 func TestWriteUpdatesCache(t *testing.T) {
 	ctx := t.Context()
 
-	p1, p2 := peer.ID("a"), peer.ID("b")
+	p1, p2 := testPeerID(t, "a"), testPeerID(t, "b")
 	h1 := internal.Hash([]byte("1"))
 	ps, err := pstoremem.NewPeerstore()
 	if err != nil {
@@ -426,13 +462,15 @@ func TestWriteUpdatesCache(t *testing.T) {
 	}
 
 	// add provider
-	pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p1})
+	require.NoError(t, pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p1}))
 	// force into the cache
-	pm.GetProviders(ctx, h1)
+	_, err = pm.GetProviders(ctx, h1)
+	require.NoError(t, err)
 	// add a second provider
-	pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p2})
+	require.NoError(t, pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p2}))
 
-	c1Provs, _ := pm.GetProviders(ctx, h1)
+	c1Provs, err := pm.GetProviders(ctx, h1)
+	require.NoError(t, err)
 	if len(c1Provs) != 2 {
 		t.Fatalf("expected h1 to be provided by 2 peers, is by %d", len(c1Provs))
 	}
@@ -443,7 +481,7 @@ func rawKeys(t *testing.T, ctx context.Context, dstore ds.Datastore) []string {
 	t.Helper()
 	res, err := dstore.Query(ctx, dsq.Query{KeysOnly: true})
 	require.NoError(t, err)
-	defer res.Close()
+	defer func() { require.NoError(t, res.Close()) }()
 
 	var keys []string
 	for e := range res.Next() {
@@ -453,6 +491,14 @@ func rawKeys(t *testing.T, ctx context.Context, dstore ds.Datastore) []string {
 	return keys
 }
 
+// writeProviderEntry writes a provider record straight into dstore, bypassing
+// ProviderManager's pending buffer entirely. Tests use this to seed on-disk
+// state (for example an already-stale record) that a manager under test
+// should never have produced itself.
+func writeProviderEntry(ctx context.Context, dstore ds.Datastore, k []byte, p peer.ID, t time.Time) error {
+	return dstore.Put(ctx, ds.NewKey(mkProvKeyFor(k, p)), encodeProviderTime(t))
+}
+
 // TestProviderKeyScheme verifies provider records are stored under the
 // "/providers/" namespace prefix, one datastore key per (key, provider) pair.
 func TestProviderKeyScheme(t *testing.T) {
@@ -460,18 +506,18 @@ func TestProviderKeyScheme(t *testing.T) {
 	store := dssync.MutexWrap(ds.NewMapDatastore())
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	pm, err := NewProviderManager(peer.ID("self"), ps, store)
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
 	key := internal.Hash([]byte("cid"))
-	prov := peer.ID("prov")
+	prov := testPeerID(t, "prov")
 	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: prov}))
-	// AddProvider writes straight through to the datastore.
 	got, err := pm.GetProviders(ctx, key)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 
+	require.NoError(t, pm.Close())
 	require.Equal(t, "/providers/", ProvidersKeyPrefix)
 	require.Equal(t, []string{mkProvKeyFor(key, prov)}, rawKeys(t, ctx, store))
 }
@@ -485,9 +531,9 @@ func TestProviderManagerConcurrentAccess(t *testing.T) {
 	ctx := t.Context()
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	t.Cleanup(func() { ps.Close() })
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
 
-	pm, err := NewProviderManager(peer.ID("self"), ps,
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps,
 		dssync.MutexWrap(ds.NewMapDatastore()),
 		// GC aggressively so its cache purge and datastore sweep overlap the
 		// readers and writers.
@@ -510,7 +556,7 @@ func TestProviderManagerConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			prov := peer.ID(fmt.Sprintf("prov-%d", w))
+			prov := testPeerID(t, fmt.Sprintf("prov-%d", w))
 			for range rounds {
 				for _, key := range mhs {
 					if err := pm.AddProvider(ctx, key, peer.AddrInfo{ID: prov}); err != nil {
@@ -548,13 +594,16 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 		store := dssync.MutexWrap(ds.NewMapDatastore())
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
-		t.Cleanup(func() { ps.Close() })
-		pm, err := NewProviderManager(peer.ID("self"), ps, store,
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
+		oldBatch := batchBufferSize
+		batchBufferSize = 1
+		t.Cleanup(func() { batchBufferSize = oldBatch })
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps, store,
 			ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
-		prov := peer.ID("prov")
+		prov := testPeerID(t, "prov")
 		// expiring records are added once and never refreshed; GC must reclaim them.
 		expiring := make([]mh.Multihash, 5)
 		for i := range expiring {
@@ -574,7 +623,10 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			for writerCtx.Err() == nil {
 				for _, key := range live {
-					pm.AddProvider(writerCtx, key, peer.AddrInfo{ID: prov})
+					if err := pm.AddProvider(writerCtx, key, peer.AddrInfo{ID: prov}); err != nil {
+						t.Errorf("writer AddProvider: %v", err)
+						return
+					}
 				}
 				time.Sleep(cleanupInterval / 2)
 			}
@@ -588,9 +640,8 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 		stopWriter()
 		wg.Wait()
 
-		// Stop GC before inspecting the datastore so the physical state is stable.
-		pm.cancel()
-		<-pm.closed
+		// Close flushes live pending writes and stops GC so the physical state is stable.
+		require.NoError(t, pm.Close())
 
 		countKeys := func(key mh.Multihash) int {
 			res, err := store.Query(ctx, dsq.Query{Prefix: mkProvKey(key)})
@@ -616,15 +667,15 @@ func TestCloseFencesDatastoreAccess(t *testing.T) {
 	ctx := t.Context()
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	t.Cleanup(func() { ps.Close() })
-	pm, err := NewProviderManager(peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
 
 	key := internal.Hash([]byte("cid"))
-	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID("prov")}))
+	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: testPeerID(t, "prov")}))
 	require.NoError(t, pm.Close())
 
-	require.ErrorIs(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID("prov2")}), ErrClosed)
+	require.ErrorIs(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: testPeerID(t, "prov2")}), ErrClosed)
 	_, err = pm.GetProviders(ctx, key)
 	require.ErrorIs(t, err, ErrClosed)
 
@@ -638,13 +689,13 @@ func TestGetProvidersRespectsContextCancellation(t *testing.T) {
 	ctx := t.Context()
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	t.Cleanup(func() { ps.Close() })
-	pm, err := NewProviderManager(peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
 	key := internal.Hash([]byte("cid"))
-	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID("prov")}))
+	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: testPeerID(t, "prov")}))
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
@@ -680,7 +731,7 @@ func TestGetProvidersInvokesShuffle(t *testing.T) {
 	ctx := t.Context()
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
-	pm, err := NewProviderManager(peer.ID("self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, dssync.MutexWrap(ds.NewMapDatastore()))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
@@ -690,7 +741,7 @@ func TestGetProvidersInvokesShuffle(t *testing.T) {
 	key := internal.Hash([]byte("cid"))
 	const n = 5
 	for i := range n {
-		require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: peer.ID(fmt.Sprintf("prov-%d", i))}))
+		require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: testPeerID(t, fmt.Sprintf("prov-%d", i))}))
 	}
 
 	got, err := pm.GetProviders(ctx, key) // cache miss: loads from datastore
@@ -714,7 +765,7 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 
 	provs := make([]peer.ID, 12)
 	for i := range provs {
-		provs[i] = peer.ID(fmt.Sprintf("prov-%02d", i))
+		provs[i] = testPeerID(t, fmt.Sprintf("prov-%02d", i))
 	}
 	// Provider keys are base32(peerID) under a common prefix, and the datastore
 	// returns them sorted by that key. base32's alphabet (A-Z2-7) does not sort
@@ -728,10 +779,14 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 		)
 	})
 
+	old := batchBufferSize
+	batchBufferSize = 1
+	t.Cleanup(func() { batchBufferSize = old })
+
 	get := func(seed uint64) []peer.ID {
 		ps, err := pstoremem.NewPeerstore()
 		require.NoError(t, err)
-		pm, err := NewProviderManager(peer.ID("self"), ps,
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps,
 			sortedQueryDS{dssync.MutexWrap(ds.NewMapDatastore())})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, pm.Close()) })
@@ -756,4 +811,204 @@ func TestGetProvidersShufflesDatastoreOrder(t *testing.T) {
 	require.ElementsMatch(t, provs, orderB, "shuffle must preserve the provider set")
 	require.NotEqual(t, dsOrder, orderA, "datastore order must not pass through")
 	require.NotEqual(t, orderA, orderB, "different rand sources must yield different order")
+}
+
+// TestAddProviderBuffersUntilFlush checks writes stay off disk until Close,
+// and that GetProviders serves the pending record without flushing it.
+func TestAddProviderBuffersUntilFlush(t *testing.T) {
+	ctx := t.Context()
+	store := dssync.MutexWrap(ds.NewMapDatastore())
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+	require.NoError(t, err)
+
+	key := internal.Hash([]byte("cid"))
+	prov := testPeerID(t, "prov")
+	require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: prov}))
+	require.Empty(t, rawKeys(t, ctx, store), "unflushed write must not hit the datastore")
+
+	got, err := pm.GetProviders(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, prov, got[0].ID)
+	require.Empty(t, rawKeys(t, ctx, store), "lookup must not flush pending writes")
+
+	require.NoError(t, pm.Close())
+	require.Equal(t, []string{mkProvKeyFor(key, prov)}, rawKeys(t, ctx, store))
+}
+
+// TestAddProviderFlushesAtBatchSize checks the 256-record (here, shrunk)
+// threshold commits pending writes as one batch.
+func TestAddProviderFlushesAtBatchSize(t *testing.T) {
+	old := batchBufferSize
+	batchBufferSize = 8
+	t.Cleanup(func() { batchBufferSize = old })
+
+	ctx := t.Context()
+	store := dssync.MutexWrap(ds.NewMapDatastore())
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+	prov := testPeerID(t, "prov")
+	for i := range batchBufferSize - 1 {
+		require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, i)), peer.AddrInfo{ID: prov}))
+	}
+	require.Empty(t, rawKeys(t, ctx, store), "writes below the flush threshold must stay pending")
+
+	require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, batchBufferSize-1)), peer.AddrInfo{ID: prov}))
+	require.Len(t, rawKeys(t, ctx, store), batchBufferSize)
+}
+
+// countingBatchDS counts Put, Delete, and Commit against a Batching datastore
+// so tests can assert that GC and flushes batch instead of writing one-by-one.
+type countingBatchDS struct {
+	ds.Batching
+	puts    int
+	deletes int
+	commits int
+}
+
+type countingBatch struct {
+	ds.Batch
+	parent *countingBatchDS
+}
+
+func (c *countingBatchDS) Put(ctx context.Context, key ds.Key, value []byte) error {
+	c.puts++
+	return c.Batching.Put(ctx, key, value)
+}
+
+func (c *countingBatchDS) Delete(ctx context.Context, key ds.Key) error {
+	c.deletes++
+	return c.Batching.Delete(ctx, key)
+}
+
+func (c *countingBatchDS) Batch(ctx context.Context) (ds.Batch, error) {
+	b, err := c.Batching.Batch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &countingBatch{Batch: b, parent: c}, nil
+}
+
+func (b *countingBatch) Put(ctx context.Context, key ds.Key, value []byte) error {
+	b.parent.puts++
+	return b.Batch.Put(ctx, key, value)
+}
+
+func (b *countingBatch) Delete(ctx context.Context, key ds.Key) error {
+	b.parent.deletes++
+	return b.Batch.Delete(ctx, key)
+}
+
+func (b *countingBatch) Commit(ctx context.Context) error {
+	b.parent.commits++
+	return b.Batch.Commit(ctx)
+}
+
+// TestProviderGCDeletesInBatches checks a leftover sweep commits once per
+// batchBufferSize deletes, not once per record.
+func TestProviderGCDeletesInBatches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := batchBufferSize
+		batchBufferSize = 10
+		t.Cleanup(func() { batchBufferSize = old })
+
+		const n = 25
+		ctx := t.Context()
+		store := &countingBatchDS{Batching: dssync.MutexWrap(ds.NewMapDatastore())}
+		past := time.Now().Add(-time.Hour)
+		prov := testPeerID(t, "prov")
+		for i := range n {
+			require.NoError(t, writeProviderEntry(ctx, store, internal.Hash(fmt.Append(nil, i)), prov, past))
+		}
+		require.Len(t, rawKeys(t, ctx, store), n)
+		store.puts, store.deletes, store.commits = 0, 0, 0
+
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps, store,
+			ProvideValidity(time.Minute), CleanupInterval(time.Hour))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+
+		require.Empty(t, rawKeys(t, ctx, store), "expired records must be gone")
+		require.Equal(t, n, store.deletes)
+		require.Equal(t, (n+batchBufferSize-1)/batchBufferSize, store.commits)
+		require.Zero(t, store.puts, "GC must not write records")
+	})
+}
+
+// TestProviderReadsSurviveGCDeletingStalePendingKey checks that GC deleting a
+// stale on-disk record does not lose a fresher write for the same key that is
+// still unflushed in pending: GetProviders must keep serving it via the
+// pending overlay regardless of what GC just did to the datastore, and Close
+// must still land it on disk afterward. batchBufferSize is kept large so the
+// fresh write never auto-flushes during the test.
+func TestProviderReadsSurviveGCDeletingStalePendingKey(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			provideValidity = time.Minute
+			cleanupInterval = 10 * time.Second
+		)
+		old := batchBufferSize
+		batchBufferSize = 256
+		t.Cleanup(func() { batchBufferSize = old })
+
+		ctx := t.Context()
+		store := dssync.MutexWrap(ds.NewMapDatastore())
+		key := internal.Hash([]byte("cid"))
+		prov := testPeerID(t, "prov")
+
+		// Seed disk with a record that is already well past provideValidity.
+		staleTime := time.Now().Add(-2 * provideValidity)
+		require.NoError(t, writeProviderEntry(ctx, store, key, prov, staleTime))
+
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps, store,
+			ProvideValidity(provideValidity), CleanupInterval(cleanupInterval))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+		// A fresh reprovide lands in pending only; batchBufferSize is far from
+		// reached so it must not touch disk yet.
+		freshTime := time.Now()
+		require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: prov}))
+		require.Equal(t, []string{mkProvKeyFor(key, prov)}, rawKeys(t, ctx, store),
+			"unflushed write must not overwrite disk yet")
+
+		// Let GC run once. The on-disk record is old enough to be swept, and
+		// nothing stops it: GC deletes it even though the key is still pending.
+		time.Sleep(cleanupInterval)
+		synctest.Wait()
+		require.Empty(t, rawKeys(t, ctx, store), "GC sweeps the stale on-disk record")
+
+		// The pending overlay must still serve the fresh write, disk state
+		// notwithstanding.
+		got, err := pm.GetProviders(ctx, key)
+		require.NoError(t, err)
+		require.Len(t, got, 1, "the pending write must still be visible after GC deletes the stale disk copy")
+
+		require.NoError(t, pm.Close())
+		entries, err := store.Query(ctx, dsq.Query{Prefix: mkProvKey(key)})
+		require.NoError(t, err)
+		rest, err := entries.Rest()
+		require.NoError(t, err)
+		require.Len(t, rest, 1)
+		ts, err := readTimeValue(rest[0].Value)
+		require.NoError(t, err)
+		require.True(t, ts.Equal(freshTime), "Close must flush the pending write back to disk")
+	})
 }

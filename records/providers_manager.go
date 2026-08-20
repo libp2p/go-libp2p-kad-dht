@@ -69,9 +69,11 @@ type ProviderStore interface {
 // it never takes mu, sweeping the datastore and committing deletes in batches
 // of batchBufferSize.
 // It may delete an on-disk record whose key has a fresher write still sitting
-// in pending; that write reaches disk at the next flush regardless, and reads
-// are unaffected because they overlay pending on top of the datastore. Reads
-// drop expired providers by the same threshold.
+// in pending: deletes are chosen from a query snapshot and applied at commit,
+// so a flush landing in between can be undone by it. See collectExpired for
+// why that race is accepted. Reads are unaffected either way, because they
+// overlay pending on top of the datastore and drop expired providers by the
+// same threshold.
 type ProviderManager struct {
 	self peer.ID
 
@@ -498,14 +500,19 @@ func (pm *ProviderManager) gcLoop(ctx context.Context) {
 // record older than provideValidity. Deletes are committed in batches of
 // batchBufferSize so a large leftover set (for example after switching to
 // client mode) costs one fsync per batch, not one per record. It never takes
-// mu, so it runs fully in parallel with AddProvider and GetProviders. It may
-// delete an on-disk record whose key has a fresher write sitting unflushed in
-// pending; that write is unaffected (deleting a datastore entry cannot reach
-// into pending) and lands on disk at the next flush, so no read is ever
-// served stale: getProviderSetForKey overlays pending on top of whatever
-// loadProviderSet returns, and unqueried entries age out of the LRU, so an
-// expired record can never be served whether or not GC has reclaimed it from
-// disk yet.
+// mu, so it runs fully in parallel with AddProvider and GetProviders.
+//
+// Deletes are chosen from the query snapshot but applied at commit, so a flush
+// landing in between writes the fresh record and clears pending, leaving it on
+// disk for this commit to remove. That provider is gone from this server until
+// its next reprovide. The race is accepted rather than closed: closing it would
+// put GC back on mu, re-reading every staged key under the write lock, and it
+// only opens for a record already past provideValidity, on a store whose
+// records are best-effort and republished well before they expire.
+//
+// Reads never serve an expired record either way: getProviderSetForKey drops
+// entries past provideValidity, overlays pending on top of loadProviderSet,
+// and unqueried entries age out of the LRU.
 func (pm *ProviderManager) collectExpired(ctx context.Context) {
 	now := time.Now()
 

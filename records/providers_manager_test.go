@@ -414,6 +414,15 @@ func TestLargeProvidersSet(t *testing.T) {
 	}
 }
 
+// TestUponCacheMissProvidersAreReadFromDatastore checks that a read missing the
+// cache merges the providers on disk with those still buffered in pending.
+//
+// Both halves are seeded so that neither source can cover for the other: p1 is
+// written straight to the datastore and never offered to AddProvider, so it can
+// only arrive via loadProviderSet, while p2 stays below the flush threshold, so
+// it can only arrive via applyPending. Adding both through AddProvider instead
+// would leave the datastore empty and let applyPending satisfy the assertion on
+// its own, which passes even if loadProviderSet returns nothing.
 func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	old := lruCacheSize
 	lruCacheSize = 1
@@ -424,27 +433,36 @@ func TestUponCacheMissProvidersAreReadFromDatastore(t *testing.T) {
 	h1 := internal.Hash([]byte("1"))
 	h2 := internal.Hash([]byte("2"))
 	ps, err := pstoremem.NewPeerstore()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	pm, err := NewProviderManager(p1, ps, dssync.MutexWrap(ds.NewMapDatastore()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := dssync.MutexWrap(ds.NewMapDatastore())
+	pm, err := NewProviderManager(p1, ps, store)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
 
-	// add provider
-	require.NoError(t, pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p1}))
-	// make the cached provider for h1 go to datastore
-	require.NoError(t, pm.AddProvider(ctx, h2, peer.AddrInfo{ID: p1}))
-	// now just offloaded record should be brought back and joined with p2
+	now := time.Now()
+	require.NoError(t, writeProviderEntry(ctx, store, h1, p1, now))
+	require.NoError(t, writeProviderEntry(ctx, store, h2, p1, now))
+
+	// Only a read populates the cache, so read h1 to cache it and h2 to evict it
+	// again from the size-1 cache.
+	_, err = pm.GetProviders(ctx, h1)
+	require.NoError(t, err)
+	_, err = pm.GetProviders(ctx, h2)
+	require.NoError(t, err)
+
 	require.NoError(t, pm.AddProvider(ctx, h1, peer.AddrInfo{ID: p2}))
+	require.NotContains(t, rawKeys(t, ctx, store), mkProvKeyFor(h1, p2),
+		"the second provider must still be unflushed for this test to cover the merge")
 
 	h1Provs, err := pm.GetProviders(ctx, h1)
 	require.NoError(t, err)
-	if len(h1Provs) != 2 {
-		t.Fatalf("expected h1 to be provided by 2 peers, is by %d", len(h1Provs))
+	got := make([]peer.ID, len(h1Provs))
+	for i, ai := range h1Provs {
+		got[i] = ai.ID
 	}
+	require.ElementsMatch(t, []peer.ID{p1, p2}, got,
+		"h1 must be provided by the datastore copy and the pending write")
 }
 
 func TestWriteUpdatesCache(t *testing.T) {

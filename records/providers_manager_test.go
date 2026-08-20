@@ -993,6 +993,56 @@ func TestFlushRetryRecoversTransientFailure(t *testing.T) {
 		"the retry must persist every record the failed flush held")
 }
 
+// stalledBatchDS is a Batching whose commits never complete on their own,
+// standing in for a datastore that has stopped making progress but still
+// honours ctx.
+type stalledBatchDS struct {
+	ds.Batching
+}
+
+type stalledBatch struct {
+	ds.Batch
+}
+
+func (d *stalledBatchDS) Batch(ctx context.Context) (ds.Batch, error) {
+	b, err := d.Batching.Batch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &stalledBatch{Batch: b}, nil
+}
+
+func (b *stalledBatch) Commit(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestCloseGivesUpOnStalledDatastore checks the flush is bounded by
+// flushTimeout rather than blocking shutdown forever, so IpfsDHT.Close cannot
+// hang on a datastore that has stopped completing commits. AddProvider flushes
+// through the same bound.
+func TestCloseGivesUpOnStalledDatastore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		store := &stalledBatchDS{Batching: dssync.MutexWrap(ds.NewMapDatastore())}
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
+
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+		require.NoError(t, err)
+
+		// One write, far below batchBufferSize, so only Close flushes it.
+		require.NoError(t, pm.AddProvider(ctx, internal.Hash([]byte("cid")),
+			peer.AddrInfo{ID: testPeerID(t, "prov")}))
+
+		start := time.Now()
+		require.ErrorIs(t, pm.Close(), context.DeadlineExceeded)
+		require.Equal(t, flushTimeout, time.Since(start),
+			"Close must give up after exactly one flushTimeout")
+	})
+}
+
 // countingBatchDS counts Put, Delete, and Commit against a Batching datastore
 // so tests can assert that GC and flushes batch instead of writing one-by-one.
 type countingBatchDS struct {

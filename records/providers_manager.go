@@ -41,7 +41,13 @@ var (
 	// write retries it; the headroom between the two is how many retries a
 	// failing datastore gets before the buffer is dropped.
 	maxPendingWrites = batchBufferSize + batchBufferSize/4
-	log              = logging.Logger("providers")
+	// flushTimeout bounds a single flush of the pending buffer. AddProvider
+	// flushes while holding mu, where an unbounded commit would stall every
+	// concurrent GetProviders, and Close flushes on the shutdown path. It binds
+	// only on a datastore that honours ctx: go-ds-leveldb's Commit ignores it,
+	// so there a stalled write still blocks until the write itself returns.
+	flushTimeout = 30 * time.Second
+	log          = logging.Logger("providers")
 )
 
 // ErrClosed is returned by AddProvider and GetProviders after Close.
@@ -187,7 +193,9 @@ func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batchin
 // Close stops the background GC, flushes pending writes, and fences the
 // datastore: once Close returns, no AddProvider or GetProviders call touches
 // the datastore, and late calls return ErrClosed. The backing datastore can
-// therefore be closed as soon as Close returns. It is idempotent.
+// therefore be closed as soon as Close returns. The flush is bounded by
+// flushTimeout, so a stalled datastore delays shutdown rather than blocking it.
+// It is idempotent.
 func (pm *ProviderManager) Close() error {
 	pm.cancel()
 	<-pm.closed
@@ -196,7 +204,7 @@ func (pm *ProviderManager) Close() error {
 	if pm.stopped {
 		return nil
 	}
-	err := pm.flushLocked(context.Background())
+	err := pm.flushLocked()
 	pm.stopped = true
 	return err
 }
@@ -230,23 +238,26 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo p
 		// failure is not this caller's to report: reporting it would fail one
 		// arbitrary ADD_PROVIDER out of a batch whose other writes already
 		// returned success. flushLocked logs it and retries instead.
-		_ = pm.flushLocked(context.Background())
+		_ = pm.flushLocked()
 	}
 	return nil
 }
 
-// flushLocked commits pending writes as one datastore batch. The caller must
-// hold pm.mu.
+// flushLocked commits pending writes as one datastore batch, bounded by
+// flushTimeout. The caller must hold pm.mu.
 //
 // A failed commit keeps pending, so the next write retries it and a transient
-// datastore fault costs nothing. Retrying is bounded: at maxPendingWrites the
+// datastore fault costs nothing; a timeout counts as one such fault, so a slow
+// store loses no records. Retrying is bounded: at maxPendingWrites the
 // buffer is dropped, so a datastore that cannot write can neither grow it
 // without limit nor make every later write re-stage an ever-larger map under
 // mu. Records dropped that way self-heal on their providers' next reprovide.
-func (pm *ProviderManager) flushLocked(ctx context.Context) error {
+func (pm *ProviderManager) flushLocked() error {
 	if len(pm.pending) == 0 {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+	defer cancel()
 	err := pm.commitPendingLocked(ctx)
 	if err != nil && len(pm.pending) < maxPendingWrites {
 		log.Warnw("provider record flush failed, keeping writes buffered for retry",

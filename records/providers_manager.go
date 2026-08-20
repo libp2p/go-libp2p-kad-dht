@@ -582,9 +582,5 @@ func (pm *ProviderManager) collectExpired(ctx context.Context) {
 			}
 		}
 	}
-	if n > 0 {
-		if err := batch.Commit(ctx); err != nil {
-			log.Error("failed to commit provider record GC batch: ", err)
-		}
-	}
+	commit()
 }

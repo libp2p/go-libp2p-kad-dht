@@ -1086,6 +1086,7 @@ type countingBatchDS struct {
 	puts    int
 	deletes int
 	commits int
+	queries int
 }
 
 type countingBatch struct {
@@ -1101,6 +1102,11 @@ func (c *countingBatchDS) Put(ctx context.Context, key ds.Key, value []byte) err
 func (c *countingBatchDS) Delete(ctx context.Context, key ds.Key) error {
 	c.deletes++
 	return c.Batching.Delete(ctx, key)
+}
+
+func (c *countingBatchDS) Query(ctx context.Context, q dsq.Query) (dsq.Results, error) {
+	c.queries++
+	return c.Batching.Query(ctx, q)
 }
 
 func (c *countingBatchDS) Batch(ctx context.Context) (ds.Batch, error) {
@@ -1160,6 +1166,39 @@ func TestProviderGCDeletesInBatches(t *testing.T) {
 		require.Equal(t, n, store.deletes)
 		require.Equal(t, (n+batchBufferSize-1)/batchBufferSize, store.commits)
 		require.Zero(t, store.puts, "GC must not write records")
+	})
+}
+
+// TestProviderGCSkipsCommitWhenNothingExpired covers the empty-batch guard in
+// collectExpired's commit closure. The sweep calls commit() unconditionally at
+// the end, so without the guard a round that stages no deletes would still
+// commit an empty batch and cost a pointless fsync every cleanupInterval.
+func TestProviderGCSkipsCommitWhenNothingExpired(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const n = 5
+		ctx := t.Context()
+		store := &countingBatchDS{Batching: dssync.MutexWrap(ds.NewMapDatastore())}
+		prov := testPeerID(t, "prov")
+		for i := range n {
+			require.NoError(t, writeProviderEntry(ctx, store, internal.Hash(fmt.Append(nil, i)), prov, time.Now()))
+		}
+		store.puts, store.deletes, store.commits, store.queries = 0, 0, 0, 0
+
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps, store,
+			ProvideValidity(48*time.Hour), CleanupInterval(time.Hour))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+
+		require.NotZero(t, store.queries, "the GC sweep must have run")
+		require.Zero(t, store.deletes, "nothing is expired")
+		require.Zero(t, store.commits, "a sweep with nothing to delete must not commit")
+		require.Len(t, rawKeys(t, ctx, store), n, "unexpired records must survive")
 	})
 }
 

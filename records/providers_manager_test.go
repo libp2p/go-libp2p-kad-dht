@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -541,6 +542,41 @@ func TestProviderKeyScheme(t *testing.T) {
 	require.Equal(t, []string{mkProvKeyFor(key, prov)}, rawKeys(t, ctx, store))
 }
 
+// TestReadDeletesRecordWithInvalidPeerID pins decodeProvKeyPeer's validation on
+// the read path: a stored provider key whose peer-ID segment does not decode to
+// a valid multihash is never served to callers and is deleted from the
+// datastore, so a corrupted record can neither masquerade as a provider nor
+// accumulate on disk.
+func TestReadDeletesRecordWithInvalidPeerID(t *testing.T) {
+	ctx := t.Context()
+	store := dssync.MutexWrap(ds.NewMapDatastore())
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+	key := internal.Hash([]byte("cid"))
+	valid := testPeerID(t, "prov")
+	now := time.Now()
+	require.NoError(t, writeProviderEntry(ctx, store, key, valid, now))
+
+	// A corrupted record under the same key: the peer-ID segment is valid
+	// base32 but decodes to bytes that are not a multihash (a truncated
+	// varint), so only peer.IDFromBytes can reject it.
+	corrupt := ds.NewKey(mkProvKey(key) + "/" + base32.RawStdEncoding.EncodeToString([]byte{0xff, 0xff}))
+	require.NoError(t, store.Put(ctx, corrupt, encodeProviderTime(now)))
+
+	got, err := pm.GetProviders(ctx, key) // cache miss, so the read hits loadProviderSet
+	require.NoError(t, err)
+	require.Len(t, got, 1, "the corrupted record must not be served")
+	require.Equal(t, valid, got[0].ID)
+
+	require.Equal(t, []string{mkProvKeyFor(key, valid)}, rawKeys(t, ctx, store),
+		"the corrupted record must be deleted on read")
+}
+
 // TestProviderManagerConcurrentAccess hammers AddProvider and GetProviders from
 // many goroutines against overlapping keys, with GC firing continuously, to
 // shake out data races now that the serialising event loop is gone. It is only
@@ -699,6 +735,129 @@ func TestCloseFencesDatastoreAccess(t *testing.T) {
 	require.ErrorIs(t, err, ErrClosed)
 
 	require.NoError(t, pm.Close(), "Close must stay idempotent with the fence in place")
+}
+
+// errSealed is returned by a sealed fencedDS.
+var errSealed = errors.New("datastore accessed after Close returned")
+
+// fencedDS is a Batching datastore that can be sealed. After Seal, every
+// operation is counted as a violation of the Close fence and rejected, so a
+// test can prove that nothing touches the datastore once Close has returned.
+type fencedDS struct {
+	ds.Batching
+	sealed     atomic.Bool
+	violations atomic.Int64
+}
+
+func (f *fencedDS) check() error {
+	if f.sealed.Load() {
+		f.violations.Add(1)
+		return errSealed
+	}
+	return nil
+}
+
+func (f *fencedDS) Put(ctx context.Context, key ds.Key, value []byte) error {
+	if err := f.check(); err != nil {
+		return err
+	}
+	return f.Batching.Put(ctx, key, value)
+}
+
+func (f *fencedDS) Delete(ctx context.Context, key ds.Key) error {
+	if err := f.check(); err != nil {
+		return err
+	}
+	return f.Batching.Delete(ctx, key)
+}
+
+func (f *fencedDS) Query(ctx context.Context, q dsq.Query) (dsq.Results, error) {
+	if err := f.check(); err != nil {
+		return nil, err
+	}
+	return f.Batching.Query(ctx, q)
+}
+
+func (f *fencedDS) Batch(ctx context.Context) (ds.Batch, error) {
+	if err := f.check(); err != nil {
+		return nil, err
+	}
+	return f.Batching.Batch(ctx)
+}
+
+// TestCloseDuringConcurrentAccess overlaps Close with in-flight AddProvider and
+// GetProviders calls. IpfsDHT.Close does not await RPC handlers, so this
+// interleaving is the production shutdown path that mu serialises: -race must
+// see no unsynchronised access to pending, workers must only ever observe nil
+// or ErrClosed, and the datastore is sealed the moment Close returns, so any
+// late call that escapes the fence fails the test. Close and the worker drain
+// are bounded by explicit deadlines, so a regression that deadlocks shutdown
+// fails fast instead of hanging the suite.
+func TestCloseDuringConcurrentAccess(t *testing.T) {
+	// A small threshold so workers keep crossing the flush path, where
+	// commitPendingLocked ranges over the same pending map Close flushes.
+	old := batchBufferSize
+	batchBufferSize = 8
+	t.Cleanup(func() { batchBufferSize = old })
+
+	ctx := t.Context()
+	store := &fencedDS{Batching: dssync.MutexWrap(ds.NewMapDatastore())}
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+	require.NoError(t, err)
+
+	const workers = 8
+	keys := make([]mh.Multihash, 4)
+	for i := range keys {
+		keys[i] = internal.Hash(fmt.Append(nil, i))
+	}
+
+	var running, done sync.WaitGroup
+	running.Add(workers)
+	for w := range workers {
+		done.Go(func() {
+			running.Done()
+			prov := testPeerID(t, fmt.Sprintf("prov-%d", w))
+			for i := 0; ; i++ {
+				err := pm.AddProvider(ctx, keys[(w+i)%len(keys)], peer.AddrInfo{ID: prov})
+				if errors.Is(err, ErrClosed) {
+					return
+				}
+				if err != nil {
+					t.Errorf("worker %d AddProvider: %v", w, err)
+					return
+				}
+				if _, err := pm.GetProviders(ctx, keys[(w+i+1)%len(keys)]); err != nil {
+					if !errors.Is(err, ErrClosed) {
+						t.Errorf("worker %d GetProviders: %v", w, err)
+					}
+					return
+				}
+			}
+		})
+	}
+	running.Wait()
+
+	closed := make(chan error, 1)
+	go func() { closed <- pm.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Minute):
+		t.Fatal("Close did not return; it deadlocks against concurrent calls")
+	}
+	store.sealed.Store(true)
+
+	drained := make(chan struct{})
+	go func() { done.Wait(); close(drained) }()
+	select {
+	case <-drained:
+	case <-time.After(time.Minute):
+		t.Fatal("workers did not observe ErrClosed after Close returned")
+	}
+	require.Zero(t, store.violations.Load(), "no call may touch the datastore after Close returned")
 }
 
 // GetProviders must honour context cancellation: a cancelled ctx yields the
@@ -895,14 +1054,16 @@ func TestExpiredPendingWriteIsNotServed(t *testing.T) {
 }
 
 // TestAddProviderFlushesAtBatchSize checks the 256-record (here, shrunk)
-// threshold commits pending writes as one batch.
+// threshold commits pending writes as one batch: a single commit, no direct
+// per-record puts. One fsync per buffer is the point of the buffering, so the
+// commit count is asserted, not just the resulting keys.
 func TestAddProviderFlushesAtBatchSize(t *testing.T) {
 	old := batchBufferSize
 	batchBufferSize = 8
 	t.Cleanup(func() { batchBufferSize = old })
 
 	ctx := t.Context()
-	store := dssync.MutexWrap(ds.NewMapDatastore())
+	store := &countingBatchDS{Batching: dssync.MutexWrap(ds.NewMapDatastore())}
 	ps, err := pstoremem.NewPeerstore()
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, ps.Close()) })
@@ -915,9 +1076,12 @@ func TestAddProviderFlushesAtBatchSize(t *testing.T) {
 		require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, i)), peer.AddrInfo{ID: prov}))
 	}
 	require.Empty(t, rawKeys(t, ctx, store), "writes below the flush threshold must stay pending")
+	require.Zero(t, store.commits, "nothing may commit below the flush threshold")
 
 	require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, batchBufferSize-1)), peer.AddrInfo{ID: prov}))
 	require.Len(t, rawKeys(t, ctx, store), batchBufferSize)
+	require.Equal(t, 1, store.commits, "the whole buffer must land as a single batch commit")
+	require.Equal(t, batchBufferSize, store.puts, "every record must go through the batch")
 }
 
 // errCommit is the failure returned by a flakyBatchDS commit.

@@ -2,6 +2,7 @@ package records
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -863,6 +864,115 @@ func TestAddProviderFlushesAtBatchSize(t *testing.T) {
 
 	require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, batchBufferSize-1)), peer.AddrInfo{ID: prov}))
 	require.Len(t, rawKeys(t, ctx, store), batchBufferSize)
+}
+
+// errCommit is the failure returned by a flakyBatchDS commit.
+var errCommit = errors.New("commit failed")
+
+// flakyBatchDS is a Batching datastore whose first `failures` commits fail,
+// standing in for a full disk or a wedged store. A negative count fails every
+// commit.
+type flakyBatchDS struct {
+	ds.Batching
+	failures int
+}
+
+type flakyBatch struct {
+	ds.Batch
+	parent *flakyBatchDS
+}
+
+func (f *flakyBatchDS) Batch(ctx context.Context) (ds.Batch, error) {
+	b, err := f.Batching.Batch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &flakyBatch{Batch: b, parent: f}, nil
+}
+
+func (b *flakyBatch) Commit(ctx context.Context) error {
+	if b.parent.failures == 0 {
+		return b.Batch.Commit(ctx)
+	}
+	b.parent.failures--
+	return errCommit
+}
+
+// pendingLen reports the size of pm's unflushed write buffer.
+func pendingLen(pm *ProviderManager) int {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return len(pm.pending)
+}
+
+// TestFlushRetriesFailedCommitUntilCapped checks a datastore that cannot commit
+// leaves its writes buffered so later writes retry them, and that the retrying
+// is bounded: pending never grows past maxPendingWrites, at which point the
+// buffer is dropped and starts refilling.
+func TestFlushRetriesFailedCommitUntilCapped(t *testing.T) {
+	const hardCap = 12 // two retries past the flush threshold
+	oldBatch, oldMax := batchBufferSize, maxPendingWrites
+	batchBufferSize, maxPendingWrites = 10, hardCap
+	t.Cleanup(func() { batchBufferSize, maxPendingWrites = oldBatch, oldMax })
+
+	ctx := t.Context()
+	store := &flakyBatchDS{Batching: dssync.MutexWrap(ds.NewMapDatastore()), failures: -1}
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+	require.NoError(t, err)
+
+	prov := testPeerID(t, "prov")
+	for i := range 3 * hardCap {
+		err := pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, i)), peer.AddrInfo{ID: prov})
+		require.NoErrorf(t, err, "write %d must not inherit another write's flush failure", i)
+		require.LessOrEqualf(t, pendingLen(pm), hardCap, "pending must stay capped after write %d", i)
+	}
+
+	// The last write above filled pending to the cap and dropped it, so the
+	// cycle restarts: writes buffer again until the threshold retries the flush.
+	require.Zero(t, pendingLen(pm), "reaching the cap must drop the buffer")
+	require.NoError(t, pm.AddProvider(ctx, internal.Hash([]byte("next")), peer.AddrInfo{ID: prov}))
+	require.Equal(t, 1, pendingLen(pm), "writes must buffer again after a drop")
+
+	// Close is the one caller that asked for a flush, so it does get the error.
+	require.ErrorIs(t, pm.Close(), errCommit, "Close must report the failed final flush")
+	require.Empty(t, rawKeys(t, ctx, store.Batching), "no write may reach a store that cannot commit")
+}
+
+// TestFlushRetryRecoversTransientFailure checks the retry is worth keeping: a
+// single failed commit loses nothing, because the next write re-commits the
+// whole buffer once the datastore recovers.
+func TestFlushRetryRecoversTransientFailure(t *testing.T) {
+	oldBatch, oldMax := batchBufferSize, maxPendingWrites
+	batchBufferSize, maxPendingWrites = 10, 12
+	t.Cleanup(func() { batchBufferSize, maxPendingWrites = oldBatch, oldMax })
+
+	ctx := t.Context()
+	store := &flakyBatchDS{Batching: dssync.MutexWrap(ds.NewMapDatastore()), failures: 1}
+	ps, err := pstoremem.NewPeerstore()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, ps.Close()) })
+	pm, err := NewProviderManager(testPeerID(t, "self"), ps, store)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+	prov := testPeerID(t, "prov")
+	for i := range batchBufferSize - 1 {
+		require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, i)), peer.AddrInfo{ID: prov}))
+	}
+
+	// The threshold write trips the one failure the store has in it.
+	require.NoError(t, pm.AddProvider(ctx, internal.Hash(fmt.Append(nil, batchBufferSize-1)), peer.AddrInfo{ID: prov}))
+	require.Equal(t, batchBufferSize, pendingLen(pm), "a failed flush must keep its writes for the retry")
+	require.Empty(t, rawKeys(t, ctx, store.Batching))
+
+	// The next write retries, and the recovered store takes the whole buffer.
+	require.NoError(t, pm.AddProvider(ctx, internal.Hash([]byte("recovered")), peer.AddrInfo{ID: prov}))
+	require.Zero(t, pendingLen(pm))
+	require.Lenf(t, rawKeys(t, ctx, store.Batching), batchBufferSize+1,
+		"the retry must persist every record the failed flush held")
 }
 
 // countingBatchDS counts Put, Delete, and Commit against a Batching datastore

@@ -36,7 +36,12 @@ var (
 	defaultCleanupInterval = time.Hour
 	lruCacheSize           = 256
 	batchBufferSize        = 256
-	log                    = logging.Logger("providers")
+	// maxPendingWrites is the hard cap on the pending write buffer. A flush
+	// fires at batchBufferSize and, if it fails, keeps its entries so the next
+	// write retries it; the headroom between the two is how many retries a
+	// failing datastore gets before the buffer is dropped.
+	maxPendingWrites = batchBufferSize + batchBufferSize/4
+	log              = logging.Logger("providers")
 )
 
 // ErrClosed is returned by AddProvider and GetProviders after Close.
@@ -56,10 +61,13 @@ type ProviderStore interface {
 // access the cache, a pending write buffer, and the datastore under mu; the
 // datastore must be safe for concurrent use. Writes accumulate in pending and
 // flush as one datastore batch at batchBufferSize or Close, so a burst of
-// ADD_PROVIDER records costs one fsync rather than one per record. GetProviders
-// overlays pending on the datastore and does not flush. A background goroutine
-// garbage-collects expired records on a parallel schedule: it never takes mu,
-// sweeping the datastore and committing deletes in batches of batchBufferSize.
+// ADD_PROVIDER records costs one fsync rather than one per record; a flush
+// that fails is retried by the writes that follow it, up to maxPendingWrites,
+// past which the buffer is dropped so it cannot grow without bound.
+// GetProviders overlays pending on the datastore and does not flush. A
+// background goroutine garbage-collects expired records on a parallel schedule:
+// it never takes mu, sweeping the datastore and committing deletes in batches
+// of batchBufferSize.
 // It may delete an on-disk record whose key has a fresher write still sitting
 // in pending; that write reaches disk at the next flush regardless, and reads
 // are unaffected because they overlay pending on top of the datastore. Reads
@@ -194,7 +202,9 @@ func (pm *ProviderManager) Close() error {
 // AddProvider adds a provider for key k. The provider's addresses are recorded
 // in the peerstore, and the (key, provider) pair is written to the cache (when
 // the key is already cached) and to the pending buffer. The buffer flushes to
-// the datastore at batchBufferSize. It returns ErrClosed after Close.
+// the datastore at batchBufferSize; a flush that fails is logged and retried
+// rather than reported here, because it covers other callers' writes too. The
+// only error this returns is ErrClosed, after Close.
 func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
 	_, span := internal.StartSpan(ctx, "ProviderManager.AddProvider")
 	defer span.End()
@@ -214,17 +224,44 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo p
 	}
 	pm.pending[mkProvKeyFor(k, provInfo.ID)] = now
 	if len(pm.pending) >= batchBufferSize {
-		return pm.flushLocked(context.Background())
+		// The flush covers every buffered write, not just this one, so its
+		// failure is not this caller's to report: reporting it would fail one
+		// arbitrary ADD_PROVIDER out of a batch whose other writes already
+		// returned success. flushLocked logs it and retries instead.
+		_ = pm.flushLocked(context.Background())
 	}
 	return nil
 }
 
 // flushLocked commits pending writes as one datastore batch. The caller must
-// hold pm.mu. A failed commit leaves pending intact so a later flush retries.
+// hold pm.mu.
+//
+// A failed commit keeps pending, so the next write retries it and a transient
+// datastore fault costs nothing. Retrying is bounded: at maxPendingWrites the
+// buffer is dropped, so a datastore that cannot write can neither grow it
+// without limit nor make every later write re-stage an ever-larger map under
+// mu. Records dropped that way self-heal on their providers' next reprovide.
 func (pm *ProviderManager) flushLocked(ctx context.Context) error {
 	if len(pm.pending) == 0 {
 		return nil
 	}
+	err := pm.commitPendingLocked(ctx)
+	if err != nil && len(pm.pending) < maxPendingWrites {
+		log.Warnw("provider record flush failed, keeping writes buffered for retry",
+			"buffered", len(pm.pending), "error", err)
+		return err
+	}
+	if err != nil {
+		log.Errorw("dropping buffered provider records after repeated flush failures",
+			"dropped", len(pm.pending), "error", err)
+	}
+	clear(pm.pending)
+	return err
+}
+
+// commitPendingLocked writes every pending entry to the datastore as a single
+// batch, leaving pending untouched. The caller must hold pm.mu.
+func (pm *ProviderManager) commitPendingLocked(ctx context.Context) error {
 	batch, err := pm.dstore.Batch(ctx)
 	if err != nil {
 		return err
@@ -234,11 +271,7 @@ func (pm *ProviderManager) flushLocked(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := batch.Commit(ctx); err != nil {
-		return err
-	}
-	clear(pm.pending)
-	return nil
+	return batch.Commit(ctx)
 }
 
 // encodeProviderTime returns the on-disk value for a provider record's write

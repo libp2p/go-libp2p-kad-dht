@@ -399,10 +399,14 @@ func (pm *ProviderManager) getProviderSetForKey(ctx context.Context, k []byte) (
 }
 
 // applyPending overlays unflushed writes for k onto pset. The caller must hold
-// pm.mu. A pending entry old enough to be expired is dropped from pset but
-// left in pending so a later flush still persists it; at the write rate this
-// buffer is sized for, a pending entry is flushed long before it could reach
-// provideValidity, so this is a defensive check rather than a load-bearing one.
+// pm.mu.
+//
+// A pending entry old enough to be expired is dropped from pset but left in
+// pending, so a later flush still persists it and GC reclaims it from disk by
+// the usual path. The expiry check is load-bearing rather than defensive:
+// flushes fire on batchBufferSize or Close and nothing else, so a node that
+// never reaches a full buffer can hold an entry well past provideValidity,
+// and only this check keeps it from being served as a live provider.
 func (pm *ProviderManager) applyPending(k []byte, pset *providerSet) {
 	prefix := mkProvKey(k) + "/"
 	now := time.Now()

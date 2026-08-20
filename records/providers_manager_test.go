@@ -858,6 +858,42 @@ func TestAddProviderBuffersUntilFlush(t *testing.T) {
 	require.Equal(t, []string{mkProvKeyFor(key, prov)}, rawKeys(t, ctx, store))
 }
 
+// TestExpiredPendingWriteIsNotServed pins the expiry filter in applyPending.
+// Nothing flushes on a timer, so a node that never fills the buffer can hold a
+// write well past provideValidity; the overlay must drop it from reads while
+// leaving it in pending for a later flush to persist and GC to reclaim.
+func TestExpiredPendingWriteIsNotServed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const provideValidity = time.Hour
+
+		ctx := t.Context()
+		store := dssync.MutexWrap(ds.NewMapDatastore())
+		ps, err := pstoremem.NewPeerstore()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, ps.Close()) })
+
+		// GC off, so nothing but the overlay can hide the record.
+		pm, err := NewProviderManager(testPeerID(t, "self"), ps, store,
+			ProvideValidity(provideValidity), CleanupInterval(0))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, pm.Close()) })
+
+		key := internal.Hash([]byte("cid"))
+		require.NoError(t, pm.AddProvider(ctx, key, peer.AddrInfo{ID: testPeerID(t, "prov")}))
+		require.Empty(t, rawKeys(t, ctx, store), "the write must stay buffered")
+
+		time.Sleep(provideValidity + time.Minute)
+		synctest.Wait()
+
+		// A cache miss, so the read is served by loadProviderSet (empty) plus
+		// applyPending: only applyPending's expiry check can drop the provider.
+		provs, err := pm.GetProviders(ctx, key)
+		require.NoError(t, err)
+		require.Empty(t, provs, "an expired pending write must not be served")
+		require.Equal(t, 1, pendingLen(pm), "but it stays buffered for a later flush")
+	})
+}
+
 // TestAddProviderFlushesAtBatchSize checks the 256-record (here, shrunk)
 // threshold commits pending writes as one batch.
 func TestAddProviderFlushesAtBatchSize(t *testing.T) {

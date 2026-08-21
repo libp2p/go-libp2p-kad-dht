@@ -584,6 +584,7 @@ func TestProviderDatastoreOverride(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, provs, 1)
 
+	require.NoError(t, frt.ProviderManager.Close())
 	require.NotEmpty(t, recordKeys(t, ctx, providers))
 	require.Empty(t, recordKeys(t, ctx, main))
 }

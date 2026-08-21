@@ -60,8 +60,10 @@ func ValueDatastore(dstore ds.Batching) Option {
 // Custom ProviderStore implementations cannot be injected; the DHT always runs
 // the built-in provider manager, configured through this option and
 // ProviderManagerOpts. DHT instances given the same provider datastore see
-// each other's provider records, and records.Cache controls the read cache in
-// front of it.
+// each other's flushed provider records, and records.Cache controls the read
+// cache in front of it. Each instance buffers its own writes in memory and
+// commits them as one batch when the buffer fills or on Close, so a record can
+// stay invisible to the other instances until its writer flushes.
 func ProviderDatastore(dstore ds.Batching) Option {
 	return func(c *dhtcfg.Config) error {
 		c.ProviderDatastore = dstore

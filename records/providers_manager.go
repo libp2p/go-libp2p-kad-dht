@@ -35,7 +35,19 @@ const (
 var (
 	defaultCleanupInterval = time.Hour
 	lruCacheSize           = 256
-	log                    = logging.Logger("providers")
+	batchBufferSize        = 256
+	// maxPendingWrites is the hard cap on the pending write buffer. A flush
+	// fires at batchBufferSize and, if it fails, keeps its entries so the next
+	// write retries it; the headroom between the two is how many retries a
+	// failing datastore gets before the buffer is dropped.
+	maxPendingWrites = batchBufferSize + batchBufferSize/4
+	// flushTimeout bounds a single flush of the pending buffer. AddProvider
+	// flushes while holding mu, where an unbounded commit would stall every
+	// concurrent GetProviders, and Close flushes on the shutdown path. It binds
+	// only on a datastore that honours ctx: go-ds-leveldb's Commit ignores it,
+	// so there a stalled write still blocks until the write itself returns.
+	flushTimeout = 30 * time.Second
+	log          = logging.Logger("providers")
 )
 
 // ErrClosed is returned by AddProvider and GetProviders after Close.
@@ -52,25 +64,33 @@ type ProviderStore interface {
 // in between.
 //
 // A ProviderManager is safe for concurrent use. AddProvider and GetProviders
-// access the cache and datastore directly under mu; the datastore must be safe
-// for concurrent use. Writes go straight to the datastore under mu with no
-// write buffering, which favours durability and simplicity over write-burst
-// throughput and keeps GC off the write lock. A background goroutine
-// garbage-collects expired records on a parallel schedule: it sweeps the
-// datastore without ever taking mu or touching the cache (reads drop expired
-// providers by the same threshold), so GC never blocks reads or writes. GC
-// racing a concurrent write may drop a just-refreshed record; this is accepted
-// and self-heals on the next provide (tracked for a follow-up).
+// access the cache, a pending write buffer, and the datastore under mu; the
+// datastore must be safe for concurrent use. Writes accumulate in pending and
+// flush as one datastore batch at batchBufferSize or Close, so a burst of
+// ADD_PROVIDER records costs one fsync rather than one per record; a flush
+// that fails is retried by the writes that follow it, up to maxPendingWrites,
+// past which the buffer is dropped so it cannot grow without bound.
+// GetProviders overlays pending on the datastore and does not flush. A
+// background goroutine garbage-collects expired records on a parallel schedule:
+// it never takes mu, sweeping the datastore and committing deletes in batches
+// of batchBufferSize.
+// It may delete an on-disk record whose key has a fresher write still sitting
+// in pending: deletes are chosen from a query snapshot and applied at commit,
+// so a flush landing in between can be undone by it. See collectExpired for
+// why that race is accepted. Reads are unaffected either way, because they
+// overlay pending on top of the datastore and drop expired providers by the
+// same threshold.
 type ProviderManager struct {
 	self peer.ID
 
-	// mu guards cache (and the providerSets it holds) and stopped, and
-	// serialises AddProvider and GetProviders access to the datastore so the
-	// cache stays consistent with it. The background GC never takes mu (it only
-	// sweeps the datastore).
+	// mu guards cache (and the providerSets it holds), pending, and stopped,
+	// and serialises AddProvider and GetProviders so the cache stays consistent
+	// with pending and the datastore. The background GC never takes mu; it only
+	// sweeps the datastore.
 	mu      sync.Mutex
 	stopped bool
 	cache   lru.LRUCache
+	pending map[string]time.Time
 	pstore  peerstore.Peerstore
 	dstore  ds.Batching
 
@@ -154,6 +174,7 @@ func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batchin
 		pstore:          ps,
 		dstore:          dstore,
 		cache:           cache,
+		pending:         make(map[string]time.Time),
 		shuffle:         rand.Shuffle,
 		providerAddrTTL: amino.DefaultProviderAddrTTL,
 		provideValidity: amino.DefaultProvideValidity,
@@ -169,25 +190,33 @@ func NewProviderManager(local peer.ID, ps peerstore.Peerstore, dstore ds.Batchin
 	return pm, nil
 }
 
-// Close stops the background GC, waits for it to exit, and fences the
+// Close stops the background GC, flushes pending writes, and fences the
 // datastore: once Close returns, no AddProvider or GetProviders call touches
 // the datastore, and late calls return ErrClosed. The backing datastore can
-// therefore be closed as soon as Close returns. It is idempotent.
+// therefore be closed as soon as Close returns. The flush is bounded by
+// flushTimeout, so a stalled datastore delays shutdown rather than blocking it.
+// It is idempotent.
 func (pm *ProviderManager) Close() error {
 	pm.cancel()
 	<-pm.closed
 	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if pm.stopped {
+		return nil
+	}
+	err := pm.flushLocked()
 	pm.stopped = true
-	pm.mu.Unlock()
-	return nil
+	return err
 }
 
 // AddProvider adds a provider for key k. The provider's addresses are recorded
 // in the peerstore, and the (key, provider) pair is written to the cache (when
-// the key is already cached) and the datastore. It returns ErrClosed after
-// Close.
+// the key is already cached) and to the pending buffer. The buffer flushes to
+// the datastore at batchBufferSize; a flush that fails is logged and retried
+// rather than reported here, because it covers other callers' writes too. The
+// only error this returns is ErrClosed, after Close.
 func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo peer.AddrInfo) error {
-	ctx, span := internal.StartSpan(ctx, "ProviderManager.AddProvider")
+	_, span := internal.StartSpan(ctx, "ProviderManager.AddProvider")
 	defer span.End()
 
 	if provInfo.ID != pm.self { // don't add own addrs.
@@ -202,18 +231,68 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, k []byte, provInfo p
 	}
 	if provs, ok := pm.cache.Get(string(k)); ok {
 		provs.(*providerSet).setVal(provInfo.ID, now)
-	} // else not cached, just write through
-	return writeProviderEntry(ctx, pm.dstore, k, provInfo.ID, now)
+	}
+	pm.pending[mkProvKeyFor(k, provInfo.ID)] = now
+	if len(pm.pending) >= batchBufferSize {
+		// The flush covers every buffered write, not just this one, so its
+		// failure is not this caller's to report: reporting it would fail one
+		// arbitrary ADD_PROVIDER out of a batch whose other writes already
+		// returned success. flushLocked logs it and retries instead.
+		_ = pm.flushLocked()
+	}
+	return nil
 }
 
-// writeProviderEntry writes the provider into the datastore
-func writeProviderEntry(ctx context.Context, dstore ds.Datastore, k []byte, p peer.ID, t time.Time) error {
-	dsk := mkProvKeyFor(k, p)
+// flushLocked commits pending writes as one datastore batch, bounded by
+// flushTimeout. The caller must hold pm.mu.
+//
+// A failed commit keeps pending, so the next write retries it and a transient
+// datastore fault costs nothing; a timeout counts as one such fault, so a slow
+// store loses no records. Retrying is bounded: at maxPendingWrites the
+// buffer is dropped, so a datastore that cannot write can neither grow it
+// without limit nor make every later write re-stage an ever-larger map under
+// mu. Records dropped that way self-heal on their providers' next reprovide.
+func (pm *ProviderManager) flushLocked() error {
+	if len(pm.pending) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+	defer cancel()
+	err := pm.commitPendingLocked(ctx)
+	if err != nil && len(pm.pending) < maxPendingWrites {
+		log.Warnw("provider record flush failed, keeping writes buffered for retry",
+			"buffered", len(pm.pending), "error", err)
+		return err
+	}
+	if err != nil {
+		log.Errorw("dropping buffered provider records after repeated flush failures",
+			"dropped", len(pm.pending), "error", err)
+	}
+	clear(pm.pending)
+	return err
+}
 
+// commitPendingLocked writes every pending entry to the datastore as a single
+// batch, leaving pending untouched. The caller must hold pm.mu.
+func (pm *ProviderManager) commitPendingLocked(ctx context.Context) error {
+	batch, err := pm.dstore.Batch(ctx)
+	if err != nil {
+		return err
+	}
+	for dsk, t := range pm.pending {
+		if err := batch.Put(ctx, ds.NewKey(dsk), encodeProviderTime(t)); err != nil {
+			return err
+		}
+	}
+	return batch.Commit(ctx)
+}
+
+// encodeProviderTime returns the on-disk value for a provider record's write
+// time.
+func encodeProviderTime(t time.Time) []byte {
 	buf := make([]byte, 16)
 	n := binary.PutVarint(buf, t.UnixNano())
-
-	return dstore.Put(ctx, ds.NewKey(dsk), buf[:n])
+	return buf[:n]
 }
 
 func mkProvKeyFor(k []byte, p peer.ID) string {
@@ -222,6 +301,17 @@ func mkProvKeyFor(k []byte, p peer.ID) string {
 
 func mkProvKey(k []byte) string {
 	return ProvidersKeyPrefix + base32.RawStdEncoding.EncodeToString(k)
+}
+
+// decodeProvKeyPeer extracts and validates the peer ID encoded in the last
+// path segment of a provider datastore key produced by mkProvKeyFor.
+func decodeProvKeyPeer(dsk string) (peer.ID, error) {
+	lix := strings.LastIndex(dsk, "/")
+	decstr, err := base32.RawStdEncoding.DecodeString(dsk[lix+1:])
+	if err != nil {
+		return "", err
+	}
+	return peer.IDFromBytes(decstr)
 }
 
 // GetProviders returns the set of providers for the given key. The returned
@@ -275,8 +365,8 @@ func (pm *ProviderManager) GetProviders(ctx context.Context, k []byte) ([]peer.A
 }
 
 // getProviderSetForKey returns the ProviderSet for k, from the cache if present
-// (dropping any entries that have since expired) or loaded from the datastore.
-// The caller must hold pm.mu.
+// (dropping any entries that have since expired) or loaded from the datastore
+// and overlaid with pending writes for k. The caller must hold pm.mu.
 func (pm *ProviderManager) getProviderSetForKey(ctx context.Context, k []byte) (*providerSet, error) {
 	cached, ok := pm.cache.Get(string(k))
 	if ok {
@@ -299,12 +389,41 @@ func (pm *ProviderManager) getProviderSetForKey(ctx context.Context, k []byte) (
 	if err != nil {
 		return nil, err
 	}
+	pm.applyPending(k, pset)
 
 	if len(pset.providers) > 0 {
 		pm.cache.Add(string(k), pset)
 	}
 
 	return pset, nil
+}
+
+// applyPending overlays unflushed writes for k onto pset. The caller must hold
+// pm.mu.
+//
+// A pending entry old enough to be expired is dropped from pset but left in
+// pending, so a later flush still persists it and GC reclaims it from disk by
+// the usual path. The expiry check is load-bearing rather than defensive:
+// flushes fire on batchBufferSize or Close and nothing else, so a node that
+// never reaches a full buffer can hold an entry well past provideValidity,
+// and only this check keeps it from being served as a live provider.
+func (pm *ProviderManager) applyPending(k []byte, pset *providerSet) {
+	prefix := mkProvKey(k) + "/"
+	now := time.Now()
+	for dsk, t := range pm.pending {
+		if !strings.HasPrefix(dsk, prefix) {
+			continue
+		}
+		if now.Sub(t) > pm.provideValidity {
+			continue
+		}
+		pid, err := decodeProvKeyPeer(dsk)
+		if err != nil {
+			log.Error("invalid peer ID in provider key: ", err)
+			continue
+		}
+		pset.setVal(pid, t)
+	}
 }
 
 // loadProviderSet loads the ProviderSet for k out of the datastore, discarding
@@ -344,19 +463,15 @@ func loadProviderSet(ctx context.Context, dstore ds.Datastore, provideValidity t
 			continue
 		}
 
-		lix := strings.LastIndex(e.Key, "/")
-
-		decstr, err := base32.RawStdEncoding.DecodeString(e.Key[lix+1:])
+		pid, err := decodeProvKeyPeer(e.Key)
 		if err != nil {
-			log.Error("base32 decoding error: ", err)
+			log.Error("invalid peer ID in provider key: ", err)
 			err = dstore.Delete(ctx, ds.RawKey(e.Key))
 			if err != nil && !errors.Is(err, ds.ErrNotFound) {
 				log.Error("failed to remove provider record from disk: ", err)
 			}
 			continue
 		}
-
-		pid := peer.ID(decstr)
 
 		out.setVal(pid, t)
 	}
@@ -397,13 +512,25 @@ func (pm *ProviderManager) gcLoop(ctx context.Context) {
 }
 
 // collectExpired sweeps the provider subtree of the datastore, deleting every
-// record older than provideValidity. It never touches the cache or mu, so it
-// runs fully in parallel with AddProvider and GetProviders (relying on the
-// datastore being safe for concurrent use). The cache needs no sweeping of its
-// own: getProviderSetForKey drops expired providers on read by the same
-// threshold, and unqueried entries age out of the LRU, so an expired record can
-// never be served whether or not GC has reclaimed it from disk yet.
+// record older than provideValidity. Deletes are committed in batches of
+// batchBufferSize so a large leftover set (for example after switching to
+// client mode) costs one fsync per batch, not one per record. It never takes
+// mu, so it runs fully in parallel with AddProvider and GetProviders.
+//
+// Deletes are chosen from the query snapshot but applied at commit, so a flush
+// landing in between writes the fresh record and clears pending, leaving it on
+// disk for this commit to remove. That provider is gone from this server until
+// its next reprovide. The race is accepted rather than closed: closing it would
+// put GC back on mu, re-reading every staged key under the write lock, and it
+// only opens for a record already past provideValidity, on a store whose
+// records are best-effort and republished well before they expire.
+//
+// Reads never serve an expired record either way: getProviderSetForKey drops
+// entries past provideValidity, overlays pending on top of loadProviderSet,
+// and unqueried entries age out of the LRU.
 func (pm *ProviderManager) collectExpired(ctx context.Context) {
+	now := time.Now()
+
 	res, err := pm.dstore.Query(ctx, dsq.Query{Prefix: ProvidersKeyPrefix})
 	if err != nil {
 		log.Error("provider record GC query failed: ", err)
@@ -411,7 +538,29 @@ func (pm *ProviderManager) collectExpired(ctx context.Context) {
 	}
 	defer func() { _ = res.Close() }()
 
-	now := time.Now()
+	batch, err := pm.dstore.Batch(ctx)
+	if err != nil {
+		log.Error("provider record GC batch failed: ", err)
+		return
+	}
+	n := 0
+	commit := func() bool {
+		if n == 0 {
+			return true
+		}
+		if err := batch.Commit(ctx); err != nil {
+			log.Error("failed to commit provider record GC batch: ", err)
+			return false
+		}
+		n = 0
+		batch, err = pm.dstore.Batch(ctx)
+		if err != nil {
+			log.Error("provider record GC batch failed: ", err)
+			return false
+		}
+		return true
+	}
+
 	for e := range res.Next() {
 		if ctx.Err() != nil {
 			return
@@ -423,9 +572,15 @@ func (pm *ProviderManager) collectExpired(ctx context.Context) {
 
 		t, err := readTimeValue(e.Value)
 		if err != nil || now.Sub(t) > pm.provideValidity {
-			if err := pm.dstore.Delete(ctx, ds.RawKey(e.Key)); err != nil && !errors.Is(err, ds.ErrNotFound) {
+			if err := batch.Delete(ctx, ds.RawKey(e.Key)); err != nil && !errors.Is(err, ds.ErrNotFound) {
 				log.Error("failed to remove provider record from disk: ", err)
+				continue
+			}
+			n++
+			if n >= batchBufferSize && !commit() {
+				return
 			}
 		}
 	}
+	commit()
 }

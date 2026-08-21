@@ -3,7 +3,7 @@ module github.com/libp2p/go-libp2p-kad-dht
 go 1.25.7
 
 require (
-	github.com/gammazero/cascadeq v0.2.0
+	github.com/gammazero/cascadeq v0.2.1
 	github.com/gammazero/deque v1.2.1
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
@@ -63,7 +63,7 @@ require (
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
-	github.com/gammazero/fsutil v0.2.0 // indirect
+	github.com/gammazero/fsutil v0.4.0 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

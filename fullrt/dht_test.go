@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -621,4 +622,135 @@ func TestProviderManagerOptsReachTheManager(t *testing.T) {
 		)
 		require.Len(t, addAndGet(t, frt), 1, "the fullrt-native validity must override the DHTOption one")
 	})
+}
+
+// reportingCrawler reports a fixed set of peers through handleSuccess and then
+// returns, without dialling any of them. That is the shape of a crawler that
+// replays a persisted routing table, and the case the default route table
+// filter rejects: the host has no connection to any peer it reports.
+type reportingCrawler struct {
+	peers []peer.ID
+	ran   chan struct{}
+}
+
+var _ crawler.Crawler = (*reportingCrawler)(nil)
+
+func newReportingCrawler(peers ...peer.ID) *reportingCrawler {
+	return &reportingCrawler{peers: peers, ran: make(chan struct{})}
+}
+
+func (c *reportingCrawler) Run(_ context.Context, _ []*peer.AddrInfo, handleSuccess crawler.HandleQueryResult, _ crawler.HandleQueryFail) {
+	for _, p := range c.peers {
+		handleSuccess(p, nil)
+	}
+	close(c.ran)
+}
+
+// waitForCrawl blocks until runCrawler has finished rebuilding the routing table
+// from a crawl. Without it a test that asserts the table is *empty* would pass
+// before the crawl had run at all, which is no assertion.
+func waitForCrawl(t *testing.T, frt *FullRT) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		frt.rtLk.RLock()
+		defer frt.rtLk.RUnlock()
+		return !frt.lastCrawlTime.IsZero()
+	}, 10*time.Second, 5*time.Millisecond, "the crawl never completed")
+}
+
+// TestRouteTableFilterDefaultDropsUnreportedPeers is the regression guard for the
+// whole change: with no option the default kaddht.PublicRoutingTableFilter still
+// applies, and a peer the crawler reports without an open connection to it is
+// kept out of the routing table.
+func TestRouteTableFilterDefaultDropsUnconnectedPeers(t *testing.T) {
+	peers := []peer.ID{newTestPeerID(t), newTestPeerID(t), newTestPeerID(t)}
+	c := newReportingCrawler(peers...)
+
+	frt := newTestFullRT(t, WithCrawler(c))
+	<-c.ran
+	waitForCrawl(t, frt)
+
+	require.Empty(t, frt.Stat(), "the default filter must drop peers the host has no connection to")
+	require.False(t, frt.Ready(), "an empty routing table is not ready")
+	for _, p := range peers {
+		require.Empty(t, frt.h.Network().ConnsToPeer(p), "the stub crawler must not have dialled anything")
+	}
+}
+
+// TestRouteTableFilterSuppliedFilterIsHonoured is the point of the option: a
+// caller whose crawler reports peers it did not dial can supply a filter that
+// admits them, and they reach the routing table.
+func TestRouteTableFilterSuppliedFilterIsHonoured(t *testing.T) {
+	peers := []peer.ID{newTestPeerID(t), newTestPeerID(t), newTestPeerID(t)}
+	c := newReportingCrawler(peers...)
+
+	var seen []peer.ID
+	var gotDHT []any
+	var seenLk sync.Mutex
+	frt := newTestFullRT(t, WithCrawler(c), WithRouteTableFilter(func(d any, p peer.ID) bool {
+		seenLk.Lock()
+		defer seenLk.Unlock()
+		seen = append(seen, p)
+		gotDHT = append(gotDHT, d)
+		return true
+	}))
+	<-c.ran
+	waitForCrawl(t, frt)
+
+	stat := frt.Stat()
+	require.Len(t, stat, len(peers))
+	inTable := make(map[peer.ID]struct{}, len(stat))
+	for _, p := range stat {
+		inTable[p] = struct{}{}
+	}
+	for _, p := range peers {
+		require.Contains(t, inTable, p)
+	}
+
+	seenLk.Lock()
+	require.ElementsMatch(t, peers, seen, "the filter must see every peer the crawler reports")
+	// The filter receives the *FullRT itself, which is what lets a real caller
+	// delegate to kaddht.PublicRoutingTableFilter and widen it rather than
+	// reimplement it.
+	for _, d := range gotDHT {
+		require.Same(t, frt, d)
+	}
+	seenLk.Unlock()
+
+	// bootstrapPeers is empty here, so Ready needs a table larger than 1.
+	require.Empty(t, frt.bootstrapPeers)
+	require.True(t, frt.Ready(), "a freshly crawled table above the bootstrap count is ready")
+}
+
+// TestRouteTableFilterRejectAll pins the other end of the range.
+func TestRouteTableFilterRejectAll(t *testing.T) {
+	c := newReportingCrawler(newTestPeerID(t), newTestPeerID(t), newTestPeerID(t))
+
+	frt := newTestFullRT(t, WithCrawler(c), WithRouteTableFilter(func(any, peer.ID) bool { return false }))
+	<-c.ran
+	waitForCrawl(t, frt)
+
+	require.Empty(t, frt.Stat())
+	require.False(t, frt.Ready())
+}
+
+// TestWithRouteTableFilterRejectsNil keeps the option from installing a filter
+// that would panic on the first crawl.
+func TestWithRouteTableFilterRejectsNil(t *testing.T) {
+	h, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, h.Close()) })
+
+	_, err = NewFullRT(h, "", WithCrawler(blockingCrawler{}), DHTOption(kaddht.BootstrapPeers()), WithRouteTableFilter(nil))
+	require.ErrorContains(t, err, "route table filter must not be nil")
+}
+
+// newTestPeerID returns a peer ID distinct from any other the test generates.
+func newTestPeerID(t *testing.T) peer.ID {
+	t.Helper()
+	_, pub, err := crypto.GenerateEd25519Key(rand.Reader)
+	require.NoError(t, err)
+	id, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	return id
 }

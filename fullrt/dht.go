@@ -100,8 +100,12 @@ type FullRT struct {
 	messageSender  dht_pb.MessageSender
 
 	filterFromTable kaddht.QueryFilterFunc
-	rtLk            sync.RWMutex
-	rt              *trie.Trie
+	// routeTableFilter decides which of the peers the crawler reports enter the
+	// routing table. Defaults to kaddht.PublicRoutingTableFilter; see
+	// WithRouteTableFilter.
+	routeTableFilter kaddht.RouteTableFilterFunc
+	rtLk             sync.RWMutex
+	rt               *trie.Trie
 
 	kMapLk       sync.RWMutex
 	keyToPeerMap map[string]peer.ID
@@ -149,6 +153,7 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		waitFrac:               0.3,
 		timeoutPerOp:           5 * time.Second,
 		ipDiversityFilterLimit: amino.DefaultMaxPeersPerIPGroup,
+		routeTableFilter:       kaddht.PublicRoutingTableFilter,
 	}
 	if err := fullrtcfg.apply(options...); err != nil {
 		return nil, err
@@ -233,18 +238,19 @@ func NewFullRT(h host.Host, protocolPrefix protocol.ID, options ...Option) (*Ful
 		ctx:    ctx,
 		cancel: cancel,
 
-		Validator:       dhtcfg.Validator,
-		ProviderManager: pm,
-		valueStore:      valueStore,
-		h:               h,
-		crawler:         fullrtcfg.crawler,
-		messageSender:   ms,
-		protoMessenger:  protoMessenger,
-		filterFromTable: kaddht.PublicQueryFilter,
-		shuffle:         rand.Shuffle,
-		rt:              trie.New(),
-		keyToPeerMap:    make(map[string]peer.ID),
-		bucketSize:      dhtcfg.BucketSize,
+		Validator:        dhtcfg.Validator,
+		ProviderManager:  pm,
+		valueStore:       valueStore,
+		h:                h,
+		crawler:          fullrtcfg.crawler,
+		messageSender:    ms,
+		protoMessenger:   protoMessenger,
+		filterFromTable:  kaddht.PublicQueryFilter,
+		routeTableFilter: fullrtcfg.routeTableFilter,
+		shuffle:          rand.Shuffle,
+		rt:               trie.New(),
+		keyToPeerMap:     make(map[string]peer.ID),
+		bucketSize:       dhtcfg.BucketSize,
 
 		peerAddrs:      make(map[peer.ID][]ma.Multiaddr),
 		bootstrapPeers: bsPeers,
@@ -371,7 +377,7 @@ func (dht *FullRT) runCrawler(ctx context.Context) {
 		limitErrOnce := sync.Once{}
 		dht.crawler.Run(ctx, addrs,
 			func(p peer.ID, rtPeers []*peer.AddrInfo) {
-				keep := kaddht.PublicRoutingTableFilter(dht, p)
+				keep := dht.routeTableFilter(dht, p)
 				if !keep {
 					return
 				}

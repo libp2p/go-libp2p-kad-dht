@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -127,8 +128,8 @@ func (s *SweepingProvider) Close() error {
 	if s.cleanupFuncs != nil {
 		// Cleanup keystore and datastore if we created them
 		var errs []error
-		for i := len(s.cleanupFuncs) - 1; i >= 0; i-- { // LIFO: last-added is cleaned up first
-			if f := s.cleanupFuncs[i]; f != nil {
+		for _, f := range slices.Backward(s.cleanupFuncs) { // LIFO: last-added is cleaned up first
+			if f != nil {
 				if err := f(); err != nil {
 					errs = append(errs, err)
 				}

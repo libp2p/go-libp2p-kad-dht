@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -519,8 +520,8 @@ func (s *SweepingProvider) Close() error {
 
 func cleanup(funcs []func() error) error {
 	var errs []error
-	for i := len(funcs) - 1; i >= 0; i-- { // LIFO: last-added is cleaned up first
-		if f := funcs[i]; f != nil {
+	for _, f := range slices.Backward(funcs) { // LIFO: last-added is cleaned up first
+		if f != nil {
 			if err := f(); err != nil {
 				errs = append(errs, err)
 			}

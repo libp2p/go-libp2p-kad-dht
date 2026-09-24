@@ -673,9 +673,7 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 
 		writerCtx, stopWriter := context.WithCancel(ctx)
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for writerCtx.Err() == nil {
 				for _, key := range live {
 					if err := pm.AddProvider(writerCtx, key, peer.AddrInfo{ID: prov}); err != nil {
@@ -685,7 +683,7 @@ func TestProviderGCUnderConcurrentWrites(t *testing.T) {
 				}
 				time.Sleep(cleanupInterval / 2)
 			}
-		}()
+		})
 
 		// Let the expiring records age out and GC run several times while the writer
 		// keeps the live records fresh. Synthetic time makes this instant, and the

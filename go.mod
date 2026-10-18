@@ -3,8 +3,8 @@ module github.com/libp2p/go-libp2p-kad-dht
 go 1.26.0
 
 require (
-	github.com/gammazero/cascadeq v0.2.1
-	github.com/gammazero/deque v1.2.1
+	github.com/gammazero/cascadeq v0.3.0
+	github.com/gammazero/deque v1.2.2
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/guillaumemichel/reservedpool v0.3.0
@@ -62,7 +62,7 @@ require (
 	github.com/dunglas/httpsfv v1.1.1 // indirect
 	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
-	github.com/gammazero/fsutil v0.4.0 // indirect
+	github.com/gammazero/fsutil v0.4.1 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -139,7 +139,7 @@ require (
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

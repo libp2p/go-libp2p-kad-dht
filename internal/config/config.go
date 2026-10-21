@@ -28,6 +28,10 @@ const DefaultPrefix protocol.ID = amino.ProtocolPrefix
 // ModeOpt describes what mode the dht should operate in
 type ModeOpt int
 
+// BootstrapOrderOpt selects which peers the DHT dials first when its routing
+// table is empty.
+type BootstrapOrderOpt int
+
 // QueryFilterFunc is a filter applied when considering peers to dial when querying
 type QueryFilterFunc func(dht any, ai peer.AddrInfo) bool
 
@@ -69,9 +73,13 @@ type Config struct {
 		CheckInterval       time.Duration
 		PeerFilter          RouteTableFilterFunc
 		DiversityFilter     peerdiversity.PeerIPGroupFilter
+		// PersistInterval is how often the routing table is saved to the
+		// Datastore; zero disables saving and seeding from saved peers.
+		PersistInterval time.Duration
 	}
 
 	BootstrapPeers func() []peer.AddrInfo
+	BootstrapOrder BootstrapOrderOpt
 	AddressFilter  func([]ma.Multiaddr) []ma.Multiaddr
 	OnRequestHook  func(ctx context.Context, s network.Stream, req *pb.Message)
 
@@ -152,6 +160,7 @@ var Defaults = func(o *Config) error {
 	o.RoutingTable.RefreshInterval = 10 * time.Minute
 	o.RoutingTable.AutoRefresh = true
 	o.RoutingTable.PeerFilter = EmptyRTFilter
+	o.RoutingTable.PersistInterval = time.Hour
 
 	o.MaxRecordAge = amino.DefaultMaxRecordAge
 	o.ValueGCInterval = amino.DefaultValueGCInterval

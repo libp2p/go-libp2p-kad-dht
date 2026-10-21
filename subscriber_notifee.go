@@ -57,7 +57,7 @@ func (dht *IpfsDHT) startNetworkSubscriber() error {
 					// to our closet peers & so in the true spirit of Zen, searching for ourself in the network really is the best way
 					// to to forge connections with those matter.
 					if dht.autoRefresh || dht.testAddressUpdateProcessing {
-						dht.rtRefreshManager.RefreshNoWait()
+						dht.requestRefresh()
 					}
 				case event.EvtPeerProtocolsUpdated:
 					handlePeerChangeEvent(dht, evt.Peer)

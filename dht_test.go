@@ -30,6 +30,7 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multistream"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stretchr/testify/assert"
@@ -2857,4 +2858,53 @@ func TestValueGCRemovesExpiredRecords(t *testing.T) {
 
 	require.Eventuallyf(t, func() bool { return !hasValueKey() },
 		2*time.Second, 10*time.Millisecond, "value GC must sweep the expired record")
+}
+
+// TestHandleNewMessageRejectsTooManyPeerEntries checks that the server resets the
+// stream on a request carrying more peer entries than its frame can hold.
+func TestHandleNewMessageRejectsTooManyPeerEntries(t *testing.T) {
+	ctx := t.Context()
+	server := setupDHT(ctx, t, false)
+
+	client, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+	require.NoError(t, client.Connect(ctx, peer.AddrInfo{ID: server.self, Addrs: server.host.Addrs()}))
+
+	// The other requests are this valid FIND_NODE plus extra entries, so only
+	// the bound, not a handler error, can reset their stream.
+	findNode, err := proto.Marshal(&pb.Message{Type: pb.Message_FIND_NODE, Key: []byte(server.self)})
+	require.NoError(t, err)
+	emptyPeers := append(bytes.Clone(findNode), bytes.Repeat([]byte{0x42, 0x00}, 50_000)...)
+	emptyAddrs := protowire.AppendTag(bytes.Clone(findNode), 8, protowire.BytesType)
+	emptyAddrs = protowire.AppendBytes(emptyAddrs, bytes.Repeat([]byte{0x12, 0x00}, 200_000))
+
+	tests := []struct {
+		name      string
+		payload   []byte
+		wantReply bool
+	}{
+		{"valid request is answered", findNode, true},
+		{"empty peer entries reset the stream", emptyPeers, false},
+		{"empty nested addrs reset the stream", emptyAddrs, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := client.NewStream(ctx, server.self, server.protocols[0])
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = s.Reset() })
+
+			require.NoError(t, msgio.NewVarintWriter(s).WriteMsg(tt.payload))
+			require.NoError(t, s.SetReadDeadline(time.Now().Add(10*time.Second)))
+			data, err := msgio.NewVarintReaderSize(s, network.MessageSizeMax).ReadMsg()
+			if !tt.wantReply {
+				require.Error(t, err, "server must reset the stream rather than answer")
+				return
+			}
+			require.NoError(t, err)
+			var resp pb.Message
+			require.NoError(t, proto.Unmarshal(data, &resp))
+			require.Equal(t, pb.Message_FIND_NODE, resp.GetType())
+		})
+	}
 }

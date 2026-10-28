@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -131,6 +132,71 @@ func TestHandlePingDropsStuffedPeerRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Emptyf(t, resp.CloserPeers, "ping response must not echo closer peers")
 	require.Emptyf(t, resp.ProviderPeers, "ping response must not echo provider peers")
+}
+
+// addProviderSender returns a peer ID to send ADD_PROVIDER from.
+func addProviderSender(t *testing.T) peer.ID {
+	t.Helper()
+	_, pub, err := crypto.GenerateEd25519Key(rand.NewChaCha8([32]byte{9}))
+	require.NoError(t, err)
+	p, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	return p
+}
+
+// TestHandleAddProviderStoresFirstSelfRecord checks that only the first provider
+// record matching the sender is stored: records for other peers are skipped, and
+// later records for the sender are ignored.
+func TestHandleAddProviderStoresFirstSelfRecord(t *testing.T) {
+	ctx := t.Context()
+	d := setupDHT(ctx, t, false)
+	p := addProviderSender(t)
+
+	addr := func(port int) []byte { return ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/tcp/%d", port)).Bytes() }
+	pmes := &pb.Message{
+		Type: pb.Message_ADD_PROVIDER,
+		Key:  []byte("some-key"),
+		ProviderPeers: []*pb.Message_Peer{
+			{Id: []byte("other-peer"), Addrs: [][]byte{addr(1)}},
+			{Id: []byte(p), Addrs: [][]byte{addr(2)}},
+			{Id: []byte(p), Addrs: [][]byte{addr(3)}},
+		},
+	}
+
+	_, err := d.handleAddProvider(ctx, p, pmes)
+	require.NoError(t, err)
+
+	stored := d.host.Peerstore().Addrs(p)
+	require.Len(t, stored, 1)
+	require.Equal(t, "/ip4/1.2.3.4/tcp/2", stored[0].String())
+}
+
+// TestHandleAddProviderParsesOnlyFirstSelfRecord checks that records after the
+// sender's first one are skipped without parsing their addresses.
+func TestHandleAddProviderParsesOnlyFirstSelfRecord(t *testing.T) {
+	ctx := t.Context()
+	d := setupDHT(ctx, t, false)
+	p := addProviderSender(t)
+
+	// Each record fills pb.MaxPeerRecordSize, so parsing them all would show.
+	addrs := make([][]byte, 800)
+	for i := range addrs {
+		addrs[i] = ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/tcp/%d", i+1)).Bytes()
+	}
+	pmes := &pb.Message{Type: pb.Message_ADD_PROVIDER, Key: []byte("some-key")}
+	for range 300 {
+		pmes.ProviderPeers = append(pmes.ProviderPeers, &pb.Message_Peer{Id: []byte(p), Addrs: addrs})
+	}
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := d.handleAddProvider(ctx, p, pmes)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+
+	got := float64(after.TotalAlloc-before.TotalAlloc) / (1 << 20)
+	require.Lessf(t, got, 4.0, "handling %d records allocated %.1f MB, more than parsing one", len(pmes.ProviderPeers), got)
 }
 
 func BenchmarkHandleFindPeer(b *testing.B) {

@@ -1,12 +1,15 @@
 package dht_pb
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	logging "github.com/ipfs/go-log/v2"
 	ma "github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 )
 
 var log = logging.Logger("dht.pb")
@@ -26,11 +29,25 @@ const (
 	peerIDField         protowire.Number = 1
 	peerAddrsField      protowire.Number = 2
 	peerConnectionField protowire.Number = 3
+	closerPeersField    protowire.Number = 8
+	providerPeersField  protowire.Number = 9
 )
 
 // peerAddrsTagSize is a repeated address field's tag size, added once per
 // address when sizing a record.
 var peerAddrsTagSize = protowire.SizeTag(peerAddrsField)
+
+// Smallest wire size of a real repeated entry. Unmarshal rejects a frame
+// shorter than the sum of these minimums over its entries; addresses are nested
+// in peer entries, so the charges never overlap.
+const (
+	minPeerEntryWireSize = 38 // tag, length, id field with a 34-byte sha256 peer ID
+	minAddrEntryWireSize = 4  // tag, length, 2-byte multiaddr such as /p2p-circuit
+)
+
+// ErrTooManyPeerEntries is returned when a DHT message carries more peer
+// entries than its frame size can hold.
+var ErrTooManyPeerEntries = errors.New("dht message: too many peer entries")
 
 // boundPeerRecordAddrs trims pbp.Addrs in place, dropping trailing addresses
 // until the peer ID, addresses and connection flag serialize within
@@ -60,6 +77,70 @@ func boundPeerRecordAddrs(pbp *Message_Peer) {
 			return
 		}
 	}
+}
+
+// Unmarshal decodes a DHT message, first rejecting frames that carry more
+// repeated peer and address entries than real ones could fit in. The check walks
+// the wire format without allocating, so it runs before proto.Unmarshal builds
+// any entry.
+func Unmarshal(data []byte, m *Message) error {
+	if !peerEntriesFitFrame(data) {
+		return ErrTooManyPeerEntries
+	}
+	return proto.Unmarshal(data, m)
+}
+
+// peerEntriesFitFrame reports whether the minimum wire sizes of the peer entries
+// in data, and of the addresses nested in each, fit within len(data). Malformed
+// input is left for proto.Unmarshal to report, so error semantics are unchanged.
+func peerEntriesFitFrame(data []byte) bool {
+	budget := len(data)
+	for len(data) > 0 {
+		num, typ, tagLen := protowire.ConsumeTag(data)
+		if tagLen < 0 {
+			return true
+		}
+		data = data[tagLen:]
+
+		valLen := protowire.ConsumeFieldValue(num, typ, data)
+		if valLen < 0 {
+			return true
+		}
+
+		if typ == protowire.BytesType && (num == closerPeersField || num == providerPeersField) {
+			body, _ := protowire.ConsumeBytes(data) // already validated by ConsumeFieldValue
+			budget -= minPeerEntryWireSize + addrEntryCount(body)*minAddrEntryWireSize
+			if budget < 0 {
+				return false
+			}
+		}
+		data = data[valLen:]
+	}
+	return true
+}
+
+// addrEntryCount returns the number of addrs entries in an encoded Message.Peer.
+// Message.Peer has no other repeated fields, so one level of descent suffices.
+func addrEntryCount(body []byte) int {
+	count := 0
+	for len(body) > 0 {
+		num, typ, tagLen := protowire.ConsumeTag(body)
+		if tagLen < 0 {
+			return count
+		}
+		body = body[tagLen:]
+
+		valLen := protowire.ConsumeFieldValue(num, typ, body)
+		if valLen < 0 {
+			return count
+		}
+
+		if typ == protowire.BytesType && num == peerAddrsField {
+			count++
+		}
+		body = body[valLen:]
+	}
+	return count
 }
 
 type PeerRoutingInfo struct {
@@ -102,8 +183,11 @@ func peerInfoToPBPeer(p peer.AddrInfo) *Message_Peer {
 	return pbp
 }
 
-// PBPeerToPeer turns a *Message_Peer into its peer.AddrInfo counterpart
+// PBPeerToPeerInfo turns a *Message_Peer into its peer.AddrInfo counterpart.
+// Invalid addresses are silently omitted. The address list is bounded to
+// MaxPeerRecordSize before conversion, trimming pbp.Addrs in place.
 func PBPeerToPeerInfo(pbp *Message_Peer) peer.AddrInfo {
+	boundPeerRecordAddrs(pbp)
 	return peer.AddrInfo{
 		ID:    peer.ID(pbp.Id),
 		Addrs: pbp.Addresses(),
@@ -149,14 +233,11 @@ func PeerRoutingInfosToPBPeers(peers []PeerRoutingInfo) []*Message_Peer {
 	return pbpeers
 }
 
-// PBPeersToPeerInfos converts given []*Message_Peer into []peer.AddrInfo.
-// Invalid addresses will be silently omitted. Each record's address list is
-// bounded to MaxPeerRecordSize before conversion — trimming pbps[i].Addrs in
-// place — so a peer record keeps a predictable peerstore footprint.
+// PBPeersToPeerInfos converts given []*Message_Peer into []peer.AddrInfo, as
+// PBPeerToPeerInfo does for each record, trimming pbps[i].Addrs in place.
 func PBPeersToPeerInfos(pbps []*Message_Peer) []*peer.AddrInfo {
 	peers := make([]*peer.AddrInfo, 0, len(pbps))
 	for _, pbp := range pbps {
-		boundPeerRecordAddrs(pbp)
 		ai := PBPeerToPeerInfo(pbp)
 		peers = append(peers, &ai)
 	}

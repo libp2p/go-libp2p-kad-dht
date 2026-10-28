@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"slices"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -245,33 +246,31 @@ func (dht *IpfsDHT) handleAddProvider(ctx context.Context, p peer.ID, pmes *pb.M
 
 	logger.Debugw("adding provider", "from", p, "key", internal.LoggableProviderRecordBytes(key))
 
-	// add provider should use the address given in the message
-	pinfos := pb.PBPeersToPeerInfos(pmes.GetProviderPeers())
-	success := false
-	for _, pi := range pinfos {
-		if pi.ID != p {
-			// we should ignore this provider record! not from originator.
-			// (we should sign them and check signature later...)
-			logger.Debugw("received provider from wrong peer", "from", p, "peer", pi.ID)
-			continue
-		}
-
-		if len(pi.Addrs) < 1 {
-			logger.Debugw("no valid addresses for provider", "from", p)
-			continue
-		}
-
-		// We run the addrs filter after checking for the length, this allows
-		// transient nodes with varying /p2p-circuit addresses to still have their
-		// announcement go through.
-		addrs := dht.filterAddrs(pi.Addrs)
-		if err := dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs}); err != nil {
-			logger.Warnw("failed to store provider record", "from", p, "key", internal.LoggableProviderRecordBytes(key), "error", err)
-			continue
-		}
-		success = true
+	// Providers only announce themselves, once per message, so only the first
+	// record from the sender is used. Records for other peers are ignored (we
+	// should sign them and check signature later...), and they are skipped
+	// before their addresses are parsed.
+	idx := slices.IndexFunc(pmes.GetProviderPeers(), func(pbp *pb.Message_Peer) bool {
+		return peer.ID(pbp.GetId()) == p
+	})
+	if idx < 0 {
+		logger.Debugw("no provider record from sender", "from", p)
+		return nil, errors.New("handleAddProvider no valid provider")
 	}
-	if !success {
+
+	// add provider should use the address given in the message
+	pi := pb.PBPeerToPeerInfo(pmes.GetProviderPeers()[idx])
+	if len(pi.Addrs) < 1 {
+		logger.Debugw("no valid addresses for provider", "from", p)
+		return nil, errors.New("handleAddProvider no valid provider")
+	}
+
+	// We run the addrs filter after checking for the length, this allows
+	// transient nodes with varying /p2p-circuit addresses to still have their
+	// announcement go through.
+	addrs := dht.filterAddrs(pi.Addrs)
+	if err := dht.providerStore.AddProvider(ctx, key, peer.AddrInfo{ID: pi.ID, Addrs: addrs}); err != nil {
+		logger.Warnw("failed to store provider record", "from", p, "key", internal.LoggableProviderRecordBytes(key), "error", err)
 		return nil, errors.New("handleAddProvider no valid provider")
 	}
 

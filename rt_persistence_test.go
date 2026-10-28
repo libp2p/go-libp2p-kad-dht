@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/version"
 	"math/rand/v2"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	detectrace "github.com/ipfs/go-detect-race"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/test"
@@ -270,7 +273,7 @@ func TestRoutingTablePersistenceOptions(t *testing.T) {
 }
 
 func TestRoutingTableSurvivesRestart(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		dhts := newMockDHTs(t)
 		dstore := dssync.MutexWrap(ds.NewMapDatastore())
 		// Nobody connects to the bootstrap peer, so only the saved peers can
@@ -293,7 +296,7 @@ func TestRoutingTableSurvivesRestart(t *testing.T) {
 }
 
 func TestRoutingTableSurvivesRestartWithoutBootstrapPeers(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		dhts := newMockDHTs(t)
 		dstore := dssync.MutexWrap(ds.NewMapDatastore())
 		first, others := dhts.addConnected(12, Datastore(dstore))
@@ -306,7 +309,7 @@ func TestRoutingTableSurvivesRestartWithoutBootstrapPeers(t *testing.T) {
 }
 
 func TestCloseSavesOnce(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		dhts := newMockDHTs(t)
 		dstore := dssync.MutexWrap(ds.NewMapDatastore())
 		d, _ := dhts.addConnected(12, Datastore(dstore))
@@ -335,7 +338,7 @@ func TestRoutingTableSavedPeriodically(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
+			bubble(t, func(t *testing.T) {
 				dhts := newMockDHTs(t)
 				dstore := dssync.MutexWrap(ds.NewMapDatastore())
 				d, others := dhts.addConnected(12, append(tt.opts, Datastore(dstore))...)
@@ -366,7 +369,7 @@ func TestRoutingTableSavedPeriodically(t *testing.T) {
 }
 
 func TestHeldRefreshRunsWhenHoldEnds(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		dhts := newMockDHTs(t)
 		// d knows only hub, so only a refresh finds hub's peers.
 		hub, _ := dhts.addConnected(12)
@@ -382,6 +385,20 @@ func TestHeldRefreshRunsWhenHoldEnds(t *testing.T) {
 		synctest.Wait()
 		require.Greater(t, d.routingTable.Size(), 1, "the held refresh didn't run")
 	})
+}
+
+// bubble runs f in a synctest bubble. Before Go 1.27, the race detector can
+// crash when timers in a bubble fire at the same instant, as the restore's dial
+// timeouts do (https://github.com/golang/go/issues/76691), so race runs on
+// older Go are skipped.
+//
+// TODO: replace bubble with synctest.Test once go.mod requires Go 1.27.
+func bubble(t *testing.T, f func(t *testing.T)) {
+	t.Helper()
+	if detectrace.WithRace() && version.Compare(runtime.Version(), "go1.27") < 0 {
+		t.Skip("synctest crashes under the race detector before Go 1.27: https://github.com/golang/go/issues/76691")
+	}
+	synctest.Test(t, f)
 }
 
 func savedSnapshot(t *testing.T, dstore ds.Datastore, key ds.Key) *rtSnapshot {
@@ -680,7 +697,7 @@ func TestSeedingOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
+			bubble(t, func(t *testing.T) {
 				n := newFakeSeedNet()
 				saved := n.add("saved", tt.savedCount, tt.saved)
 				bootstrap := n.add("bootstrap", tt.bootstrappers, tt.bootstrap)
@@ -735,7 +752,7 @@ func TestReleaseRefreshHoldAtThreshold(t *testing.T) {
 }
 
 func TestSeedingFallsBackAtDeadline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		// One live peer in thirty: enough to rule out the early abort, too
 		// few to reach the threshold before the deadline, which comes long
@@ -759,7 +776,7 @@ func TestSeedingFallsBackAtDeadline(t *testing.T) {
 }
 
 func TestSeedingSoftTimeoutFreesSlots(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		// Every peer answers between the soft and the hard timeout.
 		latency := seedDialSoftTimeout * 3 / 2
@@ -781,7 +798,7 @@ func TestSeedingSoftTimeoutFreesSlots(t *testing.T) {
 }
 
 func TestSeedingAbortsWhenNothingAnswers(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		saved := n.add("saved", 200, hangingPeer)
 		bootstrap := n.add("bootstrap", 2, livePeer)
@@ -798,7 +815,7 @@ func TestSeedingAbortsWhenNothingAnswers(t *testing.T) {
 }
 
 func TestSeedingGivesUpAfterDialTimeout(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		// The refusals alone exceed 2*seedDialConcurrency failures at once,
 		// but the sweep only gives up when the first hanging dials time out.
@@ -815,7 +832,7 @@ func TestSeedingGivesUpAfterDialTimeout(t *testing.T) {
 }
 
 func TestSeedingSurvivesQuickRefusals(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		// The live peers take a second to answer, while far more than
 		// 2*seedDialConcurrency dead ones refuse at once.
@@ -830,7 +847,7 @@ func TestSeedingSurvivesQuickRefusals(t *testing.T) {
 }
 
 func TestSeedingStopsOnCancel(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		saved := n.add("saved", 100, hangingPeer)
 		bootstrap := n.add("bootstrap", 1, refusing)
@@ -851,7 +868,7 @@ func TestSeedingStopsOnCancel(t *testing.T) {
 }
 
 func TestSeedingConcurrentStartsBothAtOnce(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	bubble(t, func(t *testing.T) {
 		n := newFakeSeedNet()
 		saved := n.add("saved", 40, livePeer)
 		bootstrap := n.add("bootstrap", 2, livePeer)

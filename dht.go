@@ -140,6 +140,8 @@ type IpfsDHT struct {
 	// connecting to the network).
 	bootstrapPeers func() []peer.AddrInfo
 
+	persistence rtPersistence
+
 	disableFixLowPeers bool
 	fixLowPeersChan    chan struct{}
 
@@ -261,6 +263,10 @@ func New(h host.Host, options ...Option) (_ *IpfsDHT, err error) {
 	// since RT membership is decoupled from connectivity
 	dht.wg.Go(dht.persistRTPeersInPeerStore)
 
+	if dht.persistence.interval > 0 {
+		dht.startRoutingTablePersistence(cfg.RoutingTable.RefreshInterval)
+	}
+
 	dht.rtPeerLoop()
 
 	// Fill routing table with currently connected peers that are DHT servers
@@ -363,6 +369,9 @@ func makeDHT(h host.Host, cfg dhtcfg.Config) (*IpfsDHT, error) {
 	}
 	dht.routingTable = rt
 	dht.bootstrapPeers = cfg.BootstrapPeers
+	dht.persistence.bootstrapOrder = cfg.BootstrapOrder
+	dht.persistence.key = snapshotKey(v1proto)
+	dht.persistence.interval = cfg.RoutingTable.PersistInterval
 
 	dht.lookupCheckTimeout = cfg.RoutingTable.RefreshQueryTimeout
 
@@ -526,40 +535,8 @@ func (dht *IpfsDHT) fixLowPeers() {
 		dht.peerFound(p)
 	}
 
-	// TODO Active Bootstrapping
-	// We should first use non-bootstrap peers we knew of from previous
-	// snapshots of the Routing Table before we connect to the bootstrappers.
-	// See https://github.com/libp2p/go-libp2p-kad-dht/issues/387.
-	if dht.routingTable.Size() == 0 && dht.bootstrapPeers != nil {
-		bootstrapPeers := dht.bootstrapPeers()
-		if len(bootstrapPeers) == 0 {
-			// No point in continuing, we have no peers!
-			return
-		}
-
-		found := 0
-		for _, i := range rand.Perm(len(bootstrapPeers)) {
-			ai := bootstrapPeers[i]
-			err := dht.Host().Connect(dht.ctx, ai)
-			if err == nil {
-				found++
-			} else {
-				logger.Warnw("failed to bootstrap", "peer", ai.ID, "error", err)
-			}
-
-			// Wait for two bootstrap peers, or try them all.
-			//
-			// Why two? In theory, one should be enough
-			// normally. However, if the network were to
-			// restart and everyone connected to just one
-			// bootstrapper, we'll end up with a mostly
-			// partitioned network.
-			//
-			// So we always bootstrap with two random peers.
-			if found == maxNBoostrappers {
-				break
-			}
-		}
+	if dht.routingTable.Size() == 0 {
+		dht.seedRoutingTable()
 	}
 
 	// if we still don't have peers in our routing table(probably because Identify hasn't completed),
@@ -569,7 +546,7 @@ func (dht *IpfsDHT) fixLowPeers() {
 	}
 
 	if dht.autoRefresh {
-		dht.rtRefreshManager.RefreshNoWait()
+		dht.requestRefresh()
 	}
 }
 
@@ -637,6 +614,7 @@ func (dht *IpfsDHT) rtPeerLoop() {
 				if newlyAdded {
 					// peer was added to the RT, it can now be fixed if needed.
 					dht.fixRTIfNeeded()
+					dht.releaseRefreshHoldAtThreshold()
 				} else {
 					// the peer is already in our RT, but we just successfully queried it and so let's give it a
 					// bump on the query time so we don't ping it too soon for a liveliness check.
@@ -651,7 +629,7 @@ func (dht *IpfsDHT) rtPeerLoop() {
 				old := isBootsrapping
 				isBootsrapping = false
 				if old {
-					dht.rtRefreshManager.RefreshNoWait()
+					dht.requestRefresh()
 				}
 
 			case <-dht.ctx.Done():
@@ -880,6 +858,11 @@ func (dht *IpfsDHT) Close() error {
 	dht.cancel()
 	dht.wg.Wait()
 
+	var errs []error
+	if err := dht.saveRoutingTableOnClose(); err != nil {
+		errs = append(errs, err)
+	}
+
 	// providerStore and valueStore are absent on forked DHTs that disable the
 	// corresponding subsystem, so only close the ones that were constructed.
 	closes := []func() error{dht.rtRefreshManager.Close}
@@ -897,7 +880,6 @@ func (dht *IpfsDHT) Close() error {
 		}(c)
 	}
 
-	var errs []error
 	for range len(closes) {
 		err := <-errc
 		if err != nil {

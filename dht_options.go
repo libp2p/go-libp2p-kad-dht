@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -34,6 +35,24 @@ const (
 	ModeServer
 	// ModeAutoServer operates in the same way as ModeAuto, but acts as a server when reachability is unknown
 	ModeAutoServer
+)
+
+// BootstrapOrderOpt selects which peers the DHT dials first when its routing
+// table is empty.
+type BootstrapOrderOpt = dhtcfg.BootstrapOrderOpt
+
+const (
+	// BootstrapFirst dials the bootstrap peers first, and the peers saved
+	// from the previous routing table only if the bootstrap peers fail or
+	// none are configured.
+	BootstrapFirst BootstrapOrderOpt = iota
+	// PersistedFirst dials the peers saved from the previous routing table
+	// first, and the bootstrap peers only if fewer of them answer than a
+	// lookup queries at once (see Concurrency) within 20 seconds.
+	PersistedFirst
+	// Concurrent dials the saved peers and the bootstrap peers at the same
+	// time.
+	Concurrent
 )
 
 // DefaultPrefix is the application specific prefix attached to all DHT protocols by default.
@@ -338,6 +357,41 @@ func BootstrapPeersFunc(getBootstrapPeers func() []peer.AddrInfo) Option {
 	return func(c *dhtcfg.Config) error {
 		c.BootstrapPeers = getBootstrapPeers
 		return nil
+	}
+}
+
+// RoutingTablePersistence saves the routing table peers to the Datastore every
+// interval and when the DHT closes. The next time the routing table is empty,
+// for example after a restart, the DHT dials the saved peers alongside the
+// bootstrap peers, in the order set by BootstrapOrder. Zero disables both.
+// Close the DHT before its host: a closed host can dial no address, so there
+// is nothing left to save.
+//
+// Without bootstrap peers, the DHT dials only the saved peers. A DHT with no
+// bootstrap peers and persistence disabled dials no peer on its own.
+func RoutingTablePersistence(interval time.Duration) Option {
+	return func(c *dhtcfg.Config) error {
+		if interval < 0 {
+			return fmt.Errorf("routing table persistence interval must not be negative, got %s", interval)
+		}
+		c.RoutingTable.PersistInterval = interval
+		return nil
+	}
+}
+
+// BootstrapOrder sets which peers the DHT dials first when its routing table
+// is empty: the bootstrap peers, or the peers saved by RoutingTablePersistence.
+//
+// The default is BootstrapFirst.
+func BootstrapOrder(order BootstrapOrderOpt) Option {
+	return func(c *dhtcfg.Config) error {
+		switch order {
+		case BootstrapFirst, PersistedFirst, Concurrent:
+			c.BootstrapOrder = order
+			return nil
+		default:
+			return fmt.Errorf("unknown bootstrap order %d", order)
+		}
 	}
 }
 

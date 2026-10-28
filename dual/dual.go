@@ -118,6 +118,9 @@ func New(h host.Host, options ...Option) (*DHT, error) {
 			dht.ProtocolExtension(LanExtension),
 			dht.QueryFilter(dht.PrivateQueryFilter),
 			dht.RoutingTableFilter(dht.PrivateRoutingTableFilter),
+			// LAN peers come and go with the network the host is on, so a
+			// saved LAN routing table is rarely worth dialing.
+			dht.RoutingTablePersistence(0),
 			// filter out localhost IP addresses
 			dht.AddressFilter(func(addrs []ma.Multiaddr) []ma.Multiaddr {
 				return ma.FilterAddrs(addrs, func(a ma.Multiaddr) bool { return !manet.IsIPLoopback(a) })

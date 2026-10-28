@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p-kad-dht/internal"
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
@@ -17,6 +21,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	peerstore "github.com/libp2p/go-libp2p/core/peerstore"
+	peertest "github.com/libp2p/go-libp2p/core/test"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	"github.com/multiformats/go-multiaddr"
@@ -458,4 +463,47 @@ func assertUniqueMultiaddrs(t *testing.T, addrs []multiaddr.Multiaddr) {
 		}
 		set[string(addr.Bytes())] = true
 	}
+}
+
+// getRecorder records the keys read from a datastore.
+type getRecorder struct {
+	ds.Batching
+	mu   sync.Mutex
+	keys []string
+}
+
+func (r *getRecorder) Get(ctx context.Context, key ds.Key) ([]byte, error) {
+	r.mu.Lock()
+	r.keys = append(r.keys, key.String())
+	r.mu.Unlock()
+	return r.Batching.Get(ctx, key)
+}
+
+func (r *getRecorder) read(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Contains(r.keys, key)
+}
+
+// TestOnlyWANPersistsRoutingTable checks that, with the same options for both
+// halves, only the WAN DHT loads a routing table snapshot. It skips setupDHT,
+// whose ProtocolPrefix would drop the LAN extension and give both halves the
+// same snapshot key.
+func TestOnlyWANPersistsRoutingTable(t *testing.T) {
+	h, err := bhost.NewHost(swarmt.GenSwarm(t, swarmt.OptDisableReuseport), new(bhost.HostOpts))
+	require.NoError(t, err)
+	h.Start()
+	t.Cleanup(func() { h.Close() })
+
+	dstore := &getRecorder{Batching: dssync.MutexWrap(ds.NewMapDatastore())}
+	dead := peer.AddrInfo{
+		ID:    peertest.RandPeerIDFatal(t),
+		Addrs: []multiaddr.Multiaddr{multiaddr.StringCast("/ip4/127.0.0.1/tcp/1")},
+	}
+	d, err := New(h, DHTOption(dht.Datastore(dstore), dht.BootstrapPeers(dead), dht.DisableAutoRefresh()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+
+	require.True(t, dstore.read("/kad-dht/routing-table/ipfs/kad/1.0.0"), "the WAN DHT loads its snapshot")
+	require.False(t, dstore.read("/kad-dht/routing-table/ipfs/lan/kad/1.0.0"), "the LAN DHT loads a snapshot")
 }

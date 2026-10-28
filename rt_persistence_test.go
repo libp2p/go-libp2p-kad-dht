@@ -436,6 +436,9 @@ func (m *mockDHTs) add(opts ...Option) *IpfsDHT {
 	d, err := New(h, append([]Option{testPrefix, DisableAutoRefresh(), Mode(ModeServer)}, opts...)...)
 	require.NoError(m.t, err)
 	m.t.Cleanup(func() { d.Close() })
+	// Let identify learn the DHT protocol New just registered, or a peer
+	// connecting now may see this one as a non-DHT peer.
+	synctest.Wait()
 	return d
 }
 

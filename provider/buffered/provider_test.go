@@ -78,9 +78,9 @@ func (f *fakeProvider) StopProviding(keys ...mh.Multihash) error {
 	return nil
 }
 
-func (f *fakeProvider) Clear() int {
+func (f *fakeProvider) Clear() error {
 	// Unused
-	return 0
+	return nil
 }
 
 func (f *fakeProvider) RefreshSchedule() error {
@@ -103,10 +103,13 @@ func TestQueueingMechanism(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := newFakeProvider()
 		ds := datastore.NewMapDatastore()
-		provider := New(fake, ds,
+		provider, err := New(fake, ds, t.TempDir(),
 			WithDsName("test1"),
 			WithIdleWriteTime(time.Millisecond),
 			WithBatchSize(10))
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer provider.Close()
 
 		keys := random.Multihashes(3)
@@ -240,19 +243,23 @@ func TestBatchProcessing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := newFakeProvider()
 		ds := datastore.NewMapDatastore()
-		provider := New(fake, ds,
+		provider, err := New(fake, ds, t.TempDir(),
 			WithDsName("test4"),
-			WithBatchSize(3), // Process 3 operations at once
+			WithBatchSize(1000), // Process 1000 operations at once
 			WithIdleWriteTime(time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer provider.Close()
 
-		// Queue multiple keys - total of 3 operations (2 from ProvideOnce + 1 from StartProviding)
-		keys := random.Multihashes(3)
+		// Queue multiple keys - total of 30000 operations (2 from ProvideOnce + 29998
+		// from StartProviding). Should be enough to overflow to disk.
+		keys := random.Multihashes(30000)
 
 		if err := provider.ProvideOnce(keys[0], keys[1]); err != nil {
 			t.Fatalf("ProvideOnce failed: %v", err)
 		}
-		if err := provider.StartProviding(false, keys[2]); err != nil {
+		if err := provider.StartProviding(false, keys[2:]...); err != nil {
 			t.Fatalf("StartProviding failed: %v", err)
 		}
 		synctest.Wait()
@@ -273,8 +280,8 @@ func TestBatchProcessing(t *testing.T) {
 		for _, call := range fake.startProvidingCalls {
 			totalStartProvidingCalls += len(call.keys)
 		}
-		if totalStartProvidingCalls != 1 {
-			t.Errorf("Expected 1 total key in StartProviding calls, got %d", totalStartProvidingCalls)
+		if totalStartProvidingCalls != len(keys)-2 {
+			t.Errorf("Expected %d total key in StartProviding calls, got %d", len(keys)-2, totalStartProvidingCalls)
 		}
 	})
 }

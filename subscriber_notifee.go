@@ -28,10 +28,11 @@ func (dht *IpfsDHT) startNetworkSubscriber() error {
 		new(event.EvtPeerConnectednessChanged),
 	}
 
-	// register for event bus local routability changes in order to trigger switching between client and server modes
-	// only register for events if the DHT is operating in ModeAuto
+	// register for event bus local reachability changes in order to trigger switching between client and server modes.
+	// AutoNAT v1 reports a node-wide EvtLocalReachabilityChanged, AutoNAT v2 reports per-address results through
+	// EvtHostReachableAddrsChanged. Only register for events if the DHT is operating in ModeAuto.
 	if dht.auto == ModeAuto || dht.auto == ModeAutoServer {
-		evts = append(evts, new(event.EvtLocalReachabilityChanged))
+		evts = append(evts, new(event.EvtLocalReachabilityChanged), new(event.EvtHostReachableAddrsChanged))
 	}
 
 	subs, err := dht.host.EventBus().Subscribe(evts, bufSize)
@@ -42,6 +43,8 @@ func (dht *IpfsDHT) startNetworkSubscriber() error {
 	dht.wg.Go(func() {
 		defer subs.Close()
 
+		// once AutoNAT v2 has reported, its per-address verdict is more stable than v1's node-wide flag, so v1 is ignored
+		v2Seen := false
 		for {
 			select {
 			case e, more := <-subs.Out():
@@ -68,11 +71,21 @@ func (dht *IpfsDHT) startNetworkSubscriber() error {
 						dht.msgSender.OnDisconnect(dht.ctx, evt.Peer)
 					}
 				case event.EvtLocalReachabilityChanged:
-					if dht.auto == ModeAuto || dht.auto == ModeAutoServer {
-						handleLocalReachabilityChangedEvent(dht, evt)
-					} else {
+					if dht.auto != ModeAuto && dht.auto != ModeAutoServer {
 						// something has gone really wrong if we get an event we did not subscribe to
 						logger.Errorf("received LocalReachabilityChanged event that was not subscribed to")
+					} else if v2Seen {
+						logger.Debugw("ignoring AutoNAT v1 reachability event, AutoNAT v2 already reported", "reachability", evt.Reachability)
+					} else {
+						handleReachabilityChange(dht, evt.Reachability)
+					}
+				case event.EvtHostReachableAddrsChanged:
+					if dht.auto != ModeAuto && dht.auto != ModeAutoServer {
+						// something has gone really wrong if we get an event we did not subscribe to
+						logger.Errorf("received HostReachableAddrsChanged event that was not subscribed to")
+					} else {
+						v2Seen = true
+						handleReachabilityChange(dht, reachabilityFromAddrs(evt))
 					}
 				default:
 					// something has gone really wrong if we get an event for another type
@@ -99,10 +112,24 @@ func handlePeerChangeEvent(dht *IpfsDHT, p peer.ID) {
 	}
 }
 
-func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabilityChanged) {
+// reachabilityFromAddrs collapses AutoNAT v2's per-address results into the node-wide reachability the mode switch
+// needs: any confirmed public address makes the node public, only unreachable ones make it private, and nothing
+// confirmed yet leaves it unknown.
+func reachabilityFromAddrs(e event.EvtHostReachableAddrsChanged) network.Reachability {
+	switch {
+	case len(e.Reachable) > 0:
+		return network.ReachabilityPublic
+	case len(e.Unreachable) > 0:
+		return network.ReachabilityPrivate
+	default:
+		return network.ReachabilityUnknown
+	}
+}
+
+func handleReachabilityChange(dht *IpfsDHT, r network.Reachability) {
 	var target mode
 
-	switch e.Reachability {
+	switch r {
 	case network.ReachabilityPrivate:
 		target = modeClient
 	case network.ReachabilityUnknown:
@@ -115,7 +142,7 @@ func handleLocalReachabilityChangedEvent(dht *IpfsDHT, e event.EvtLocalReachabil
 		target = modeServer
 	}
 
-	logger.Infof("processed event %T; performing dht mode switch", e)
+	logger.Infow("reachability changed; performing dht mode switch", "reachability", r)
 
 	err := dht.setMode(target)
 	// NOTE: the mode will be printed out as a decimal.

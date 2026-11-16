@@ -2323,6 +2323,99 @@ func TestDynamicModeSwitching(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	assertDHTClient()
+
+	// AutoNAT v2 reports per-address reachability through a different event
+	v2Emitter, err := node.host.EventBus().Emitter(new(event.EvtHostReachableAddrsChanged))
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicAddr := ma.StringCast("/ip4/1.2.3.4/tcp/4001")
+
+	err = v2Emitter.Emit(event.EvtHostReachableAddrsChanged{Reachable: []ma.Multiaddr{publicAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTServer()
+
+	err = v2Emitter.Emit(event.EvtHostReachableAddrsChanged{Unreachable: []ma.Multiaddr{publicAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+
+	// once v2 has reported, v1 events must no longer drive the mode
+	err = emitter.Emit(event.EvtLocalReachabilityChanged{Reachability: network.ReachabilityPublic})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+
+	err = v2Emitter.Emit(event.EvtHostReachableAddrsChanged{Unknown: []ma.Multiaddr{publicAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	assertDHTClient()
+}
+
+func TestDynamicModeSwitchingAutoServer(t *testing.T) {
+	ctx := t.Context()
+
+	prober := setupDHT(ctx, t, true)
+	node := setupDHT(ctx, t, true, Mode(ModeAutoServer))
+	prober.Host().Peerstore().AddAddrs(node.PeerID(), node.Host().Addrs(), peerstore.AddressTTL)
+	if _, err := prober.Host().Network().DialPeer(ctx, node.PeerID()); err != nil {
+		t.Fatal(err)
+	}
+
+	v2Emitter, err := node.host.EventBus().Emitter(new(event.EvtHostReachableAddrsChanged))
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicAddr := ma.StringCast("/ip4/1.2.3.4/tcp/4001")
+
+	// unknown reachability keeps an auto-server node in server mode
+	err = v2Emitter.Emit(event.EvtHostReachableAddrsChanged{Unknown: []ma.Multiaddr{publicAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	assert.Nil(t, prober.Ping(ctx, node.PeerID()))
+
+	err = v2Emitter.Emit(event.EvtHostReachableAddrsChanged{Unreachable: []ma.Multiaddr{publicAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	err = prober.Ping(ctx, node.PeerID())
+	assert.True(t, errors.Is(err, multistream.ErrNotSupported[protocol.ID]{}))
+}
+
+func TestReachabilityFromAddrs(t *testing.T) {
+	addr := ma.StringCast("/ip4/1.2.3.4/tcp/4001")
+	cases := []struct {
+		name string
+		evt  event.EvtHostReachableAddrsChanged
+		want network.Reachability
+	}{
+		{"reachable", event.EvtHostReachableAddrsChanged{Reachable: []ma.Multiaddr{addr}}, network.ReachabilityPublic},
+		{"reachable and unreachable", event.EvtHostReachableAddrsChanged{Reachable: []ma.Multiaddr{addr}, Unreachable: []ma.Multiaddr{addr}}, network.ReachabilityPublic},
+		{"unreachable only", event.EvtHostReachableAddrsChanged{Unreachable: []ma.Multiaddr{addr}, Unknown: []ma.Multiaddr{addr}}, network.ReachabilityPrivate},
+		{"unknown only", event.EvtHostReachableAddrsChanged{Unknown: []ma.Multiaddr{addr}}, network.ReachabilityUnknown},
+		{"empty", event.EvtHostReachableAddrsChanged{}, network.ReachabilityUnknown},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, reachabilityFromAddrs(c.evt))
+		})
+	}
 }
 
 func TestInvalidKeys(t *testing.T) {

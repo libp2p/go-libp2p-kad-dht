@@ -144,6 +144,9 @@ tables with peers that never answer. By default the DHT works this out itself:
 | `dht.ModeServer`         | Always server. Only for nodes known to be publicly reachable.                                       |
 | `dht.ModeClient`         | Always client.                                                                                      |
 
+The automatic modes follow both AutoNAT v1 and AutoNAT v2 reachability
+events; once AutoNAT v2 has reported, its per-address verdict takes precedence.
+
 Leave it on `ModeAuto` unless you know better. A reachable home node becomes a
 full server, and the network needs those.
 

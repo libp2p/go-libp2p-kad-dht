@@ -26,8 +26,9 @@ import (
 type ModeOpt = dhtcfg.ModeOpt
 
 const (
-	// ModeAuto utilizes EvtLocalReachabilityChanged events sent over the event bus to dynamically switch the DHT
-	// between Client and Server modes based on network conditions
+	// ModeAuto utilizes reachability events sent over the event bus to dynamically switch the DHT between Client and
+	// Server modes based on network conditions. It follows EvtLocalReachabilityChanged (AutoNAT v1) and
+	// EvtHostReachableAddrsChanged (AutoNAT v2); once a v2 event has been observed, v1 events are ignored.
 	ModeAuto ModeOpt = iota
 	// ModeClient operates the DHT as a client only, it cannot respond to incoming queries
 	ModeClient

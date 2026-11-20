@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand/v2"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/libp2p/go-libp2p-kad-dht/netsize"
@@ -110,4 +111,18 @@ func TestOptimisticProvide(t *testing.T) {
 			t.Fatal("Did not get a provider back.")
 		}
 	}
+}
+
+// TestWaitForRPCsWithoutRPCs checks that an optimistic provide whose lookup
+// found no peer to store the record with returns instead of waiting for
+// ADD_PROVIDER RPCs that were never sent.
+func TestWaitForRPCsWithoutRPCs(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		state := &optimisticState{
+			doneChan:        make(chan struct{}, 1),
+			peerStates:      map[peer.ID]addProviderRPCState{},
+			returnThreshold: 3,
+		}
+		state.waitForRPCs()
+	})
 }

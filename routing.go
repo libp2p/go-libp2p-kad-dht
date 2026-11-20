@@ -355,6 +355,7 @@ func (dht *IpfsDHT) getValues(ctx context.Context, key string, stopQuery chan st
 					Val:  val,
 					From: p,
 				}:
+				case <-stopQuery:
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				}

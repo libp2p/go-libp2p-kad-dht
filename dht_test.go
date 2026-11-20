@@ -587,6 +587,33 @@ func TestSearchValueLocalInvalid(t *testing.T) {
 	}
 }
 
+// TestGetValuesFinishesAfterStop checks that a value lookup ends once it is
+// told to stop, even though nobody reads the values still arriving. That is
+// how SearchValue leaves it after reaching its quorum.
+func TestGetValuesFinishesAfterStop(t *testing.T) {
+	ctx := t.Context()
+	client := setupDHT(ctx, t, false)
+
+	const key = "/v/hello"
+	rec := record.MakePutRecord(key, []byte("world"))
+	for _, d := range setupDHTS(t, ctx, 6) {
+		require.NoError(t, d.putLocal(ctx, key, rec))
+		connect(t, ctx, client, d)
+	}
+
+	stop := make(chan struct{})
+	valCh, lookupRes := client.getValues(ctx, key, stop)
+	_, ok := <-valCh
+	require.True(t, ok, "lookup found no value")
+	close(stop)
+
+	select {
+	case <-lookupRes:
+	case <-time.After(10 * time.Second):
+		t.Fatal("value lookup still running after it was stopped")
+	}
+}
+
 func TestProvides(t *testing.T) {
 	ctx := t.Context()
 

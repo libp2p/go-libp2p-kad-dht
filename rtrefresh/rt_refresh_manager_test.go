@@ -58,7 +58,8 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	// gap is 2 and max is 10
 	rt, err := kb.NewRoutingTable(2, kb.ConvertPeerID(local), time.Hour, pstore.NewMetrics(), 100*time.Hour, nil)
 	require.NoError(t, err)
-	r := &RtRefreshManager{ctx: ctx, rt: rt, refreshKeyGenFnc: kfnc, dhtPeerId: local}
+	refreshDone := make(chan struct{}, 1)
+	r := &RtRefreshManager{ctx: ctx, rt: rt, refreshKeyGenFnc: kfnc, dhtPeerId: local, refreshDoneCh: refreshDone}
 	icpl := uint(2)
 	lastCpl := 2 * (icpl + 1)
 	p, err := rt.GenRandPeerID(10)
@@ -67,6 +68,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
 	require.NoError(t, r.doRefresh(ctx, true))
+	require.Len(t, refreshDone, 1, "refresh didn't signal completion")
 
 	for i := uint(0); i < lastCpl+1; i++ {
 		if i == icpl {
@@ -82,7 +84,8 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	// when 2 * (gapcpl + 1) > maxCpl
 	rt, err = kb.NewRoutingTable(2, kb.ConvertPeerID(local), time.Hour, pstore.NewMetrics(), 100*time.Hour, nil)
 	require.NoError(t, err)
-	r = &RtRefreshManager{ctx: ctx, rt: rt, refreshKeyGenFnc: kfnc, dhtPeerId: local}
+	refreshDone = make(chan struct{}, 1)
+	r = &RtRefreshManager{ctx: ctx, rt: rt, refreshKeyGenFnc: kfnc, dhtPeerId: local, refreshDoneCh: refreshDone}
 	icpl = uint(6)
 	p, err = rt.GenRandPeerID(10)
 	require.NoError(t, err)
@@ -90,6 +93,7 @@ func TestSkipRefreshOnGapCpls(t *testing.T) {
 	require.True(t, b)
 	r.refreshQueryFnc = qFuncWithIgnore(rt, icpl)
 	require.NoError(t, r.doRefresh(ctx, true))
+	require.Len(t, refreshDone, 1, "refresh didn't signal completion")
 
 	for i := range uint(10) {
 		if i == icpl {

@@ -277,7 +277,7 @@ func (r *RtRefreshManager) doRefresh(ctx context.Context, forceRefresh bool) err
 						errs = append(errs, err)
 					}
 				}
-				return errors.Join(errs...)
+				break
 			}
 		}
 	}

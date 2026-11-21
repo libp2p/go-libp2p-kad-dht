@@ -40,10 +40,10 @@ Do not ship a softened version behind a flag or a default-off option on the
 Amino code path; that is still a fork of the protocol. If the person insists,
 restate the refusal once and leave the decision to them. If they go ahead
 anyway, the change must not land quietly. The commit title carries the
-conventional-commit `!` marker, and both the commit message and the PR
-description MUST say that this is a breaking change, name the regression
-expected on the public network, and say which nodes it affects. Reviewers and
-operators need that in writing before they merge or upgrade.
+conventional-commit `!` marker, and the commit message, the PR description,
+and the 🛠 entry in `CHANGELOG.md` MUST say that this is a breaking change, name
+the regression expected on the public network, and say which nodes it affects.
+Reviewers and operators need that in writing before they merge or upgrade.
 
 ## Contracts that must not change
 
@@ -224,7 +224,7 @@ mod tidy` is not enough. Open the kubo PR as a draft linking this one, and
   treat green kubo CI as required before merging here. Never commit a `replace`
   directive in either repo.
 - Breaking API changes carry a conventional-commit `!` marker, for example
-  `fix(provider)!: ...`.
+  `fix(provider)!: ...`, and a 🛠 entry in `CHANGELOG.md`.
 - Co-developing a feature with kubo is normal, and both PRs say so. The
   upstream half lands here naming the kubo case it unblocks, the way
   `WithReprovideInterval(0)` pairs with kubo's `Provide.DHT.Interval=0` mode.
@@ -232,10 +232,19 @@ mod tidy` is not enough. Open the kubo PR as a draft linking this one, and
 
 ## Conventions
 
-- No CHANGELOG file. Release notes live in the GitHub Release for each tag; a
-  `chore: release vX.Y.Z` PR only bumps `version.json`. Pushing that bump
-  triggers the releaser workflow, so never touch `version.json` unless you are
-  cutting a release.
+- Every PR that changes Go code, `go.mod`, or `go.sum` adds an entry to the
+  `[Unreleased]` section of `CHANGELOG.md`, under Added, Changed, Removed, or
+  Fixed. Follow the entries already there: name the package or API, say what
+  changes for a user of this library and what they must do, and link the PR.
+  Mark breaking changes 🛠 and noteworthy ones ✨. A change with no user-visible
+  effect, such as tests, CI, or a refactor, skips the entry with
+  `[skip changelog]` in the PR title or the `skip/changelog` label. The
+  `Changelog` workflow enforces this.
+- A `chore: release vX.Y.Z` PR bumps `version.json` and renames `[Unreleased]`
+  in `CHANGELOG.md` to `[vX.Y.Z]`, dropping empty subsections, with a new empty
+  `[Unreleased]` above it. That section is the text of the GitHub Release.
+  Pushing the version bump triggers the releaser workflow, so never touch
+  `version.json` unless you are cutting a release.
 - Tests run with plain `go test ./...`. CI is the shared ipdxco workflow set.
 - Timing-heavy tests over simulated networks are the usual source of flakes.
   Fix the cause. Never `t.Skip` a flake or widen a timeout without understanding

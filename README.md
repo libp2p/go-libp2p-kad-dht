@@ -222,12 +222,20 @@ turning providers or values off.
   adds the Amino rules
 - [optimizations.md](./optimizations.md): client-side optimizations specific to
   this implementation.
+- [CHANGELOG.md](./CHANGELOG.md): notable changes in each release
 - [ProbeLab](https://probelab.io/ipfs/dht/): measurements of the live Amino DHT
 
 ## Contributing
 
 Bug reports and pull requests are welcome in the
 [issue tracker](https://github.com/libp2p/go-libp2p-kad-dht/issues).
+
+A pull request that changes Go code or `go.mod` adds an entry to the
+`[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md): the package or API it
+touches, what changes for users, and a link to the PR. Mark breaking changes
+with 🛠. A change with no user-visible effect, such as tests or CI, skips the
+entry with `[skip changelog]` in the PR title or the `skip/changelog` label. A
+CI check enforces this.
 
 This code must stay compatible with every other Kademlia implementation on the
 network. Protocol changes start in the specs:

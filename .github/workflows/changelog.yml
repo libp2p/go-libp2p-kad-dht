@@ -1,0 +1,42 @@
+name: Changelog
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+    paths:
+      - '**.go'
+      - '**/go.mod'
+      - '**/go.sum'
+
+permissions:
+  pull-requests: read
+
+jobs:
+  changelog:
+    if: contains(github.event.pull_request.title, '[skip changelog]') == false &&
+        contains(github.event.pull_request.labels.*.name, 'skip/changelog') == false
+    runs-on: ubuntu-latest
+    name: Changelog
+    steps:
+      - id: changelog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ENDPOINT: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
+          SELECTOR: 'map(select(.filename == "CHANGELOG.md")) | length'
+        run: gh api --paginate "$ENDPOINT" --jq "$SELECTOR" | awk '{s+=$1} END {print "modified=" s+0}' | tee -a "$GITHUB_OUTPUT"
+      - if: steps.changelog.outputs.modified == '0'
+        env:
+          MESSAGE: |
+            CHANGELOG.md was not modified in this PR. Please do one of the following:
+            - add a changelog entry under [Unreleased]
+            - add `[skip changelog]` to the PR title
+            - label the PR with `skip/changelog`
+        run: |
+          echo "::error::${MESSAGE//$'\n'/%0A}"
+          exit 1

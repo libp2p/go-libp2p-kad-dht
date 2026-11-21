@@ -282,8 +282,7 @@ func TestProvideClearQueue(t *testing.T) {
 	require.Equal(t, q.queue.queue.Len(), len(prefixes))
 	require.Equal(t, q.Size(), len(prefixes)*nMultihashesPerPrefix)
 
-	cleared := q.Clear()
-	require.Equal(t, len(prefixes)*nMultihashesPerPrefix, cleared)
+	require.NoError(t, q.Clear())
 	require.True(t, q.IsEmpty())
 
 	require.True(t, q.keys.IsEmptyLeaf())
